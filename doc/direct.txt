@@ -1,0 +1,27 @@
+*dirvish.vim.txt* A short multi line description of your plugin
+
+===============================================================================
+CONTENTS                                                          *dirvish.vim*
+
+    1. Intro .............................................. |dirvish.vim-intro|
+    2. Requirements ................................ |dirvish.vim-requirements|
+    3. Usage .............................................. |dirvish.vim-usage|
+    4. Licence .......................................... |dirvish.vim-licence|
+===============================================================================
+1. Intro                                                    *dirvish.vim-intro*
+
+Overview of plugin
+
+2. Requirements                                      *dirvish.vim-requirements*
+
+What additional programs are required to run the plugin
+
+3. Usage                                                    *dirvish.vim-usage*
+
+How to use the plugin. What functions does it give the user?
+
+4. Licence                                                *dirvish.vim-licence*
+
+This is open source make sure to include a licence
+
+vim:ft=help
