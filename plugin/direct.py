@@ -4,17 +4,20 @@ import vim
 
 
 class DirectBuffer(object):
-    def __init__(self, path):
+    def __init__(self, root=None):
+        self.root = root or os.getcwd()
         self.directories = []
         self.files = []
-        for entry in os.listdir(path):
+        for entry in os.listdir(self.root):
             if os.path.isdir(entry):
                 self.directories.append(entry)
             elif os.path.isfile(entry):
                 self.files.append(entry)
 
     def list(self):
-        vim.current.buffer[:] = self.__lines()
+        current_buffer = vim.current.buffer
+        current_buffer[:] = self.__lines()
+        current_buffer.name = '{}/'.format(self.root)
 
     def sync(self):
         actual_lines = vim.current.buffer[:]
@@ -38,9 +41,17 @@ class DirectBuffer(object):
             ):
                 if actual_line != expected_line:
                     shutil.move(
-                            expected_line[:-1] if self.__isdir(expected_line) else expected_line, 
-                            actual_line[:-1] if self.__isdir(actual_line) else actual_line
-                            )
+                        expected_line[:-1] if self.__isdir(expected_line) else
+                        expected_line, actual_line[:-1]
+                        if self.__isdir(actual_line) else actual_line
+                    )
+
+    def open(self):
+        current_line = vim.current.line
+        if self.__isdir(current_line):
+            DirectBuffer(current_line[:-1]).list()
+        else:
+            vim.command('e {}'.format(current_line))
 
     def __lines(self):
         lines = []

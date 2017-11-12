@@ -1,20 +1,26 @@
-" --------------------------------
-" Add our plugin to the path
-" --------------------------------
 python import sys
 python import vim
 python sys.path.append(vim.eval('expand("<sfile>:h")'))
 
-" --------------------------------
-"  Function(s)
-" --------------------------------
-function! direct#list()
+
+function! direct#list(...)
 enew
+set filetype=direct
+setlocal buftype=acwrite noswapfile
+augroup direct
+    autocmd! * <buffer>
+    autocmd BufWriteCmd direct <buffer> DirectSync
+augroup END
+
+
+let root = ''
+if a:0 > 0
+    let root = a:1
+endif
 python << endOfPython
 
-import os
 from direct import DirectBuffer
-DirectBuffer(os.getcwd()).list()
+DirectBuffer(root=vim.eval('root')).list()
 
 endOfPython
 endfunction
@@ -22,16 +28,21 @@ endfunction
 function! direct#sync()
 python << endOfPython
 
-import os
 from direct import DirectBuffer
-DirectBuffer(os.getcwd()).sync()
-DirectBuffer(os.getcwd()).list()
+DirectBuffer().sync()
+DirectBuffer().list()
 
 endOfPython
 endfunction
 
-" --------------------------------
-"  Expose our commands to the user
-" --------------------------------
-command! DirectList call direct#list()
+function! direct#open()
+python << endOfPython
+
+from direct import DirectBuffer
+DirectBuffer().open()
+
+endOfPython
+endfunction
+
+command! -nargs=? -complete=dir DirectList call direct#list(<f-args>)
 command! DirectSync call direct#sync()
