@@ -1,11 +1,11 @@
 import os
-import shutil
 import vim
 from action import Move
 from action import Remove
 from action import RemoveDirectory
 from action import Touch
 from action import MakeDirectory
+from history import History
 
 
 class DirectBuffer(object):
@@ -47,8 +47,11 @@ class DirectBuffer(object):
             ):
                 if actual_line != expected_line:
                     actions.append(Move(expected_line, actual_line))
+
+        history = History()
         for action in actions:
             action.write()
+            history.log(action, history.undo_filename)
 
     def open(self):
         current_line = vim.current.line
