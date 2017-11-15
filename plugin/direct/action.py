@@ -87,7 +87,7 @@ class MakeDirectory(Action):
         os.mkdir(self.dst)
 
 
-def invert(action):
+def reverse(action):
     clazz = action.__class__
     if clazz == Move:
         return Move(action.dst, action.src)

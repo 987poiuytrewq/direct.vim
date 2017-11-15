@@ -51,7 +51,7 @@ class DirectBuffer(object):
         history = History()
         for action in actions:
             action.write()
-            history.log(action, history.undo_filename)
+            history.log(action)
 
     def open(self):
         current_line = vim.current.line

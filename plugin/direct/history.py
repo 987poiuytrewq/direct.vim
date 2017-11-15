@@ -1,6 +1,6 @@
 import os
 from action import Action
-from action import invert
+from action import reverse
 
 
 class History(object):
@@ -8,26 +8,26 @@ class History(object):
         self.undo_filename = '/home/duncan/.direct/undo'
         self.redo_filename = '/home/duncan/.direct/redo'
 
-    def log(self, action, filename):
-        self.__push_line(str(action), filename)
+    def log(self, action):
+        self.__push_line(str(action), self.undo_filename)
+        open(self.redo_filename, 'w').close()
 
     def undo(self):
-        line = self.__pop_line(self.undo_filename)
-        action = self.__parse_action(line)
-        inverse_action = invert(action)
-        inverse_action.write()
-        self.log(inverse_action, self.redo_filename)
+        self.__reverse(self.undo_filename, self.redo_filename)
 
     def redo(self):
-        line = self.__pop_line(self.redo_filename)
+        self.__reverse(self.redo_filename, self.undo_filename)
+
+    def __reverse(self, src_filename, dst_filename):
+        line = self.__pop_line(src_filename)
         action = self.__parse_action(line)
-        inverse_action = invert(action)
-        inverse_action.write()
-        self.log(inverse_action, self.undo_filename)
+        reverse_action = reverse(action)
+        reverse_action.write()
+        self.__push_line(reverse_action, dst_filename)
 
     def __push_line(self, line, filename):
-        with open(self.undo_filename, 'a') as undofile:
-            undofile.write(line)
+        with open(filename, 'a') as file:
+            file.write(line)
 
     def __pop_line(self, filename):
         characters = []
