@@ -1,6 +1,11 @@
 import os
 import shutil
 import vim
+from action import Move
+from action import Remove
+from action import RemoveDirectory
+from action import Touch
+from action import MakeDirectory
 
 
 class DirectBuffer(object):
@@ -23,28 +28,27 @@ class DirectBuffer(object):
         actual_lines = vim.current.buffer[:]
         expected_lines = self.__lines()
 
+        actions = []
         if len(actual_lines) > len(expected_lines):
             for added_line in set(actual_lines) - set(expected_lines):
                 if self.__isdir(added_line):
-                    os.mkdir(added_line[:-1])
+                    actions.append(MakeDirectory(added_line))
                 else:
-                    open(added_line, 'w').close()
+                    actions.append(Touch(added_line))
         elif len(actual_lines) < len(expected_lines):
             for removed_line in set(expected_lines) - set(actual_lines):
                 if self.__isdir(removed_line):
-                    shutil.rmtree(removed_line[:-1])
+                    actions.append(RemoveDirectory(removed_line))
                 else:
-                    os.remove(removed_line)
+                    actions.append(Remove(removed_line))
         else:
             for actual_line, expected_line in zip(
                 actual_lines, expected_lines
             ):
                 if actual_line != expected_line:
-                    shutil.move(
-                        expected_line[:-1] if self.__isdir(expected_line) else
-                        expected_line, actual_line[:-1]
-                        if self.__isdir(actual_line) else actual_line
-                    )
+                    actions.append(Move(expected_line, actual_line))
+        for action in actions:
+            action.write()
 
     def open(self):
         current_line = vim.current.line
