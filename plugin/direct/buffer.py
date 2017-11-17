@@ -14,9 +14,9 @@ class DirectBuffer(object):
         self.directories = []
         self.files = []
         for entry in os.listdir(self.root):
-            if os.path.isdir(entry):
+            if os.path.isdir(self.__absolute_path(entry)):
                 self.directories.append(entry)
-            elif os.path.isfile(entry):
+            elif os.path.isfile(self.__absolute_path(entry)):
                 self.files.append(entry)
 
     def list(self):
@@ -25,20 +25,24 @@ class DirectBuffer(object):
         current_buffer.name = '{}/'.format(self.root)
 
     def sync(self):
-        actual_lines = vim.current.buffer[:]
-        expected_lines = self.__lines()
+        actual_lines = map(self.__absolute_path, vim.current.buffer[:])
+        expected_lines = map(self.__absolute_path, self.__lines())
 
         actions = []
         if len(actual_lines) > len(expected_lines):
             for added_line in set(actual_lines) - set(expected_lines):
                 if self.__isdir(added_line):
-                    actions.append(MakeDirectory(added_line))
+                    actions.append(
+                        MakeDirectory(added_line)
+                    )
                 else:
                     actions.append(Touch(added_line))
         elif len(actual_lines) < len(expected_lines):
             for removed_line in set(expected_lines) - set(actual_lines):
                 if self.__isdir(removed_line):
-                    actions.append(RemoveDirectory(removed_line))
+                    actions.append(
+                        RemoveDirectory(removed_line)
+                    )
                 else:
                     actions.append(Remove(removed_line))
         else:
@@ -46,7 +50,12 @@ class DirectBuffer(object):
                 actual_lines, expected_lines
             ):
                 if actual_line != expected_line:
-                    actions.append(Move(expected_line, actual_line))
+                    actions.append(
+                        Move(
+                            expected_line,
+                            actual_line
+                        )
+                    )
 
         history = History()
         for action in actions:
@@ -60,6 +69,9 @@ class DirectBuffer(object):
         else:
             vim.command('e {}'.format(current_line))
 
+    def __absolute_path(self, entry):
+        return os.path.join(self.root, entry)
+
     def __lines(self):
         lines = []
         lines += [
@@ -68,5 +80,5 @@ class DirectBuffer(object):
         lines += [u'{}'.format(file) for file in sorted(self.files)]
         return lines
 
-    def __isdir(self, line):
-        return line[-1] == '/'
+    def __isdir(self, entry):
+        return entry.endswith("/")

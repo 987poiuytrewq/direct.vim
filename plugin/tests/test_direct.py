@@ -12,70 +12,68 @@ from direct.buffer import DirectBuffer  # noqa E402
 
 
 @contextmanager
-def test_dir():
+def example_dir():
     root = tempfile.mkdtemp()
-    for filename in ('foo', 'bar'):
-        open(os.path.join(root, filename), 'w').close()
-    for dirname in ('baz', 'qux'):
-        os.mkdir(os.path.join(root, dirname))
+    os.mkdir(os.path.join(root, 'foo'))
+    open(os.path.join(root, 'bar'), 'w').close()
     yield root
     shutil.rmtree(root)
 
 
 def test_list():
-    with test_dir() as root:
+    with example_dir() as root:
         DirectBuffer(root=root).list()
-        assert vim.current.buffer[:] == ["bar/", "foo/", "baz", "qux"]
+        assert vim.current.buffer[:] == ["foo/", "bar"]
 
 
 def test_sync_add():
-    with test_dir() as root:
-        sync(root, ["bar/", "foo/", "baz", "qux", "quux"])
-        assert vim.current.buffer[:] == ["bar/", "foo/", "baz", "qux", "quux"]
-        assert set(os.listdir(root)) == set([
-            "bar", "foo", "baz", "qux", "quux"
-        ])
-        assert os.path.isfile(os.path.join(root, "quux"))
+    with example_dir() as root:
+        sync(root, ["foo/", "bar", "baz"])
+        assert vim.current.buffer[:] == ["foo/", "bar", "baz"]
+        assert set(os.listdir(root)) == set(["foo", "bar", "baz"])
+        assert os.path.isfile(os.path.join(root, "baz"))
 
 
 def test_sync_add_directory():
-    with test_dir() as root:
-        sync(root, ["bar/", "foo/", "quux/", "baz", "qux"])
-        assert vim.current.buffer[:] == ["bar/", "foo/", "quux/", "baz", "qux"]
-        assert set(os.listdir(root)) == set([
-            "bar", "foo", "baz", "qux", "quux"
-        ])
-        assert os.path.isdir(os.path.join(root, "quux"))
+    with example_dir() as root:
+        sync(root, ["foo/", "bar", "baz/"])
+        assert vim.current.buffer[:] == ["baz/", "foo/", "bar"]
+        assert set(os.listdir(root)) == set(["foo", "bar", "baz"])
+        assert os.path.isdir(os.path.join(root, "baz"))
 
 
 def test_sync_remove():
-    with test_dir() as root:
-        sync(root, ["bar/", "foo/", "baz"])
-        assert vim.current.buffer[:] == ["bar/", "foo/", "baz"]
-        assert set(os.listdir(root)) == set(["bar", "foo", "baz"])
+    with example_dir() as root:
+        sync(root, ["foo/"])
+        assert vim.current.buffer[:] == ["foo/"]
+        assert set(os.listdir(root)) == set(["foo"])
 
 
-def test_sync_remove_directory():
-    with test_dir() as root:
-        sync(root, ["foo/", "baz", "qux"])
-        assert vim.current.buffer[:] == ["bar/", "baz", "qux"]
-        assert set(os.listdir(root)) == set(["bar", "baz", "qux"])
+# def test_sync_remove_directory():
+#     with example_dir() as root:
+#         sync(root, ["bar"])
+#         assert vim.current.buffer[:] == ["bar"]
+#         assert set(os.listdir(root)) == set(["bar"])
 
 
 def test_sync_rename():
-    with test_dir() as root:
-        sync(root, ["bar/", "foo/", "baz", "quux"])
-        assert vim.current.buffer[:] == ["bar/", "foo/", "baz", "quux"]
-        assert set(os.listdir(root)) == set(["bar", "foo", "baz", "quux"])
-        assert os.path.isfile(os.path.join(root, "quux"))
+    with example_dir() as root:
+        INODE = os.stat(os.path.join(root, "bar")).st_ino
+        sync(root, ["foo/", "baz"])
+        assert vim.current.buffer[:] == ["foo/", "baz"]
+        assert set(os.listdir(root)) == set(["foo", "baz"])
+        assert os.path.isfile(os.path.join(root, "baz"))
+        assert os.stat(os.path.join(root, "baz")).st_ino == INODE
 
 
 def test_sync_rename_directory():
-    with test_dir() as root:
-        sync(root, ["bar/", "quux/", "baz", "qux"])
-        assert vim.current.buffer[:] == ["bar/", "quux/", "baz", "qux"]
-        assert set(os.listdir(root)) == set(["bar", "foo", "baz", "quux"])
-        assert os.path.isdir(os.path.join(root, "quux"))
+    with example_dir() as root:
+        INODE = os.stat(os.path.join(root, "foo")).st_ino
+        sync(root, ["baz/", "bar"])
+        assert vim.current.buffer[:] == ["baz/", "bar"]
+        assert set(os.listdir(root)) == set(["baz", "bar"])
+        assert os.path.isdir(os.path.join(root, "baz"))
+        assert os.stat(os.path.join(root, "baz")).st_ino == INODE
 
 
 def sync(root, lines):
@@ -83,3 +81,4 @@ def sync(root, lines):
     buffer.list()
     vim.setup_text('\n'.join(lines))
     buffer.sync()
+    DirectBuffer(root=root).list()
