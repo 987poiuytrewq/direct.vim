@@ -2,7 +2,6 @@ python import sys
 python import vim
 python sys.path.append(vim.eval('expand("<sfile>:h")'))
 
-
 function! direct#list(...)
 enew
 set filetype=direct
@@ -12,14 +11,14 @@ augroup direct
     autocmd BufWriteCmd <buffer> DirectSync
 augroup END
 
-let root = ''
+let root = getcwd()
 if a:0 > 0
     let root = a:1
 endif
 
 python << endOfPython
 from direct.buffer import DirectBuffer
-DirectBuffer(root=vim.eval('root')).list()
+DirectBuffer(vim.eval('root')).list()
 endOfPython
 endfunction
 
@@ -34,10 +33,15 @@ setlocal nomodified
 endfunction
 
 
-function! direct#open()
+function! direct#open(...)
+let line = getline('.')
+if a:0 > 0
+    let line = a:1
+endif
+
 python << endOfPython
-from direct import DirectBuffer
-DirectBuffer().open()
+from direct.buffer import DirectBuffer
+DirectBuffer().open(vim.eval('line'))
 endOfPython
 endfunction
 
