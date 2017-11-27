@@ -7,13 +7,8 @@ class Action(object):
     def _normalise_path(self, path):
         return path.replace(r'\/$', '')
 
-    def _trash_path(self, path):
-        message = hashlib.md5()
-        message.update(path)
-        return message.hexdigest()
-
     def __repr__(self):
-        words = [self.__class__.__name__]
+        words = [self.NAME]
         if hasattr(self, 'src'):
             words.append(self.src)
         if hasattr(self, 'dst'):
@@ -22,6 +17,8 @@ class Action(object):
 
 
 class Move(Action):
+    NAME = 'mv'
+
     def __init__(self, src, dst):
         self.src = self._normalise_path(src)
         self.dst = self._normalise_path(dst)
@@ -31,47 +28,24 @@ class Move(Action):
 
 
 class Remove(Action):
+    NAME = 'mv'
+    TRASH_DIR = '/home/duncan/.direct/trash'
+
     def __init__(self, src):
         self.src = self._normalise_path(src)
-        self.dst = self._trash_path(src)
+        message = hashlib.md5()
+        message.update(self.src)
+        self.dst = os.path.abspath(
+            os.path.join(self.TRASH_DIR, message.hexdigest())
+        )
 
     def write(self):
         shutil.move(self.src, self.dst)
-
-
-class RemoveDirectory(Action):
-    def __init__(self, src):
-        self.src = self._normalise_path(src)
-        self.dst = self._trash_path(src)
-
-    def write(self):
-        archived = None
-        shutil.move(archived, self.dst)
-        os.remove(archived)
-        shutil.rmtree(self.src)
-
-
-class Restore(Action):
-    def __init__(self, src, dst):
-        self.src = self._normalise_path(src)
-        self.dst = self._normalise_path(dst)
-
-    def write(self):
-        shutil.move(self.src, self.dst)
-
-
-class RestoreDirectory(Action):
-    def __init__(self, src, dst):
-        self.src = self._normalise_path(src)
-        self.dst = self._normalise_path(dst)
-
-    def write(self):
-        extracted = None
-        shutil.move(extracted, self.dst)
-        os.remove(self.src)
 
 
 class Touch(Action):
+    NAME = 'touch'
+
     def __init__(self, dst):
         self.dst = self._normalise_path(dst)
 
@@ -80,6 +54,8 @@ class Touch(Action):
 
 
 class MakeDirectory(Action):
+    NAME = 'mkdir'
+
     def __init__(self, dst):
         self.dst = self._normalise_path(dst)
 
@@ -92,14 +68,8 @@ def reverse(action):
     if clazz == Move:
         return Move(action.dst, action.src)
     elif clazz == Remove:
-        return Restore(action.dst, action.src)
-    elif clazz == RemoveDirectory:
-        return RestoreDirectory(action.dst, action.src)
-    elif clazz == Restore:
-        return Remove(action.dst)
-    elif clazz == RestoreDirectory:
-        return RemoveDirectory(action.dst)
+        return Move(action.dst, action.src)
     elif clazz == Touch:
         return Remove(action.dst)
     elif clazz == MakeDirectory:
-        return RemoveDirectory(action.dst)
+        return Remove(action.dst)

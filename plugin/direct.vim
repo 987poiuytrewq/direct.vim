@@ -17,17 +17,18 @@ if a:0 > 0
 endif
 
 python << endOfPython
-from direct.buffer import DirectBuffer
-DirectBuffer(vim.eval('root')).list()
+from direct.buffer import Buffer
+Buffer(vim.eval('root')).list()
 endOfPython
 endfunction
 
 
 function! direct#sync()
 python << endOfPython
-from direct.buffer import DirectBuffer
-DirectBuffer().sync()
-DirectBuffer().list()
+from direct.buffer import Buffer
+buffer = Buffer()
+buffer.sync()
+buffer.list()
 endOfPython
 setlocal nomodified
 endfunction
@@ -40,28 +41,28 @@ if a:0 > 0
 endif
 
 python << endOfPython
-from direct.buffer import DirectBuffer
-DirectBuffer().open(vim.eval('line'))
+from direct.buffer import Buffer
+Buffer().open(vim.eval('line'))
 endOfPython
 endfunction
 
 
 function! direct#undo()
 python << endOfPython
-from direct.buffer import DirectBuffer
+from direct.buffer import Buffer
 from direct.history import History
 History().undo()
-DirectBuffer().list()
+Buffer().list()
 endOfPython
 endfunction
 
 
 function! direct#redo()
 python << endOfPython
-from direct.buffer import DirectBuffer
+from direct.buffer import Buffer
 from direct.history import History
 History().redo()
-DirectBuffer().list()
+Buffer().list()
 endOfPython
 endfunction
 

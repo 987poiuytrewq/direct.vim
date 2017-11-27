@@ -5,33 +5,37 @@ from action import reverse
 
 class History(object):
     def __init__(self):
-        self.undo_filename = '/home/duncan/.direct/undo'
-        self.redo_filename = '/home/duncan/.direct/redo'
+        self.undo_log = ActionLog('/home/duncan/.direct/undo')
+        self.redo_log = ActionLog('/home/duncan/.direct/redo')
 
     def log(self, action):
-        self.__push_line(str(action), self.undo_filename)
-        open(self.redo_filename, 'w').close()
+        self.undo_log.push(action)
+        self.redo_log.truncate()
 
     def undo(self):
-        self.__reverse(self.undo_filename, self.redo_filename)
+        self.__reverse(self.undo_log, self.redo_log)
 
     def redo(self):
-        self.__reverse(self.redo_filename, self.undo_filename)
+        self.__reverse(self.redo_log, self.undo_log)
 
-    def __reverse(self, src_filename, dst_filename):
-        line = self.__pop_line(src_filename)
-        action = self.__parse_action(line)
+    def __reverse(self, src_log, dst_log):
+        action = src_log.pop()
         reverse_action = reverse(action)
         reverse_action.write()
-        self.__push_line(reverse_action, dst_filename)
+        dst_log.push(reverse_action)
 
-    def __push_line(self, line, filename):
-        with open(filename, 'a') as file:
-            file.write(line)
 
-    def __pop_line(self, filename):
+class ActionLog(object):
+    def __init__(self, filename):
+        self.path = filename
+
+    def push(self, action):
+        with open(self.path, 'a') as file:
+            file.write(str(action))
+
+    def pop(self):
         characters = []
-        with open(filename, 'r+') as file:
+        with open(self.path, 'r+') as file:
             file.seek(0, os.SEEK_END)
             cursor = file.tell() - 1
 
@@ -46,11 +50,13 @@ class History(object):
             if cursor > 0:
                 file.truncate()
 
-        return ''.join(reversed(characters))
+        line = ''.join(reversed(characters))
 
-    def __parse_action(self, line):
         words = line.split(' ')
         action_name = words[0]
         for SubAction in Action.__subclasses__():
-            if SubAction.__name__ == action_name:
+            if SubAction.NAME == action_name:
                 return SubAction(*words[1:])
+
+    def truncate(self):
+        open(self.path, 'w').close()
