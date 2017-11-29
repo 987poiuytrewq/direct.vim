@@ -48,6 +48,13 @@ class Buffer(object):
             action.write()
             history.log(action)
 
+        print(
+            ', '.join(
+                str(action).lower() if index > 0 else str(action)
+                for index, action in enumerate(actions)
+            )
+        )
+
     def open(self, line):
         path = self.__full_path(line)
         if self.__isdir(path):

@@ -66,8 +66,22 @@ Buffer().list()
 endOfPython
 endfunction
 
+function! direct#yank()
+python << endOfPython
+pass
+endOfPython
+endfunction
+
+function! direct#paste()
+python << endOfPython
+pass
+endOfPython
+endfunction
+
 
 command! -nargs=? -complete=dir DirectList call direct#list(<f-args>)
 command! DirectSync call direct#sync()
 command! DirectUndo call direct#undo()
 command! DirectRedo call direct#redo()
+command! DirectYank call direct#yank()
+command! DirectPaste call direct#paste()

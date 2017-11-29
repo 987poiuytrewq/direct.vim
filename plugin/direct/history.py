@@ -1,12 +1,14 @@
 import os
+
 from action import Action
 from action import reverse
+from directories import history_directory
 
 
 class History(object):
     def __init__(self):
-        self.undo_log = ActionLog('/home/duncan/.direct/undo')
-        self.redo_log = ActionLog('/home/duncan/.direct/redo')
+        self.undo_log = ActionLog('undo.log')
+        self.redo_log = ActionLog('redo.log')
 
     def log(self, action):
         self.undo_log.push(action)
@@ -22,16 +24,17 @@ class History(object):
         action = src_log.pop()
         reverse_action = reverse(action)
         reverse_action.write()
+        print(reverse_action)
         dst_log.push(reverse_action)
 
 
 class ActionLog(object):
     def __init__(self, filename):
-        self.path = filename
+        self.path = os.path.join(history_directory, filename)
 
     def push(self, action):
         with open(self.path, 'a') as file:
-            file.write(str(action))
+            file.write(action.serialize())
 
     def pop(self):
         characters = []
@@ -52,11 +55,7 @@ class ActionLog(object):
 
         line = ''.join(reversed(characters))
 
-        words = line.split(' ')
-        action_name = words[0]
-        for SubAction in Action.__subclasses__():
-            if SubAction.NAME == action_name:
-                return SubAction(*words[1:])
+        return Action.deserialize(line)
 
     def truncate(self):
         open(self.path, 'w').close()
