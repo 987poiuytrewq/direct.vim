@@ -2,7 +2,7 @@ import os
 import shutil
 import hashlib
 
-from directories import trash_directory
+from direct import directories
 
 
 class Action(object):
@@ -12,15 +12,7 @@ class Action(object):
             words.append(self.src)
         if hasattr(self, 'dst'):
             words.append(self.dst)
-        return '{}\n'.format(' '.join(words))
-
-    @classmethod
-    def deserialize(cls, line):
-        words = line.split(' ')
-        action_name = words[0]
-        for SubAction in cls.__subclasses__():
-            if SubAction.NAME == action_name:
-                return SubAction(*words[1:])
+        return ' '.join(words)
 
 
 class Move(Action):
@@ -42,16 +34,13 @@ class Move(Action):
 class Remove(Action):
     NAME = 'rm'
 
-    def __init__(self, src, dst=None):
+    def __init__(self, src):
         self.src = src
-        if dst:
-            self.dst = dst
-        else:
-            message = hashlib.md5()
-            message.update(self.src)
-            self.dst = os.path.abspath(
-                os.path.join(trash_directory, message.hexdigest())
-            )
+        message = hashlib.md5()
+        message.update(self.src)
+        self.dst = os.path.abspath(
+            os.path.join(directories.trash_directory, message.hexdigest())
+        )
 
     def write(self):
         shutil.move(self.src, self.dst)
@@ -102,22 +91,19 @@ class MakeDirectory(Action):
 
 
 REVERSALS = {
-    Move.NAME:
-        lambda action: Move(action.dst, action.src),
-    Remove.NAME:
-        lambda action: Restore(action.dst, action.src),
-    RemoveDirectory.NAME:
-        lambda action: RestoreDirectory(action.dst, action.src),
-    Restore.NAME:
-        lambda action: Remove(action.dst),
-    RestoreDirectory.NAME:
-        lambda action: RemoveDirectory(action.dst),
-    Touch.NAME:
-        lambda action: Remove(action.dst),
-    MakeDirectory.NAME:
-        lambda action: RemoveDirectory(action.dst),
+    SubAction.NAME: reverse
+    for SubAction, reverse in (
+        (Move, lambda src, dst: Move(dst, src)),
+        (Remove, lambda src, dst: Restore(dst, src)),
+        (RemoveDirectory, lambda src, dst: RestoreDirectory(dst, src)),
+        (Restore, lambda src, dst: Remove(dst)),
+        (RestoreDirectory, lambda src, dst: RemoveDirectory(dst)),
+        (Touch, lambda dst: Remove(dst)),
+        (MakeDirectory, lambda dst: RemoveDirectory(dst)),
+    )
 }
 
 
-def reverse(action):
-    return REVERSALS[action.NAME](action)
+def reverse(line):
+    words = line.split(' ')
+    return REVERSALS[words[0]](*words[1:])
