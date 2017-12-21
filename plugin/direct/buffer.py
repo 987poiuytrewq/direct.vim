@@ -45,7 +45,7 @@ class Buffer(object):
 
         history = History()
         for action in actions:
-            action.write()
+            action.do()
             history.log(action)
 
         print(

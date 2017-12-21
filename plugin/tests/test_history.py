@@ -18,10 +18,12 @@ def test_action_log(directories):
     path = os.path.join(directories.history_directory, filename)
     action_log = ActionLog(filename)
 
+    # assert lines pushed correctly
     for index, line in enumerate(lines):
         action_log.push(line)
         assert_log_lines(path, lines[slice(0, index + 1)])
 
+    # assert lines popped correctly
     for index, line in enumerate(reversed(lines)):
         popped_line = action_log.pop()
         assert popped_line.strip() == line

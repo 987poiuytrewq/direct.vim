@@ -22,7 +22,7 @@ class Move(Action):
         self.src = src
         self.dst = dst
 
-    def write(self):
+    def do(self):
         shutil.move(self.src, self.dst)
 
     def __str__(self):
@@ -42,7 +42,7 @@ class Remove(Action):
             os.path.join(directories.trash_directory, message.hexdigest())
         )
 
-    def write(self):
+    def do(self):
         shutil.move(self.src, self.dst)
 
     def __str__(self):
@@ -70,7 +70,7 @@ class Touch(Action):
     def __init__(self, dst):
         self.dst = dst
 
-    def write(self):
+    def do(self):
         open(self.dst, 'w').close()
 
     def __str__(self):
@@ -83,7 +83,7 @@ class MakeDirectory(Action):
     def __init__(self, dst):
         self.dst = dst
 
-    def write(self):
+    def do(self):
         os.makedirs(self.dst)
 
     def __str__(self):
