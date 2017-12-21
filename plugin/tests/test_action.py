@@ -34,21 +34,17 @@ def test_move_directory(directory):
 
 
 def test_remove(directory):
-    inode = os.stat(join(directory, 'file1')).st_ino
     action = Remove(join(directory, 'file1'))
     action.do()
     assert set(os.listdir(directory)) == set(['dir1'])
     assert isfile(action.dst)
-    assert os.stat(action.dst).st_ino == inode
 
 
 def test_remove_directory(directory):
-    inode = os.stat(join(directory, 'dir1')).st_ino
     action = RemoveDirectory(join(directory, 'dir1'))
     action.do()
     assert set(os.listdir(directory)) == set(['file1'])
     assert isdir(action.dst)
-    assert os.stat(action.dst).st_ino == inode
 
 
 def test_restore(directory):
