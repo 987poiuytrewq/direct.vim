@@ -107,3 +107,8 @@ REVERSALS = {
 def reverse(line):
     words = line.split(' ')
     return REVERSALS[words[0]](*words[1:])
+
+
+def print_actions(actions):
+    actions_string = ', '.join(str(action) for action in actions)
+    print(actions_string[0].upper() + actions_string[1:])

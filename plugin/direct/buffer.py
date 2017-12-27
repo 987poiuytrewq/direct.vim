@@ -4,6 +4,7 @@ from action import Move
 from action import Remove
 from action import Touch
 from action import MakeDirectory
+from action import print_actions
 from history import History
 
 
@@ -48,12 +49,7 @@ class Buffer(object):
             action.do()
             history.log(action)
 
-        print(
-            ', '.join(
-                str(action).lower() if index > 0 else str(action)
-                for index, action in enumerate(actions)
-            )
-        )
+        print_actions(actions)
 
     def open(self, line):
         path = self.__full_path(line)

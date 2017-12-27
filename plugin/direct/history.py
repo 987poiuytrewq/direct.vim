@@ -1,5 +1,6 @@
 import os
 
+from action import print_actions
 from action import reverse
 from direct import directories
 
@@ -22,7 +23,7 @@ class History(object):
     def __reverse(self, src_log, dst_log):
         reverse_action = reverse(src_log.pop())
         reverse_action.do()
-        print(reverse_action)
+        print_actions([action])
         dst_log.push(reverse_action.serialize())
 
 

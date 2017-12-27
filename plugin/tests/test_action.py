@@ -33,21 +33,32 @@ def test_move_directory(directory):
     assert os.stat(join(directory, 'dir2')).st_ino == inode
 
 
-def test_remove(directory):
+@patch('direct.action.directories')
+def test_remove(directories, directory):
+    directories.trash_directory = tempfile.mkdtemp()
+    inode = os.stat(join(directory, 'file1')).st_ino
     action = Remove(join(directory, 'file1'))
     action.do()
     assert set(os.listdir(directory)) == set(['dir1'])
     assert isfile(action.dst)
+    assert os.stat(action.dst).st_ino == inode
 
 
-def test_remove_directory(directory):
+@patch('direct.action.directories')
+def test_remove_directory(directories, directory):
+    directories.trash_directory = tempfile.mkdtemp()
+    dir_path = join(directory, 'dir1')
+    inode = os.stat(join(dir_path, 'subfile1')).st_ino
     action = RemoveDirectory(join(directory, 'dir1'))
     action.do()
     assert set(os.listdir(directory)) == set(['file1'])
     assert isdir(action.dst)
+    assert os.stat(join(action.dst, 'subfile1')).st_ino == inode
 
 
-def test_restore(directory):
+@patch('direct.action.directories')
+def test_restore(directories, directory):
+    directories.trash_directory = tempfile.mkdtemp()
     inode = os.stat(join(directory, 'file1')).st_ino
     action = Remove(join(directory, 'file1'))
     action.do()
@@ -57,14 +68,17 @@ def test_restore(directory):
     assert os.stat(join(directory, 'file1')).st_ino == inode
 
 
-def test_restore_directory(directory):
-    inode = os.stat(join(directory, 'dir1')).st_ino
+@patch('direct.action.directories')
+def test_restore_directory(directories, directory):
+    directories.trash_directory = tempfile.mkdtemp()
+    dir_path = join(directory, 'dir1')
+    inode = os.stat(join(dir_path, 'subfile1')).st_ino
     action = RemoveDirectory(join(directory, 'dir1'))
     action.do()
     Restore(action.dst, action.src).do()
     assert set(os.listdir(directory)) == set(['dir1', 'file1'])
     assert isdir(join(directory, 'dir1'))
-    assert os.stat(join(directory, 'dir1')).st_ino == inode
+    assert os.stat(join(dir_path, 'subfile1')).st_ino == inode
 
 
 def test_touch(directory):

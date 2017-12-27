@@ -2,8 +2,6 @@ import pytest
 import os
 import vimmock
 
-from os.path import isdir, isfile, join
-
 vimmock.patch_vim()
 import vim  # noqa: E402
 
@@ -25,14 +23,12 @@ def test_sync_add(directory, buffer):
     sync(buffer, ["dir1/", "file1", "file2"])
     assert vim.current.buffer[:] == ["dir1/", "file1", "file2"]
     assert set(os.listdir(directory)) == set(["dir1", "file1", "file2"])
-    assert isfile(join(directory, "file2"))
 
 
 def test_sync_add_directory(directory, buffer):
     sync(buffer, ["dir1/", "file1", "dir2/"])
     assert vim.current.buffer[:] == ["dir1/", "dir2/", "file1"]
     assert set(os.listdir(directory)) == set(["dir1", "dir2", "file1"])
-    assert isdir(join(directory, "dir2"))
 
 
 def test_sync_remove(directory, buffer):
@@ -51,14 +47,12 @@ def test_sync_rename(directory, buffer):
     sync(buffer, ["dir1/", "file2"])
     assert vim.current.buffer[:] == ["dir1/", "file2"]
     assert set(os.listdir(directory)) == set(["dir1", "file2"])
-    assert isfile(join(directory, "file2"))
 
 
 def test_sync_rename_directory(directory, buffer):
     sync(buffer, ["dir2/", "file1"])
     assert vim.current.buffer[:] == ["dir2/", "file1"]
     assert set(os.listdir(directory)) == set(["dir2", "file1"])
-    assert isdir(join(directory, "dir2"))
 
 
 def sync(buffer, lines):
