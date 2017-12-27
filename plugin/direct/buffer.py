@@ -1,11 +1,12 @@
 import os
 import vim
-from action import Move
-from action import Remove
-from action import Touch
-from action import MakeDirectory
-from action import print_actions
-from history import History
+
+from direct.action import Move
+from direct.action import Remove
+from direct.action import Touch
+from direct.action import MakeDirectory
+from direct.action import print_actions
+from direct.history import History
 
 
 class Buffer(object):

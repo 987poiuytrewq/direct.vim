@@ -1,7 +1,7 @@
 import os
 import shutil
-import hashlib
 
+from os.path import abspath, join, relpath
 from direct import directories
 
 
@@ -13,6 +13,11 @@ class Action(object):
         if hasattr(self, 'dst'):
             words.append(self.dst)
         return ' '.join(words)
+
+    def _digest(path):
+        message = hashlib.md5()
+        message.update(path)
+        return message.hexdigest()
 
 
 class Move(Action):
@@ -26,9 +31,7 @@ class Move(Action):
         shutil.move(self.src, self.dst)
 
     def __str__(self):
-        return 'Moved {} to {}'.format(
-            os.path.relpath(self.src), os.path.relpath(self.dst)
-        )
+        return 'Moved {} to {}'.format(relpath(self.src), relpath(self.dst))
 
 
 class Remove(Action):
@@ -36,17 +39,15 @@ class Remove(Action):
 
     def __init__(self, src):
         self.src = src
-        message = hashlib.md5()
-        message.update(self.src)
-        self.dst = os.path.abspath(
-            os.path.join(directories.trash_directory, message.hexdigest())
+        self.dst = abspath(
+            join(directories.trash_directory, directories.digest(self.src))
         )
 
     def do(self):
         shutil.move(self.src, self.dst)
 
     def __str__(self):
-        return 'Removed {}'.format(os.path.relpath(self.src))
+        return 'Removed {}'.format(relpath(self.src))
 
 
 class RemoveDirectory(Remove):
@@ -57,10 +58,10 @@ class Restore(Move):
     NAME = 'rs'
 
     def __str__(self):
-        return 'Restored {}'.format(os.path.relpath(self.dst))
+        return 'Restored {}'.format(relpath(self.dst))
 
 
-class RestoreDirectory(Move):
+class RestoreDirectory(Restore):
     NAME = 'rsdir'
 
 
@@ -74,7 +75,7 @@ class Touch(Action):
         open(self.dst, 'w').close()
 
     def __str__(self):
-        return 'Created {}'.format(os.path.relpath(self.dst))
+        return 'Created {}'.format(relpath(self.dst))
 
 
 class MakeDirectory(Action):
@@ -87,7 +88,37 @@ class MakeDirectory(Action):
         os.makedirs(self.dst)
 
     def __str__(self):
-        return 'Created {}'.format(os.path.relpath(self.dst))
+        return 'Created {}'.format(relpath(self.dst))
+
+
+class Paste(Action):
+    NAME = 'p'
+
+    def __init__(self, src, dst):
+        self.src = src
+        self.dst = dst
+
+    def do(self):
+        for entry in os.listdir(self.src):
+            shutil.copy(entry, self.dst)
+
+    def __str__(self):
+        return 'Pasted into {}'.format(relpath(self.dst))
+
+
+class Unpaste(Action):
+    NAME = 'up'
+
+    def __init__(self, src, dst):
+        self.src = src
+        self.dst = dst
+
+    def do(self):
+        for entry in os.listdir(self.dst):
+            shutil.remove(os.path.join(self.src, entry))
+
+    def __str__(self):
+        return 'Reversed paste into {}'.format(relpath(self.src))
 
 
 REVERSALS = {
@@ -100,6 +131,8 @@ REVERSALS = {
         (RestoreDirectory, lambda src, dst: RemoveDirectory(dst)),
         (Touch, lambda dst: Remove(dst)),
         (MakeDirectory, lambda dst: RemoveDirectory(dst)),
+        (Paste, lambda src, dst: Unpaste(dst, src)),
+        (Unpaste, lambda src, dst: Paste(dst, src)),
     )
 }
 

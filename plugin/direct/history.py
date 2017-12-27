@@ -1,18 +1,21 @@
 import os
 
-from action import print_actions
-from action import reverse
 from direct import directories
+from direct.action import print_actions
+from direct.action import reverse
+from direct.log import Log
 
 
 class History(object):
     def __init__(self):
-        self.undo_log = ActionLog('undo.log')
-        self.redo_log = ActionLog('redo.log')
+        self.undo_log, self.redo_log = (
+            Log(os.path.join(directories.history_directory, filename))
+            for filename in ('undo.log', 'redo.log')
+        )
 
     def log(self, action):
         self.undo_log.push(action.serialize())
-        self.redo_log.truncate()
+        self.redo_log.clear()
 
     def undo(self):
         self.__reverse(self.undo_log, self.redo_log)
@@ -25,34 +28,3 @@ class History(object):
         reverse_action.do()
         print_actions(reverse_action)
         dst_log.push(reverse_action.serialize())
-
-
-class ActionLog(object):
-    def __init__(self, filename):
-        self.path = os.path.join(directories.history_directory, filename)
-
-    def push(self, line):
-        with open(self.path, 'a') as file:
-            file.write(line + '\n')
-
-    def pop(self):
-        characters = []
-        with open(self.path, 'r+') as file:
-            file.seek(0, os.SEEK_END)
-            cursor = file.tell() - 1
-
-            while cursor > 0:
-                cursor -= 1
-                file.seek(cursor, os.SEEK_SET)
-                character = file.read(1)
-                if character == '\n':
-                    break
-                characters.append(character)
-
-            if cursor > 0:
-                file.truncate()
-
-        return ''.join(reversed(characters))
-
-    def truncate(self):
-        open(self.path, 'w').close()
