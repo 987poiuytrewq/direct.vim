@@ -23,7 +23,7 @@ class History(object):
     def __reverse(self, src_log, dst_log):
         reverse_action = reverse(src_log.pop())
         reverse_action.do()
-        print_actions([action])
+        print_actions(reverse_action)
         dst_log.push(reverse_action.serialize())
 
 

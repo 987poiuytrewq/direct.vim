@@ -49,7 +49,7 @@ class Buffer(object):
             action.do()
             history.log(action)
 
-        print_actions(actions)
+        print_actions(*actions)
 
     def open(self, line):
         path = self.__full_path(line)
