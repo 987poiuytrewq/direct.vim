@@ -2,7 +2,8 @@ import hashlib
 import os
 import shutil
 
-from os.path import abspath, join, relpath
+from os.path import abspath, basename, join, relpath
+
 from direct import directories
 
 
@@ -101,7 +102,10 @@ class Paste(Action):
 
     def do(self):
         for entry in os.listdir(self.src):
-            shutil.copy(entry, self.dst)
+            if os.path.isfile(entry):
+                shutil.copy(entry, self.dst)
+            if os.path.isdir(entry):
+                shutil.copytree(entry, join(self.dst, basename(entry)))
 
     def __str__(self):
         return 'Pasted into {}'.format(relpath(self.dst))

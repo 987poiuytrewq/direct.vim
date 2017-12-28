@@ -13,6 +13,7 @@ from direct.action import RestoreDirectory
 from direct.action import Touch
 from direct.action import MakeDirectory
 from direct.action import reverse
+from direct.directories import digest
 
 from .utils import random_string
 
@@ -20,9 +21,10 @@ from .utils import random_string
 @pytest.fixture
 def trash_directory():
     with patch('direct.action.directories') as directories:
-        directories.trash_directory = tempfile.mkdtemp()
-        directories.digest = lambda _: random_string()
-        yield
+        trash_directory = tempfile.mkdtemp()
+        directories.trash_directory = trash_directory
+        directories.digest = digest
+        yield trash_directory
 
 
 def test_move_file(directory):
