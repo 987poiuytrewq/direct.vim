@@ -2,9 +2,10 @@ import os
 import hashlib
 
 
-def digest(path):
+def digest(*paths):
     message = hashlib.md5()
-    message.update(path)
+    for path in paths:
+        message.update(path)
     return message.hexdigest()
 
 

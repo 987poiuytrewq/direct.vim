@@ -17,6 +17,14 @@ from direct.action import reverse
 from .utils import random_string
 
 
+@pytest.fixture
+def trash_directory():
+    with patch('direct.action.directories') as directories:
+        directories.trash_directory = tempfile.mkdtemp()
+        directories.digest = lambda _: random_string()
+        yield
+
+
 def test_move_file(directory):
     inode = os.stat(join(directory, 'file1')).st_ino
     Move(join(directory, 'file1'), join(directory, 'file2')).do()
@@ -33,9 +41,7 @@ def test_move_directory(directory):
     assert os.stat(join(directory, 'dir2')).st_ino == inode
 
 
-@patch('direct.action.directories')
-def test_remove(directories, directory):
-    directories.trash_directory = tempfile.mkdtemp()
+def test_remove(trash_directory, directory):
     inode = os.stat(join(directory, 'file1')).st_ino
     action = Remove(join(directory, 'file1'))
     action.do()
@@ -44,9 +50,7 @@ def test_remove(directories, directory):
     assert os.stat(action.dst).st_ino == inode
 
 
-@patch('direct.action.directories')
-def test_remove_directory(directories, directory):
-    directories.trash_directory = tempfile.mkdtemp()
+def test_remove_directory(trash_directory, directory):
     dir_path = join(directory, 'dir1')
     inode = os.stat(join(dir_path, 'subfile1')).st_ino
     action = RemoveDirectory(join(directory, 'dir1'))
@@ -56,9 +60,7 @@ def test_remove_directory(directories, directory):
     assert os.stat(join(action.dst, 'subfile1')).st_ino == inode
 
 
-@patch('direct.action.directories')
-def test_restore(directories, directory):
-    directories.trash_directory = tempfile.mkdtemp()
+def test_restore(trash_directory, directory):
     inode = os.stat(join(directory, 'file1')).st_ino
     action = Remove(join(directory, 'file1'))
     action.do()
@@ -68,9 +70,7 @@ def test_restore(directories, directory):
     assert os.stat(join(directory, 'file1')).st_ino == inode
 
 
-@patch('direct.action.directories')
-def test_restore_directory(directories, directory):
-    directories.trash_directory = tempfile.mkdtemp()
+def test_restore_directory(trash_directory, directory):
     dir_path = join(directory, 'dir1')
     inode = os.stat(join(dir_path, 'subfile1')).st_ino
     action = RemoveDirectory(join(directory, 'dir1'))
@@ -105,9 +105,7 @@ def test_reverse_move():
     (Remove, Restore),
     (RemoveDirectory, RestoreDirectory),
 ))
-@patch('direct.action.directories')
-def test_reverse_remove(directories, RemoveAction, RestoreAction):
-    directories.trash_directory = tempfile.mkdtemp()
+def test_reverse_remove(trash_directory, RemoveAction, RestoreAction):
     action = RemoveAction(random_string())
     reverse_action = reverse(action.serialize().strip())
     assert reverse_action.__class__ == RestoreAction
@@ -119,9 +117,7 @@ def test_reverse_remove(directories, RemoveAction, RestoreAction):
     (Restore, Remove),
     (RestoreDirectory, RemoveDirectory),
 ))
-@patch('direct.action.directories')
-def test_reverse_restore(directories, RestoreAction, RemoveAction):
-    directories.trash_directory = tempfile.mkdtemp()
+def test_reverse_restore(trash_directory, RestoreAction, RemoveAction):
     action = RestoreAction(random_string(), random_string())
     reverse_action = reverse(action.serialize().strip())
     assert reverse_action.__class__ == RemoveAction
@@ -132,9 +128,7 @@ def test_reverse_restore(directories, RestoreAction, RemoveAction):
     (Touch, Remove),
     (MakeDirectory, RemoveDirectory),
 ))
-@patch('direct.action.directories')
-def test_reverse_create(directories, CreateAction, RemoveAction):
-    directories.trash_directory = tempfile.mkdtemp()
+def test_reverse_create(trash_directory, CreateAction, RemoveAction):
     action = CreateAction(random_string())
     reverse_action = reverse(action.serialize().strip())
     assert reverse_action.__class__ == RemoveAction

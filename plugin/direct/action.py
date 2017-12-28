@@ -1,3 +1,4 @@
+import hashlib
 import os
 import shutil
 
@@ -115,7 +116,7 @@ class Unpaste(Action):
 
     def do(self):
         for entry in os.listdir(self.dst):
-            shutil.remove(os.path.join(self.src, entry))
+            os.remove(join(self.src, entry))
 
     def __str__(self):
         return 'Reversed paste into {}'.format(relpath(self.src))

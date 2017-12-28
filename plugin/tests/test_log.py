@@ -2,21 +2,16 @@ import os
 import random
 import tempfile
 
-from mock import patch
-
-from direct.history import ActionLog
+from direct.log import Log
 
 from .utils import random_string
 
 
-@patch('direct.history.directories')
-def test_action_log(directories):
-    directories.history_directory = tempfile.mkdtemp()
+def test_log():
     lines = [random_string() for _ in xrange(random.randint(10, 20))]
 
-    filename = random_string()
-    path = os.path.join(directories.history_directory, filename)
-    action_log = ActionLog(filename)
+    path = os.path.join(tempfile.mkdtemp(), random_string())
+    action_log = Log(path)
 
     # assert lines pushed correctly
     for index, line in enumerate(lines):

@@ -11,11 +11,12 @@ class Register(object):
         self.path = directories.register_directory
         self.content_path = os.path.join(self.path, 'content')
 
-    def yank(self, sources):
-        dst = os.path.join(self.path, directories.digest(sources))
-        shutil.makedirs(dst)
-        for src in self.sources:
-            shutil.copy(src, self.path)
+    def yank(self, *sources):
+        dst = os.path.join(self.path, directories.digest(*sources))
+        if not os.path.exists(dst):
+            os.makedirs(dst)
+        for src in sources:
+            shutil.copy(src, dst)
         with open(self.content_path, 'w') as content:
             content.write(dst)
 

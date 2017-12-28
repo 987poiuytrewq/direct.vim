@@ -67,14 +67,22 @@ endOfPython
 endfunction
 
 function! direct#yank()
+let line = getline('.')
 python << endOfPython
-pass
+from direct.buffer import Buffer
+from direct.register import Register
+Register().yank(vim.eval('line'))
+Buffer().list()
 endOfPython
 endfunction
 
 function! direct#paste()
 python << endOfPython
-pass
+from direct.buffer import Buffer
+from direct.register import Register
+buffer = Buffer()
+Register().paste(buffer.root)
+buffer.list()
 endOfPython
 endfunction
 
