@@ -176,3 +176,15 @@ def test_reverse_create(trash_directory, CreateAction, RemoveAction):
     reverse_action = reverse(action.serialize().strip())
     assert reverse_action.__class__ == RemoveAction
     assert reverse_action.src == action.dst
+
+
+@pytest.mark.parametrize(('Action1', 'Action2'), (
+    (Paste, Unpaste),
+    (Unpaste, Paste),
+))
+def test_reverse_paste(Action1, Action2):
+    action = Action1(random_string(), random_string())
+    reverse_action = reverse(action.serialize().strip())
+    assert reverse_action.__class__ == Action2
+    assert reverse_action.src == action.dst
+    assert reverse_action.dst == action.src
