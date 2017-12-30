@@ -1,9 +1,11 @@
 import os
 import pytest
 import tempfile
+import shutil
 
 from mock import patch
 from os.path import isdir, isfile, join
+from contextlib import contextmanager
 
 from direct.action import Move
 from direct.action import Remove
@@ -12,6 +14,8 @@ from direct.action import Restore
 from direct.action import RestoreDirectory
 from direct.action import Touch
 from direct.action import MakeDirectory
+from direct.action import Paste
+from direct.action import Unpaste
 from direct.action import reverse
 from direct.directories import digest
 
@@ -93,6 +97,43 @@ def test_make_directory(directory):
     MakeDirectory(join(directory, 'dir2')).do()
     assert set(os.listdir(directory)) == set(['dir1', 'dir2', 'file1'])
     assert isdir(join(directory, 'dir2'))
+
+
+@contextmanager
+def register():
+    path = tempfile.mkdtemp()
+    yield path
+    shutil.rmtree(path)
+
+
+def test_paste_file(directory):
+    with register() as register_path:
+        open(join(register_path, 'file2'), 'w').close()
+        Paste(register_path, directory).do()
+        assert set(os.listdir(directory)) == set(['dir1', 'file1', 'file2'])
+        assert isfile(join(directory, 'file2'))
+
+
+def test_paste_directory(directory):
+    with register() as register_path:
+        os.mkdir(join(register_path, 'dir2'))
+        Paste(register_path, directory).do()
+        assert set(os.listdir(directory)) == set(['dir1', 'dir2', 'file1'])
+        assert isdir(join(directory, 'dir2'))
+
+
+def test_unpaste_file(directory):
+    with register() as register_path:
+        open(join(register_path, 'file1'), 'w').close()
+        Unpaste(directory, register_path).do()
+        assert set(os.listdir(directory)) == set(['dir1'])
+
+
+def test_unpaste_directory(directory):
+    with register() as register_path:
+        os.mkdir(join(register_path, 'dir1'))
+        Unpaste(directory, register_path).do()
+        assert set(os.listdir(directory)) == set(['file1'])
 
 
 def test_reverse_move():

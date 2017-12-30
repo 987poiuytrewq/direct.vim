@@ -2,7 +2,7 @@ import hashlib
 import os
 import shutil
 
-from os.path import abspath, basename, join, relpath
+from os.path import abspath, join, relpath
 
 from direct import directories
 
@@ -102,10 +102,11 @@ class Paste(Action):
 
     def do(self):
         for entry in os.listdir(self.src):
-            if os.path.isfile(entry):
-                shutil.copy(entry, self.dst)
-            if os.path.isdir(entry):
-                shutil.copytree(entry, join(self.dst, basename(entry)))
+            full_entry = join(self.src, entry)
+            if os.path.isfile(full_entry):
+                shutil.copy(full_entry, self.dst)
+            if os.path.isdir(full_entry):
+                shutil.copytree(full_entry, join(self.dst, entry))
 
     def __str__(self):
         return 'Pasted into {}'.format(relpath(self.dst))
@@ -120,7 +121,11 @@ class Unpaste(Action):
 
     def do(self):
         for entry in os.listdir(self.dst):
-            os.remove(join(self.src, entry))
+            full_entry = join(self.src, entry)
+            if os.path.isfile(full_entry):
+                os.remove(full_entry)
+            if os.path.isdir(full_entry):
+                shutil.rmtree(full_entry)
 
     def __str__(self):
         return 'Reversed paste into {}'.format(relpath(self.src))
