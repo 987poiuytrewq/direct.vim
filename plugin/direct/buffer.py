@@ -7,6 +7,7 @@ from direct.action import Touch
 from direct.action import MakeDirectory
 from direct.action import print_actions
 from direct.history import History
+from direct.register import Register
 
 
 class Buffer(object):
@@ -29,6 +30,7 @@ class Buffer(object):
         expected_lines = map(self.__full_path, self.__read())
 
         actions = []
+        yanks = []
         if len(actual_lines) > len(expected_lines):
             for added_line in set(actual_lines) - set(expected_lines):
                 if self.__isdir(added_line):
@@ -38,6 +40,7 @@ class Buffer(object):
         elif len(actual_lines) < len(expected_lines):
             for removed_line in set(expected_lines) - set(actual_lines):
                 actions.append(Remove(removed_line))
+                yanks.append(removed_line)
         else:
             for actual_line, expected_line in zip(
                 actual_lines, expected_lines
@@ -45,12 +48,14 @@ class Buffer(object):
                 if actual_line != expected_line:
                     actions.append(Move(expected_line, actual_line))
 
-        history = History()
-        for action in actions:
-            action.do()
-            history.log(action)
-
         if actions:
+            if yanks:
+                Register().yank(*yanks)
+
+            history = History()
+            for action in actions:
+                action.do()
+                history.log(action)
             print_actions(*actions)
 
     def open(self, line):
