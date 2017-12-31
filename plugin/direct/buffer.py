@@ -60,6 +60,10 @@ class Buffer(object):
         else:
             vim.command('e {}'.format(path))
 
+    def get_lines(self, firstline, lastline):
+        current_buffer = vim.current.buffer
+        return current_buffer[slice(int(firstline) - 1, int(lastline))]
+
     def __read(self):
         files = []
         directories = []

@@ -5,6 +5,7 @@ from os.path import basename, join
 
 from direct import directories
 from direct.action import Paste
+from direct.action import print_actions
 from direct.history import History
 
 
@@ -30,4 +31,5 @@ class Register(object):
             src = content.read()
         action = Paste(src, dst)
         action.do()
+        print_actions(action)
         History().log(action)

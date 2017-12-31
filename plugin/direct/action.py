@@ -109,7 +109,7 @@ class Paste(Action):
                 shutil.copytree(full_entry, join(self.dst, entry))
 
     def __str__(self):
-        return 'Pasted into {}'.format(relpath(self.dst))
+        return 'Pasted into {}{}'.format(relpath(self.dst), os.path.sep)
 
 
 class Unpaste(Action):
@@ -128,7 +128,7 @@ class Unpaste(Action):
                 shutil.rmtree(full_entry)
 
     def __str__(self):
-        return 'Reversed paste into {}'.format(relpath(self.src))
+        return 'Reversed paste into {}{}'.format(relpath(self.src), os.path.sep)
 
 
 REVERSALS = {

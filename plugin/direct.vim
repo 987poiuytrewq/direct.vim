@@ -66,23 +66,33 @@ Buffer().list()
 endOfPython
 endfunction
 
-function! direct#yank()
-let line = getline('.')
-python << endOfPython
-from direct.buffer import Buffer
-from direct.register import Register
-Register().yank(vim.eval('line'))
-Buffer().list()
-endOfPython
-endfunction
-
-function! direct#paste()
+function! direct#yank() range
 python << endOfPython
 from direct.buffer import Buffer
 from direct.register import Register
 buffer = Buffer()
-Register().paste(buffer.root)
+sources = buffer.get_lines(vim.eval('a:firstline'), vim.eval('a:lastline'))
+Register().yank(*sources)
 buffer.list()
+endOfPython
+endfunction
+
+function! direct#paste(...)
+let dst = ''
+if a:0 > 0
+    let dst = a:1
+endif
+
+python << endOfPython
+from direct.buffer import Buffer
+from direct.register import Register
+dst = vim.eval('dst')
+if dst:
+    Register().paste(dst)
+else:
+    buffer = Buffer()
+    Register().paste(buffer.root)
+    buffer.list()
 endOfPython
 endfunction
 
@@ -91,5 +101,5 @@ command! -nargs=? -complete=dir DirectList call direct#list(<f-args>)
 command! DirectSync call direct#sync()
 command! DirectUndo call direct#undo()
 command! DirectRedo call direct#redo()
-command! DirectYank call direct#yank()
-command! DirectPaste call direct#paste()
+command! -range DirectYank <line1>,<line2>call direct#yank()
+command! -nargs=? -complete=dir DirectPaste call direct#paste(<f-args>)
