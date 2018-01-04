@@ -2,7 +2,7 @@ python import sys
 python import vim
 python sys.path.append(vim.eval('expand("<sfile>:h")'))
 
-function! direct#list(...)
+function! direct#list(path)
 enew
 set filetype=direct
 setlocal filetype=direct buftype=acwrite noswapfile nomodified
@@ -11,14 +11,9 @@ augroup direct
     autocmd BufWriteCmd <buffer> DirectSync
 augroup END
 
-let root = getcwd()
-if a:0 > 0
-    let root = a:1
-endif
-
 python << endOfPython
 from direct.buffer import Buffer
-Buffer(vim.eval('root')).list()
+Buffer(vim.eval('a:path')).list()
 endOfPython
 endfunction
 
@@ -97,9 +92,20 @@ endOfPython
 endfunction
 
 
-command! -nargs=? -complete=dir DirectList call direct#list(<f-args>)
+command! -nargs=1 -complete=dir DirectList call direct#list(<f-args>)
+command! DirectListBuffer call direct#list(expand('%:p:h'))
+command! DirectListCwd call direct#list(getcwd())
 command! DirectSync call direct#sync()
 command! DirectUndo call direct#undo()
 command! DirectRedo call direct#redo()
 command! -range DirectYank <line1>,<line2>call direct#yank()
 command! -nargs=? -complete=dir DirectPaste call direct#paste(<f-args>)
+
+augroup direct_replace_netrw
+  autocmd!
+  autocmd VimEnter * if exists('#FileExplorer') | exe 'au! FileExplorer *' | endif
+  autocmd BufEnter * if !exists('b:direct_path') && isdirectory(expand('%'))
+    \ | redraw | echo '' | exe 'DirectList %'
+    \ | elseif exists('b:direct_path') && &buflisted && bufnr('$') > 1 | setlocal nobuflisted | endif
+augroup END
+nnoremap <silent> - :<C-U>DirectListBuffer<CR>

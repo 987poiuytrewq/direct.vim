@@ -21,9 +21,13 @@ class Buffer(object):
         vim.command("let {} = '{}'".format(self.PATH_VARIABLE, self.root))
 
     def list(self):
+        name = '{}{}'.format(self.root, os.path.sep)
+        for buffer in vim.buffers:
+            if buffer.name == name:
+                vim.command('buffer {}'.format(name))
         current_buffer = vim.current.buffer
         current_buffer[:] = self.__read()
-        current_buffer.name = '{}/'.format(os.path.relpath(self.root))
+        current_buffer.name = name
 
     def sync(self):
         actual_lines = map(self.__full_path, vim.current.buffer[:])
@@ -81,7 +85,8 @@ class Buffer(object):
 
         lines = []
         lines += [
-            u'{}/'.format(directory) for directory in sorted(directories)
+            u'{}{}'.format(directory, os.path.sep)
+            for directory in sorted(directories)
         ]
         lines += [u'{}'.format(file) for file in sorted(files)]
         return lines
@@ -90,4 +95,4 @@ class Buffer(object):
         return os.path.join(self.root, entry)
 
     def __isdir(self, line):
-        return line.endswith("/")
+        return line.endswith(os.path.sep)

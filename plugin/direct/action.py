@@ -128,7 +128,9 @@ class Unpaste(Action):
                 shutil.rmtree(full_entry)
 
     def __str__(self):
-        return 'Reversed paste into {}{}'.format(relpath(self.src), os.path.sep)
+        return 'Reversed paste into {}{}'.format(
+            relpath(self.src), os.path.sep
+        )
 
 
 REVERSALS = {
