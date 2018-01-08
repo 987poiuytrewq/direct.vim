@@ -3,18 +3,15 @@ python import vim
 python sys.path.append(vim.eval('expand("<sfile>:h")'))
 
 function! direct#list(path)
-enew
-set filetype=direct
-setlocal filetype=direct buftype=acwrite noswapfile nomodified
-augroup direct
-    autocmd! * <buffer>
-    autocmd BufWriteCmd <buffer> DirectSync
-augroup END
-
 python << endOfPython
 from direct.buffer import Buffer
 Buffer(vim.eval('a:path')).list()
 endOfPython
+set filetype=direct buftype=acwrite buflisted noswapfile nomodified
+augroup direct
+    autocmd! * <buffer>
+    autocmd BufWriteCmd <buffer> DirectSync
+augroup END
 endfunction
 
 

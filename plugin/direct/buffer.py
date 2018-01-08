@@ -3,6 +3,7 @@ import vim
 
 from direct.action import Move
 from direct.action import Remove
+from direct.action import RemoveDirectory
 from direct.action import Touch
 from direct.action import MakeDirectory
 from direct.action import print_actions
@@ -20,14 +21,14 @@ class Buffer(object):
         self.root = os.path.abspath(path)
         vim.command("let {} = '{}'".format(self.PATH_VARIABLE, self.root))
 
+        if any(buffer.name == self.root for buffer in vim.buffers):
+            vim.command('buffer {}'.format(self.root))
+        else:
+            vim.command('enew')
+            vim.current.buffer.name = self.root
+
     def list(self):
-        name = '{}{}'.format(self.root, os.path.sep)
-        for buffer in vim.buffers:
-            if buffer.name == name:
-                vim.command('buffer {}'.format(name))
-        current_buffer = vim.current.buffer
-        current_buffer[:] = self.__read()
-        current_buffer.name = name
+        vim.current.buffer[:] = self.__read()
 
     def sync(self):
         actual_lines = map(self.__full_path, vim.current.buffer[:])
@@ -43,8 +44,11 @@ class Buffer(object):
                     actions.append(Touch(added_line))
         elif len(actual_lines) < len(expected_lines):
             for removed_line in set(expected_lines) - set(actual_lines):
-                actions.append(Remove(removed_line))
                 yanks.append(removed_line)
+                if self.__isdir(removed_line):
+                    actions.append(RemoveDirectory(removed_line))
+                else:
+                    actions.append(Remove(removed_line))
         else:
             for actual_line, expected_line in zip(
                 actual_lines, expected_lines
@@ -67,7 +71,7 @@ class Buffer(object):
         if self.__isdir(path):
             Buffer(line[:-1]).list()
         else:
-            vim.command('e {}'.format(path))
+            vim.command('edit {}'.format(path))
 
     def get_lines(self, firstline, lastline):
         current_buffer = vim.current.buffer
