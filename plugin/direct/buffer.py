@@ -12,25 +12,32 @@ from direct.register import Register
 
 
 class Buffer(object):
-    PATH_VARIABLE = 'b:direct_path'
+    def __init__(self, path):
+        self.root = BufferRoot(path)
 
-    def __init__(self, path=''):
-        exists = vim.eval("exists('{}')".format(self.PATH_VARIABLE))
-        if exists != '0':
-            path = os.path.join(vim.eval(self.PATH_VARIABLE), path)
-        self.root = os.path.abspath(path)
-        vim.command("let {} = '{}'".format(self.PATH_VARIABLE, self.root))
-
-        if any(buffer.name == self.root for buffer in vim.buffers):
-            vim.command('buffer {}'.format(self.root))
+        # change window to buffer if it already exists
+        if any(
+            buffer.name == self.root.absolute_path for buffer in vim.buffers
+        ):
+            vim.command('buffer {}'.format(self.root.absolute_path))
         else:
+            # else create new buffer and dump path
             vim.command('enew')
-            vim.current.buffer.name = self.root
+            vim.current.buffer.name = self.root.absolute_path
+            self.root.dump()
+
+    @classmethod
+    def restore(cls):
+        '''Restore buffer from dumped path'''
+        path = BufferRoot.load()
+        return cls(path)
 
     def list(self):
+        '''Display directory content in buffer'''
         vim.current.buffer[:] = self.__read()
 
     def sync(self):
+        '''Synchronise buffer content with directory content'''
         actual_lines = map(self.__full_path, vim.current.buffer[:])
         expected_lines = map(self.__full_path, self.__read())
 
@@ -58,7 +65,8 @@ class Buffer(object):
 
         if actions:
             if yanks:
-                Register().yank(*yanks)
+                print yanks
+                # Register().yank(*yanks)
 
             history = History()
             for action in actions:
@@ -67,9 +75,11 @@ class Buffer(object):
             print_actions(*actions)
 
     def open(self, line):
+        '''Open file or change directory'''
         path = self.__full_path(line)
         if self.__isdir(path):
-            Buffer(line[:-1]).list()
+            self.root.change_directory(line[:-1])
+            self.list()
         else:
             vim.command('edit {}'.format(path))
 
@@ -81,7 +91,7 @@ class Buffer(object):
         files = []
         directories = []
 
-        for entry in os.listdir(self.root):
+        for entry in os.listdir(self.root.absolute_path):
             if os.path.isdir(self.__full_path(entry)):
                 directories.append(entry)
             elif os.path.isfile(self.__full_path(entry)):
@@ -96,7 +106,26 @@ class Buffer(object):
         return lines
 
     def __full_path(self, entry):
-        return os.path.join(self.root, entry)
+        return os.path.join(self.root.absolute_path, entry)
 
     def __isdir(self, line):
         return line.endswith(os.path.sep)
+
+
+class BufferRoot(object):
+    ROOT_VARIABLE = 'b:direct_buffer_root'
+
+    def __init__(self, relative_path):
+        self.absolute_path = os.path.abspath(relative_path)
+
+    def change_directory(self, offset_path):
+        self.absolute_path = os.path.join(self.absolute_path, offset_path)
+
+    def dump(self):
+        vim.command(
+            "let {} = '{}'".format(self.ROOT_VARIABLE, self.absolute_path)
+        )
+
+    @classmethod
+    def load(cls):
+        return vim.eval(cls.ROOT_VARIABLE)

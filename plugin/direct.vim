@@ -4,8 +4,10 @@ python sys.path.append(vim.eval('expand("<sfile>:h")'))
 
 function! direct#list(path)
 python << endOfPython
+import os
 from direct.buffer import Buffer
-Buffer(vim.eval('a:path')).list()
+buffer = Buffer(vim.eval('a:path'))
+buffer.list()
 endOfPython
 set filetype=direct buftype=acwrite buflisted noswapfile nomodified
 augroup direct
@@ -18,7 +20,7 @@ endfunction
 function! direct#sync()
 python << endOfPython
 from direct.buffer import Buffer
-buffer = Buffer()
+buffer = Buffer.restore()
 buffer.sync()
 buffer.list()
 endOfPython
@@ -34,7 +36,8 @@ endif
 
 python << endOfPython
 from direct.buffer import Buffer
-Buffer().open(vim.eval('line'))
+buffer = Buffer.restore()
+buffer.open(vim.eval('line'))
 endOfPython
 endfunction
 
@@ -44,7 +47,8 @@ python << endOfPython
 from direct.buffer import Buffer
 from direct.history import History
 History().undo()
-Buffer().list()
+buffer = Buffer.restore()
+buffer.list()
 endOfPython
 endfunction
 
@@ -54,7 +58,8 @@ python << endOfPython
 from direct.buffer import Buffer
 from direct.history import History
 History().redo()
-Buffer().list()
+buffer = Buffer.restore()
+buffer.list()
 endOfPython
 endfunction
 
@@ -62,7 +67,7 @@ function! direct#yank() range
 python << endOfPython
 from direct.buffer import Buffer
 from direct.register import Register
-buffer = Buffer()
+buffer = Buffer.restore()
 sources = buffer.get_lines(vim.eval('a:firstline'), vim.eval('a:lastline'))
 Register().yank(*sources)
 buffer.list()
@@ -82,7 +87,7 @@ dst = vim.eval('dst')
 if dst:
     Register().paste(dst)
 else:
-    buffer = Buffer()
+    buffer = Buffer.restore()
     Register().paste(buffer.root)
     buffer.list()
 endOfPython
@@ -100,9 +105,7 @@ command! -nargs=? -complete=dir DirectPaste call direct#paste(<f-args>)
 
 augroup direct_replace_netrw
   autocmd!
-  autocmd VimEnter * if exists('#FileExplorer') | exe 'au! FileExplorer *' | endif
-  autocmd BufEnter * if !exists('b:direct_path') && isdirectory(expand('%'))
-    \ | redraw | echo '' | exe 'DirectList %'
-    \ | elseif exists('b:direct_path') && &buflisted && bufnr('$') > 1 | setlocal nobuflisted | endif
+  autocmd VimEnter * if exists('#FileExplorer') | execute 'autocmd! FileExplorer *' | endif
+  autocmd BufEnter * if isdirectory(expand('%')) && !exists('b:direct_buffer_root') | execute 'DirectList %' | endif
 augroup END
 nnoremap <silent> - :<C-U>DirectListBuffer<CR>
