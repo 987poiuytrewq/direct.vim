@@ -65,8 +65,7 @@ class Buffer(object):
 
         if actions:
             if yanks:
-                print yanks
-                # Register().yank(*yanks)
+                Register().yank(*yanks)
 
             history = History()
             for action in actions:
@@ -78,8 +77,14 @@ class Buffer(object):
         '''Open file or change directory'''
         path = self.__full_path(line)
         if self.__isdir(path):
+            # disable writes
+            vim.command('set buftype=nofile')
             self.root.change_directory(line[:-1])
             self.list()
+            # enable writes
+            vim.command('set buftype=acwrite nomodified')
+            vim.current.buffer.name = self.root.absolute_path
+            self.root.dump()
         else:
             vim.command('edit {}'.format(path))
 
