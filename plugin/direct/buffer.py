@@ -16,12 +16,14 @@ class Buffer(object):
         self.root = BufferRoot(path)
 
         # change window to buffer if it already exists
-        if any(
-            buffer.name == self.root.absolute_path for buffer in vim.buffers
-        ):
-            vim.command('buffer {}'.format(self.root.absolute_path))
-        else:
-            # else create new buffer and dump path
+        buffer_exists = False
+        for buffer in vim.buffers:
+            if buffer.name == self.root.absolute_path:
+                buffer_exists = True
+                vim.current.buffer = buffer
+
+        # else create new buffer and dump path
+        if not buffer_exists:
             vim.command('enew')
             vim.current.buffer.name = self.root.absolute_path
             self.root.dump()
@@ -74,19 +76,17 @@ class Buffer(object):
             print_actions(*actions)
 
     def open(self, line):
-        '''Open file or change directory'''
+        '''Open file or directory'''
+        direct_buffer = vim.current.buffer
         path = self.__full_path(line)
         if self.__isdir(path):
-            # disable writes
-            vim.command('set buftype=nofile')
-            self.root.change_directory(line[:-1])
-            self.list()
-            # enable writes
-            vim.command('set buftype=acwrite nomodified')
-            vim.current.buffer.name = self.root.absolute_path
-            self.root.dump()
+            # open new direct buffer
+            vim.command('DirectList {}'.format(path))
         else:
+            # open file
             vim.command('edit {}'.format(path))
+        # close last buffer
+        vim.command('bwipeout! {}'.format(direct_buffer.number))
 
     def get_lines(self, firstline, lastline):
         current_buffer = vim.current.buffer
@@ -122,9 +122,6 @@ class BufferRoot(object):
 
     def __init__(self, relative_path):
         self.absolute_path = os.path.abspath(relative_path)
-
-    def change_directory(self, offset_path):
-        self.absolute_path = os.path.join(self.absolute_path, offset_path)
 
     def dump(self):
         vim.command(

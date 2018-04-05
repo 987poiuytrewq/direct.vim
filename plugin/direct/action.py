@@ -1,6 +1,7 @@
 import hashlib
 import os
 import shutil
+import vim
 
 from os.path import abspath, join, relpath
 
@@ -30,7 +31,22 @@ class Move(Action):
         self.dst = dst
 
     def do(self):
-        shutil.move(self.src, self.dst)
+        # if the file is already open, save it as dst
+        buffer_exists = False
+        for buffer in vim.buffers:
+            if buffer.name == self.src:
+                buffer_exists = True
+                direct_buffer = vim.current.buffer
+                print 'direct buffer {}', format(direct_buffer.number)
+                print 'found open buffer'
+                vim.current.buffer = buffer
+                print 'switched to buffer {}'.format(vim.current.buffer.number)
+                vim.command('keepalt saveas! {}'.format(self.dst))
+                vim.current_buffer = direct_buffer
+
+        # else just move the file
+        if not buffer_exists:
+            shutil.move(self.src, self.dst)
 
     def __str__(self):
         return 'Moved {} to {}'.format(relpath(self.src), relpath(self.dst))
@@ -47,6 +63,10 @@ class Remove(Action):
 
     def do(self):
         shutil.move(self.src, self.dst)
+        # if the file is already open, close the buffer
+        for buffer in vim.buffers:
+            if buffer.name == self.src:
+                vim.command('bwipeout! {}'.format(buffer.number))
 
     def __str__(self):
         return 'Removed {}'.format(relpath(self.src))
