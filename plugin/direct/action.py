@@ -37,12 +37,16 @@ class Move(Action):
             if buffer.name == self.src:
                 buffer_exists = True
                 direct_buffer = vim.current.buffer
-                print 'direct buffer {}', format(direct_buffer.number)
+                print 'direct buffer {} {}'.format(
+                    direct_buffer.number, direct_buffer.name
+                )
                 print 'found open buffer'
                 vim.current.buffer = buffer
-                print 'switched to buffer {}'.format(vim.current.buffer.number)
-                vim.command('keepalt saveas! {}'.format(self.dst))
-                vim.current_buffer = direct_buffer
+                print 'switched to buffer {} {}'.format(
+                    vim.current.buffer.number, vim.current.buffer.name
+                )
+                # vim.command('saveas! {}'.format(self.dst))
+                # vim.current_buffer = direct_buffer
 
         # else just move the file
         if not buffer_exists:
