@@ -40,8 +40,7 @@ class Buffer(object):
         # set current line to originator
         for index, line in enumerate(lines):
             if os.path.normpath(self.__full_path(line)) == self.origin:
-                print 'origin: ', self.origin, index
-                vim.current.line == index + 1
+                vim.command(str(index + 1))
 
     def sync(self):
         '''Synchronise buffer content with directory content'''
