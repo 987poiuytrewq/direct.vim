@@ -14,19 +14,18 @@ from direct.register import Register
 class Buffer(object):
     def __init__(self, path):
         self.root = BufferRoot(path)
+        self.origin = self.__full_path(vim.current.buffer.name)
 
         # change window to buffer if it already exists
-        buffer_exists = False
         for buffer in vim.buffers:
             if buffer.name == self.root.absolute_path:
-                buffer_exists = True
                 vim.current.buffer = buffer
+                return
 
         # else create new buffer and dump path
-        if not buffer_exists:
-            vim.command('enew')
-            vim.current.buffer.name = self.root.absolute_path
-            self.root.dump()
+        vim.command('enew')
+        vim.current.buffer.name = self.root.absolute_path
+        self.root.dump()
 
     @classmethod
     def restore(cls):
@@ -36,7 +35,13 @@ class Buffer(object):
 
     def list(self):
         '''Display directory content in buffer'''
-        vim.current.buffer[:] = self.__read()
+        lines = self.__read()
+        vim.current.buffer[:] = lines
+        # set current line to originator
+        for index, line in enumerate(lines):
+            if os.path.normpath(self.__full_path(line)) == self.origin:
+                print 'origin: ', self.origin, index
+                vim.current.line == index + 1
 
     def sync(self):
         '''Synchronise buffer content with directory content'''

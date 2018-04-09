@@ -88,7 +88,7 @@ if dst:
     Register().paste(dst)
 else:
     buffer = Buffer.restore()
-    Register().paste(buffer.root)
+    Register().paste(buffer.root.absolute_path)
     buffer.list()
 endOfPython
 endfunction
