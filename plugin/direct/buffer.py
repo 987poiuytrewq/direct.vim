@@ -14,7 +14,7 @@ from direct.register import Register
 class Buffer(object):
     def __init__(self, path):
         self.root = BufferRoot(path)
-        self.origin = self.__full_path(vim.current.buffer.name)
+        self.current_file = self.__full_path(vim.current.buffer.name)
 
         # change window to buffer if it already exists
         for buffer in vim.buffers:
@@ -37,10 +37,13 @@ class Buffer(object):
         '''Display directory content in buffer'''
         lines = self.__read()
         vim.current.buffer[:] = lines
-        # set current line to originator
-        for index, line in enumerate(lines):
-            if os.path.normpath(self.__full_path(line)) == self.origin:
-                vim.command(str(index + 1))
+        if self.current_file:
+            # set current line
+            for index, line in enumerate(lines):
+                if os.path.normpath(self.__full_path(line)
+                                    ) == self.current_file:
+                    vim.command(str(index + 1))
+                    break
 
     def sync(self):
         '''Synchronise buffer content with directory content'''
@@ -75,7 +78,7 @@ class Buffer(object):
 
             history = History()
             for action in actions:
-                action.do()
+                self.current_file = action.do()
                 history.log(action)
             print_actions(*actions)
 

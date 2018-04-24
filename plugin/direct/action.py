@@ -17,10 +17,17 @@ class Action(object):
             words.append(self.dst)
         return ' '.join(words)
 
-    def _digest(path):
-        message = hashlib.md5()
-        message.update(path)
-        return message.hexdigest()
+    @staticmethod
+    def get_input(prompt, text, completion):
+        '''Get user input'''
+        vim.command('call inputsave()')
+        vim.command(
+            "let response = input('{}', '{}', '{}')".format(
+                prompt, text, completion
+            )
+        )
+        vim.command('call inputrestore()')
+        return vim.eval('response')
 
 
 class Move(Action):
@@ -37,6 +44,7 @@ class Move(Action):
                 vim.command('bwipeout! {}'.format(buffer.number))
 
         shutil.move(self.src, self.dst)
+        return self.dst
 
     def __str__(self):
         return 'Moved {} to {}'.format(relpath(self.src), relpath(self.dst))
@@ -85,6 +93,7 @@ class Touch(Action):
 
     def do(self):
         open(self.dst, 'w').close()
+        return self.dst
 
     def __str__(self):
         return 'Created {}'.format(relpath(self.dst))
@@ -98,6 +107,7 @@ class MakeDirectory(Action):
 
     def do(self):
         os.makedirs(self.dst)
+        return self.dst
 
     def __str__(self):
         return 'Created {}'.format(relpath(self.dst))
@@ -111,12 +121,26 @@ class Paste(Action):
         self.dst = dst
 
     def do(self):
+        full_dst = None
         for entry in os.listdir(self.src):
-            full_entry = join(self.src, entry)
-            if os.path.isfile(full_entry):
-                shutil.copy(full_entry, self.dst)
-            if os.path.isdir(full_entry):
-                shutil.copytree(full_entry, join(self.dst, entry))
+            full_src = join(self.src, entry)
+            full_dst = join(self.dst, entry)
+            if os.path.exists(full_dst):
+                entry_type = 'File' if os.path.isfile(
+                    full_dst
+                ) else 'Directory'
+                entry = self.get_input(
+                    '{} already exists. Paste as: '.format(entry_type), entry,
+                    'file'
+                )
+                full_dst = join(self.dst, entry)
+
+            if os.path.isfile(full_src):
+                shutil.copyfile(full_src, full_dst)
+            if os.path.isdir(full_src):
+                shutil.copytree(full_src, full_dst)
+
+        return full_dst
 
     def __str__(self):
         return 'Pasted into {}{}'.format(relpath(self.dst), os.path.sep)
