@@ -52,29 +52,39 @@ class Buffer(object):
 
         actions = []
         yanks = []
-        if len(actual_lines) > len(expected_lines):
+        if len(actual_lines) > len(expected_lines) and set(
+            expected_lines
+        ).issubset(actual_lines):
             for added_line in set(actual_lines) - set(expected_lines):
                 if self.__isdir(added_line):
                     actions.append(MakeDirectory(added_line))
                 else:
                     actions.append(Touch(added_line))
-        elif len(actual_lines) < len(expected_lines):
+        elif len(actual_lines) < len(expected_lines) and set(
+            actual_lines
+        ).issubset(expected_lines):
             for removed_line in set(expected_lines) - set(actual_lines):
                 yanks.append(removed_line)
                 if self.__isdir(removed_line):
                     actions.append(RemoveDirectory(removed_line))
                 else:
                     actions.append(Remove(removed_line))
-        else:
+        elif len(actual_lines) == len(expected_lines):
             for actual_line, expected_line in zip(
                 actual_lines, expected_lines
             ):
                 if actual_line != expected_line:
                     actions.append(Move(expected_line, actual_line))
+        else:
+            print(
+                'Ambiguous buffer content. '
+                'You must only add, remove or rename in each edit.'
+            )
+            raise AmbiguousBufferError()
 
         if actions:
             if yanks:
-                Register().yank(*yanks)
+                Register().yank(yanks)
 
             history = History()
             for action in actions:
@@ -95,9 +105,12 @@ class Buffer(object):
         # close last buffer
         vim.command('bwipeout! {}'.format(direct_buffer.number))
 
-    def get_lines(self, firstline, lastline):
+    def get_paths(self, firstline, lastline):
         current_buffer = vim.current.buffer
-        return current_buffer[slice(int(firstline) - 1, int(lastline))]
+        return map(
+            self.__full_path,
+            current_buffer[slice(int(firstline) - 1, int(lastline))]
+        )
 
     def __read(self):
         files = []
@@ -138,3 +151,7 @@ class BufferRoot(object):
     @classmethod
     def load(cls):
         return vim.eval(cls.ROOT_VARIABLE)
+
+
+class AmbiguousBufferError(Exception):
+    pass

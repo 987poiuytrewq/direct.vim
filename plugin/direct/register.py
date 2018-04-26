@@ -14,15 +14,19 @@ class Register(object):
         self.path = directories.register_directory
         self.content_path = join(self.path, 'content')
 
-    def yank(self, *sources):
+    def yank(self, sources):
         dst = join(self.path, directories.digest(*sources))
         if not os.path.exists(dst):
             os.makedirs(dst)
         for src in sources:
+            print 'Yanked {}'.format(src)
             if os.path.isfile(src):
                 shutil.copy(src, dst)
             if os.path.isdir(src):
-                shutil.copytree(src, join(dst, basename(src)))
+                full_dst = join(dst, os.path.basename(os.path.abspath(src)))
+                if os.path.exists(full_dst):
+                    shutil.rmtree(full_dst)
+                shutil.copytree(src, full_dst)
         with open(self.content_path, 'w') as content:
             content.write(dst)
 

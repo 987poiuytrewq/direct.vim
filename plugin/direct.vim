@@ -2,6 +2,7 @@ python import sys
 python import vim
 python sys.path.append(vim.eval('expand("<sfile>:h")'))
 
+
 function! direct#list(path)
 python << endOfPython
 import os
@@ -19,10 +20,14 @@ endfunction
 
 function! direct#sync()
 python << endOfPython
-from direct.buffer import Buffer
+from direct.buffer import Buffer, AmbiguousBufferError
 buffer = Buffer.restore()
-buffer.sync()
-buffer.list()
+try:
+  buffer.sync()
+except AmbiguousBufferError:
+  pass
+else:
+  buffer.list()
 endOfPython
 setlocal nomodified
 endfunction
@@ -63,16 +68,18 @@ buffer.list()
 endOfPython
 endfunction
 
+
 function! direct#yank() range
 python << endOfPython
 from direct.buffer import Buffer
 from direct.register import Register
 buffer = Buffer.restore()
-sources = buffer.get_lines(vim.eval('a:firstline'), vim.eval('a:lastline'))
-Register().yank(*sources)
+sources = buffer.get_paths(vim.eval('a:firstline'), vim.eval('a:lastline'))
+Register().yank(sources)
 buffer.list()
 endOfPython
 endfunction
+
 
 function! direct#paste(...)
 let dst = ''
