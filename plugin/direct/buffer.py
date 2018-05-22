@@ -37,8 +37,7 @@ class Buffer(object):
         if self.current_file:
             # set current line
             for index, line in enumerate(lines):
-                if os.path.normpath(self.__full_path(line)
-                                    ) == self.current_file:
+                if os.path.samefile(self.__full_path(line), self.current_file):
                     vim.command(str(index + 1))
                     break
 
@@ -95,12 +94,16 @@ class Buffer(object):
         path = self.__full_path(line)
         if self.__isdir(path):
             # open new direct buffer
-            vim.command('DirectList {}'.format(path))
+            vim.command('DirectList {path}'.format(path=path))
         else:
             # open file
-            vim.command('edit {}'.format(path))
+            vim.command('edit {path}'.format(path=path))
         # close last buffer
-        vim.command('bwipeout! {}'.format(direct_buffer.number))
+        vim.command(
+            'bwipeout! {buffer_number}'.format(
+                buffer_number=direct_buffer.number
+            )
+        )
 
     def get_paths(self, firstline, lastline):
         current_buffer = vim.current.buffer
@@ -110,6 +113,7 @@ class Buffer(object):
         )
 
     def __read(self):
+        '''Read the filesystem'''
         files = []
         directories = []
 
@@ -120,11 +124,8 @@ class Buffer(object):
                 files.append(entry)
 
         lines = []
-        lines += [
-            u'{}{}'.format(directory, os.path.sep)
-            for directory in sorted(directories)
-        ]
-        lines += [u'{}'.format(file) for file in sorted(files)]
+        lines += [directory + os.path.sep for directory in sorted(directories)]
+        lines += sorted(files)
         return lines
 
     def __full_path(self, entry):

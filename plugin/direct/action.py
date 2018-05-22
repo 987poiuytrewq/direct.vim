@@ -2,12 +2,15 @@ import os
 import shutil
 import vim
 
+from abc import ABCMeta, abstractmethod
 from os.path import abspath, join, relpath
 
 from direct import directories
 
 
 class Action(object):
+    __metaclass__ = ABCMeta
+
     def serialize(self):
         words = [self.NAME]
         if hasattr(self, 'src'):
@@ -17,7 +20,7 @@ class Action(object):
         return ' '.join(words)
 
     @staticmethod
-    def get_input(prompt, text, completion):
+    def _get_input(prompt, text, completion):
         '''Get user input'''
         vim.command('call inputsave()')
         vim.command(
@@ -28,6 +31,24 @@ class Action(object):
         vim.command('call inputrestore()')
         return vim.eval('response')
 
+    def _close_src_buffer(self):
+        '''If the src file is already open, close the buffer'''
+        for buffer in vim.buffers:
+            if buffer.name == self.src:
+                vim.command(
+                    'bwipeout! {buffer_number}'.format(
+                        buffer_number=buffer.number
+                    )
+                )
+
+    @abstractmethod
+    def do(self):
+        '''Perform the action
+
+        :returns: any newly created file system entries
+        '''
+        pass
+
 
 class Move(Action):
     NAME = 'mv'
@@ -37,16 +58,14 @@ class Move(Action):
         self.dst = dst
 
     def do(self):
-        # if the file is already open, close the buffer
-        for buffer in vim.buffers:
-            if buffer.name == self.src:
-                vim.command('bwipeout! {}'.format(buffer.number))
-
+        self._close_src_buffer()
         shutil.move(self.src, self.dst)
         return self.dst
 
     def __str__(self):
-        return 'Moved {} to {}'.format(relpath(self.src), relpath(self.dst))
+        return 'Moved {src} to {dat}'.format(
+            src=relpath(self.src), dst=relpath(self.dst)
+        )
 
 
 class Remove(Action):
@@ -59,11 +78,8 @@ class Remove(Action):
         )
 
     def do(self):
+        self._close_src_buffer()
         shutil.move(self.src, self.dst)
-        # if the file is already open, close the buffer
-        for buffer in vim.buffers:
-            if buffer.name == self.src:
-                vim.command('bwipeout! {}'.format(buffer.number))
 
     def __str__(self):
         return 'Removed {}'.format(relpath(self.src))
@@ -77,7 +93,7 @@ class Restore(Move):
     NAME = 'rs'
 
     def __str__(self):
-        return 'Restored {}'.format(relpath(self.dst))
+        return 'Restored {dst}'.format(dst=relpath(self.dst))
 
 
 class RestoreDirectory(Restore):
@@ -95,7 +111,7 @@ class Touch(Action):
         return self.dst
 
     def __str__(self):
-        return 'Created {}'.format(relpath(self.dst))
+        return 'Created {dst}'.format(dst=relpath(self.dst))
 
 
 class MakeDirectory(Action):
@@ -109,7 +125,7 @@ class MakeDirectory(Action):
         return self.dst
 
     def __str__(self):
-        return 'Created {}'.format(relpath(self.dst))
+        return 'Created {dst}'.format(dst=relpath(self.dst))
 
 
 class Paste(Action):
@@ -128,8 +144,11 @@ class Paste(Action):
                 entry_type = 'File' if os.path.isfile(
                     full_dst
                 ) else 'Directory'
-                entry = self.get_input(
-                    '{} already exists. Paste as: '.format(entry_type), entry,
+                entry = self._get_input(
+                    '{entry_type} already exists. Paste as: '.format(
+                        entry_type=entry_type
+                    ),
+                    entry,
                     'file'
                 )
                 full_dst = join(self.dst, entry)
@@ -142,7 +161,9 @@ class Paste(Action):
         return full_dst
 
     def __str__(self):
-        return 'Pasted into {}{}'.format(relpath(self.dst), os.path.sep)
+        return 'Pasted into {dst}'.format(
+            dst=(relpath(self.dst) + os.path.sep)
+        )
 
 
 class Unpaste(Action):
@@ -161,8 +182,8 @@ class Unpaste(Action):
                 shutil.rmtree(full_entry)
 
     def __str__(self):
-        return 'Reversed paste into {}{}'.format(
-            relpath(self.src), os.path.sep
+        return 'Reversed paste into {src}'.format(
+            src=(relpath(self.src) + os.path.sep)
         )
 
 
