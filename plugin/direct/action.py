@@ -63,7 +63,7 @@ class Move(Action):
         return self.dst
 
     def __str__(self):
-        return 'Moved {src} to {dat}'.format(
+        return 'Moved {src} to {dst}'.format(
             src=relpath(self.src), dst=relpath(self.dst)
         )
 

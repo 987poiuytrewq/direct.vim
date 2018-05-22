@@ -95,7 +95,7 @@ if dst:
     Register().paste(dst)
 else:
     buffer = Buffer.restore()
-    Register().paste(buffer.root.absolute_path)
+    Register().paste(buffer.root)
     buffer.list()
 endOfPython
 endfunction
@@ -113,6 +113,6 @@ command! -nargs=? -complete=dir DirectPaste call direct#paste(<f-args>)
 augroup direct_replace_netrw
   autocmd!
   autocmd VimEnter * if exists('#FileExplorer') | execute 'autocmd! FileExplorer *' | endif
-  autocmd BufEnter * if isdirectory(expand('%')) && !exists('b:direct_buffer_root') | execute 'DirectList %' | endif
+  autocmd BufEnter * if isdirectory(expand('%')) | execute 'DirectList %' | endif
 augroup END
 nnoremap <silent> - :<C-U>DirectListBuffer<CR>
