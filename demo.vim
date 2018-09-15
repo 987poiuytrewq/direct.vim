@@ -3,8 +3,8 @@ function Pause()
 python << endOfPython
 import random
 import time
-duration = random.uniform(0.03, 0.10)
-time.sleep(duration)
+duration = random.uniform(0.02, 0.10)
+time.sleep(0.01)
 endOfPython
 redraw!
 endfunction
@@ -20,6 +20,7 @@ function! Type(entry, position, string)
   for character in characters
     call Input(a:position . character)
   endfor
+  call Pause()
 endfunction
 
 augroup autosave
@@ -28,10 +29,11 @@ augroup END
 
 redraw!
 T watch -n 0.1 -t tree --dirsfirst --noreport -F demo
+" sleep 1
 call Type("c$", "A", "rename_directories/")
 write
 call Input("j^")
-call Type("ct.", "a", "rename_files")
+call Type("c$", "a", "rename_files.txt")
 write
 call Input("o")
 call Type("c$", "A", "create_directories/")
@@ -39,9 +41,27 @@ write
 call Input("o")
 call Type("c$", "A", "create_files.txt")
 write
-vs rename_files.txt
-call Type("c$", "A", "yank files including their content")
+call Type("c$", "A", "delete_files.txt")
 write
-wincmd h
+call Input("dd")
+write
+call Input("gg")
+call Type("c$", "A", "delete_directories/")
+write
+call Input("dd")
+write
+call Input("G")
+call Type("c$", "A", "yank_files.txt")
+write
+call Input("gg")
+call Type("c$", "A", "and_paste_them/")
+write
+call Input("G")
 call Input("yy")
+call Input("gg")
+call feedkeys("\<CR>")
+sleep 1
 call Input("p")
+" write
+" call Type("c$", "A", "with_contents.txt")
+" call feedkeys("\<CR>")
