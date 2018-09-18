@@ -14,7 +14,7 @@ from direct.register import Register
 class Buffer(object):
     def __init__(self, path):
         self.root = os.path.abspath(path)
-        self.current_file = self.__full_path(vim.current.buffer.name)
+        self.current_entry = self.__full_path(vim.current.buffer.name)
 
         # change window to buffer if it already exists
         for buffer in vim.buffers:
@@ -34,10 +34,12 @@ class Buffer(object):
         '''Display directory content in buffer'''
         lines = self.__read()
         vim.current.buffer[:] = lines
-        if self.current_file:
+        if self.current_entry:
             # set current line
             for index, line in enumerate(lines):
-                if os.path.samefile(self.__full_path(line), self.current_file):
+                if os.path.samefile(
+                    self.__full_path(line), self.current_entry
+                ):
                     vim.command(str(index + 1))
                     break
 
@@ -84,7 +86,7 @@ class Buffer(object):
 
             history = History()
             for action in actions:
-                self.current_file = action.do()
+                self.current_entry = action.do()
                 history.log(action)
             print_actions(*actions)
 

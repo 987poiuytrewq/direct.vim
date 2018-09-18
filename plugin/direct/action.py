@@ -9,6 +9,7 @@ from direct import directories
 
 
 class Action(object):
+    FIELD_SEPARATOR = '\t'
     __metaclass__ = ABCMeta
 
     def serialize(self):
@@ -17,7 +18,7 @@ class Action(object):
             words.append(self.src)
         if hasattr(self, 'dst'):
             words.append(self.dst)
-        return ' '.join(words)
+        return self.FIELD_SEPARATOR.join(words)
 
     @staticmethod
     def _get_input(prompt, text, completion):
@@ -128,37 +129,55 @@ class MakeDirectory(Action):
         return 'Created {dst}'.format(dst=relpath(self.dst))
 
 
-class Paste(Action):
-    NAME = 'p'
+class MultiAction(Action):
+    ENTRY_SEPARATOR = ' '
 
-    def __init__(self, src, dst, name=None):
+    def __init__(self, src, dst, src_names, dst_names):
         self.src = src
         self.dst = dst
-        self.name = name
+        self.renames = dict(zip(src_names, dst_names))
+
+    def serialize(self):
+        return self.FIELD_SEPARATOR.join((
+            super(Action, self).serialize(),
+            self.ENTRY_SEPARATOR.join(self.renames.keys()),
+            self.ENTRY_SEPARATOR.join(self.renames.values())
+        ))
+
+
+class Paste(MultiAction):
+    NAME = 'p'
 
     def do(self):
         full_dst = None
-        for entry in os.listdir(self.src):
-            full_src = join(self.src, entry)
-            full_dst = join(self.dst, self.name or entry)
+        for src_name in os.listdir(self.src):
+            full_src = join(self.src, src_name)
+            if src_name in self.renames:
+                dst_name = self.renames[src_name]
+            else:
+                dst_name = src_name
+
+            full_dst = join(self.dst, dst_name)
             if os.path.exists(full_dst):
                 entry_type = 'File' if os.path.isfile(
                     full_dst
                 ) else 'Directory'
-                entry = self._get_input(
+                dst_name = self._get_input(
                     '{entry_type} already exists. Paste as: '.format(
                         entry_type=entry_type
                     ),
-                    entry,
+                    src_name,
                     'file'
                 )
-                full_dst = join(self.dst, entry)
+                self.renames[src_name] = dst_name
+                full_dst = join(self.dst, dst_name)
 
             if os.path.isfile(full_src):
                 shutil.copyfile(full_src, full_dst)
             if os.path.isdir(full_src):
                 shutil.copytree(full_src, full_dst)
 
+        # set last pasted entry as current entry
         return full_dst
 
     def __str__(self):
@@ -167,20 +186,26 @@ class Paste(Action):
         )
 
 
-class Unpaste(Action):
+class Unpaste(MultiAction):
     NAME = 'up'
 
-    def __init__(self, src, dst):
-        self.src = src
-        self.dst = dst
+    def __init__(self, src, dst, src_names, dst_names):
+        super(Unpaste, self).__init__(src, dst, src_names, dst_names)
+        self.reverse_renames = dict(zip(dst_names, src_names))
 
     def do(self):
-        for entry in os.listdir(self.dst):
-            full_entry = join(self.src, entry)
-            if os.path.isfile(full_entry):
-                os.remove(full_entry)
-            if os.path.isdir(full_entry):
-                shutil.rmtree(full_entry)
+        for dst_name in os.listdir(self.dst):
+            if dst_name in self.reverse_renames:
+                src_name = self.reverse_renames[dst_name]
+            else:
+                src_name = dst_name
+            full_src = join(self.src, src_name)
+
+            # no need to move to the trash as we know it came from a register
+            if os.path.isfile(full_src):
+                os.remove(full_src)
+            if os.path.isdir(full_src):
+                shutil.rmtree(full_src)
 
     def __str__(self):
         return 'Reversed paste into {src}'.format(
@@ -198,14 +223,14 @@ REVERSALS = {
         (RestoreDirectory, lambda src, dst: RemoveDirectory(dst)),
         (Touch, lambda dst: Remove(dst)),
         (MakeDirectory, lambda dst: RemoveDirectory(dst)),
-        (Paste, lambda src, dst: Unpaste(dst, src)),
-        (Unpaste, lambda src, dst: Paste(dst, src)),
+        (Paste, lambda src, dst, src_names, dst_names: Unpaste(dst, src, src_names.split(MultiAction.ENTRY_SEPARATOR), dst_names.split(MultiAction.ENTRY_SEPARATOR))),
+        (Unpaste, lambda src, dst, src_names, dst_names: Paste(dst, src, src_names.split(MultiAction.ENTRY_SEPARATOR), dst_names.split(MultiAction.ENTRY_SEPARATOR))),
     )
 }
 
 
 def reverse(line):
-    words = line.split(' ')
+    words = line.split(Action.FIELD_SEPARATOR)
     return REVERSALS[words[0]](*words[1:])
 
 

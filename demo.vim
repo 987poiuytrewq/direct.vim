@@ -1,5 +1,5 @@
 function Pause()
-for _ in range(5)
+for _ in range(8)
   sleep 100m
 endfor
 endfunction
@@ -9,7 +9,7 @@ silent execute "normal! " . a:characters
 python << endOfPython
 import random
 import time
-duration = random.uniform(0.02, 0.10)
+duration = random.uniform(0.01, 0.05)
 time.sleep(duration)
 endOfPython
 redraw!
@@ -108,8 +108,8 @@ call Pause()
 call Type("c$", "A", "undo_everything/")
 write
 
-for _ in range(15)
-  call Pause()
-  call direct#undo()
-  redraw!
-endfor
+" for _ in range(15)
+"   call Pause()
+"   call direct#undo()
+"   redraw!
+" endfor
