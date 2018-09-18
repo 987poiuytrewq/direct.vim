@@ -1,7 +1,7 @@
 import os
 import shutil
 
-from os.path import basename, join
+from os.path import join
 
 from direct import directories
 from direct.action import Paste
@@ -30,10 +30,10 @@ class Register(object):
         with open(self.content_path, 'w') as content:
             content.write(dst)
 
-    def paste(self, dst):
+    def paste(self, dst, name=None):
         with open(self.content_path, 'r') as content:
             src = content.read()
-        action = Paste(src, dst)
+        action = Paste(src, dst, name=name)
         action.do()
         print_actions(action)
         History().log(action)

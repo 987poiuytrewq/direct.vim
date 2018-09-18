@@ -131,15 +131,16 @@ class MakeDirectory(Action):
 class Paste(Action):
     NAME = 'p'
 
-    def __init__(self, src, dst):
+    def __init__(self, src, dst, name=None):
         self.src = src
         self.dst = dst
+        self.name = name
 
     def do(self):
         full_dst = None
         for entry in os.listdir(self.src):
             full_src = join(self.src, entry)
-            full_dst = join(self.dst, entry)
+            full_dst = join(self.dst, self.name or entry)
             if os.path.exists(full_dst):
                 entry_type = 'File' if os.path.isfile(
                     full_dst

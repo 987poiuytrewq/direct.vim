@@ -101,6 +101,18 @@ endOfPython
 endfunction
 
 
+function! direct#pasteas(name)
+python << endOfPython
+name = vim.eval('a:name')
+from direct.buffer import Buffer
+from direct.register import Register
+buffer = Buffer.restore()
+Register().paste(buffer.root, name=name)
+buffer.list()
+endOfPython
+endfunction
+
+
 command! -nargs=1 -complete=dir DirectList call direct#list(<f-args>)
 command! DirectListBuffer call direct#list(expand('%:p:h'))
 command! DirectListCwd call direct#list(getcwd())
@@ -109,6 +121,7 @@ command! DirectUndo call direct#undo()
 command! DirectRedo call direct#redo()
 command! -range DirectYank <line1>,<line2>call direct#yank()
 command! -nargs=? -complete=dir DirectPaste call direct#paste(<f-args>)
+command! -nargs=1 -complete=file DirectPasteAs call direct#pasteas(<f-args>)
 
 augroup direct_replace_netrw
   autocmd!
