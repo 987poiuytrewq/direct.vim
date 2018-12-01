@@ -36,6 +36,10 @@ class Register(object):
         src_names = os.listdir(src)
         dst_names = src_names
         action = Paste(src, dst, src_names, dst_names)
-        action.do()
-        print_actions(action)
-        History().log(action)
+        try:
+            action.do()
+        except (IOError, OSError):
+            print 'Failed to paste'
+        else:
+            print_actions(action)
+            History().log(action)

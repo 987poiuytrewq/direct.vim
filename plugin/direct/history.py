@@ -18,13 +18,19 @@ class History(object):
         self.redo_log.clear()
 
     def undo(self):
-        self.__reverse(self.undo_log, self.redo_log)
+        self.__reverse('undo', self.undo_log, self.redo_log)
 
     def redo(self):
-        self.__reverse(self.redo_log, self.undo_log)
+        self.__reverse('redo', self.redo_log, self.undo_log)
 
-    def __reverse(self, src_log, dst_log):
+    def __reverse(self, action_name, src_log, dst_log):
         reverse_action = reverse(src_log.pop())
-        reverse_action.do()
-        print_actions(reverse_action)
-        dst_log.push(reverse_action.serialize())
+        try:
+            reverse_action.do()
+        except (IOError, OSError):
+            print 'Failed to {} action - {}'.format(
+                action_name, print_actions(reverse_action)
+            )
+        else:
+            print_actions(reverse_action)
+            dst_log.push(reverse_action.serialize())

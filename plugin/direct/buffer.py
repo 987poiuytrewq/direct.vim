@@ -86,8 +86,12 @@ class Buffer(object):
 
             history = History()
             for action in actions:
-                self.current_entry = action.do()
-                history.log(action)
+                try:
+                    self.current_entry = action.do()
+                except (IOError, OSError):
+                    print 'Action failed - {}'.format(action)
+                else:
+                    history.log(action)
             print_actions(*actions)
 
     def open(self, line):
