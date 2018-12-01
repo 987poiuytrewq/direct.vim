@@ -21,7 +21,7 @@ def register_directory():
 @pytest.mark.parametrize('src', ('file1', 'dir1'))
 def test_yank(src, register_directory, directory):
     register = Register()
-    register.yank(join(directory, src))
+    register.yank([join(directory, src)])
     register_dst = join(register_directory, digest(join(directory, src)))
     with open(join(register_directory, 'content')) as content:
         assert content.read() == register_dst
@@ -32,7 +32,7 @@ def test_yank(src, register_directory, directory):
 @pytest.mark.parametrize('src', ('file1', 'dir1'))
 def test_paste(History, src, register_directory, directory):
     register = Register()
-    register.yank(join(directory, src))
+    register.yank([join(directory, src)])
     dst = tempfile.mkdtemp()
 
     history = MagicMock()

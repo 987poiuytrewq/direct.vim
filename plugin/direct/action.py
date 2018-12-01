@@ -130,7 +130,8 @@ class MakeDirectory(Action):
 
 
 class MultiAction(Action):
-    ENTRY_SEPARATOR = ' '
+    """Action that operates on more than one entry"""
+    ENTRY_SEPARATOR = ' '  # nbsp
 
     def __init__(self, src, dst, src_names, dst_names):
         self.src = src
@@ -139,25 +140,23 @@ class MultiAction(Action):
 
     def serialize(self):
         return self.FIELD_SEPARATOR.join((
-            super(Action, self).serialize(),
+            super(MultiAction, self).serialize(),
             self.ENTRY_SEPARATOR.join(self.renames.keys()),
             self.ENTRY_SEPARATOR.join(self.renames.values())
         ))
 
 
 class Paste(MultiAction):
+    """Defines an action for copying entries from a register (self.src) to a
+    directory (self.dst)"""
     NAME = 'p'
 
     def do(self):
         full_dst = None
-        for src_name in os.listdir(self.src):
+        for src_name, dst_name in self.renames.items():
             full_src = join(self.src, src_name)
-            if src_name in self.renames:
-                dst_name = self.renames[src_name]
-            else:
-                dst_name = src_name
-
             full_dst = join(self.dst, dst_name)
+
             if os.path.exists(full_dst):
                 entry_type = 'File' if os.path.isfile(
                     full_dst
@@ -187,18 +186,13 @@ class Paste(MultiAction):
 
 
 class Unpaste(MultiAction):
+    """Defines an action for undoing a Paste action. This is effectively the
+    same as removing the pasted entries but also writes the original names of
+    the files into the history so it can be reversed"""
     NAME = 'up'
 
-    def __init__(self, src, dst, src_names, dst_names):
-        super(Unpaste, self).__init__(src, dst, src_names, dst_names)
-        self.reverse_renames = dict(zip(dst_names, src_names))
-
     def do(self):
-        for dst_name in os.listdir(self.dst):
-            if dst_name in self.reverse_renames:
-                src_name = self.reverse_renames[dst_name]
-            else:
-                src_name = dst_name
+        for src_name, dst_name in self.renames.items():
             full_src = join(self.src, src_name)
 
             # no need to move to the trash as we know it came from a register
@@ -223,8 +217,14 @@ REVERSALS = {
         (RestoreDirectory, lambda src, dst: RemoveDirectory(dst)),
         (Touch, lambda dst: Remove(dst)),
         (MakeDirectory, lambda dst: RemoveDirectory(dst)),
-        (Paste, lambda src, dst, src_names, dst_names: Unpaste(dst, src, src_names.split(MultiAction.ENTRY_SEPARATOR), dst_names.split(MultiAction.ENTRY_SEPARATOR))),
-        (Unpaste, lambda src, dst, src_names, dst_names: Paste(dst, src, src_names.split(MultiAction.ENTRY_SEPARATOR), dst_names.split(MultiAction.ENTRY_SEPARATOR))),
+        (Paste, lambda src, dst, src_names, dst_names: Unpaste(
+            dst, src, dst_names.split(MultiAction.ENTRY_SEPARATOR),
+            src_names.split(MultiAction.ENTRY_SEPARATOR))
+         ),
+        (Unpaste, lambda src, dst, src_names, dst_names: Paste(
+            dst, src, dst_names.split(MultiAction.ENTRY_SEPARATOR),
+            src_names.split(MultiAction.ENTRY_SEPARATOR))
+         ),
     )
 }
 

@@ -109,7 +109,7 @@ def register():
 def test_paste_file(directory):
     with register() as register_path:
         open(join(register_path, 'file2'), 'w').close()
-        Paste(register_path, directory).do()
+        Paste(register_path, directory, ['file2'], ['file2']).do()
         assert set(os.listdir(directory)) == set(['dir1', 'file1', 'file2'])
         assert isfile(join(directory, 'file2'))
 
@@ -117,7 +117,7 @@ def test_paste_file(directory):
 def test_paste_directory(directory):
     with register() as register_path:
         os.mkdir(join(register_path, 'dir2'))
-        Paste(register_path, directory).do()
+        Paste(register_path, directory, ['dir2'], ['dir2']).do()
         assert set(os.listdir(directory)) == set(['dir1', 'dir2', 'file1'])
         assert isdir(join(directory, 'dir2'))
 
@@ -125,15 +125,50 @@ def test_paste_directory(directory):
 def test_unpaste_file(directory):
     with register() as register_path:
         open(join(register_path, 'file1'), 'w').close()
-        Unpaste(directory, register_path).do()
+        Unpaste(directory, register_path, ['file1'], ['file1']).do()
         assert set(os.listdir(directory)) == set(['dir1'])
 
 
 def test_unpaste_directory(directory):
     with register() as register_path:
         os.mkdir(join(register_path, 'dir1'))
-        Unpaste(directory, register_path).do()
+        Unpaste(directory, register_path, ['dir1'], ['dir1']).do()
         assert set(os.listdir(directory)) == set(['file1'])
+
+
+def test_paste_file_rename(directory):
+    with register() as register_path:
+        open(join(register_path, 'file1'), 'w').close()
+        action = Paste(register_path, directory, ['file1'], ['file1'])
+        with patch.object(action, '_get_input') as _get_input:
+            _get_input.return_value = 'file1-renamed'
+            action.do()
+        assert set(os.listdir(directory)) == set([
+            'dir1', 'file1', 'file1-renamed'
+        ])
+        assert isfile(join(directory, 'file1-renamed'))
+        assert action.serialize(
+        ) == '{name}{FS}{src}{FS}{dst}{FS}file1{FS}file1-renamed'.format(
+            name=action.NAME,
+            src=register_path,
+            dst=directory,
+            FS=action.FIELD_SEPARATOR
+        )
+
+
+def test_unpaste_file_rename(directory):
+    with register() as register_path:
+        open(join(register_path, 'file1'), 'w').close()
+        open(join(directory, 'file1-renamed'), 'w').close()
+        action = Unpaste(register_path, directory, ['file1-renamed'], ['file1'])
+        assert isfile(join(directory, 'file1-renamed'))
+        assert action.serialize(
+        ) == '{name}{FS}{src}{FS}{dst}{FS}file1-renamed{FS}file1'.format(
+            name=action.NAME,
+            src=register_path,
+            dst=directory,
+            FS=action.FIELD_SEPARATOR
+        )
 
 
 def test_reverse_move():
@@ -178,13 +213,17 @@ def test_reverse_create(trash_directory, CreateAction, RemoveAction):
     assert reverse_action.src == action.dst
 
 
-@pytest.mark.parametrize(('Action1', 'Action2'), (
+@pytest.mark.parametrize(('Action', 'ReverseAction'), (
     (Paste, Unpaste),
     (Unpaste, Paste),
 ))
-def test_reverse_paste(Action1, Action2):
-    action = Action1(random_string(), random_string())
+def test_reverse_paste(Action, ReverseAction):
+    src_name = random_string()
+    dst_name = random_string()
+    action = Action(random_string(), random_string(), [src_name], [dst_name])
     reverse_action = reverse(action.serialize().strip())
-    assert reverse_action.__class__ == Action2
+    assert reverse_action.__class__ == ReverseAction
     assert reverse_action.src == action.dst
     assert reverse_action.dst == action.src
+    assert action.renames == {src_name: dst_name}
+    assert reverse_action.renames == {dst_name: src_name}

@@ -33,7 +33,9 @@ class Register(object):
     def paste(self, dst, name=None):
         with open(self.content_path, 'r') as content:
             src = content.read()
-        action = Paste(src, dst, name=name)
+        src_names = os.listdir(src)
+        dst_names = src_names
+        action = Paste(src, dst, src_names, dst_names)
         action.do()
         print_actions(action)
         History().log(action)
