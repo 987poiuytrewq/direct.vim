@@ -2,11 +2,13 @@
 
 Edit directories in vim.
 
-This plugin allows you to directly edit the filesystem. It does this by
-loading a directories into a buffer, with each line corresponding to a
-file or directory. You can then edit the buffer to make whatever changes you
-like to your files and directories and, when you save the buffer, your changes
-are synchronised with the filesystem.
+Load up a directory in vim and edit files and subirectorie using normal vim
+commands. No need to remember extra commands or keybindings. 
+
+It does this by loading a directories into a buffer, with each line
+corresponding to a file or directory. You can then edit the buffer to make
+whatever changes you like to your files and directories and, when you save the
+buffer, your changes are synchronised with the filesystem.
 
 - navigate around the filesytem easily
 - rename, create and delete files and directories
@@ -68,3 +70,13 @@ or rename in case of name clashes.
 
 Directories are yanked recursively so that you can yank and paste directory
 trees around the filesystem.
+
+## Install 
+
+Install using your favourite package manager.
+
+### Plug
+
+```
+Plug '987poiuytrewq/direct.vim'
+```

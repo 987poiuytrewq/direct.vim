@@ -1,26 +1,66 @@
-*dirvish.vim.txt* A short multi line description of your plugin
+direct.vim.txt* 
 
 ===============================================================================
-CONTENTS                                                          *dirvish.vim*
+CONTENTS                                                          *direct.vim*
 
-    1. Intro .............................................. |dirvish.vim-intro|
-    2. Requirements ................................ |dirvish.vim-requirements|
-    3. Usage .............................................. |dirvish.vim-usage|
-    4. Licence .......................................... |dirvish.vim-licence|
+    1. Intro .............................................. |direct.vim-intro|
+    2. Requirements ................................ |direct.vim-requirements|
+    3. Usage .............................................. |direct.vim-usage|
+    4. Licence .......................................... |direct.vim-licence|
 ===============================================================================
-1. Intro                                                    *dirvish.vim-intro*
+1. Intro                                                    *direct.vim-intro*
 
-Overview of plugin
+Edit directories in vim.
 
-2. Requirements                                      *dirvish.vim-requirements*
+Load up a directory in vim and edit files and subirectories using normal vim
+commands. No need to remember extra commands or keybindings. 
 
-What additional programs are required to run the plugin
+2. Requirements                                      *direct.vim-requirements*
 
-3. Usage                                                    *dirvish.vim-usage*
+You must have vim compiled with python support. To see if your version of
+vim has python support, run the following:
 
-How to use the plugin. What functions does it give the user?
+:echo has('python')
 
-4. Licence                                                *dirvish.vim-licence*
+If this returns 1 you can use this plugin. Otherwise, you will need to obtain
+a different version of vim compiled with python support.
+
+3. Usage
+
+There are two ways you can open up a directory. Firstly, you can simply open
+the directory as you would a file (e.g. :e foo/, or vim foo/) for editing.
+Alternatively, when you have a file open in your current buffer, press the -
+key in normal mode to open the parent directory. If there is no buffer open,
+or the buffer is not a file-type buffer, the current working directory will be
+opened instead.
+
+Once opened, you will viewing the directory in your buffer. Files are
+represented by simply by their names, while subdirectories have a trailing
+slash and a different highlight rule. Hidden file and subdirectories (those
+with a leading .) are also highlighted in a different way. The syntax
+highlighting can be changed by setting rules for the groups DirectFile,
+DirectDirectory, DirectHiddenDirectory, DirectHiddenFile.
+
+In normal mode, you can use the - key to go up to the parent directory, or
+<Enter> to open a file or subdirectory. This allows you to navigate around the
+filesystem.
+
+Most importantyl though, you can edit the buffer. This means you can use any
+vim command to edit the text in the buffer, e.g. in insert mode, deleting
+lines, adding new line or even running search and replace or macros. When you
+save the buffer, the changes are wrtten to disk, just as when you are editing
+a file. You must remember to use a trailing slash on directories, otherwise
+the line will be considered to represent a file.
+
+Also when you are in normal mode in a direct buffer the yank / paste and undo
+/ redo commands are overloaded and will work on files and subdirectories
+instead of their normal functionality of working on text. This means that
+yanking a whole line will actually copy the file or subdirectory, and pasting
+will paste that file or subdirectory into the currently open directory. The
+undo and redo function allows you to go backwards and forwards through your
+history, in case you make a mistake.
+
+4. Licence                                                *direct.vim-licence*
 
 This is open source make sure to include a licence
 

@@ -2,6 +2,7 @@ if exists("b:current_syntax")
   finish
 endif
 
+syntax match DirectFile "^[^\.].*[^/]$"
 syntax match DirectDirectory "^[^\.].*/$"
 syntax match DirectHiddenDirectory "^\..*/$"
 syntax match DirectHiddenFile "^\..*[^/]$"
