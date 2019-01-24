@@ -1,6 +1,8 @@
 import os
 import vim
 
+from glob import glob
+
 from direct.action import Move
 from direct.action import Remove
 from direct.action import RemoveDirectory
@@ -123,11 +125,23 @@ class Buffer(object):
         files = []
         directories = []
 
+        # use wildignore to filter out entries
+        ignore_entries = []
+        wildignore = vim.eval('&wildignore')
+        if wildignore:
+            patterns = wildignore.split(',')
+            for pattern in patterns:
+                matches = glob(self.__full_path(pattern))
+                ignore_entries += matches
+
+        # group files and directories
         for entry in os.listdir(self.root):
-            if os.path.isdir(self.__full_path(entry)):
-                directories.append(entry)
-            elif os.path.isfile(self.__full_path(entry)):
-                files.append(entry)
+            full_entry = self.__full_path(entry)
+            if full_entry not in ignore_entries:
+                if os.path.isdir(full_entry):
+                    directories.append(entry)
+                elif os.path.isfile(full_entry):
+                    files.append(entry)
 
         lines = []
         lines += [directory + os.path.sep for directory in sorted(directories)]
