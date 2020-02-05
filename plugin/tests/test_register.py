@@ -6,16 +6,7 @@ from mock import patch, MagicMock
 from os.path import join
 
 from direct.register import Register
-from direct.directories import digest
-
-
-@pytest.fixture
-def register_directory():
-    with patch('direct.register.directories') as directories:
-        register_directory = tempfile.mkdtemp()
-        directories.register_directory = register_directory
-        directories.digest = digest
-        yield register_directory
+from direct.data import digest
 
 
 @pytest.mark.parametrize('src', ('file1', 'dir1'))

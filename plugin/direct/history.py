@@ -1,6 +1,6 @@
 import os
 
-from direct import directories
+from direct.data import Local
 from direct.action import print_actions
 from direct.action import reverse
 from direct.log import Log
@@ -9,7 +9,7 @@ from direct.log import Log
 class History(object):
     def __init__(self):
         self.undo_log, self.redo_log = (
-            Log(os.path.join(directories.history_directory, filename))
+            Log(os.path.join(Local.history(), filename))
             for filename in ('undo.log', 'redo.log')
         )
 

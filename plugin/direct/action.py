@@ -5,7 +5,7 @@ import vim
 from abc import ABCMeta, abstractmethod
 from os.path import abspath, join, relpath
 
-from direct import directories
+from direct.data import Local, digest
 
 
 class Action(object):
@@ -74,9 +74,7 @@ class Remove(Action):
 
     def __init__(self, src):
         self.src = src
-        self.dst = abspath(
-            join(directories.trash_directory, directories.digest(self.src))
-        )
+        self.dst = abspath(join(Local.trash(), digest(self.src)))
 
     def do(self):
         self._close_src_buffer()

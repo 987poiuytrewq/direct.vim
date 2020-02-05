@@ -4,8 +4,12 @@ import os
 import pytest
 import vimmock
 
+from mock import patch
+
 vimmock.patch_vim()
 import vim  # noqa: E402
+
+from direct.data import Local  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -28,3 +32,27 @@ def directory():
     yield path
     shutil.rmtree(path)
     shutil.rmtree(data)
+
+
+@pytest.fixture
+def trash_directory():
+    with patch.object(Local, 'trash') as trash:
+        tmpdir = tempfile.mkdtemp()
+        trash.return_value = tmpdir
+        yield tmpdir
+
+
+@pytest.fixture
+def register_directory():
+    with patch.object(Local, 'register') as register:
+        tmpdir = tempfile.mkdtemp()
+        register.return_value = tmpdir
+        yield tmpdir
+
+
+@pytest.fixture
+def history_directory():
+    with patch.object(Local, 'history') as history:
+        tmpdir = tempfile.mkdtemp()
+        history.return_value = tmpdir
+        yield tmpdir

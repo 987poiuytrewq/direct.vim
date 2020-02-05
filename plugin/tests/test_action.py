@@ -17,18 +17,8 @@ from direct.action import MakeDirectory
 from direct.action import Paste
 from direct.action import Unpaste
 from direct.action import reverse
-from direct.directories import digest
 
 from .utils import random_string
-
-
-@pytest.fixture
-def trash_directory():
-    with patch('direct.action.directories') as directories:
-        trash_directory = tempfile.mkdtemp()
-        directories.trash_directory = trash_directory
-        directories.digest = digest
-        yield trash_directory
 
 
 def test_move_file(directory):
@@ -160,7 +150,9 @@ def test_unpaste_file_rename(directory):
     with register() as register_path:
         open(join(register_path, 'file1'), 'w').close()
         open(join(directory, 'file1-renamed'), 'w').close()
-        action = Unpaste(register_path, directory, ['file1-renamed'], ['file1'])
+        action = Unpaste(
+            register_path, directory, ['file1-renamed'], ['file1']
+        )
         assert isfile(join(directory, 'file1-renamed'))
         assert action.serialize(
         ) == '{name}{FS}{src}{FS}{dst}{FS}file1-renamed{FS}file1'.format(

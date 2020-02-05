@@ -16,7 +16,11 @@ from direct.register import Register
 class Buffer(object):
     def __init__(self, path):
         self.root = os.path.abspath(path)
-        self.current_entry = self.__full_path(vim.current.buffer.name)
+        buffer_entry = self.__full_path(vim.current.buffer.name)
+        if os.path.exists(buffer_entry):
+            self.current_entry = buffer_entry
+        else:
+            self.current_entry = None
 
         # change window to buffer if it already exists
         for buffer in vim.buffers:

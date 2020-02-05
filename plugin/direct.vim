@@ -113,8 +113,17 @@ endOfPython
 endfunction
 
 
+function! direct#getbufd()
+if &buftype == ''
+  return expand('%:p:h')
+else
+  return getcwd()
+end
+endfunction
+
+
 command! -nargs=1 -complete=dir DirectList call direct#list(<f-args>)
-command! DirectListBuffer call direct#list(expand('%:p:h'))
+command! DirectListBuffer call direct#list(direct#getbufd())
 command! DirectListCwd call direct#list(getcwd())
 command! DirectSync call direct#sync()
 command! DirectUndo call direct#undo()
