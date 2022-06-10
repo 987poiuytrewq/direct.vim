@@ -26,7 +26,7 @@ class Register(object):
                 if os.path.exists(full_dst):
                     shutil.rmtree(full_dst)
                 shutil.copytree(src, full_dst)
-            print 'Yanked {}'.format(src)
+            print('Yanked {}'.format(src))
         with open(self.content_path, 'w') as content:
             content.write(dst)
 
@@ -39,7 +39,7 @@ class Register(object):
         try:
             action.do()
         except (IOError, OSError):
-            print 'Failed to paste'
+            print('Failed to paste')
         else:
             print_actions(action)
             History().log(action)

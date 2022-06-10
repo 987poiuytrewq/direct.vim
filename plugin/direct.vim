@@ -1,10 +1,10 @@
-python import sys
-python import vim
-python sys.path.append(vim.eval('expand("<sfile>:h")'))
+python3 import sys
+python3 import vim
+python3 sys.path.append(vim.eval('expand("<sfile>:h")'))
 
 
 function! direct#list(path)
-python << endOfPython
+python3 << endOfPython
 import os
 from direct.buffer import Buffer
 buffer = Buffer(vim.eval('a:path'))
@@ -19,7 +19,7 @@ endfunction
 
 
 function! direct#sync()
-python << endOfPython
+python3 << endOfPython
 from direct.buffer import Buffer, AmbiguousBufferError
 buffer = Buffer.restore()
 try:
@@ -39,7 +39,7 @@ if a:0 > 0
     let line = a:1
 endif
 
-python << endOfPython
+python3 << endOfPython
 from direct.buffer import Buffer
 buffer = Buffer.restore()
 buffer.open(vim.eval('line'))
@@ -48,7 +48,7 @@ endfunction
 
 
 function! direct#undo()
-python << endOfPython
+python3 << endOfPython
 from direct.buffer import Buffer
 from direct.history import History
 History().undo()
@@ -59,7 +59,7 @@ endfunction
 
 
 function! direct#redo()
-python << endOfPython
+python3 << endOfPython
 from direct.buffer import Buffer
 from direct.history import History
 History().redo()
@@ -70,7 +70,7 @@ endfunction
 
 
 function! direct#yank() range
-python << endOfPython
+python3 << endOfPython
 from direct.buffer import Buffer
 from direct.register import Register
 buffer = Buffer.restore()
@@ -87,7 +87,7 @@ if a:0 > 0
     let dst = a:1
 endif
 
-python << endOfPython
+python3 << endOfPython
 from direct.buffer import Buffer
 from direct.register import Register
 dst = vim.eval('dst')
@@ -102,7 +102,7 @@ endfunction
 
 
 function! direct#pasteas(name)
-python << endOfPython
+python3 << endOfPython
 name = vim.eval('a:name')
 from direct.buffer import Buffer
 from direct.register import Register

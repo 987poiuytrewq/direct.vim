@@ -28,9 +28,9 @@ class History(object):
         try:
             reverse_action.do()
         except (IOError, OSError):
-            print 'Failed to {} action - {}'.format(
+            print('Failed to {} action - {}'.format(
                 action_name, print_actions(reverse_action)
-            )
+            ))
         else:
             print_actions(reverse_action)
             dst_log.push(reverse_action.serialize())

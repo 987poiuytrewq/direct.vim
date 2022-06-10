@@ -95,7 +95,7 @@ class Buffer(object):
                 try:
                     self.current_entry = action.do()
                 except (IOError, OSError):
-                    print 'Action failed - {}'.format(action)
+                    print('Action failed - {}'.format(action))
                 else:
                     history.log(action)
             print_actions(*actions)
