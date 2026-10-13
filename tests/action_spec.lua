@@ -37,6 +37,81 @@ H.describe('action', function()
     H.assert_false(H.exists(sb.root, 'dir1'), 'directory source gone')
   end)
 
+  -- P1 (Greptile, PR #1): close_src_buffer matched with fs.same_path, which is
+  -- ino+dev identity -- so EVERY hard link to a file matched, and renaming one
+  -- link force-closed the buffers of all the others, discarding unsaved edits.
+  -- The match must be the resolved PATHNAME (fs.realpath), not inode identity:
+  -- distinct hard links are distinct names; the same file reached through a
+  -- symlinked prefix, `..` or a trailing slash still matches (B9).
+  H.describe('action: close_src_buffer pathname identity (P1)', function()
+    H.it('a buffer on one hardlink survives close_src_buffer of another (P1)', function()
+      local sb = H.sandbox()
+      H.mkfile(sb.root, 'a.txt', { 'a' })
+      H.assert_true(vim.uv.fs_link(sb.root .. '/a.txt', sb.root .. '/b.txt') == true,
+        'hardlink created')
+
+      -- nvim itself refuses a SECOND buffer for the other hardlink (E95 -- its
+      -- own ino+dev name unification), which is exactly what makes the P1 bug
+      -- destructive: the single buffer for a.txt is at risk whenever a
+      -- destructive action targets the OTHER hardlink name, because the old
+      -- fs.same_path(b.txt, a.txt) matched by inode.
+      local buf = vim.api.nvim_create_buf(true, false)
+      vim.api.nvim_buf_set_name(buf, sb.root .. '/a.txt')
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'unsaved edit' })
+      H.assert_true(vim.bo[buf].modified, 'the buffer is modified')
+
+      -- Renaming/deleting b.txt must not close the buffer for a.txt.
+      H.assert_true(M.close_src_buffer(sb.root .. '/b.txt') == true,
+        'close_src_buffer succeeded')
+
+      H.assert_true(vim.api.nvim_buf_is_valid(buf),
+        'the other hardlink buffer is still open')
+      H.assert_eq(H.buf_lines(buf), { 'unsaved edit' }, 'its unsaved edits are intact')
+      pcall(vim.api.nvim_buf_delete, buf, { force = true })
+    end)
+
+    H.it('still closes a buffer whose name is the resolved target (symlinked prefix, B9)', function()
+      -- The trap the naive fix falls into: nvim resolves a symlinked prefix in
+      -- the stored buffer name (the macOS /tmp -> /private/tmp case), so a
+      -- plain vim.fs.normalize(a) == normalize(b) comparison would MISS the
+      -- buffer. realpath resolves both sides, so the unresolved spelling must
+      -- still close it.
+      local sb = H.sandbox()
+      H.mkdir(sb.root, 'realdir')
+      H.mkfile(sb.root, 'realdir/file.txt', { 'x' })
+      pcall(vim.uv.fs_symlink, sb.root .. '/realdir', sb.root .. '/linkdir')
+      H.assert_true(vim.uv.fs_lstat(sb.root .. '/linkdir') ~= nil, 'prefix symlink created')
+
+      local buf = vim.api.nvim_create_buf(true, false)
+      vim.api.nvim_buf_set_name(buf, sb.root .. '/linkdir/file.txt')
+      H.assert_eq(vim.api.nvim_buf_get_name(buf), sb.root .. '/realdir/file.txt',
+        'premise: nvim stored the resolved spelling')
+
+      H.assert_true(M.close_src_buffer(sb.root .. '/linkdir/file.txt') == true,
+        'close_src_buffer succeeded for the unresolved spelling')
+      H.assert_false(vim.api.nvim_buf_is_valid(buf), 'the buffer was closed')
+    end)
+
+    H.it('matches the same file reached through a .. or a trailing-slash spelling (P1)', function()
+      local sb = H.sandbox()
+      H.mkdir(sb.root, 'sub')
+      H.mkfile(sb.root, 'real.txt', { 'x' })
+      local buf = vim.api.nvim_create_buf(true, false)
+      vim.api.nvim_buf_set_name(buf, sb.root .. '/real.txt')
+
+      H.assert_true(M.close_src_buffer(sb.root .. '/sub/../real.txt') == true,
+        'close_src_buffer succeeded for a .. spelling')
+      H.assert_false(vim.api.nvim_buf_is_valid(buf), 'the buffer was closed')
+
+      H.mkdir(sb.root, 'adir')
+      local d = vim.api.nvim_create_buf(true, false)
+      vim.api.nvim_buf_set_name(d, sb.root .. '/adir')
+      H.assert_true(M.close_src_buffer(sb.root .. '/adir/') == true,
+        'close_src_buffer succeeded for a directory named with a trailing slash')
+      H.assert_false(vim.api.nvim_buf_is_valid(d), 'the directory buffer was closed')
+    end)
+  end)
+
   H.it('Remove and RemoveDirectory send entries to the trash (T-012, B10)', function()
     local sb = H.sandbox()
     H.mkfile(sb.root, 'f.txt', { 'f' })

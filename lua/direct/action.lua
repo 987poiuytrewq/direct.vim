@@ -90,21 +90,25 @@ function M.rel(path)
 end
 
 -- close_src_buffer(src) -> true | nil, err. Closes every buffer whose name
--- denotes the same path as `src` (fs.same_path, spelling-independent) before a
--- destructive action, matching the Python `_close_src_buffer`. Pure defence and
--- parity: nothing here may raise, so every buffer API call is pcall-guarded.
+-- denotes the same path as `src` (fs.realpath, spelling-independent) before a
+-- destructive action, matching the Python `_close_src_buffer`. Identity is the
+-- resolved PATHNAME, not fs.same_path: same_path compares ino+dev, so it also
+-- matched every HARD LINK to `src` and force-closed unrelated modified buffers
+-- (P1). realpath collapses a symlinked prefix (B9, the `/tmp` -> `/private/tmp`
+-- case), `..` and trailing slashes, so the same file reached by a different
+-- spelling still closes, while two distinct hardlink names stay distinct.
+-- Pure defence and parity: nothing here may raise, so every buffer API call is
+-- pcall-guarded.
 function M.close_src_buffer(src)
   if type(src) ~= 'string' then
     return true
   end
+  local target = M.fs.realpath(src)
   local ok = pcall(function()
     for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
       local name = vim.api.nvim_buf_get_name(bufnr)
-      if name ~= '' then
-        local same = M.fs.same_path(name, src)
-        if same then
-          pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
-        end
+      if name ~= '' and M.fs.realpath(name) == target then
+        pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
       end
     end
   end)
