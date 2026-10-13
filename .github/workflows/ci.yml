@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test with Neovim (stable)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Neovim
+        # `version: stable` is resolved dynamically at run time, so the exact
+        # Neovim build CI exercises can drift without any change to this file.
+        # This commit SHA is pinned deliberately rather than tracking the
+        # movable `v1.6.1` tag: the pin is auditable, reproducible, and only
+        # changes through an explicit edit.
+        uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1.6.1
+        with:
+          neovim: true
+          version: stable
+
+      - name: Show the resolved Neovim version
+        run: nvim --version | head -n 1
+
+      - name: Run the test suite
+        run: nvim --headless -l tests/run.lua
