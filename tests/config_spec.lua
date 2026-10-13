@@ -3,6 +3,10 @@
 
 local H = require('tests.support.harness')
 
+-- P2 (Greptile, PR #1): buffer-local direct mappings must be removable and
+-- restorable for ALREADY-open direct buffers, which needs `buffer` to open one.
+local buffer = require('direct.buffer')
+
 -- A fresh module table: config is stateful (lifecycle flags), and the harness
 -- only unloads direct modules at file boundaries, so the spec reloads it where
 -- state matters.
@@ -110,5 +114,80 @@ H.describe('config', function()
     H.assert_true(config.clear_mappings() == true, 'returns true and does not raise')
     H.assert_eq(vim.fn.maparg('-', 'n'), ':echo "user"<CR>', 'the user dash is untouched')
     vim.keymap.del('n', '-')
+  end)
+
+  -- P2 (Greptile, PR #1): the buffer-local maps are installed by the ftplugin
+  -- and were never cleared, so setup({ map_default_keys = false }) after a
+  -- direct buffer is already open left the option looking ineffective.
+  local function open_direct_buffer()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkfile(ws, 'a.txt', { 'a' })
+    buffer.list(ws)
+    local bufnr = vim.api.nvim_get_current_buf()
+    H.assert_eq(vim.bo[bufnr].filetype, 'direct', 'premise: opened a direct buffer')
+    return bufnr
+  end
+
+  local function buf_map_rhs(lhs, mode)
+    return vim.fn.maparg(lhs, mode, false, true).rhs
+  end
+
+  H.it('setup({ map_default_keys = false }) clears buffer-local maps in already-open direct buffers (P2)', function()
+    local config = fresh_config()
+    config.clear_mappings()
+    config.setup({ map_default_keys = true })
+    local bufnr = open_direct_buffer()
+    H.assert_true(buf_map_rhs('u', 'n') ~= nil, 'premise: buffer-local u installed')
+    H.assert_true(buf_map_rhs('p', 'n') ~= nil, 'premise: buffer-local p installed')
+
+    config.setup({ map_default_keys = false })
+
+    H.assert_nil(buf_map_rhs('u', 'n'), 'the buffer-local u mapping is gone')
+    H.assert_nil(buf_map_rhs('p', 'n'), 'the buffer-local p mapping is gone')
+    H.assert_nil(buf_map_rhs('y', 'v'), 'the buffer-local visual y mapping is gone')
+    pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+  end)
+
+  H.it('clearing does not disturb other buffers and their buffer-local maps (P2)', function()
+    local config = fresh_config()
+    config.clear_mappings()
+    config.setup({ map_default_keys = true })
+    local direct_buf = open_direct_buffer()
+
+    -- A non-direct buffer with its OWN buffer-local u mapping.
+    local other = vim.api.nvim_create_buf(true, false)
+    vim.api.nvim_set_current_buf(other)
+    vim.keymap.set('n', 'u', ':echo "other user map"<CR>',
+      { buffer = true, silent = true, noremap = true })
+
+    config.setup({ map_default_keys = false })
+
+    -- Read the direct buffer's own scope first, then the other buffer's.
+    vim.api.nvim_set_current_buf(direct_buf)
+    H.assert_nil(buf_map_rhs('u', 'n'), 'the direct buffer was cleared')
+    vim.api.nvim_set_current_buf(other)
+    H.assert_eq(buf_map_rhs('u', 'n'), ':echo "other user map"<CR>',
+      'the other buffer-local mapping is untouched')
+    H.assert_eq(vim.fn.maparg('-', 'n'), '',
+      'the plugin global mapping was removed, no user global dash was created')
+    pcall(vim.api.nvim_buf_delete, direct_buf, { force = true })
+    pcall(vim.api.nvim_buf_delete, other, { force = true })
+  end)
+
+  H.it('re-enabling map_default_keys restores the maps in already-open direct buffers (P2)', function()
+    local config = fresh_config()
+    config.clear_mappings()
+    config.setup({ map_default_keys = true })
+    local bufnr = open_direct_buffer()
+
+    config.setup({ map_default_keys = false })
+    H.assert_nil(buf_map_rhs('u', 'n'), 'cleared first')
+
+    config.setup({ map_default_keys = true })
+    H.assert_true(buf_map_rhs('u', 'n') ~= nil,
+      'the buffer-local u mapping is restored in the open direct buffer')
+    H.assert_true(buf_map_rhs('p', 'n') ~= nil, 'the buffer-local p mapping is restored')
+    pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
   end)
 end)
