@@ -153,17 +153,19 @@ H.describe('fs', function()
   -- move destroyed symlinks/FIFOs/sockets with no warning.
   --
   -- P1 follow-up (review): the refusal is the DESTRUCTIVE caller's contract, so
-  -- it is now REQUESTED (`{ require_complete = true }`) by the caller that
-  -- removes the source after a successful copy -- rename's EXDEV fallback, which
-  -- the next test pins end to end. The refusal still happens BEFORE mkdirp(dst),
-  -- so no partial destination is left behind.
-  H.it('copy_tree with require_complete refuses a tree holding a symlink before writing anything (P1)', function()
+  -- it is REQUESTED (`{ require_complete = true }`) by the caller that removes
+  -- the source after a successful copy -- rename's EXDEV fallback, which the
+  -- tests below pin end to end. The WALK is the single authority (there is no
+  -- up-front-only scan to outrun), and a refusal discards whatever the copy had
+  -- already created, so the source is intact and no destination is left behind.
+  H.it('copy_tree with require_complete refuses a symlink tree, leaving no destination (P1)', function()
     local sb = H.sandbox()
     local root = H.mkdir(sb.root, 'tree')
     H.mkfile(root, 'a.txt', { 'a' })
     H.mkdir(root, 'sub')
     H.mkfile(root, 'sub/b.txt', { 'b' })
-    -- Nested, so a direct-child-only check would miss it.
+    -- Nested, and reached only AFTER a.txt and sub/b.txt have been copied, so
+    -- the no-partial-destination assertion also pins the cleanup.
     pcall(vim.uv.fs_symlink, root .. '/a.txt', root .. '/sub/link')
     H.assert_true(vim.uv.fs_lstat(root .. '/sub/link') ~= nil, 'nested symlink created')
 
@@ -224,14 +226,14 @@ H.describe('fs', function()
     H.assert_fs_eq(root, { 'a.txt', 'link@' }, 'nothing was destroyed')
   end)
 
-  H.it('copy_tree with require_complete refuses a FIFO when one can be created (P1)', function()
+  H.it('copy_tree with require_complete refuses a FIFO, leaving no destination (P1)', function()
     local sb = H.sandbox()
     local root = H.mkdir(sb.root, 'tree')
     H.mkfile(root, 'a.txt', { 'a' })
     local fifo = root .. '/pipe'
     -- mkfifo is an external tool; the harness has no skip primitive, so a
-    -- platform without it returns early (the symlink cases above already pin
-    -- the pre-scan). Guarded by lstat, never by the exit status alone.
+    -- platform without it returns early (the symlink cases pin the walk).
+    -- Guarded by lstat, never by the exit status alone.
     vim.fn.system({ 'mkfifo', fifo })
     local st = vim.uv.fs_lstat(fifo)
     if st == nil or st.type ~= 'fifo' then
@@ -247,19 +249,27 @@ H.describe('fs', function()
   -- P1 follow-up (review): `list_dir` returns nil only for a non-directory; a
   -- directory whose entries cannot be read (EACCES) goes through `iter_dir`,
   -- which swallows the scandir failure and yields nothing -- so `list_dir`
-  -- returned an EMPTY listing and the pre-scan saw "nothing uncopyable". The
-  -- copy then returned TRUE with the locked subtree silently missing (probe at
-  -- 51bb146), and on the EXDEV move path the source is removed afterwards: a
-  -- silent destroy that the refusal exists to prevent. The pre-scan therefore
-  -- probes the scan itself and names the entry, before mkdirp(dst).
+  -- returned an EMPTY listing and the copy saw "nothing uncopyable". It then
+  -- returned TRUE with the locked subtree silently missing (probe at 51bb146),
+  -- and on the EXDEV move path the source is removed afterwards: a silent
+  -- destroy that the refusal exists to prevent.
+  --
+  -- This test REPLACES the pre-scan-era test of the same guarantee. The walk is
+  -- now the single authority, so the guarantee is kept by copy_dir probing each
+  -- directory with fs_scandir as it descends; the locked subtree is placed after
+  -- a copyable one so the destination the refusal discards is genuinely non-empty.
   -- Skipped under root, which ignores permission bits.
-  H.it('copy_tree with require_complete refuses an unreadable directory before writing anything (P1)', function()
+  H.it('copy_tree with require_complete refuses an unreadable directory, leaving no destination (P1)', function()
     if vim.uv.getuid ~= nil and vim.uv.getuid() == 0 then
       return
     end
     local sb = H.sandbox()
     local root = H.mkdir(sb.root, 'tree')
     H.mkfile(root, 'a.txt', { 'a' })
+    local keep = H.mkdir(root, 'keep')
+    H.mkfile(keep, 'inner.txt', { 'i' })
+    -- Sorted last, so 'a.txt' and 'keep/inner.txt' are already copied when the
+    -- walk reaches it.
     local locked = H.mkdir(root, 'locked')
     H.mkfile(locked, 'inner.txt', { 'i' })
     H.assert_true(vim.uv.fs_chmod(locked, 0) == true, 'locked the directory')
@@ -273,8 +283,8 @@ H.describe('fs', function()
     H.assert_true(type(err) == 'string' and err:find('locked', 1, true) ~= nil,
       'the error names the offending entry: ' .. tostring(err))
     H.assert_false(fs.exists(sb.root .. '/dst'), 'no partial destination left behind')
-    H.assert_fs_eq(root, { 'a.txt', 'locked/', 'locked/inner.txt' },
-      'the source is untouched')
+    H.assert_fs_eq(root, { 'a.txt', 'keep/', 'keep/inner.txt', 'locked/',
+      'locked/inner.txt' }, 'the source is untouched')
   end)
 
   -- P1 follow-up (review): a caller that destroys nothing gets a best-effort
@@ -304,6 +314,132 @@ H.describe('fs', function()
       'the readable entries are copied and no stand-in for the locked tree is created')
     H.assert_fs_eq(root, { 'a.txt', 'locked/', 'locked/inner.txt' },
       'the source is untouched')
+  end)
+
+  -- P1 regression (Greptile on 7d5ce12, "Moves can lose new entries"): the
+  -- round that narrowed the refusal replaced the per-subtree re-check with one
+  -- up-front scan, so an entry that appeared AFTER that scan was neither refused
+  -- nor reported -- copy_dir simply left it out -- and rename's EXDEV fallback
+  -- then removed the source, destroying it silently. The walk is now the single
+  -- authority and re-lists every directory as it descends, so each entry is
+  -- classified after the copy has started.
+  --
+  -- The injection is deterministic: M.mkdirp is a module-table seam (section 8),
+  -- and the stub creates the entry at the copy's first mkdirp, i.e. inside the
+  -- walk. No sleeping and no reliance on scheduling, so this cannot flake.
+  H.it('an entry that appears after the copy started still refuses the copy (P1)', function()
+    local sb = H.sandbox()
+    local root = H.mkdir(sb.root, 'tree')
+    H.mkfile(root, 'a.txt', { 'a' })
+    H.mkfile(root, 'sub/b.txt', { 'b' })
+
+    local injected = false
+    local real_mkdirp = fs.mkdirp
+    local restore = H.stub(fs, 'mkdirp', function(path)
+      if not injected then
+        injected = true
+        -- A symlink because it is portable; a FIFO/socket/device is refused by
+        -- the same branch (and is pinned by the FIFO test above).
+        vim.uv.fs_symlink(root .. '/a.txt', root .. '/late')
+      end
+      return real_mkdirp(path)
+    end)
+    local ok, err = fs.copy_tree(root, sb.root .. '/dst', { require_complete = true })
+    restore()
+
+    H.assert_true(injected, 'the entry was created during the copy')
+    H.assert_nil(ok, 'the late entry refuses the copy: ' .. tostring(err))
+    H.assert_true(type(err) == 'string' and err:find('late', 1, true) ~= nil,
+      'the error names the entry that appeared late: ' .. tostring(err))
+    H.assert_false(fs.exists(sb.root .. '/dst'), 'no partial destination left behind')
+    H.assert_fs_eq(root, { 'a.txt', 'late@', 'sub/', 'sub/b.txt' },
+      'the source is untouched, the late entry included')
+  end)
+
+  -- The other half of the same regression: on a path that destroys nothing, the
+  -- late entry must still be REPORTED. At 7d5ce12 it was followed as a copy of
+  -- its target and copy_tree returned true with no skip report at all.
+  H.it('an entry that appears after the copy started is still reported, not dropped (P1)', function()
+    local sb = H.sandbox()
+    local root = H.mkdir(sb.root, 'tree')
+    H.mkfile(root, 'a.txt', { 'a' })
+    H.mkfile(root, 'sub/b.txt', { 'b' })
+
+    local injected = false
+    local real_mkdirp = fs.mkdirp
+    local restore = H.stub(fs, 'mkdirp', function(path)
+      if not injected then
+        injected = true
+        vim.uv.fs_symlink(root .. '/a.txt', root .. '/late')
+      end
+      return real_mkdirp(path)
+    end)
+    local dst = sb.root .. '/dst'
+    local ok, skipped = fs.copy_tree(root, dst)
+    restore()
+
+    H.assert_true(injected, 'the entry was created during the copy')
+    H.assert_true(ok == true, 'a copy that destroys nothing succeeds')
+    H.assert_true(type(skipped) == 'table' and #skipped == 1,
+      'the late entry is reported, not dropped: ' .. vim.inspect(skipped))
+    H.assert_eq(skipped[1].path, root .. '/late', 'the report names it')
+    H.assert_fs_eq(dst, { 'a.txt', 'sub/', 'sub/b.txt' },
+      'the copyable entries are copied and the late symlink is not followed')
+    H.assert_fs_eq(root, { 'a.txt', 'late@', 'sub/', 'sub/b.txt' },
+      'the source is untouched')
+  end)
+
+  -- End to end on the path the invariant is about: a source-removing move must
+  -- never delete a source it could not copy completely, whenever the entry shows
+  -- up. At 7d5ce12 this probe returned true and the source tree was gone.
+  H.it('a cross-device move never removes a source it could not copy completely (P1)', function()
+    local sb = H.sandbox()
+    local root = H.mkdir(sb.root, 'tree')
+    H.mkfile(root, 'a.txt', { 'a' })
+    H.mkfile(root, 'sub/b.txt', { 'b' })
+
+    local injected = false
+    local real_mkdirp = fs.mkdirp
+    local mrestore = H.stub(fs, 'mkdirp', function(path)
+      if not injected then
+        injected = true
+        vim.uv.fs_symlink(root .. '/a.txt', root .. '/late')
+      end
+      return real_mkdirp(path)
+    end)
+    local rrestore = H.stub(vim.uv, 'fs_rename', function()
+      return nil, 'EXDEV: cross-device link not permitted', 'EXDEV'
+    end)
+    local ok, err = fs.rename(root, sb.root .. '/moved')
+    rrestore()
+    mrestore()
+
+    H.assert_true(injected, 'the entry was created during the cross-device copy')
+    H.assert_nil(ok, 'the move fails instead of losing the entry: ' .. tostring(err))
+    H.assert_true(type(err) == 'string' and err:find('late', 1, true) ~= nil,
+      'the error names the entry: ' .. tostring(err))
+    H.assert_true(fs.exists(sb.root .. '/tree'), 'the source tree is intact')
+    H.assert_false(fs.exists(sb.root .. '/moved'), 'no destination left behind')
+    H.assert_fs_eq(root, { 'a.txt', 'late@', 'sub/', 'sub/b.txt' },
+      'nothing was destroyed')
+  end)
+
+  -- The cleanup a refusal now performs must undo only what THAT copy created: a
+  -- destination that already existed belongs to its owner and is left alone.
+  H.it('a refused copy removes only what it created (P1)', function()
+    local sb = H.sandbox()
+    local root = H.mkdir(sb.root, 'tree')
+    H.mkfile(root, 'a.txt', { 'a' })
+    pcall(vim.uv.fs_symlink, root .. '/a.txt', root .. '/link')
+    H.assert_true(vim.uv.fs_lstat(root .. '/link') ~= nil, 'symlink created')
+    local dst = H.mkdir(sb.root, 'dst')
+    H.mkfile(dst, 'keep.txt', { 'KEEP' })
+
+    local ok, err = fs.copy_tree(root, dst, { require_complete = true })
+
+    H.assert_nil(ok, 'the copy is refused: ' .. tostring(err))
+    H.assert_fs_eq(dst, { 'keep.txt' },
+      'only the entries the copy created are undone, never the pre-existing destination')
   end)
 
   H.it('list_dir is sorted and the thin wrappers behave', function()

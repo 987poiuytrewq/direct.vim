@@ -261,74 +261,82 @@ function M.copy_file(src, dst)
   return nil, err, code
 end
 
--- scan_uncopyable(src) -> entries, err. Every entry under `src` that
--- `copy_tree` cannot reproduce faithfully, in deterministic walk order (D17);
--- each entry is `{ path = <source path>, kind = <what it is> }` and entries[1]
--- is the first offender. A symlink is uncopyable: following it (as the pre-P1
--- code did) silently turned the link into a copy of its target, and cp -a style
--- preservation is deliberately out of scope. Any other lstat type (FIFO,
--- socket, device) is uncopyable too; those entries used to be skipped silently
--- while copy_tree still returned true. lstat never follows the final component,
--- which is what distinguishes a symlink from its target.
+-- uncopyable(ctx, path, kind) -> err | nil. Classifies one entry the copy cannot
+-- reproduce faithfully: a symlink (following it would silently turn the link
+-- into a copy of its target, and cp -a style preservation is deliberately out of
+-- scope), any other lstat type (FIFO, socket, device), an entry that cannot be
+-- lstat'ed, or a directory whose contents cannot be read (see copy_dir).
 --
--- A directory whose ENTRIES cannot be read is uncopyable as well. M.list_dir
--- reports nil only for a non-directory: a scan that fails (EACCES) goes through
--- `vim.fs.dir`, which yields nothing instead of raising, so the listing comes
--- back EMPTY and the walk -- and the copy -- would treat the directory as
--- empty, silently dropping its contents. The walk therefore probes the scan
--- with fs_scandir, so such a directory is a named entry instead of reading as
--- empty. A failure from M.list_dir itself is a hard error -- enumeration
--- failed, which is not a property of one entry -- and comes back as `err`.
-local function walk_uncopyable(src, out)
-  local names, err = M.list_dir(src)
-  if not names then
-    return err
+-- Under `ctx.require_complete` -- the destructive caller's contract -- it returns
+-- the refusal message, which stops the walk and leaves the caller's source where
+-- it is. Otherwise the entry is SKIPPED and recorded in ctx.skipped for the
+-- caller to report: it is never dropped silently.
+local function uncopyable(ctx, path, kind)
+  if ctx.require_complete then
+    return 'cannot copy ' .. kind .. ': ' .. path
   end
-  for _, name in ipairs(names) do
-    local path = M.join(src, name)
-    local ok, lst = pcall(vim.uv.fs_lstat, path)
-    if not ok or lst == nil then
-      out[#out + 1] = { path = path, kind = 'unreadable entry' }
-    elseif lst.type == 'link' then
-      out[#out + 1] = { path = path, kind = 'symlink' }
-    elseif lst.type == 'directory' then
-      local scan, scan_err = vim.uv.fs_scandir(path)
-      if scan == nil then
-        out[#out + 1] = { path = path,
-          kind = 'unreadable directory (' .. tostring(scan_err) .. ')' }
-      else
-        -- Drain the handle: luv closes it at the end of iteration.
-        while vim.uv.fs_scandir_next(scan) ~= nil do end
-        local nested_err = walk_uncopyable(path, out)
-        if nested_err then
-          return nested_err
-        end
-      end
-    elseif lst.type ~= 'file' then
-      out[#out + 1] = { path = path, kind = tostring(lst.type) }
-    end
-  end
+  ctx.skipped[#ctx.skipped + 1] = { path = path, kind = kind }
   return nil
 end
 
-local function scan_uncopyable(src)
-  local out = {}
-  local err = walk_uncopyable(src, out)
-  if err ~= nil then
-    return nil, err
+-- discard(created) undoes what a FAILED copy created, newest first, so a refused
+-- copy leaves no partial destination behind. Only paths THIS copy created are in
+-- the list, so a destination that already existed is never removed from under
+-- its owner. Cleanup itself is best-effort: the invariant that matters -- the
+-- source is untouched -- already holds, and the copy's own error is what the
+-- caller reports.
+local function discard(created)
+  for i = #created, 1, -1 do
+    local path = created[i]
+    if M.is_dir(path) then
+      M.rm_tree(path)
+    else
+      M.rm_file(path)
+    end
   end
-  return out
 end
 
--- copy_dir(from, to, skip) -> true | nil, err. The recursion behind copy_tree:
--- `mkdir -p` the destination, then copy every entry the pre-scan did not mark
--- uncopyable. A skipped tree is never descended into, so nothing stands in for
--- what could not be read. Calls go through the module table (M.mkdirp,
--- M.list_dir, M.stat, M.copy_file), so the S8 seam rule holds here too.
-local function copy_dir(from, to, skip)
+-- copy_dir(from, to, ctx) -> true | nil, err. The recursion behind copy_tree and
+-- the SINGLE AUTHORITY on what a copy reproduces: it classifies every entry with
+-- lstat as it walks (never following the final component) and copies plain files
+-- and real directories. The verdict therefore does not depend on any earlier
+-- pass, so an entry that appears after the copy started is still seen -- the
+-- round that narrowed the refusal to one up-front scan could miss such an entry,
+-- and `rename`'s EXDEV fallback then removed the source, destroying it silently
+-- (Greptile P1 on 7d5ce12).
+--
+-- Every directory is probed with fs_scandir BEFORE its destination is created.
+-- M.list_dir reports nil only for a non-directory, and a scan that fails (EACCES)
+-- goes through vim.fs.dir, which yields nothing instead of raising, so an
+-- unreadable directory would otherwise read as EMPTY and its contents would be
+-- dropped -- or, best-effort, an empty stand-in directory would be created for
+-- it. The probe runs before mkdirp(to) so nothing stands in for what could not
+-- be read, while the listing runs AFTER mkdirp(to) so the walk classifies each
+-- directory as late as it can. Calls go through the module table (M.mkdirp,
+-- M.list_dir, M.copy_file), so the S8 seam rule holds here too.
+--
+-- A skipped directory (best-effort mode) is a SUCCESS carrying a ctx.skipped
+-- record, not a failure: only a real I/O failure or a refusal returns nil, err.
+local function copy_dir(from, to, ctx)
+  local scan, scan_err = vim.uv.fs_scandir(from)
+  if scan == nil then
+    local uerr = uncopyable(ctx, from,
+      'unreadable directory (' .. tostring(scan_err) .. ')')
+    if uerr ~= nil then
+      return nil, uerr
+    end
+    return true
+  end
+  -- Drain the handle: luv closes it at the end of iteration.
+  while vim.uv.fs_scandir_next(scan) ~= nil do end
+
+  local existed = M.exists(to)
   local mok, merr = M.mkdirp(to)
   if not mok then
     return nil, merr
+  end
+  if not existed then
+    ctx.created[#ctx.created + 1] = to
   end
   local names = M.list_dir(from)
   if not names then
@@ -336,19 +344,32 @@ local function copy_dir(from, to, skip)
   end
   for _, name in ipairs(names) do
     local child_from = M.join(from, name)
-    if not skip[child_from] then
-      local child_to = M.join(to, name)
-      local st = M.stat(child_from)
-      if st and st.type == 'directory' then
-        local cok, cerr = copy_dir(child_from, child_to, skip)
-        if not cok then
-          return nil, cerr
-        end
-      elseif st and st.type == 'file' then
-        local cok, cerr = M.copy_file(child_from, child_to)
-        if not cok then
-          return nil, cerr
-        end
+    local child_to = M.join(to, name)
+    local ok, lst = pcall(vim.uv.fs_lstat, child_from)
+    if not ok or lst == nil then
+      local uerr = uncopyable(ctx, child_from, 'unreadable entry')
+      if uerr ~= nil then
+        return nil, uerr
+      end
+    elseif lst.type == 'directory' then
+      local cok, cerr = copy_dir(child_from, child_to, ctx)
+      if not cok then
+        return nil, cerr
+      end
+    elseif lst.type == 'file' then
+      -- Recorded BEFORE the copy, so a half-written file is cleaned up too.
+      ctx.created[#ctx.created + 1] = child_to
+      local cok, cerr = M.copy_file(child_from, child_to)
+      if not cok then
+        return nil, cerr
+      end
+    else
+      -- 'link' is the luv name for a symlink; keep reporting it as 'symlink',
+      -- which is the vocabulary the skipped-entry records already use.
+      local kind = lst.type == 'link' and 'symlink' or tostring(lst.type)
+      local uerr = uncopyable(ctx, child_from, kind)
+      if uerr ~= nil then
+        return nil, uerr
       end
     end
   end
@@ -361,11 +382,10 @@ end
 -- honoured.
 --
 -- `opts.require_complete` is the DESTRUCTIVE caller's contract: the caller
--- removes the source after a successful copy (`rename`'s EXDEV fallback), so a
--- tree holding a symlink, FIFO, socket, device or unreadable directory is
--- REFUSED, naming the first offending entry -- before `mkdirp(dst)`, so no
--- half-populated destination is left behind -- because an entry that was
--- skipped silently would become permanent when the source is removed.
+-- removes the source after a successful copy (`rename`'s EXDEV fallback), so an
+-- entry the walk cannot reproduce is REFUSED, naming it -- and whatever the
+-- failed copy had already created is removed first, so the source is left
+-- completely intact and no partial destination remains.
 --
 -- Without it the copy is best-effort, which is what a yank or a paste needs:
 -- they destroy nothing, so an entry that merely cannot be reproduced must not
@@ -376,24 +396,18 @@ function M.copy_tree(src, dst, opts)
   if not M.is_dir(src) then
     return nil, 'not a directory: ' .. tostring(src)
   end
-  local require_complete = opts ~= nil and opts.require_complete == true
-  local skipped, scan_err = scan_uncopyable(src)
-  if scan_err ~= nil then
-    return nil, scan_err
-  end
-  if require_complete and #skipped > 0 then
-    return nil, 'cannot copy ' .. skipped[1].kind .. ': ' .. skipped[1].path
-  end
-  local skip = {}
-  for _, entry in ipairs(skipped) do
-    skip[entry.path] = true
-  end
-  local cok, cerr = copy_dir(src, dst, skip)
+  local ctx = {
+    require_complete = opts ~= nil and opts.require_complete == true,
+    skipped = {},
+    created = {},
+  }
+  local cok, cerr = copy_dir(src, dst, ctx)
   if not cok then
+    discard(ctx.created)
     return nil, cerr
   end
-  if #skipped > 0 then
-    return true, skipped
+  if #ctx.skipped > 0 then
+    return true, ctx.skipped
   end
   return true
 end
