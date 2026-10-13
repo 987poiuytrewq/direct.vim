@@ -1,82 +1,185 @@
 # direct.vim
 
-Edit directories in vim.
+Edit directories in Neovim.
 
-Load up a directory in vim and edit files and subirectorie using normal vim
-commands. No need to remember extra commands or keybindings. 
+Load a directory into a buffer with each line corresponding to a file or a
+subdirectory. You can then edit the buffer to make whatever changes you like to
+your files and directories and, when you save the buffer, your changes are
+synchronised with the filesystem.
 
-It does this by loading a directories into a buffer, with each line
-corresponding to a file or directory. You can then edit the buffer to make
-whatever changes you like to your files and directories and, when you save the
-buffer, your changes are synchronised with the filesystem.
-
-- navigate around the filesytem easily
+- navigate around the filesystem easily
 - rename, create and delete files and directories
 - yank and paste files and directories
 - full undo and redo history for every change that you make to the filesystem
 
+## Requirements
+
+- Neovim >= 0.11
+- No Python: the plugin is pure Lua and needs nothing beyond the Neovim runtime.
+
+Run `:checkhealth direct` to confirm the version and the data home in use.
+
+## Install
+
+Install with your favourite package manager. For example, with
+[vim-plug](https://github.com/junegunn/vim-plug):
+
+```vim
+Plug '987poiuytrewq/direct.vim'
+```
+
+## Setup
+
+`setup()` is optional; the defaults apply when you never call it.
+
+```lua
+require('direct').setup({
+  map_default_keys = true, -- set false to install no default mappings
+})
+```
+
+It is idempotent, may be called more than once, and reports an unknown option
+name as an error instead of silently ignoring it.
+
 ## Navigate
 
-By default, the `-` key is bound to display the parent directory of the current
-buffer (or the working directory if no buffer is open). Or, use the `:edit
-foo/` command to open a directory.
+In normal mode, `-` lists the directory of the current file, or the working
+directory when the buffer is not tied to one (a buffer with no file name, or a
+non-empty `&buftype` such as a direct listing). You can also open a directory
+with `:edit foo/` or by starting Neovim on it.
 
-Once you are viewing a directory you can go to its parent directory by pressing
-`-`, or open a directory or file by pressing `<Enter>`.
+Once a directory is listed, `-` goes up to its parent directory and `<Enter>`
+opens the entry under the cursor: a directory line opens a new listing, a file
+line opens the file.
 
 ## Edit
 
 When viewing a directory, you can edit the listing of files and directories as
-if you were editing a file, and your changes will be synchronised to the
-filesystem. You can use whatever vim commands you like to edit the buffer, and
-changes will be written when the buffer is saved.
+if you were editing a file, using any Vim command (`di`, `o`, `:s`, macros, and
+so on). Saving the buffer synchronises your change with the filesystem and then
+re-lists the directory.
 
-### Rename
+A save is classified as exactly one of *rename*, *create* or *delete*:
 
-To rename files or directories, edit the line corresponding to the file or
-directory you want to rename, and save the buffer. Directories must always have
-a trailing slash however, otherwise they will be interpreted as files.
+- **Rename** — edit the line of the file or directory you want to rename, and
+  save.
+- **Create** — add new lines at any location, and save.
+- **Delete** — delete the lines for the entries you want to remove, and save.
+  Deleted entries are yanked automatically, so you can paste them back.
 
-### Create
+### The trailing-slash rule
 
-To create files or directories, add new lines to the buffer at any location,
-and save the buffer. To create a directory, the line must end in a trailing
-slash, otherwise a file will be created.
+A directory must always be written with a trailing slash, and a file must never
+have one: the line, not the filesystem, decides what will be created or
+renamed. Renaming `foo/` to `foo` therefore replaces the directory `foo` with a
+file, and adding a line `bar` creates a file while `bar/` creates a directory.
 
-### Delete
+An edit that both adds and deletes entries, or that leaves a duplicated line,
+is reported as ambiguous, naming both sides of the comparison. Nothing is
+changed, no history is written, and the buffer stays modified so you can fix it.
 
-To delete files or directory, delete the lines corresponding to the files or
-directories you want to delete, and save the buffer.
+`&wildignore` is honoured: entries matching one of its patterns are not listed
+and are left untouched.
 
 ### Undo / Redo
 
-When viewing a directory, the undo (`u`) and redo (`<C-r>`) mappings will undo
-and redo any changes you made to the filesystem.
+In a direct buffer, `u` and `<C-r>` are mapped to `:DirectUndo` and
+`:DirectRedo`, so the keys you would use for text undo perform the
+*filesystem* undo/redo instead. That history records the actions a sync, paste,
+undo or redo performed and reverses or re-applies them; `:DirectUndo` right
+after a paste, for example, undoes the paste.
 
-### Yank / Paste
+The filesystem undo is separate from Neovim's text undo. `:undo` (or any other
+text-undo command) only reverses changes to the buffer's lines: it never
+renames, creates, deletes or restores anything on disk. Only `:DirectUndo`
+reverses a filesystem action.
 
-When viewing ta directory any yank commands that operate on a full line (`yy`
-and `Y`) will yank the file or directory to a register. Any deleted files or
-direcotries are automatically yanked, as when deleting text in vim.
+## Yank / Paste
 
+`yy` and `Y` yank the file or directory on the current line, and a visual `y`
+yanks the selected range. `p` and `P` paste the yanked entries into the current
+directory. Directories are yanked recursively, so you can copy directory trees
+around the filesystem.
 
-Pasting (`p` and `P`) will paste the yanked file or directory into the current
-directory. 
+If an entry with the same name already exists, you are prompted
+(`File already exists. Paste as: `, or `Directory ...`) and can paste it under
+another name; an empty answer skips that entry and leaves the original
+untouched.
 
+Yank and paste share the undo/redo history, so they can be undone like any other
+filesystem change.
 
-There is undo and redo support for these too, as well as prompting to overwrite
-or rename in case of name clashes.
+## Commands
 
+| Command | Arguments | Description |
+|---|---|---|
+| `:DirectList {dir}` | `{dir}`, `dir` completion | List `{dir}` in a direct buffer. |
+| `:DirectListBuffer` | none | List the directory of the current file, or the working directory when the buffer is not tied to one (no file name, or a non-empty `&buftype`). |
+| `:DirectListCwd` | none | List the current working directory. |
+| `:DirectSync` | none | Classify and apply the current buffer's edits; also runs on `:write`. |
+| `:DirectUndo` | none | Undo the last filesystem action. |
+| `:DirectRedo` | none | Redo the last undone action. |
+| `:DirectYank` | range (default: current line) | Yank the ranged entries. |
+| `:DirectPaste [dir]` | optional `{dir}` (directory completion) | Paste into the current buffer's directory (no argument; re-lists it), or into `{dir}` without touching the current buffer. |
+| `:DirectPasteAs {name}` | `{name}` | Paste into the current buffer's directory as `{name}`. |
 
-Directories are yanked recursively so that you can yank and paste directory
-trees around the filesystem.
+`:DirectUndo`, `:DirectRedo`, `:DirectYank`, `:DirectPaste` (no argument) and
+`:DirectPasteAs` report an error and do nothing when the current buffer is not a
+direct buffer. `:DirectPaste {dir}` is the exception: it pastes into an
+explicitly named directory and never touches the current buffer, so it needs no
+direct buffer. `:DirectList`, `:DirectListBuffer`, `:DirectListCwd` and
+`:DirectSync` are not restricted this way: they do not act on the current
+buffer's listing.
 
-## Install 
+## Mappings
 
-Install using your favourite package manager.
+Global (normal mode), installed when `map_default_keys` is true:
 
-### Plug
+| Key | Action |
+|---|---|
+| `-` | `:DirectListBuffer` |
 
-```
-Plug '987poiuytrewq/direct.vim'
-```
+Buffer-local, in a direct buffer, installed when `map_default_keys` is true:
+
+| Mode | Key | Action |
+|---|---|---|
+| normal | `<CR>` | open the entry under the cursor |
+| normal | `-` | open `../` (the parent directory) |
+| normal | `u` | `:DirectUndo` |
+| normal | `<C-r>` | `:DirectRedo` |
+| normal | `yy`, `Y` | `:DirectYank` (current line) |
+| visual | `y` | `:DirectYank` (selected range) |
+| normal | `p`, `P` | `:DirectPaste` |
+
+The buffer-local `-` wins over the global `-` inside a direct buffer.
+
+## Data directory
+
+State has no cache and is resolved on every use:
+
+1. `$XDG_DATA_HOME/direct` when `$XDG_DATA_HOME` is set and non-empty;
+2. otherwise `$HOME/.local/share/direct`
+   (falling back to Neovim's standard data directory, with a warning, when
+   neither variable is set).
+
+Run `:checkhealth direct` to print the resolved data home. Inside it:
+
+- `history/` — `undo.log` and `redo.log`, the filesystem undo/redo history;
+- `trash/` — removed entries, kept so an undo can restore them;
+- `register/` — the most recent yank, and its content pointer.
+
+## Upgrading from the Python version
+
+The Lua rewrite uses a new on-disk format and does **not** carry the Python-era
+data over:
+
+- **History** — the Lua logs are version-tagged, and a log without the tag is
+  never executed: it is renamed aside to `<name>.legacy` (or
+  `<name>.legacy.<n>` if that name is already taken) and a warning
+  (`Ignoring history written by an older version`) is shown. **Undo history
+  does not survive the upgrade.**
+- **Register** — entries written by the Python version are still listed, but a
+  name the Lua version cannot round-trip (a space, a tab or another control
+  character) is skipped with an error.
+- **Trash** — Python-era trash entries are still read, so an entry removed
+  before the upgrade can still be restored.
