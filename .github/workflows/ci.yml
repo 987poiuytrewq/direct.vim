@@ -1,19 +1,18 @@
 name: CI
 
-# Unfiltered `push` plus `pull_request` means every push produces two workflow
-# runs: for commit 847bf9e those were run 38391401218 (`push`) and run
-# 38391401792 (`pull_request`). The duplication is intentional and accepted: a
-# push to a branch that has no PR must still trigger a run -- that is how the
-# red-run self-test was performed -- so narrowing `push` to `master` was
-# rejected. Suppressing the pair with a `concurrency:` block was considered and
-# rejected too: the `push` run is keyed on `refs/heads/lua-migration` and the
-# `pull_request` run on `refs/pull/1/merge`, so they are different concurrency
-# groups and both would still run; forcing them into one group would cancel one
-# of two simultaneously-starting runs, replacing two green checks with one
-# green plus one grey `cancelled`.
-on:
-  push:
-  pull_request:
+# `push` only, so one commit produces one workflow run. It stays unfiltered
+# (no `branches:`/`tags:`) because a push to a branch that has no PR must still
+# trigger a run -- that is how the red-run self-test was performed. What this
+# trades away:
+#   - Pull requests from forks will not trigger CI at all: a push in a fork
+#     does not trigger the upstream repository's workflows.
+#   - CI no longer tests the branch merged with the base (`pull_request` ran on
+#     `refs/pull/*/merge`), so a branch that is green alone but breaks when
+#     combined with `master` is only discovered by the run on `master` after
+#     merging.
+#   - Unfiltered `push` also means tag pushes trigger CI (harmless, but worth
+#     knowing).
+on: push
 
 permissions:
   contents: read
