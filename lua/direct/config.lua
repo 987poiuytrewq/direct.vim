@@ -1,20 +1,6 @@
--- lua/direct/config.lua -- default options and setup() merge.
---
--- Responsibility (spec section 5): defaults, setup(opts), install_mappings,
--- clear_mappings. No filesystem or buffer access.
---
--- The only default option is `map_default_keys` (section 6). setup() is
--- idempotent: later calls replace the option table and re-apply mappings.
--- Unknown keys are rejected with an ERROR notification naming the key, so a
--- typo is surfaced instead of silently ignored.
---
--- Mapping timing (D10): the global `-` is installed either immediately from
--- setup(), or -- when the user never calls setup() -- once from the VimEnter
--- handler. Under `nvim --headless -l` `v:vim_did_enter` is already 1, so the
--- immediate path is the one the harness exercises. The nine buffer-local
--- mappings are defined here (BUFFER_MAPS, P2) and installed by
--- `ftplugin/direct.lua`; setup() clears and restores them in already-open
--- direct buffers.
+-- lua/direct/config.lua -- options and plugin-owned key mappings.
+-- setup is idempotent; disabling mappings removes only mappings installed by
+-- this plugin, including its buffer-local mappings in loaded direct buffers.
 
 local M = {}
 
@@ -25,7 +11,7 @@ local defaults = {
 M.defaults = defaults
 M.options = vim.deepcopy(defaults)
 
--- Global mapping (section 6): normal `-` opens the current buffer's directory.
+-- Global mapping : normal `-` opens the current buffer's directory.
 M.GLOBAL_MAP = {
   mode = 'n',
   lhs = '-',
@@ -36,7 +22,7 @@ M.GLOBAL_MAP = {
 -- user has configured the plugin; `_vim_enter_installed` makes that handler
 -- one-shot.
 --
--- `_installed` is reconciled against the keymap at load (P2, Greptile PR #1):
+-- `_installed` is reconciled against the keymap at load
 -- the module is re-required across sessions and at runtime boundaries while a
 -- `-` mapping may exist that the plugin never installed (the user's own, or
 -- another plugin's), and `clear_mappings` must only remove a mapping the
@@ -45,13 +31,13 @@ M._setup_called = false
 M._vim_enter_installed = false
 M._installed = vim.fn.maparg(M.GLOBAL_MAP.lhs, M.GLOBAL_MAP.mode) == M.GLOBAL_MAP.rhs
 
--- The nine buffer-local mappings for filetype=direct buffers (T-026), owned
--- here (P2, Greptile PR #1) so setup() can clear and restore them in
+-- The nine buffer-local mappings for filetype=direct buffers , owned
+-- here  so setup can clear and restore them in
 -- ALREADY-open direct buffers. Installed by `ftplugin/direct.lua` via
 -- `install_buffer_mappings(0)`. Built on `<Cmd>` (never a `:` command that
 -- would leave visual mode / re-trigger mappings); the buffer-local `-` wins
 -- over the global one inside a direct buffer, which is why the global mapping
--- resolving to `getcwd()` there is never observable.
+-- resolving to `getcwd` there is never observable.
 M.BUFFER_MAPS = {
   { mode = 'n', lhs = '<CR>',
     rhs = '<Cmd>lua require("direct").open()<CR>' },
@@ -97,15 +83,15 @@ function M.install_buffer_mappings(bufnr)
   return true
 end
 
--- clear_buffer_mappings() -> true. Removes the plugin's buffer-local maps from
+-- clear_buffer_mappings -> true. Removes the plugin's buffer-local maps from
 -- every loaded direct buffer. Each candidate is re-read through nvim_buf_call
 -- (maparg reads the CURRENT buffer's scope) and deleted only when it really IS
 -- this buffer's mapping (current.buffer == 1) AND is the plugin's own (rhs
 -- identity, the same ownership rule the global `-` uses): a buffer-local map
--- with the same lhs but a different rhs belongs to the user and is left alone,
+-- with the same lhs but a different rhs belongs to the user and is left alone
 -- and a GLOBAL fallback (buffer == 0) is not this buffer's mapping at all --
 -- `keymap.del(..., { buffer = true })` raises E31 on it, so it must not even be
--- attempted (Greptile PR #1, P2).
+-- attempted .
 --
 -- The guard is PER MAPPING: a deletion that fails is reported and must not
 -- silently abort the rest of that buffer's mappings (a single pcall around the
@@ -148,7 +134,7 @@ function M.install_mappings()
     desc = 'direct: list current buffer directory',
   })
   M._installed = true
-  -- P2: re-applying the option must also re-install the buffer-local maps in
+  -- re-applying the option must also re-install the buffer-local maps in
   -- direct buffers that are already open (the ftplugin only runs when a direct
   -- buffer is created).
   for _, bufnr in ipairs(open_direct_buffers()) do
@@ -158,13 +144,13 @@ function M.install_mappings()
 end
 
 function M.clear_mappings()
-  -- Only remove the global `-` when this plugin installed it (P2, Greptile
-  -- PR #1): a user-owned mapping with a different rhs must survive.
+  -- Only remove the global `-` when this plugin installed it: a user-owned
+  -- mapping with a different rhs must survive.
   if M._installed then
     pcall(vim.keymap.del, M.GLOBAL_MAP.mode, M.GLOBAL_MAP.lhs)
     M._installed = false
   end
-  -- P2: disabling the maps must also clear the buffer-local ones in direct
+  -- disabling the maps must also clear the buffer-local ones in direct
   -- buffers that are already open.
   M.clear_buffer_mappings()
   return true
@@ -195,8 +181,8 @@ function M.setup(opts)
   return M.options
 end
 
--- on_vim_enter() -> boolean (installed?). The VimEnter handler (D10): installs
--- the default mapping at most once and only when setup() was never called.
+-- on_vim_enter -> boolean (installed?). The VimEnter handler : installs
+-- the default mapping at most once and only when setup was never called.
 function M.on_vim_enter()
   if M._setup_called or M._vim_enter_installed then
     return false
@@ -208,7 +194,7 @@ function M.on_vim_enter()
   return true
 end
 
--- install_deferred() -> boolean (installed now?). The D10 entry point that
+-- install_deferred -> boolean (installed now?). The entry point that
 -- plugin/direct.lua calls at load: when VimEnter has already fired (`-l`, or a
 -- startup that sourced the plugin late) install immediately; otherwise defer to
 -- a one-shot VimEnter autocmd.

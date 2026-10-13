@@ -1,12 +1,9 @@
--- lua/direct/health.lua -- :checkhealth direct (spec section 5 / T-027 / D1).
---
--- Responsibility: report the Neovim version against the 0.11 floor (D1) and the
--- resolved data directory (B9). Fails on nothing except `nvim < 0.11`: the floor
--- is the only hard requirement. Everything else is informational.
+-- lua/direct/health.lua -- :checkhealth direct.
+-- The 0.11 floor is the only hard requirement; every other line is
+-- informational, so this never reports an error for anything else.
 
 local M = {}
 
--- check() is the `:checkhealth direct` entry point invoked by Neovim.
 function M.check()
   vim.health.start('direct')
 
