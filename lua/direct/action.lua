@@ -390,7 +390,11 @@ end
 -- `src` into the directory `dst`. `renames` is the ordered zip of the two name
 -- lists, sorted ascending by src name (D17/R19). On a destination clash the
 -- user is prompted for a new name; renames[i].dst is updated so the
--- serialization always reflects what was actually pasted (T-014). An empty,
+-- serialization always reflects what was actually pasted (T-014). The prompt is
+-- re-asked while the answer still names an existing path: an existing
+-- destination is never written to (a directory is never merged into, a file is
+-- never overwritten), so Undo -- which removes what `renames` records -- can
+-- never delete data that predated the paste (P1). An empty,
 -- cancelled or separator-carrying answer (B3/N2: one containing the ' '
 -- ENTRY_SEPARATOR or the '\t' FIELD_SEPARATOR could not round-trip) skips the
 -- entry and reports it (D8a) -- ui.prompt re-raises after inputrestore on
@@ -417,7 +421,16 @@ function M.Paste(src, dst, src_names, dst_names)
       local st = M.fs.stat(full_src)
       if st then
         local skipped = false
-        if M.fs.exists(full_dst) then
+        -- P1: an existing destination is NEVER written to. Previously the
+        -- answered name was taken verbatim, so answering a name that still
+        -- existed merged a tree into the existing directory (copy_tree) or
+        -- overwrote the existing file (copy_file) -- while `renames` recorded it
+        -- as newly created, so Undo then deleted the whole destination,
+        -- pre-existing members included. Re-prompt until the answer names a
+        -- path that does not exist; an empty, cancelled or separator-carrying
+        -- answer (D8a/B3/N2) still skips the entry and leaves the existing
+        -- destination untouched.
+        while M.fs.exists(full_dst) do
           local entry_type = 'File'
           if not M.fs.is_file(full_dst) then
             entry_type = 'Directory'
@@ -431,10 +444,10 @@ function M.Paste(src, dst, src_names, dst_names)
             -- entirely; the original destination must not be touched.
             M.ui.notify('Skipped ' .. pair.src, vim.log.levels.WARN)
             skipped = true
-          else
-            pair.dst = answer
-            full_dst = M.fs.join(self.dst, pair.dst)
+            break
           end
+          pair.dst = answer
+          full_dst = M.fs.join(self.dst, pair.dst)
         end
         if not skipped then
           if st.type == 'file' then

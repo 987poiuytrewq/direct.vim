@@ -175,6 +175,116 @@ H.describe('register', function()
       'a non-empty answer is not a skip')
   end)
 
+  -- P1 (Greptile, PR #1): a clash answer that still named an existing entry was
+  -- accepted verbatim, so a directory was MERGED into (copy_tree) / a file was
+  -- overwritten and the paste was still recorded as newly created -- undo then
+  -- deleted the whole destination, including data that predated the paste.
+  -- The prompt must re-ask until the name is free; cancel still skips (D8a).
+  H.it('a directory clash re-prompts instead of merging into the existing directory (P1)', function()
+    local sb = H.sandbox()
+    H.mkdir(sb.root, 'tree')
+    H.mkfile(sb.root, 'tree/sub.txt', { 'sub' })
+    H.assert_true(reg.yank({ sb.root .. '/tree' }) == true, 'yank a directory')
+    local ws = H.mkdir(sb.root, 'ws')
+    -- The destination already holds a DIFFERENT directory of the same name.
+    H.mkdir(ws, 'tree')
+    H.mkfile(ws, 'tree/keep.txt', { 'KEEP' })
+
+    H.capture_messages()
+    local prompts, answers = 0, { 'tree', 'fresh' }
+    local restore = H.stub(ui, 'prompt', function()
+      prompts = prompts + 1
+      return table.remove(answers, 1) or ''
+    end)
+    local res
+    local ok, perr = xpcall(function() res = reg.paste(ws) end, debug.traceback)
+    restore()
+    if not ok then error(perr, 0) end
+
+    H.assert_eq(prompts, 2, 'the still-colliding answer re-prompts')
+    H.assert_fs_eq(ws .. '/tree', { 'keep.txt' },
+      'the pre-existing directory was not merged into')
+    H.assert_fs_eq(ws .. '/fresh', { 'sub.txt' },
+      'the directory landed under the fresh name')
+    H.assert_eq(res, ws .. '/fresh', 'the fresh entry is the last pasted one')
+  end)
+
+  H.it('undo after a clashing directory paste removes only what the paste created (P1)', function()
+    local sb = H.sandbox()
+    H.mkdir(sb.root, 'tree')
+    H.mkfile(sb.root, 'tree/sub.txt', { 'sub' })
+    H.assert_true(reg.yank({ sb.root .. '/tree' }) == true, 'yank a directory')
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkdir(ws, 'tree')
+    H.mkfile(ws, 'tree/keep.txt', { 'KEEP' })
+
+    local answers = { 'tree', 'fresh' }
+    local restore = H.stub(ui, 'prompt', function()
+      return table.remove(answers, 1) or ''
+    end)
+    local ok, perr = xpcall(function() reg.paste(ws) end, debug.traceback)
+    restore()
+    if not ok then error(perr, 0) end
+
+    H.assert_true(history.undo() ~= nil, 'undo succeeds')
+    H.assert_fs_eq(ws, { 'tree/', 'tree/keep.txt' },
+      'undo removed exactly the pasted directory and spared the pre-existing one')
+  end)
+
+  H.it('cancelling the clash prompt changes nothing, even after a colliding answer (P1)', function()
+    local sb = H.sandbox()
+    H.mkdir(sb.root, 'tree')
+    H.mkfile(sb.root, 'tree/sub.txt', { 'sub' })
+    H.assert_true(reg.yank({ sb.root .. '/tree' }) == true, 'yank a directory')
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkdir(ws, 'tree')
+    H.mkfile(ws, 'tree/keep.txt', { 'KEEP' })
+
+    H.capture_messages()
+    local answers = { 'tree', '' } -- collide once, then cancel
+    local restore = H.stub(ui, 'prompt', function()
+      return table.remove(answers, 1) or ''
+    end)
+    local ok, perr = xpcall(function() reg.paste(ws) end, debug.traceback)
+    restore()
+    if not ok then error(perr, 0) end
+
+    H.assert_fs_eq(ws, { 'tree/', 'tree/keep.txt' },
+      'a cancelled paste left the filesystem exactly as it was')
+    H.assert_notified('Skipped tree')
+  end)
+
+  H.it('a file clash re-prompts too, so undo cannot delete a pre-existing file (P1)', function()
+    -- Item-2 investigation, pinned: a FILE clash took the same branch, so the
+    -- answer `f.txt` used to overwrite the pre-existing file and undo then
+    -- deleted it. The re-prompt loop closes that path without any overwrite
+    -- policy decision: the existing file is never written and never removed.
+    local sb = H.sandbox()
+    H.mkfile(sb.root, 'f.txt', { 'reg-f' })
+    H.assert_true(reg.yank({ sb.root .. '/f.txt' }) == true, 'yank')
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkfile(ws, 'f.txt', { 'KEEP' })
+
+    local answers = { 'f.txt', 'f-copy.txt' }
+    local restore = H.stub(ui, 'prompt', function()
+      return table.remove(answers, 1) or ''
+    end)
+    local ok, perr = xpcall(function() reg.paste(ws) end, debug.traceback)
+    restore()
+    if not ok then error(perr, 0) end
+
+    H.assert_eq(vim.fn.readfile(ws .. '/f.txt'), { 'KEEP' },
+      'the pre-existing file was not overwritten')
+    H.assert_eq(vim.fn.readfile(ws .. '/f-copy.txt'), { 'reg-f' },
+      'the copy landed under the fresh name')
+
+    H.assert_true(history.undo() ~= nil, 'undo succeeds')
+    H.assert_eq(vim.fn.readfile(ws .. '/f.txt'), { 'KEEP' },
+      'undo spared the pre-existing file')
+    H.assert_false(fs.exists(ws .. '/f-copy.txt'),
+      'undo removed only the pasted copy')
+  end)
+
   H.it('an empty prompt answer skips the entry and reports it (T-013/D8a)', function()
     local sb = H.sandbox()
     H.mkfile(sb.root, 'f.txt', { 'f' })
