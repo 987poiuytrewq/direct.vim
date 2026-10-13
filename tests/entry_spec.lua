@@ -1,0 +1,315 @@
+-- tests/entry_spec.lua -- P4 entry points: the public API + guard (T-024), the
+-- command surface + BufEnter intercept (T-025), and the ftplugin mappings
+-- (T-026).
+--
+-- Scope (spec section 6, 7 B7/B8/B12, 11.3 D10, AC4/AC13):
+--   * all nine commands exist with the exact nargs/range/complete of the retired
+--     Vimscript entry point;
+--   * `:DirectList {dir}` opens a direct buffer with the correct listing, and the
+--     `BufEnter` intercept converts a non-direct directory buffer to
+--     `filetype=direct` -- a dead predicate would fail this file;
+--   * `:write` in a direct buffer runs the sync (the buffer-local
+--     `BufWriteCmd <buffer> DirectSync`, section 6);
+--   * the guarded commands (`undo`, `redo`, `yank`, no-arg `paste`, `paste_as`)
+--     notify `direct: <cmd> can only be used in a direct buffer` and change
+--     nothing outside a direct buffer, while `:DirectPaste {dir}` pastes into
+--     that directory untouched by the guard;
+--   * the global `-` and all nine buffer-local mappings resolve to their
+--     commands by default, `map_default_keys = false` installs none of them, and
+--     no mapping's rhs calls into the retired Vimscript function.
+--
+-- Modules are required INSIDE the `it` bodies: the harness forgets every
+-- `direct.*` module and re-sources `plugin/direct.lua` at each file boundary
+-- (reviewer B7), so a chunk-time table would be stale relative to the table the
+-- reloaded command surface uses.
+--
+-- The retired Vimscript ftplugin (P6/T-036) installed its own maps on the same
+-- keys; under the default configuration `ftplugin/direct.lua` overwrote all
+-- nine of them, and the file has now been removed. The opt-out assertions at
+-- the end of this file are therefore scoped to the mappings `ftplugin/direct.lua`
+-- itself owns (all `<Cmd>`-based).
+
+local H = require('tests.support.harness')
+
+-- The retired Vimscript function-call prefix, built at runtime so this file
+-- never contains the literal token the repo-wide audit (T-037) forbids.
+local RETIRED = 'direct' .. '#'
+
+local function clean_buffers()
+  pcall(vim.cmd, '%bwipeout!')
+end
+
+-- buf_maps(bufnr, mode) -> { [lhs] = rhs } for the buffer-local mappings.
+local function buf_maps(bufnr, mode)
+  local by_lhs = {}
+  for _, m in ipairs(vim.api.nvim_buf_get_keymap(bufnr, mode)) do
+    by_lhs[m.lhs] = m.rhs
+  end
+  return by_lhs
+end
+
+-- global_map(lhs) -> the normal-mode GLOBAL mapping for lhs, or nil. Uses
+-- `nvim_get_keymap` (global set only) so a buffer-local mapping of the same lhs
+-- can never masquerade as the global one.
+local function global_map(lhs)
+  for _, m in ipairs(vim.api.nvim_get_keymap('n')) do
+    if m.lhs == lhs then
+      return m
+    end
+  end
+  return nil
+end
+
+local function enter_buffer_named(path)
+  vim.cmd('enew')
+  vim.api.nvim_buf_set_name(0, path)
+end
+
+local EXPECTED_N = {
+  ['<CR>'] = '<Cmd>lua require("direct").open()<CR>',
+  ['-'] = '<Cmd>lua require("direct").open("../")<CR>',
+  ['u'] = '<Cmd>DirectUndo<CR>',
+  ['<C-R>'] = '<Cmd>DirectRedo<CR>',
+  ['yy'] = '<Cmd>DirectYank<CR>',
+  ['Y'] = '<Cmd>DirectYank<CR>',
+  ['p'] = '<Cmd>DirectPaste<CR>',
+  ['P'] = '<Cmd>DirectPaste<CR>',
+}
+
+local EXPECTED_V = {
+  ['y'] = '<Cmd>lua require("direct").yank(vim.fn.line("v"), vim.fn.line("."))<CR>',
+}
+
+local EXPECTED_CMDS = {
+  DirectList = { nargs = '1', complete = 'dir' },
+  DirectListBuffer = { nargs = '0' },
+  DirectListCwd = { nargs = '0' },
+  DirectSync = { nargs = '0' },
+  DirectUndo = { nargs = '0' },
+  DirectRedo = { nargs = '0' },
+  DirectYank = { nargs = '0', range = '.' },
+  DirectPaste = { nargs = '?', complete = 'dir' },
+  DirectPasteAs = { nargs = '1', complete = 'file' },
+}
+
+H.describe('entry: command surface (T-025)', function()
+  H.it('the nine commands exist with their exact nargs/range/complete (T-025)', function()
+    local cmds = vim.api.nvim_get_commands({ builtin = false })
+    for name, want in pairs(EXPECTED_CMDS) do
+      local got = cmds[name]
+      H.assert_true(got ~= nil, name .. ' is registered')
+      if got then
+        H.assert_eq(got.nargs, want.nargs, name .. '.nargs')
+        H.assert_eq(got.complete, want.complete, name .. '.complete')
+        H.assert_eq(got.range, want.range, name .. '.range')
+      end
+    end
+  end)
+
+  H.it(':DirectList {dir} opens a direct buffer with the correct listing (T-025)', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkdir(ws, 'sub')
+    H.mkfile(ws, 'a.txt', { 'a' })
+
+    vim.cmd('DirectList ' .. vim.fn.fnameescape(ws))
+
+    H.assert_eq(vim.bo.filetype, 'direct', ':DirectList sets filetype=direct')
+    H.assert_eq(vim.bo.buftype, 'acwrite', 'and buftype=acwrite')
+    H.assert_buf_eq({ 'sub/', 'a.txt' })
+  end)
+
+  H.it(':write in a direct buffer runs the sync and clears modified (section 6 / AC4)', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkfile(ws, 'a.txt', { 'a' })
+    require('direct').list(ws)
+    local buf = vim.api.nvim_get_current_buf()
+
+    -- Add an entry the filesystem does not have yet, then write.
+    local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    lines[#lines + 1] = 'new.txt'
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+    H.assert_true(vim.bo[buf].modified, 'the buffer is dirty before the write')
+
+    vim.cmd('write')
+
+    H.assert_true(vim.uv.fs_stat(vim.fs.joinpath(ws, 'new.txt')) ~= nil,
+      'the write routed to the sync and created new.txt')
+    H.assert_false(vim.bo[buf].modified, 'the write cleared modified')
+  end)
+
+  H.it('the BufEnter intercept is registered and converts a directory buffer (T-025)', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local dir = H.mkdir(sb.root, 'dir')
+    H.mkfile(dir, 'b.txt', { 'b' })
+
+    local registered = false
+    for _, au in ipairs(vim.api.nvim_get_autocmds({ group = 'direct', event = 'BufEnter' })) do
+      if au.pattern == '*' then
+        registered = true
+      end
+    end
+    H.assert_true(registered, 'the BufEnter intercept is registered in the direct augroup')
+
+    enter_buffer_named(dir)
+    H.assert_true(vim.bo.filetype ~= 'direct', 'sanity: the directory buffer is not direct yet')
+    vim.api.nvim_exec_autocmds('BufEnter', {})
+    H.assert_eq(vim.bo.filetype, 'direct', 'the intercept converted the buffer')
+    H.assert_buf_eq({ 'b.txt' })
+  end)
+
+  H.it('the intercept leaves an unnamed buffer and a regular file buffer alone (T-025)', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local file = H.mkfile(sb.root, 'plain.txt', { 'p' })
+
+    -- Unnamed: the intercept must not list anything.
+    vim.cmd('enew')
+    vim.api.nvim_exec_autocmds('BufEnter', {})
+    H.assert_true(vim.bo.filetype ~= 'direct', 'an unnamed buffer is not converted')
+
+    -- A regular file: the predicate's is_dir clause must stop the intercept
+    -- before it tries to list a non-directory (which would notify).
+    clean_buffers()
+    enter_buffer_named(file)
+    H.capture_messages()
+    vim.api.nvim_exec_autocmds('BufEnter', {})
+    H.assert_true(vim.bo.filetype ~= 'direct', 'a file buffer is not converted')
+    H.assert_false(H.messages():find('cannot list', 1, true) ~= nil,
+      'the intercept attempted no listing for a regular file')
+  end)
+end)
+
+H.describe('entry: direct-buffer guard (T-024)', function()
+  H.it('the public API exposes every facade function (T-024)', function()
+    local api = require('direct')
+    for _, name in ipairs({ 'setup', 'list', 'list_buffer', 'list_cwd', 'open',
+      'sync', 'undo', 'redo', 'yank', 'paste', 'paste_as' }) do
+      H.assert_eq(type(api[name]), 'function', 'direct.' .. name .. ' is a function')
+    end
+  end)
+
+  H.it('guarded commands notify and change nothing outside a direct buffer (T-024)', function()
+    local cases = {
+      { name = 'DirectUndo', call = function(api) return api.undo() end },
+      { name = 'DirectRedo', call = function(api) return api.redo() end },
+      { name = 'DirectYank', call = function(api) return api.yank(1, 1) end },
+      { name = 'DirectPaste', call = function(api) return api.paste() end },
+      { name = 'DirectPasteAs', call = function(api) return api.paste_as('x.txt') end },
+    }
+    for _, case in ipairs(cases) do
+      clean_buffers()
+      local sb = H.sandbox()
+      local file = H.mkfile(sb.root, 'plain.txt', { 'keep' })
+      enter_buffer_named(file)
+      vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'keep' })
+      H.assert_eq(vim.bo.filetype, '', 'sanity: the buffer is not a direct buffer')
+
+      H.capture_messages()
+      local result = case.call(require('direct'))
+
+      H.assert_nil(result, case.name .. ' returns nil when guarded')
+      H.assert_notified(case.name .. ' can only be used in a direct buffer')
+      H.assert_buf_eq({ 'keep' })
+    end
+  end)
+
+  H.it(':DirectPaste {dir} is exempt: it pastes outside a direct buffer and leaves it untouched (T-024)', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    H.mkfile(sb.root, 'src.txt', { 's' })
+    H.assert_true(require('direct.register').yank({ vim.fs.joinpath(sb.root, 'src.txt') }) == true,
+      'the register holds src.txt')
+    local dst = H.mkdir(sb.root, 'dst')
+    local file = H.mkfile(sb.root, 'plain.txt', { 'keep' })
+    enter_buffer_named(file)
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'keep' })
+    H.assert_eq(vim.bo.filetype, '', 'sanity: the buffer is not a direct buffer')
+
+    H.capture_messages()
+    local result = require('direct').paste(dst)
+
+    H.assert_true(result ~= nil, 'the {dir} form pastes without the direct-buffer guard')
+    H.assert_true(vim.uv.fs_stat(vim.fs.joinpath(dst, 'src.txt')) ~= nil,
+      'src.txt was pasted into {dir}')
+    H.assert_buf_eq({ 'keep' })
+    H.assert_false(H.messages():find('can only be used in a direct buffer', 1, true) ~= nil,
+      'the {dir} form never raised the guard notice')
+  end)
+end)
+
+H.describe('entry: default mappings (T-026)', function()
+  H.it('the global - is installed by default and resolves to DirectListBuffer (T-026)', function()
+    clean_buffers()
+    require('direct.config').setup({ map_default_keys = true })
+    local m = global_map('-')
+    H.assert_true(m ~= nil, 'the global - mapping exists')
+    if m then
+      H.assert_eq(m.rhs, ':<C-U>DirectListBuffer<CR>', 'the global - lists the buffer directory')
+    end
+  end)
+
+  H.it('all nine buffer-local mappings resolve to their commands and none call the retired Vimscript (T-026)', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkfile(ws, 'a.txt', { 'a' })
+    require('direct.config').setup({ map_default_keys = true })
+    require('direct').list(ws)
+    local buf = vim.api.nvim_get_current_buf()
+    H.assert_eq(vim.bo[buf].filetype, 'direct')
+
+    local normal = buf_maps(buf, 'n')
+    local visual = buf_maps(buf, 'v')
+    for lhs, rhs in pairs(EXPECTED_N) do
+      H.assert_eq(normal[lhs], rhs, 'normal-mode ' .. lhs)
+    end
+    for lhs, rhs in pairs(EXPECTED_V) do
+      H.assert_eq(visual[lhs], rhs, 'visual-mode ' .. lhs)
+    end
+
+    for _, maps in ipairs({ normal, visual }) do
+      for lhs, rhs in pairs(maps) do
+        H.assert_false(rhs:find(RETIRED, 1, true) ~= nil,
+          'the rhs of ' .. lhs .. ' must not call the retired Vimscript function')
+      end
+    end
+  end)
+
+  H.it('map_default_keys=false installs no global - and no Lua buffer-local mappings (T-026)', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkfile(ws, 'a.txt', { 'a' })
+
+    require('direct.config').setup({ map_default_keys = false })
+    H.assert_true(global_map('-') == nil, 'the opt-out removes the global - mapping')
+
+    require('direct').list(ws)
+    local buf = vim.api.nvim_get_current_buf()
+    H.assert_eq(vim.bo[buf].filetype, 'direct', 'listing still works without mappings')
+
+    -- Scoped to OUR ftplugin's `<Cmd>`-based mappings: the retired Vimscript
+    -- ftplugin (P6/T-036) is gone, so a key absent here is simply not mapped.
+    local normal = buf_maps(buf, 'n')
+    local visual = buf_maps(buf, 'v')
+    for lhs in pairs(EXPECTED_N) do
+      local rhs = normal[lhs]
+      if rhs ~= nil then
+        H.assert_false(rhs:find('<Cmd>', 1, true) ~= nil,
+          'the opt-out must not install the Lua mapping for normal ' .. lhs)
+      end
+    end
+    for lhs in pairs(EXPECTED_V) do
+      local rhs = visual[lhs]
+      if rhs ~= nil then
+        H.assert_false(rhs:find('require("direct")', 1, true) ~= nil,
+          'the opt-out must not install the Lua mapping for visual ' .. lhs)
+      end
+    end
+  end)
+end)
