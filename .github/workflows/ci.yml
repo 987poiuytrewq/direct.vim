@@ -1,5 +1,16 @@
 name: CI
 
+# Unfiltered `push` plus `pull_request` means every push produces two workflow
+# runs: for commit 847bf9e those were run 38391401218 (`push`) and run
+# 38391401792 (`pull_request`). The duplication is intentional and accepted: a
+# push to a branch that has no PR must still trigger a run -- that is how the
+# red-run self-test was performed -- so narrowing `push` to `master` was
+# rejected. Suppressing the pair with a `concurrency:` block was considered and
+# rejected too: the `push` run is keyed on `refs/heads/lua-migration` and the
+# `pull_request` run on `refs/pull/1/merge`, so they are different concurrency
+# groups and both would still run; forcing them into one group would cancel one
+# of two simultaneously-starting runs, replacing two green checks with one
+# green plus one grey `cancelled`.
 on:
   push:
   pull_request:
@@ -20,13 +31,20 @@ jobs:
       - name: Install Neovim
         # `version: stable` is resolved dynamically at run time, so the exact
         # Neovim build CI exercises can drift without any change to this file.
-        # This commit SHA is pinned deliberately rather than tracking the
-        # movable `v1.6.1` tag: the pin is auditable, reproducible, and only
-        # changes through an explicit edit.
+        # This commit SHA is pinned deliberately, for auditability, instead of
+        # referencing the `v1.6.1` tag: `v1.6.1` is a lightweight tag that
+        # resolves straight to this same commit, so a reviewer can verify the
+        # pin, and it changes only through an explicit edit.
         uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1.6.1
         with:
           neovim: true
           version: stable
+          # Version-floor gap: the plugin supports `neovim >= 0.11`, but this
+          # job exercises only whatever `stable` resolves to at run time (NVIM
+          # v0.12.6 on the 847bf9e runs). The 0.11 floor is therefore NOT
+          # covered by this workflow: a green badge means "passes on today's
+          # stable", not "passes the supported floor". Treat the floor as
+          # unverified until a job pins 0.11 explicitly.
 
       - name: Show the resolved Neovim version
         run: nvim --version | head -n 1
