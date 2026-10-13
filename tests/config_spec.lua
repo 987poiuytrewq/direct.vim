@@ -72,4 +72,43 @@ H.describe('config', function()
     H.assert_false(after.install_deferred() == true, 'setup() suppresses the deferred install')
     H.assert_eq(vim.fn.maparg('-', 'n'), '', 'no global mapping under map_default_keys=false')
   end)
+
+  -- P2 (Greptile, PR #1): clear_mappings used to delete the global `-`
+  -- unconditionally, so setup({ map_default_keys = false }) removed a mapping
+  -- the USER installed even when the plugin never installed one.
+  H.it('setup({ map_default_keys = false }) spares a user-owned global - mapping (P2)', function()
+    local config = fresh_config()
+    config.clear_mappings() -- remove whatever the plugin installed at the file boundary
+    vim.keymap.set('n', '-', ':echo "user"<CR>', {})
+    -- Reload so _installed reconciles against the CURRENT keymap: a dash that
+    -- is not the plugin's rhs is not ours to remove.
+    package.loaded['direct.config'] = nil
+    config = require('direct.config')
+    H.assert_false(config._installed, 'premise: the plugin owns nothing here')
+    config.setup({ map_default_keys = false })
+    H.assert_eq(vim.fn.maparg('-', 'n'), ':echo "user"<CR>',
+      'the user mapping survives setup(map_default_keys=false)')
+    vim.keymap.del('n', '-')
+  end)
+
+  H.it('setup({ map_default_keys = false }) still removes the mapping the plugin installed (P2)', function()
+    local config = fresh_config()
+    config.clear_mappings()
+    config.setup({ map_default_keys = true })
+    H.assert_true(vim.fn.maparg('-', 'n') ~= '', 'premise: the plugin mapping is installed')
+    config.setup({ map_default_keys = false })
+    H.assert_eq(vim.fn.maparg('-', 'n'), '', 'the plugin mapping is removed')
+  end)
+
+  H.it('clear_mappings with nothing installed is a harmless no-op (P2)', function()
+    local config = fresh_config()
+    config.clear_mappings()
+    vim.keymap.set('n', '-', ':echo "user"<CR>', {})
+    package.loaded['direct.config'] = nil
+    config = require('direct.config')
+    H.assert_false(config._installed, 'premise: nothing was installed')
+    H.assert_true(config.clear_mappings() == true, 'returns true and does not raise')
+    H.assert_eq(vim.fn.maparg('-', 'n'), ':echo "user"<CR>', 'the user dash is untouched')
+    vim.keymap.del('n', '-')
+  end)
 end)

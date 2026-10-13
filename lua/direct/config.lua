@@ -34,9 +34,15 @@ M.GLOBAL_MAP = {
 -- Lifecycle state. `_setup_called` short-circuits the VimEnter handler once the
 -- user has configured the plugin; `_vim_enter_installed` makes that handler
 -- one-shot.
+--
+-- `_installed` is reconciled against the keymap at load (P2, Greptile PR #1):
+-- the module is re-required across sessions and at runtime boundaries while a
+-- `-` mapping may exist that the plugin never installed (the user's own, or
+-- another plugin's), and `clear_mappings` must only remove a mapping the
+-- plugin owns. Ownership is decided by rhs identity, never by lhs alone.
 M._setup_called = false
 M._vim_enter_installed = false
-M._installed = false
+M._installed = vim.fn.maparg(M.GLOBAL_MAP.lhs, M.GLOBAL_MAP.mode) == M.GLOBAL_MAP.rhs
 
 function M.install_mappings()
   if not M.options.map_default_keys then
@@ -52,8 +58,12 @@ function M.install_mappings()
 end
 
 function M.clear_mappings()
-  pcall(vim.keymap.del, M.GLOBAL_MAP.mode, M.GLOBAL_MAP.lhs)
-  M._installed = false
+  -- Only remove the global `-` when this plugin installed it (P2, Greptile
+  -- PR #1): a user-owned mapping with a different rhs must survive.
+  if M._installed then
+    pcall(vim.keymap.del, M.GLOBAL_MAP.mode, M.GLOBAL_MAP.lhs)
+    M._installed = false
+  end
   return true
 end
 
