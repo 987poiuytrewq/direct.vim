@@ -150,9 +150,14 @@ H.describe('fs', function()
   -- P1 (Greptile, PR #1): copy_tree used to copy only 'file'/'directory' stats
   -- and silently skip everything else while still returning true, and
   -- rename()'s EXDEV fallback then removed the source tree -- so a cross-device
-  -- move destroyed symlinks/FIFOs/sockets with no warning. The pre-scan must
-  -- refuse, and must do so BEFORE mkdirp(dst), so no partial destination exists.
-  H.it('copy_tree refuses a tree holding a symlink before writing anything (P1)', function()
+  -- move destroyed symlinks/FIFOs/sockets with no warning.
+  --
+  -- P1 follow-up (review): the refusal is the DESTRUCTIVE caller's contract, so
+  -- it is now REQUESTED (`{ require_complete = true }`) by the caller that
+  -- removes the source after a successful copy -- rename's EXDEV fallback, which
+  -- the next test pins end to end. The refusal still happens BEFORE mkdirp(dst),
+  -- so no partial destination is left behind.
+  H.it('copy_tree with require_complete refuses a tree holding a symlink before writing anything (P1)', function()
     local sb = H.sandbox()
     local root = H.mkdir(sb.root, 'tree')
     H.mkfile(root, 'a.txt', { 'a' })
@@ -162,11 +167,38 @@ H.describe('fs', function()
     pcall(vim.uv.fs_symlink, root .. '/a.txt', root .. '/sub/link')
     H.assert_true(vim.uv.fs_lstat(root .. '/sub/link') ~= nil, 'nested symlink created')
 
-    local ok, err = fs.copy_tree(root, sb.root .. '/dst')
+    local ok, err = fs.copy_tree(root, sb.root .. '/dst', { require_complete = true })
     H.assert_nil(ok, 'copy_tree refuses a tree holding a symlink')
     H.assert_true(type(err) == 'string' and err:find('sub/link', 1, true) ~= nil,
       'the error names the offending entry: ' .. tostring(err))
     H.assert_false(fs.exists(sb.root .. '/dst'), 'no partial destination left behind')
+    H.assert_fs_eq(root, { 'a.txt', 'sub/', 'sub/b.txt', 'sub/link@' },
+      'the source tree is untouched')
+  end)
+
+  -- P1 follow-up (review, Greptile P1): the same tree copied by a caller that
+  -- destroys NOTHING (a yank, a paste) must not fail -- failing it broke an
+  -- ordinary yank of any tree that merely CONTAINS a symlink. Everything
+  -- reproducible is copied, the symlink is left out, and the omission is
+  -- REPORTED as the second return value instead of being dropped silently.
+  H.it('copy_tree without require_complete copies what it can and reports the symlink it skipped (P1)', function()
+    local sb = H.sandbox()
+    local root = H.mkdir(sb.root, 'tree')
+    H.mkfile(root, 'a.txt', { 'a' })
+    H.mkdir(root, 'sub')
+    H.mkfile(root, 'sub/b.txt', { 'b' })
+    pcall(vim.uv.fs_symlink, root .. '/a.txt', root .. '/sub/link')
+    H.assert_true(vim.uv.fs_lstat(root .. '/sub/link') ~= nil, 'nested symlink created')
+
+    local dst = sb.root .. '/dst'
+    local ok, skipped = fs.copy_tree(root, dst)
+    H.assert_true(ok == true, 'a copy that destroys nothing succeeds: ' .. tostring(skipped))
+    H.assert_true(type(skipped) == 'table' and #skipped == 1,
+      'exactly one skipped entry is reported: ' .. vim.inspect(skipped))
+    H.assert_eq(skipped[1].path, root .. '/sub/link', 'the report names the symlink')
+    H.assert_eq(skipped[1].kind, 'symlink', 'the report names what the entry is')
+    -- Everything reproducible is copied; the symlink is the only omission.
+    H.assert_fs_eq(dst, { 'a.txt', 'sub/', 'sub/b.txt' }, 'the copyable entries are copied')
     H.assert_fs_eq(root, { 'a.txt', 'sub/', 'sub/b.txt', 'sub/link@' },
       'the source tree is untouched')
   end)
@@ -192,7 +224,7 @@ H.describe('fs', function()
     H.assert_fs_eq(root, { 'a.txt', 'link@' }, 'nothing was destroyed')
   end)
 
-  H.it('copy_tree refuses a FIFO when one can be created (P1)', function()
+  H.it('copy_tree with require_complete refuses a FIFO when one can be created (P1)', function()
     local sb = H.sandbox()
     local root = H.mkdir(sb.root, 'tree')
     H.mkfile(root, 'a.txt', { 'a' })
@@ -205,7 +237,7 @@ H.describe('fs', function()
     if st == nil or st.type ~= 'fifo' then
       return
     end
-    local ok, err = fs.copy_tree(root, sb.root .. '/dst')
+    local ok, err = fs.copy_tree(root, sb.root .. '/dst', { require_complete = true })
     H.assert_nil(ok, 'copy_tree refuses a FIFO')
     H.assert_true(type(err) == 'string' and err:find('pipe', 1, true) ~= nil,
       'the error names the FIFO: ' .. tostring(err))
@@ -219,9 +251,9 @@ H.describe('fs', function()
   -- copy then returned TRUE with the locked subtree silently missing (probe at
   -- 51bb146), and on the EXDEV move path the source is removed afterwards: a
   -- silent destroy that the refusal exists to prevent. The pre-scan therefore
-  -- probes the scan itself and refuses up front, naming the entry, before
-  -- mkdirp(dst). Skipped under root, which ignores permission bits.
-  H.it('copy_tree refuses an unreadable directory before writing anything (P1)', function()
+  -- probes the scan itself and names the entry, before mkdirp(dst).
+  -- Skipped under root, which ignores permission bits.
+  H.it('copy_tree with require_complete refuses an unreadable directory before writing anything (P1)', function()
     if vim.uv.getuid ~= nil and vim.uv.getuid() == 0 then
       return
     end
@@ -232,7 +264,7 @@ H.describe('fs', function()
     H.mkfile(locked, 'inner.txt', { 'i' })
     H.assert_true(vim.uv.fs_chmod(locked, 0) == true, 'locked the directory')
 
-    local ok, err = fs.copy_tree(root, sb.root .. '/dst')
+    local ok, err = fs.copy_tree(root, sb.root .. '/dst', { require_complete = true })
     -- Restore 0700 before asserting so a failed assertion still leaves the
     -- sandbox removable by the harness teardown.
     vim.uv.fs_chmod(locked, 448)
@@ -241,6 +273,35 @@ H.describe('fs', function()
     H.assert_true(type(err) == 'string' and err:find('locked', 1, true) ~= nil,
       'the error names the offending entry: ' .. tostring(err))
     H.assert_false(fs.exists(sb.root .. '/dst'), 'no partial destination left behind')
+    H.assert_fs_eq(root, { 'a.txt', 'locked/', 'locked/inner.txt' },
+      'the source is untouched')
+  end)
+
+  -- P1 follow-up (review): a caller that destroys nothing gets a best-effort
+  -- copy. The locked subtree is REPORTED, never silently short: an empty
+  -- `locked/` standing in for contents that could not be read would hide the
+  -- omission instead of surfacing it.
+  H.it('copy_tree without require_complete reports an unreadable directory it skipped (P1)', function()
+    if vim.uv.getuid ~= nil and vim.uv.getuid() == 0 then
+      return
+    end
+    local sb = H.sandbox()
+    local root = H.mkdir(sb.root, 'tree')
+    H.mkfile(root, 'a.txt', { 'a' })
+    local locked = H.mkdir(root, 'locked')
+    H.mkfile(locked, 'inner.txt', { 'i' })
+    H.assert_true(vim.uv.fs_chmod(locked, 0) == true, 'locked the directory')
+
+    local dst = sb.root .. '/dst'
+    local ok, skipped = fs.copy_tree(root, dst)
+    vim.uv.fs_chmod(locked, 448)
+
+    H.assert_true(ok == true, 'a copy that destroys nothing succeeds: ' .. tostring(skipped))
+    H.assert_true(type(skipped) == 'table' and #skipped == 1,
+      'exactly one skipped entry is reported: ' .. vim.inspect(skipped))
+    H.assert_eq(skipped[1].path, root .. '/locked', 'the report names the locked directory')
+    H.assert_fs_eq(dst, { 'a.txt' },
+      'the readable entries are copied and no stand-in for the locked tree is created')
     H.assert_fs_eq(root, { 'a.txt', 'locked/', 'locked/inner.txt' },
       'the source is untouched')
   end)

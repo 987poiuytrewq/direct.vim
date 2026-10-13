@@ -87,6 +87,34 @@ H.describe('register', function()
     H.assert_eq(count, 2, 'exactly one Yanked line per source')
   end)
 
+  -- P1 follow-up (review, Greptile P1): a yank destroys nothing, so a tree that
+  -- merely CONTAINS an entry the copy cannot reproduce (a symlink) must not fail
+  -- -- refusing it broke the ordinary `yy` of any such tree, and with it every
+  -- delete path, which yanks the removed paths before removing them. The entry
+  -- is left out of the register copy and the omission is REPORTED.
+  H.it('a yank of a tree holding a symlink succeeds and reports the skipped entry (P1)', function()
+    local sb = H.sandbox()
+    local root = H.mkdir(sb.root, 'tree')
+    H.mkfile(root, 'a.txt', { 'a' })
+    H.mkdir(root, 'sub')
+    H.mkfile(root, 'sub/b.txt', { 'b' })
+    pcall(vim.uv.fs_symlink, root .. '/a.txt', root .. '/sub/link')
+    H.assert_true(vim.uv.fs_lstat(root .. '/sub/link') ~= nil, 'nested symlink created')
+
+    H.capture_messages()
+    local ok, err = reg.yank({ root })
+    H.assert_true(ok == true, 'the yank succeeds: ' .. tostring(err))
+    H.assert_notified('Skipped 1', vim.log.levels.WARN)
+
+    -- The register copy holds everything reproducible, with no stand-in for
+    -- what could not be copied.
+    local dst = sorted_dst(sb, { root })
+    H.assert_fs_eq(dst, { 'tree/', 'tree/a.txt', 'tree/sub/', 'tree/sub/b.txt' },
+      'the yank stored what it could copy')
+    H.assert_fs_eq(root, { 'a.txt', 'sub/', 'sub/b.txt', 'sub/link@' },
+      'the source is untouched, symlink included')
+  end)
+
   H.it('digest is stable across orderings and a re-yank replaces the entry (T-016/R7/D15)', function()
     local sb = H.sandbox()
     H.mkfile(sb.root, 'a.txt', { 'a' })
@@ -673,6 +701,30 @@ H.describe('register', function()
     H.assert_eq(last, ws .. '/tree', 'the directory entry is the last pasted one')
     H.assert_fs_eq(ws, { 'tree/', 'tree/deep.txt', 'tree/sub.txt' },
       'the whole tree pasted')
+  end)
+
+  -- P1 follow-up (review): the skip report is not yank-only. A paste destroys
+  -- nothing either, and its source (the register dir) is persisted, untrusted
+  -- data -- a legacy entry can hold an entry the copy cannot reproduce. It must
+  -- warn with the count rather than pasting short in silence. The copy seam is
+  -- stubbed so the report path is pinned without depending on how such an entry
+  -- got into the register.
+  H.it('a paste whose tree copy skipped an entry warns with the count (P1)', function()
+    local sb = H.sandbox()
+    H.mkdir(sb.root, 'tree')
+    H.mkfile(sb.root, 'tree/a.txt', { 'a' })
+    H.assert_true(reg.yank({ sb.root .. '/tree' }) == true, 'yank the tree')
+    local ws = H.mkdir(sb.root, 'ws')
+
+    local restore = H.stub(fs, 'copy_tree', function()
+      return true, { { path = '/register/tree/link', kind = 'symlink' } }
+    end)
+    H.capture_messages()
+    local last, err = reg.paste(ws)
+    restore()
+
+    H.assert_true(last ~= nil, 'the paste succeeds: ' .. tostring(err))
+    H.assert_notified('Skipped 1', vim.log.levels.WARN)
   end)
 
   H.it('the re-list hook fires only for the no-arg paste form and tolerates nil (B7/N6)', function()

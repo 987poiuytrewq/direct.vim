@@ -123,12 +123,21 @@ function M.yank(sources)
     end
   end
   for _, src in ipairs(sources) do
-    local ok, yerr = M._yank_one(dst, src)
+    -- _yank_one returns true[, skipped] on success and nil, err on failure.
+    local ok, skipped = M._yank_one(dst, src)
     if not ok then
-      return nil, yerr
+      return nil, skipped
     end
     -- B15: the raw source path, one line per source, in input order.
     M.ui.notify('Yanked ' .. src, vim.log.levels.INFO)
+    -- P1 follow-up (review): a yank destroys nothing, so an entry the copy
+    -- cannot reproduce (a symlink, a FIFO, an unreadable directory) is skipped
+    -- rather than failing the yank -- but it must not vanish silently either.
+    local n = skipped ~= nil and #skipped or 0
+    if n > 0 then
+      M.ui.notify('Skipped ' .. n .. ' ' .. (n == 1 and 'entry' or 'entries')
+        .. ' that cannot be copied: ' .. src, vim.log.levels.WARN)
+    end
   end
   local ok, werr = pcall(vim.fn.writefile, { dst }, M.paths.join(dir, 'content'))
   if not ok then
@@ -137,10 +146,13 @@ function M.yank(sources)
   return true
 end
 
--- _yank_one(dst, src) -> true | nil, err. Copies one source into the register
--- entry directory, replacing an existing entry of the same name: files via
--- copy_file (which overwrites), directories by removing the stale entry and
--- re-copying the tree so no stale members survive a re-yank.
+-- _yank_one(dst, src) -> true[, skipped] | nil, err. Copies one source into the
+-- register entry directory, replacing an existing entry of the same name: files
+-- via copy_file (which overwrites), directories by removing the stale entry and
+-- re-copying the tree so no stale members survive a re-yank. A directory copy is
+-- best-effort (copy_tree without require_complete): the sources stay in place,
+-- so an entry that cannot be reproduced is reported to the caller (`skipped`)
+-- instead of failing the yank.
 function M._yank_one(dst, src)
   local st = M.fs.stat(src)
   if not st then

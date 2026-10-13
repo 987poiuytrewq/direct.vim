@@ -478,9 +478,18 @@ function M.Paste(src, dst, src_names, dst_names)
             last = full_dst
             copied[#copied + 1] = { src = pair.src, dst = pair.dst }
           elseif st.type == 'directory' then
-            local ok, err = M.fs.copy_tree(full_src, full_dst)
+            -- P1 follow-up (review): a paste destroys nothing, so an entry the
+            -- copy cannot reproduce is skipped and REPORTED (the register is
+            -- persisted, untrusted data) rather than failing the paste or
+            -- vanishing silently.
+            local ok, skipped = M.fs.copy_tree(full_src, full_dst)
             if not ok then
-              return nil, err
+              return nil, skipped
+            end
+            local n = skipped ~= nil and #skipped or 0
+            if n > 0 then
+              M.ui.notify('Skipped ' .. n .. ' ' .. (n == 1 and 'entry' or 'entries')
+                .. ' that cannot be copied: ' .. full_src, vim.log.levels.WARN)
             end
             last = full_dst
             copied[#copied + 1] = { src = pair.src, dst = pair.dst }

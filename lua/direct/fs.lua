@@ -223,7 +223,11 @@ function M.rename(src, dst)
     return nil, err, code
   end
   if M.is_dir(src) then
-    local cok, cerr = M.copy_tree(src, dst)
+    -- The source is REMOVED below, so the copy must be complete: an entry it
+    -- could not reproduce must refuse the move instead of being destroyed
+    -- silently (P1; review follow-up moved the refusal from copy_tree's default
+    -- behaviour to this explicit request).
+    local cok, cerr = M.copy_tree(src, dst, { require_complete = true })
     if not cok then
       return nil, cerr
     end
@@ -257,103 +261,139 @@ function M.copy_file(src, dst)
   return nil, err, code
 end
 
--- uncopyable_entry(src) -> nil | path, kind [, err]. The first entry under `src`
--- that `copy_tree` cannot reproduce faithfully, or nil when every entry is a
--- regular file or a real directory. A symlink is uncopyable here: following it
--- (as the pre-P1 code did) silently turned the link into a copy of its target,
--- and cp -a style preservation is deliberately out of scope. Any other lstat
--- type (FIFO, socket, device) is uncopyable too; those entries used to be
--- skipped silently while copy_tree still returned true. Iteration goes through
--- M.list_dir so the walk is deterministic (D17); lstat never follows the final
--- component, which is what distinguishes a symlink from its target.
+-- scan_uncopyable(src) -> entries, err. Every entry under `src` that
+-- `copy_tree` cannot reproduce faithfully, in deterministic walk order (D17);
+-- each entry is `{ path = <source path>, kind = <what it is> }` and entries[1]
+-- is the first offender. A symlink is uncopyable: following it (as the pre-P1
+-- code did) silently turned the link into a copy of its target, and cp -a style
+-- preservation is deliberately out of scope. Any other lstat type (FIFO,
+-- socket, device) is uncopyable too; those entries used to be skipped silently
+-- while copy_tree still returned true. lstat never follows the final component,
+-- which is what distinguishes a symlink from its target.
 --
 -- A directory whose ENTRIES cannot be read is uncopyable as well. M.list_dir
 -- reports nil only for a non-directory: a scan that fails (EACCES) goes through
 -- `vim.fs.dir`, which yields nothing instead of raising, so the listing comes
 -- back EMPTY and the walk -- and the copy -- would treat the directory as
--- empty, silently dropping its contents; `rename`'s EXDEV fallback then makes
--- that permanent by removing the source. The walk therefore probes the scan
--- with fs_scandir and refuses up front, naming the entry and the real reason. A
--- failure from M.list_dir itself is returned as the third value (nil, nil, err)
--- so the caller refuses with that reason instead of reading it as "nothing
--- uncopyable".
-local function uncopyable_entry(src)
+-- empty, silently dropping its contents. The walk therefore probes the scan
+-- with fs_scandir, so such a directory is a named entry instead of reading as
+-- empty. A failure from M.list_dir itself is a hard error -- enumeration
+-- failed, which is not a property of one entry -- and comes back as `err`.
+local function walk_uncopyable(src, out)
   local names, err = M.list_dir(src)
   if not names then
-    return nil, nil, err
+    return err
   end
   for _, name in ipairs(names) do
     local path = M.join(src, name)
     local ok, lst = pcall(vim.uv.fs_lstat, path)
     if not ok or lst == nil then
-      return path, 'unreadable entry'
-    end
-    if lst.type == 'link' then
-      return path, 'symlink'
-    end
-    if lst.type == 'directory' then
+      out[#out + 1] = { path = path, kind = 'unreadable entry' }
+    elseif lst.type == 'link' then
+      out[#out + 1] = { path = path, kind = 'symlink' }
+    elseif lst.type == 'directory' then
       local scan, scan_err = vim.uv.fs_scandir(path)
-      if not scan then
-        return path, 'unreadable directory (' .. tostring(scan_err) .. ')'
-      end
-      -- Drain the handle: luv closes it at the end of iteration.
-      while vim.uv.fs_scandir_next(scan) ~= nil do end
-      local nested, kind, nested_err = uncopyable_entry(path)
-      if nested_err then
-        return nil, nil, nested_err
-      end
-      if nested then
-        return nested, kind
+      if scan == nil then
+        out[#out + 1] = { path = path,
+          kind = 'unreadable directory (' .. tostring(scan_err) .. ')' }
+      else
+        -- Drain the handle: luv closes it at the end of iteration.
+        while vim.uv.fs_scandir_next(scan) ~= nil do end
+        local nested_err = walk_uncopyable(path, out)
+        if nested_err then
+          return nested_err
+        end
       end
     elseif lst.type ~= 'file' then
-      return path, tostring(lst.type)
+      out[#out + 1] = { path = path, kind = tostring(lst.type) }
     end
   end
   return nil
 end
 
--- copy_tree(src, dst) -> true | nil, err. Recursive, hand-rolled (no `cp -r`),
--- with mkdir -p semantics. Every entry is copied as itself: a tree holding a
--- symlink, FIFO, socket or device is REFUSED (P1), because following or skipping
--- such an entry would not reproduce the tree and `rename`'s EXDEV fallback
--- removes the source after a successful copy -- a silently skipped entry would
--- be destroyed. The pre-scan runs BEFORE `mkdirp(dst)`, so a refusal leaves no
--- half-populated destination behind. Iteration goes through M.list_dir, so
--- ordering is deterministic (D17) and stubs on the module table are honoured.
-function M.copy_tree(src, dst)
-  if not M.is_dir(src) then
-    return nil, 'not a directory: ' .. tostring(src)
+local function scan_uncopyable(src)
+  local out = {}
+  local err = walk_uncopyable(src, out)
+  if err ~= nil then
+    return nil, err
   end
-  local bad, kind, scan_err = uncopyable_entry(src)
-  if scan_err then
-    return nil, scan_err
-  end
-  if bad then
-    return nil, 'cannot copy ' .. kind .. ': ' .. bad
-  end
-  local mok, merr = M.mkdirp(dst)
+  return out
+end
+
+-- copy_dir(from, to, skip) -> true | nil, err. The recursion behind copy_tree:
+-- `mkdir -p` the destination, then copy every entry the pre-scan did not mark
+-- uncopyable. A skipped tree is never descended into, so nothing stands in for
+-- what could not be read. Calls go through the module table (M.mkdirp,
+-- M.list_dir, M.stat, M.copy_file), so the S8 seam rule holds here too.
+local function copy_dir(from, to, skip)
+  local mok, merr = M.mkdirp(to)
   if not mok then
     return nil, merr
   end
-  local names = M.list_dir(src)
+  local names = M.list_dir(from)
   if not names then
-    return nil, 'cannot list: ' .. tostring(src)
+    return nil, 'cannot list: ' .. tostring(from)
   end
   for _, name in ipairs(names) do
-    local from = M.join(src, name)
-    local to = M.join(dst, name)
-    local st = M.stat(from)
-    if st and st.type == 'directory' then
-      local cok, cerr = M.copy_tree(from, to)
-      if not cok then
-        return nil, cerr
-      end
-    elseif st and st.type == 'file' then
-      local cok, cerr = M.copy_file(from, to)
-      if not cok then
-        return nil, cerr
+    local child_from = M.join(from, name)
+    if not skip[child_from] then
+      local child_to = M.join(to, name)
+      local st = M.stat(child_from)
+      if st and st.type == 'directory' then
+        local cok, cerr = copy_dir(child_from, child_to, skip)
+        if not cok then
+          return nil, cerr
+        end
+      elseif st and st.type == 'file' then
+        local cok, cerr = M.copy_file(child_from, child_to)
+        if not cok then
+          return nil, cerr
+        end
       end
     end
+  end
+  return true
+end
+
+-- copy_tree(src, dst[, opts]) -> true[, skipped] | nil, err. Recursive,
+-- hand-rolled (no `cp -r`), with mkdir -p semantics; iteration goes through
+-- M.list_dir, so ordering is deterministic (D17) and module-table stubs are
+-- honoured.
+--
+-- `opts.require_complete` is the DESTRUCTIVE caller's contract: the caller
+-- removes the source after a successful copy (`rename`'s EXDEV fallback), so a
+-- tree holding a symlink, FIFO, socket, device or unreadable directory is
+-- REFUSED, naming the first offending entry -- before `mkdirp(dst)`, so no
+-- half-populated destination is left behind -- because an entry that was
+-- skipped silently would become permanent when the source is removed.
+--
+-- Without it the copy is best-effort, which is what a yank or a paste needs:
+-- they destroy nothing, so an entry that merely cannot be reproduced must not
+-- fail the whole operation. Such entries are SKIPPED and returned as `skipped`
+-- (a list of `{ path, kind }`, nil when nothing was skipped) so the caller can
+-- report them; an uncopyable entry is never dropped silently.
+function M.copy_tree(src, dst, opts)
+  if not M.is_dir(src) then
+    return nil, 'not a directory: ' .. tostring(src)
+  end
+  local require_complete = opts ~= nil and opts.require_complete == true
+  local skipped, scan_err = scan_uncopyable(src)
+  if scan_err ~= nil then
+    return nil, scan_err
+  end
+  if require_complete and #skipped > 0 then
+    return nil, 'cannot copy ' .. skipped[1].kind .. ': ' .. skipped[1].path
+  end
+  local skip = {}
+  for _, entry in ipairs(skipped) do
+    skip[entry.path] = true
+  end
+  local cok, cerr = copy_dir(src, dst, skip)
+  if not cok then
+    return nil, cerr
+  end
+  if #skipped > 0 then
+    return true, skipped
   end
   return true
 end
