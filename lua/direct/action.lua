@@ -63,6 +63,13 @@ M.ui = require('direct.ui')
 
 local FIELD_SEPARATOR = '\t'
 
+-- Paste clash prompt cap (P1 follow-up): a `ui.prompt` that keeps answering a
+-- name that still exists -- a stub, or a broken/hostile prompt -- would
+-- otherwise spin forever and freeze the editor. After this many collisions the
+-- entry is SKIPPED and reported, exactly like a cancelled answer (D8a): the
+-- existing destination is never written to.
+M.PASTE_CLASH_ATTEMPTS = 10
+
 -- ---------------------------------------------------------------------------
 -- Helpers
 -- ---------------------------------------------------------------------------
@@ -431,10 +438,19 @@ function M.Paste(src, dst, src_names, dst_names)
         -- overwrote the existing file (copy_file) -- while `renames` recorded it
         -- as newly created, so Undo then deleted the whole destination,
         -- pre-existing members included. Re-prompt until the answer names a
-        -- path that does not exist; an empty, cancelled or separator-carrying
+        -- path that does not exist (at most PASTE_CLASH_ATTEMPTS times: a
+        -- prompt that stays stuck on an existing name is skipped, never spun
+        -- on); an empty, cancelled or separator-carrying
         -- answer (D8a/B3/N2) still skips the entry and leaves the existing
         -- destination untouched.
+        local attempts = 0
         while M.fs.exists(full_dst) do
+          attempts = attempts + 1
+          if attempts > M.PASTE_CLASH_ATTEMPTS then
+            M.ui.notify('Skipped ' .. pair.src, vim.log.levels.WARN)
+            skipped = true
+            break
+          end
           local entry_type = 'File'
           if not M.fs.is_file(full_dst) then
             entry_type = 'Directory'

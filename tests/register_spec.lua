@@ -39,6 +39,9 @@ local ui = require('direct.ui') -- chunk-time capture: the SAME table reg.M.ui u
 local paths = require('direct.paths')
 local fs = require('direct.fs')
 local history = require('direct.history')
+-- Review follow-up: the paste clash loop is capped, so the cap constant is the
+-- oracle for "the loop stopped instead of spinning".
+local action = require('direct.action')
 
 H.describe('register', function()
   local function register_dir(sb)
@@ -283,6 +286,38 @@ H.describe('register', function()
       'undo spared the pre-existing file')
     H.assert_false(fs.exists(ws .. '/f-copy.txt'),
       'undo removed only the pasted copy')
+  end)
+
+  -- P1 follow-up (review): the clash loop was unbounded. A prompt that keeps
+  -- answering a name that still exists (stubbed or broken) would spin forever
+  -- and freeze the editor, so the loop is capped; on exhaustion the entry is
+  -- skipped and reported, exactly like a cancelled prompt. The stub aborts past
+  -- a ceiling so the PRE-fix run fails an assertion instead of hanging.
+  H.it('a stuck clash prompt is capped: the entry is skipped, not retried forever (P1)', function()
+    local sb = H.sandbox()
+    H.mkfile(sb.root, 'f.txt', { 'reg-f' })
+    H.assert_true(reg.yank({ sb.root .. '/f.txt' }) == true, 'yank')
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkfile(ws, 'f.txt', { 'KEEP' })
+
+    H.capture_messages()
+    local prompts = 0
+    local restore = H.stub(ui, 'prompt', function()
+      prompts = prompts + 1
+      if prompts > 50 then
+        error('paste clash prompt exceeded its ceiling: the loop is unbounded', 0)
+      end
+      return 'f.txt' -- always the name that already exists
+    end)
+    local ok, perr = xpcall(function() reg.paste(ws) end, debug.traceback)
+    restore()
+    if not ok then error(perr, 0) end
+
+    H.assert_eq(prompts, action.PASTE_CLASH_ATTEMPTS,
+      'the loop stops at the attempt cap instead of spinning')
+    H.assert_eq(vim.fn.readfile(ws .. '/f.txt'), { 'KEEP' },
+      'the pre-existing file was never touched')
+    H.assert_notified('Skipped f.txt')
   end)
 
   H.it('an empty prompt answer skips the entry and reports it (T-013/D8a)', function()
