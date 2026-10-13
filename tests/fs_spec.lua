@@ -212,6 +212,39 @@ H.describe('fs', function()
     H.assert_false(fs.exists(sb.root .. '/dst'), 'no partial destination left behind')
   end)
 
+  -- P1 follow-up (review): `list_dir` returns nil only for a non-directory; a
+  -- directory whose entries cannot be read (EACCES) goes through `iter_dir`,
+  -- which swallows the scandir failure and yields nothing -- so `list_dir`
+  -- returned an EMPTY listing and the pre-scan saw "nothing uncopyable". The
+  -- copy then returned TRUE with the locked subtree silently missing (probe at
+  -- 51bb146), and on the EXDEV move path the source is removed afterwards: a
+  -- silent destroy that the refusal exists to prevent. The pre-scan therefore
+  -- probes the scan itself and refuses up front, naming the entry, before
+  -- mkdirp(dst). Skipped under root, which ignores permission bits.
+  H.it('copy_tree refuses an unreadable directory before writing anything (P1)', function()
+    if vim.uv.getuid ~= nil and vim.uv.getuid() == 0 then
+      return
+    end
+    local sb = H.sandbox()
+    local root = H.mkdir(sb.root, 'tree')
+    H.mkfile(root, 'a.txt', { 'a' })
+    local locked = H.mkdir(root, 'locked')
+    H.mkfile(locked, 'inner.txt', { 'i' })
+    H.assert_true(vim.uv.fs_chmod(locked, 0) == true, 'locked the directory')
+
+    local ok, err = fs.copy_tree(root, sb.root .. '/dst')
+    -- Restore 0700 before asserting so a failed assertion still leaves the
+    -- sandbox removable by the harness teardown.
+    vim.uv.fs_chmod(locked, 448)
+
+    H.assert_nil(ok, 'copy_tree refuses an unreadable directory')
+    H.assert_true(type(err) == 'string' and err:find('locked', 1, true) ~= nil,
+      'the error names the offending entry: ' .. tostring(err))
+    H.assert_false(fs.exists(sb.root .. '/dst'), 'no partial destination left behind')
+    H.assert_fs_eq(root, { 'a.txt', 'locked/', 'locked/inner.txt' },
+      'the source is untouched')
+  end)
+
   H.it('list_dir is sorted and the thin wrappers behave', function()
     local sb = H.sandbox()
     H.mkfile(sb.root, 'c.txt', { 'c' })

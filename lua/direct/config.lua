@@ -104,7 +104,11 @@ end
 -- the user or another plugin and is left alone.
 function M.clear_buffer_mappings()
   for _, bufnr in ipairs(open_direct_buffers()) do
-    vim.api.nvim_buf_call(bufnr, function()
+    -- The handle can go invalid between the snapshot above and this call (the
+    -- buffer is unloaded in the meantime) and nvim_buf_call raises on an
+    -- invalid buffer id. The buffer is going away anyway, so the failure is
+    -- ignored rather than propagated.
+    pcall(vim.api.nvim_buf_call, bufnr, function()
       for _, entry in ipairs(M.BUFFER_MAPS) do
         local current = vim.fn.maparg(entry.lhs, entry.mode, false, true)
         if current.rhs ~= nil and current.rhs == entry.rhs then

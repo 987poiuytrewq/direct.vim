@@ -190,4 +190,30 @@ H.describe('config', function()
     H.assert_true(buf_map_rhs('p', 'n') ~= nil, 'the buffer-local p mapping is restored')
     pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
   end)
+
+  -- P2 follow-up (review hardening): a buffer can be unloaded between the
+  -- snapshot taken by clear_buffer_mappings and the nvim_buf_call that reads
+  -- its maps, and nvim_buf_call raises on an invalid handle. The window itself
+  -- cannot be opened deterministically from a test, so the API seam synthesises
+  -- exactly the documented failure; the guard must swallow it, since the buffer
+  -- is going away anyway.
+  H.it('clear_buffer_mappings ignores a buffer that goes away before the call (P2)', function()
+    local config = fresh_config()
+    config.clear_mappings()
+    config.setup({ map_default_keys = true })
+    local bufnr = open_direct_buffer()
+
+    local calls = 0
+    local restore = H.stub(vim.api, 'nvim_buf_call', function()
+      calls = calls + 1
+      error('Invalid buffer id: ' .. tostring(bufnr), 0)
+    end)
+    local ok, res = pcall(config.clear_buffer_mappings)
+    restore()
+
+    H.assert_true(ok, 'clear_buffer_mappings does not propagate the buf_call failure')
+    H.assert_true(res == true, 'it still reports success')
+    H.assert_eq(calls, 1, 'the guarded call was attempted once')
+    pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+  end)
 end)

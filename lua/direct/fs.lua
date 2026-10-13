@@ -257,19 +257,30 @@ function M.copy_file(src, dst)
   return nil, err, code
 end
 
--- uncopyable_entry(src) -> nil | path, kind. The first entry under `src` that
--- `copy_tree` cannot reproduce faithfully, or nil when every entry is a regular
--- file or a real directory. A symlink is uncopyable here: following it (as the
--- pre-P1 code did) silently turned the link into a copy of its target, and cp -a
--- style preservation is deliberately out of scope. Any other lstat type (FIFO,
--- socket, device) is uncopyable too; those entries used to be skipped silently
--- while copy_tree still returned true. Iteration goes through M.list_dir so the
--- walk is deterministic (D17); lstat never follows the final component, which is
--- what distinguishes a symlink from its target.
+-- uncopyable_entry(src) -> nil | path, kind [, err]. The first entry under `src`
+-- that `copy_tree` cannot reproduce faithfully, or nil when every entry is a
+-- regular file or a real directory. A symlink is uncopyable here: following it
+-- (as the pre-P1 code did) silently turned the link into a copy of its target,
+-- and cp -a style preservation is deliberately out of scope. Any other lstat
+-- type (FIFO, socket, device) is uncopyable too; those entries used to be
+-- skipped silently while copy_tree still returned true. Iteration goes through
+-- M.list_dir so the walk is deterministic (D17); lstat never follows the final
+-- component, which is what distinguishes a symlink from its target.
+--
+-- A directory whose ENTRIES cannot be read is uncopyable as well. M.list_dir
+-- reports nil only for a non-directory: a scan that fails (EACCES) goes through
+-- `vim.fs.dir`, which yields nothing instead of raising, so the listing comes
+-- back EMPTY and the walk -- and the copy -- would treat the directory as
+-- empty, silently dropping its contents; `rename`'s EXDEV fallback then makes
+-- that permanent by removing the source. The walk therefore probes the scan
+-- with fs_scandir and refuses up front, naming the entry and the real reason. A
+-- failure from M.list_dir itself is returned as the third value (nil, nil, err)
+-- so the caller refuses with that reason instead of reading it as "nothing
+-- uncopyable".
 local function uncopyable_entry(src)
-  local names = M.list_dir(src)
+  local names, err = M.list_dir(src)
   if not names then
-    return nil
+    return nil, nil, err
   end
   for _, name in ipairs(names) do
     local path = M.join(src, name)
@@ -281,7 +292,16 @@ local function uncopyable_entry(src)
       return path, 'symlink'
     end
     if lst.type == 'directory' then
-      local nested, kind = uncopyable_entry(path)
+      local scan, scan_err = vim.uv.fs_scandir(path)
+      if not scan then
+        return path, 'unreadable directory (' .. tostring(scan_err) .. ')'
+      end
+      -- Drain the handle: luv closes it at the end of iteration.
+      while vim.uv.fs_scandir_next(scan) ~= nil do end
+      local nested, kind, nested_err = uncopyable_entry(path)
+      if nested_err then
+        return nil, nil, nested_err
+      end
       if nested then
         return nested, kind
       end
@@ -304,7 +324,10 @@ function M.copy_tree(src, dst)
   if not M.is_dir(src) then
     return nil, 'not a directory: ' .. tostring(src)
   end
-  local bad, kind = uncopyable_entry(src)
+  local bad, kind, scan_err = uncopyable_entry(src)
+  if scan_err then
+    return nil, scan_err
+  end
   if bad then
     return nil, 'cannot copy ' .. kind .. ': ' .. bad
   end
