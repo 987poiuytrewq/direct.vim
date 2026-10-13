@@ -442,6 +442,47 @@ H.describe('fs', function()
       'only the entries the copy created are undone, never the pre-existing destination')
   end)
 
+  -- P1 (Greptile, on 14cbb3f, "Failed copies delete existing data"): the cleanup
+  -- a failed copy performs recorded a destination FILE path without checking
+  -- whether something was already there. A source file whose name clashes with
+  -- an existing destination DIRECTORY makes copy_file fail (EISDIR), and the
+  -- cleanup then deleted that directory -- and everything inside it -- although
+  -- the copy never created it. Only paths this copy created may be undone.
+  H.it('a failed copy never deletes a pre-existing destination directory (P1)', function()
+    local sb = H.sandbox()
+    local src = H.mkdir(sb.root, 'src')
+    H.mkfile(src, 'a.txt', { 'a' })
+    H.mkfile(src, 'clash', { 'SOURCE FILE' })
+    local dst = H.mkdir(sb.root, 'dst')
+    H.mkfile(dst, 'clash/keep.txt', { 'PRE-EXISTING DATA' })
+
+    local ok, err = fs.copy_tree(src, dst, { require_complete = true })
+
+    H.assert_nil(ok, 'the copy fails: ' .. tostring(err))
+    H.assert_true(fs.is_dir(dst .. '/clash'), 'the pre-existing directory survives')
+    H.assert_fs_eq(dst, { 'clash/', 'clash/keep.txt' },
+      'the pre-existing entry and its contents survive; only this copy remains undone')
+    H.assert_fs_eq(src, { 'a.txt', 'clash' }, 'the source is untouched')
+  end)
+
+  -- The same guarantee on the best-effort path: a hard failure there also cleans
+  -- up, and it must undo only what this copy created.
+  H.it('a failed best-effort copy never deletes a pre-existing destination directory (P1)', function()
+    local sb = H.sandbox()
+    local src = H.mkdir(sb.root, 'src')
+    H.mkfile(src, 'a.txt', { 'a' })
+    H.mkfile(src, 'clash', { 'SOURCE FILE' })
+    local dst = H.mkdir(sb.root, 'dst')
+    H.mkfile(dst, 'clash/keep.txt', { 'PRE-EXISTING DATA' })
+
+    local ok, err = fs.copy_tree(src, dst)
+
+    H.assert_nil(ok, 'the copy fails: ' .. tostring(err))
+    H.assert_fs_eq(dst, { 'clash/', 'clash/keep.txt' },
+      'the pre-existing entry and its contents survive')
+    H.assert_fs_eq(src, { 'a.txt', 'clash' }, 'the source is untouched')
+  end)
+
   H.it('list_dir is sorted and the thin wrappers behave', function()
     local sb = H.sandbox()
     H.mkfile(sb.root, 'c.txt', { 'c' })

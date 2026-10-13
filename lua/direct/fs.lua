@@ -296,6 +296,14 @@ local function discard(created)
   end
 end
 
+-- taken(path) -> true when something already exists at `path`, whatever its
+-- type. lstat, not stat: a dangling symlink is still something that was already
+-- there. Only a path that was NOT taken is this copy's to undo.
+local function taken(path)
+  local ok, st = pcall(vim.uv.fs_lstat, path)
+  return ok and st ~= nil
+end
+
 -- copy_dir(from, to, ctx) -> true | nil, err. The recursion behind copy_tree and
 -- the SINGLE AUTHORITY on what a copy reproduces: it classifies every entry with
 -- lstat as it walks (never following the final component) and copies plain files
@@ -330,7 +338,7 @@ local function copy_dir(from, to, ctx)
   -- Drain the handle: luv closes it at the end of iteration.
   while vim.uv.fs_scandir_next(scan) ~= nil do end
 
-  local existed = M.exists(to)
+  local existed = taken(to)
   local mok, merr = M.mkdirp(to)
   if not mok then
     return nil, merr
@@ -357,8 +365,14 @@ local function copy_dir(from, to, ctx)
         return nil, cerr
       end
     elseif lst.type == 'file' then
-      -- Recorded BEFORE the copy, so a half-written file is cleaned up too.
-      ctx.created[#ctx.created + 1] = child_to
+      -- Recorded BEFORE the copy, so a half-written file is cleaned up too --
+      -- but only when the destination path was free: a path that was already
+      -- taken belongs to whoever put it there, and a failure here (EISDIR when
+      -- the source entry clashes with an existing destination directory, say)
+      -- must not delete it (Greptile P1 on 14cbb3f).
+      if not taken(child_to) then
+        ctx.created[#ctx.created + 1] = child_to
+      end
       local cok, cerr = M.copy_file(child_from, child_to)
       if not cok then
         return nil, cerr
