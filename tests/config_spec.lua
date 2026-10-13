@@ -191,6 +191,89 @@ H.describe('config', function()
     pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
   end)
 
+  -- P2 follow-up (Greptile, PR #1): maparg inside a direct buffer reports a
+  -- GLOBAL fallback with buffer == 0 when the buffer has no local mapping of
+  -- that lhs, and `keymap.del(mode, lhs, { buffer = true })` on a mapping that
+  -- is not the buffer's raises E31. Only a buffer-local mapping can be deleted
+  -- from a buffer, so the deletion must not even be ATTEMPTED for a fallback --
+  -- and it must never abort the rest of that buffer's mappings, which is what
+  -- the single pcall around the whole loop did while reporting success.
+  H.it('a global-only mapping is left alone and does not stop the rest of the clearing (P2)', function()
+    local config = fresh_config()
+    config.clear_mappings()
+    config.setup({ map_default_keys = true })
+    local bufnr = open_direct_buffer()
+
+    -- Reachable state (Greptile): the buffer has no local `u` (its ftplugin
+    -- mapping was cleared, or never installed) while a global `u` carrying the
+    -- plugin's own rhs resolves through it.
+    vim.keymap.del('n', 'u', { buffer = true })
+    vim.keymap.set('n', 'u', '<Cmd>DirectUndo<CR>', { silent = true, noremap = true })
+    local resolved = vim.fn.maparg('u', 'n', false, true)
+    H.assert_eq(resolved.buffer, 0, 'premise: only a global u resolves here')
+    H.assert_eq(resolved.rhs, '<Cmd>DirectUndo<CR>', 'premise: it carries the plugin rhs')
+
+    config.setup({ map_default_keys = false })
+
+    -- The mappings AFTER the fallback in BUFFER_MAPS must still be cleared.
+    H.assert_nil(buf_map_rhs('p', 'n'), 'the later buffer-local mappings are still cleared')
+    H.assert_nil(buf_map_rhs('yy', 'n'), 'and the ones in between too')
+    -- The global fallback is not this buffer's mapping: it must survive.
+    local after = vim.fn.maparg('u', 'n', false, true)
+    H.assert_eq(after.buffer, 0, 'the global u is still global')
+    H.assert_eq(after.rhs, '<Cmd>DirectUndo<CR>', 'the global u was not deleted')
+    vim.keymap.del('n', 'u')
+    pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+  end)
+
+  -- P2 follow-up (Greptile, PR #1): a deletion that fails must not take the
+  -- rest of the buffer's mappings down with it, and must not be swallowed --
+  -- the user has to be able to find out.
+  H.it('a failing deletion warns and does not stop the remaining mappings (P2)', function()
+    local config = fresh_config()
+    config.clear_mappings()
+    config.setup({ map_default_keys = true })
+    local bufnr = open_direct_buffer()
+
+    local real_del = vim.keymap.del
+    local restore = H.stub(vim.keymap, 'del', function(mode, lhs, o)
+      if lhs == 'u' then
+        error('forced: cannot delete ' .. lhs, 0)
+      end
+      return real_del(mode, lhs, o)
+    end)
+    H.capture_messages()
+    config.setup({ map_default_keys = false })
+    restore()
+
+    H.assert_nil(buf_map_rhs('p', 'n'), 'the mappings after the failure are still cleared')
+    H.assert_nil(buf_map_rhs('yy', 'n'), 'and the ones in between too')
+    H.assert_true(buf_map_rhs('u', 'n') ~= nil, 'the mapping that could not be deleted stays')
+    H.assert_notified('cannot clear', vim.log.levels.WARN)
+    pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+  end)
+
+  -- P2 follow-up (Greptile, PR #1): buffer-local ownership is the exact
+  -- question here -- a user's own buffer-local override of `u` in a direct
+  -- buffer is buffer-local and must be spared, while the plugin's own maps
+  -- around it are still cleared.
+  H.it('clearing spares a user-owned buffer-local override of u (P2)', function()
+    local config = fresh_config()
+    config.clear_mappings()
+    config.setup({ map_default_keys = true })
+    local bufnr = open_direct_buffer()
+
+    vim.keymap.set('n', 'u', ':echo "mine"<CR>',
+      { buffer = true, silent = true, noremap = true })
+    H.assert_eq(vim.fn.maparg('u', 'n', false, true).buffer, 1, 'premise: a local override now')
+
+    config.setup({ map_default_keys = false })
+
+    H.assert_eq(buf_map_rhs('u', 'n'), ':echo "mine"<CR>', 'the user override survives')
+    H.assert_nil(buf_map_rhs('p', 'n'), 'the plugin maps are still cleared')
+    pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+  end)
+
   -- P2 follow-up (review hardening): a buffer can be unloaded between the
   -- snapshot taken by clear_buffer_mappings and the nvim_buf_call that reads
   -- its maps, and nvim_buf_call raises on an invalid handle. The window itself

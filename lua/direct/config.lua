@@ -98,10 +98,19 @@ function M.install_buffer_mappings(bufnr)
 end
 
 -- clear_buffer_mappings() -> true. Removes the plugin's buffer-local maps from
--- every loaded direct buffer. Each deletion is rhs-checked against BUFFER_MAPS
--- (read through nvim_buf_call, because maparg reads the current buffer's
--- scope): a buffer-local map with the same lhs but a different rhs belongs to
--- the user or another plugin and is left alone.
+-- every loaded direct buffer. Each candidate is re-read through nvim_buf_call
+-- (maparg reads the CURRENT buffer's scope) and deleted only when it really IS
+-- this buffer's mapping (current.buffer == 1) AND is the plugin's own (rhs
+-- identity, the same ownership rule the global `-` uses): a buffer-local map
+-- with the same lhs but a different rhs belongs to the user and is left alone,
+-- and a GLOBAL fallback (buffer == 0) is not this buffer's mapping at all --
+-- `keymap.del(..., { buffer = true })` raises E31 on it, so it must not even be
+-- attempted (Greptile PR #1, P2).
+--
+-- The guard is PER MAPPING: a deletion that fails is reported and must not
+-- silently abort the rest of that buffer's mappings (a single pcall around the
+-- whole loop did exactly that while still returning true, leaving the buffer
+-- half-cleared with no sign of it).
 function M.clear_buffer_mappings()
   for _, bufnr in ipairs(open_direct_buffers()) do
     -- The handle can go invalid between the snapshot above and this call (the
@@ -111,8 +120,17 @@ function M.clear_buffer_mappings()
     pcall(vim.api.nvim_buf_call, bufnr, function()
       for _, entry in ipairs(M.BUFFER_MAPS) do
         local current = vim.fn.maparg(entry.lhs, entry.mode, false, true)
-        if current.rhs ~= nil and current.rhs == entry.rhs then
-          vim.keymap.del(entry.mode, entry.lhs, { buffer = true })
+        local ours = current.rhs ~= nil
+          and current.rhs == entry.rhs
+          and current.buffer == 1
+        if ours then
+          local ok, err = pcall(vim.keymap.del, entry.mode, entry.lhs, { buffer = true })
+          if not ok then
+            require('direct.ui').notify(
+              string.format('direct: cannot clear the %s mapping in buffer %d: %s',
+                entry.lhs, bufnr, tostring(err)),
+              vim.log.levels.WARN)
+          end
         end
       end
     end)
