@@ -257,14 +257,56 @@ function M.copy_file(src, dst)
   return nil, err, code
 end
 
+-- uncopyable_entry(src) -> nil | path, kind. The first entry under `src` that
+-- `copy_tree` cannot reproduce faithfully, or nil when every entry is a regular
+-- file or a real directory. A symlink is uncopyable here: following it (as the
+-- pre-P1 code did) silently turned the link into a copy of its target, and cp -a
+-- style preservation is deliberately out of scope. Any other lstat type (FIFO,
+-- socket, device) is uncopyable too; those entries used to be skipped silently
+-- while copy_tree still returned true. Iteration goes through M.list_dir so the
+-- walk is deterministic (D17); lstat never follows the final component, which is
+-- what distinguishes a symlink from its target.
+local function uncopyable_entry(src)
+  local names = M.list_dir(src)
+  if not names then
+    return nil
+  end
+  for _, name in ipairs(names) do
+    local path = M.join(src, name)
+    local ok, lst = pcall(vim.uv.fs_lstat, path)
+    if not ok or lst == nil then
+      return path, 'unreadable entry'
+    end
+    if lst.type == 'link' then
+      return path, 'symlink'
+    end
+    if lst.type == 'directory' then
+      local nested, kind = uncopyable_entry(path)
+      if nested then
+        return nested, kind
+      end
+    elseif lst.type ~= 'file' then
+      return path, tostring(lst.type)
+    end
+  end
+  return nil
+end
+
 -- copy_tree(src, dst) -> true | nil, err. Recursive, hand-rolled (no `cp -r`),
--- with mkdir -p semantics. Symlinks are followed (matching shutil.copytree's
--- default); entries that are neither files nor directories are skipped so the
--- copy stays total. Iteration goes through M.list_dir, so ordering is
--- deterministic (D17) and stubs on the module table are honoured.
+-- with mkdir -p semantics. Every entry is copied as itself: a tree holding a
+-- symlink, FIFO, socket or device is REFUSED (P1), because following or skipping
+-- such an entry would not reproduce the tree and `rename`'s EXDEV fallback
+-- removes the source after a successful copy -- a silently skipped entry would
+-- be destroyed. The pre-scan runs BEFORE `mkdirp(dst)`, so a refusal leaves no
+-- half-populated destination behind. Iteration goes through M.list_dir, so
+-- ordering is deterministic (D17) and stubs on the module table are honoured.
 function M.copy_tree(src, dst)
   if not M.is_dir(src) then
     return nil, 'not a directory: ' .. tostring(src)
+  end
+  local bad, kind = uncopyable_entry(src)
+  if bad then
+    return nil, 'cannot copy ' .. kind .. ': ' .. bad
   end
   local mok, merr = M.mkdirp(dst)
   if not mok then

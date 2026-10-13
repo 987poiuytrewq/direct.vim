@@ -147,6 +147,71 @@ H.describe('fs', function()
       { 'sub/', 'sub/deep.txt', 'top.txt' }, 'tree copied recursively')
   end)
 
+  -- P1 (Greptile, PR #1): copy_tree used to copy only 'file'/'directory' stats
+  -- and silently skip everything else while still returning true, and
+  -- rename()'s EXDEV fallback then removed the source tree -- so a cross-device
+  -- move destroyed symlinks/FIFOs/sockets with no warning. The pre-scan must
+  -- refuse, and must do so BEFORE mkdirp(dst), so no partial destination exists.
+  H.it('copy_tree refuses a tree holding a symlink before writing anything (P1)', function()
+    local sb = H.sandbox()
+    local root = H.mkdir(sb.root, 'tree')
+    H.mkfile(root, 'a.txt', { 'a' })
+    H.mkdir(root, 'sub')
+    H.mkfile(root, 'sub/b.txt', { 'b' })
+    -- Nested, so a direct-child-only check would miss it.
+    pcall(vim.uv.fs_symlink, root .. '/a.txt', root .. '/sub/link')
+    H.assert_true(vim.uv.fs_lstat(root .. '/sub/link') ~= nil, 'nested symlink created')
+
+    local ok, err = fs.copy_tree(root, sb.root .. '/dst')
+    H.assert_nil(ok, 'copy_tree refuses a tree holding a symlink')
+    H.assert_true(type(err) == 'string' and err:find('sub/link', 1, true) ~= nil,
+      'the error names the offending entry: ' .. tostring(err))
+    H.assert_false(fs.exists(sb.root .. '/dst'), 'no partial destination left behind')
+    H.assert_fs_eq(root, { 'a.txt', 'sub/', 'sub/b.txt', 'sub/link@' },
+      'the source tree is untouched')
+  end)
+
+  H.it('an EXDEV move of a tree holding a symlink fails loudly and keeps the source (P1)', function()
+    local sb = H.sandbox()
+    local root = H.mkdir(sb.root, 'tree')
+    H.mkfile(root, 'a.txt', { 'a' })
+    pcall(vim.uv.fs_symlink, root .. '/a.txt', root .. '/link')
+    H.assert_true(vim.uv.fs_lstat(root .. '/link') ~= nil, 'symlink created')
+
+    local restore = H.stub(vim.uv, 'fs_rename', function()
+      return nil, 'EXDEV: cross-device link not permitted', 'EXDEV'
+    end)
+    local ok, err = fs.rename(root, sb.root .. '/moved')
+    restore()
+
+    H.assert_nil(ok, 'the move fails instead of losing the symlink')
+    H.assert_true(type(err) == 'string' and err:find('link', 1, true) ~= nil,
+      'the error names the entry: ' .. tostring(err))
+    H.assert_true(fs.exists(sb.root .. '/tree'), 'the source tree is intact')
+    H.assert_false(fs.exists(sb.root .. '/moved'), 'no destination left behind')
+    H.assert_fs_eq(root, { 'a.txt', 'link@' }, 'nothing was destroyed')
+  end)
+
+  H.it('copy_tree refuses a FIFO when one can be created (P1)', function()
+    local sb = H.sandbox()
+    local root = H.mkdir(sb.root, 'tree')
+    H.mkfile(root, 'a.txt', { 'a' })
+    local fifo = root .. '/pipe'
+    -- mkfifo is an external tool; the harness has no skip primitive, so a
+    -- platform without it returns early (the symlink cases above already pin
+    -- the pre-scan). Guarded by lstat, never by the exit status alone.
+    vim.fn.system({ 'mkfifo', fifo })
+    local st = vim.uv.fs_lstat(fifo)
+    if st == nil or st.type ~= 'fifo' then
+      return
+    end
+    local ok, err = fs.copy_tree(root, sb.root .. '/dst')
+    H.assert_nil(ok, 'copy_tree refuses a FIFO')
+    H.assert_true(type(err) == 'string' and err:find('pipe', 1, true) ~= nil,
+      'the error names the FIFO: ' .. tostring(err))
+    H.assert_false(fs.exists(sb.root .. '/dst'), 'no partial destination left behind')
+  end)
+
   H.it('list_dir is sorted and the thin wrappers behave', function()
     local sb = H.sandbox()
     H.mkfile(sb.root, 'c.txt', { 'c' })
