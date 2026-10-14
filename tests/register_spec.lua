@@ -165,9 +165,9 @@ H.describe('register', function()
     local undo_path = vim.fs.joinpath(sb.data_home, 'direct/history/undo.log')
     local redo_path = vim.fs.joinpath(sb.data_home, 'direct/history/redo.log')
     H.assert_eq(vim.fn.readfile(undo_path),
-      { '#direct-history-v2', 'p\t' .. src .. '\t' .. ws .. '\tf.txt\tf.txt' },
+      { '#direct-history-v3', 'p\t' .. src .. '\t' .. ws .. '\tf.txt\tf.txt' },
       'the marker plus the serialized paste line is recorded')
-    H.assert_eq(vim.fn.readfile(redo_path), { '#direct-history-v2' },
+    H.assert_eq(vim.fn.readfile(redo_path), { '#direct-history-v3' },
       'log() reset the redo log to its marker')
   end)
 

@@ -18,13 +18,25 @@
 --   * B2 current entry: captured from the PRE-ATTACH current buffer name; the
 --     cursor is restored from it with `same_path` after every listing.
 --   * B4/B5 sync: duplicate -> AMBIGUOUS, ADD/DELETE/RENAME, D17 ordering,
---     delete auto-yank, per-action error capture, history only for successes,
---     always re-list, one joined summary (B15), one failure summary.
+--     delete auto-yank, per-action error capture, history only for successes
+--     (grouped per `action.move_groups`, B6), always re-list, one joined summary
+--     (B15), one failure summary.
 --   * B11/D3 rename clobber guard: swap/chain renames stage to
---     `<root>/.direct-tmp-<n>` first. `current_entry` is never a temp path.
---     A staging rename that FAILS returns the temps already staged alongside
---     the error, and the caller reports each orphan path, so a `.direct-tmp-*`
---     left behind by a failed staging rename is never silent (T-023/B1).
+--     `<root>/.direct-tmp-<n>` first (`action.stage_moves`, the ONE staging
+--     mechanism, reused by the group reversal). `current_entry` is never a temp
+--     path. A staging rename that FAILS returns the temps already staged
+--     alongside the error, and the caller reports each orphan path, so a
+--     `.direct-tmp-*` left behind by a failed staging rename is never silent
+--     (T-023/B1).
+--   * B6 grouped history (Greptile PR #1, `buffer.lua:595`): history is written
+--     per GROUP of interlinked moves (`action.move_groups`), not per action.
+--     Swapping two files used to record two `mv` lines, so one `DirectUndo`
+--     renamed a live name straight over a name whose content had not been saved
+--     anywhere -- destroying it. A group of two or more moves is recorded as one
+--     `g` entry and reversed as one staged step; a group with any member that did
+--     NOT apply is not recorded at all, because a reversal of a half-applied
+--     permutation would collide exactly the same way (the Paste precedent: B5
+--     never records a reversal for entries that were never written).
 --   * D4/OQ7 ambiguous: notify the reason and both sides, change nothing, write
 --     no history, do NOT re-list, leave the buffer modified.
 --   * B8/D8b open: trailing `/` opens a new direct listing, otherwise `:edit`
@@ -282,63 +294,15 @@ end
 -- ---------------------------------------------------------------------------
 -- B11/D3 rename staging
 -- ---------------------------------------------------------------------------
-
--- first_free_temp(root) -> the first free `<root>/.direct-tmp-<n>` (same
--- directory, so staging a rename can never cross a filesystem).
-local function first_free_temp(root)
-  local n = 1
-  local candidate = M.entry_path(root, '.direct-tmp-' .. n)
-  while fs.exists(candidate) do
-    n = n + 1
-    candidate = M.entry_path(root, '.direct-tmp-' .. n)
-  end
-  return candidate
-end
-
--- stage_moves(root, actions) -> { overrides = { src -> tmp }, temps = { tmp } }
--- when a rename `dst` is also some action's `src` (a swap or a chain), else nil.
--- Only `mv` actions participate. A staging rename failure returns
--- `nil, err, temps`, where `temps` are the entries ALREADY renamed to their
--- temp path: the caller must report them, because the entry no longer sits at
--- its original name and silently discarding the list would orphan it (B1/T-023).
--- The caller executes each Move from `overrides[src]` when present, while
--- `history.log` and `current_entry` keep using the ORIGINAL action (B11:
--- `current_entry` must never be a temp path).
-local function stage_moves(root, actions)
-  local dst_set = {}
-  for _, act in ipairs(actions) do
-    if act.name == 'mv' and act.dst ~= nil then
-      dst_set[act.dst] = true
-    end
-  end
-  local needed = false
-  for _, act in ipairs(actions) do
-    if act.name == 'mv' and act.src ~= nil and dst_set[act.src] then
-      needed = true
-      break
-    end
-  end
-  if not needed then
-    return nil
-  end
-  local overrides, temps = {}, {}
-  for _, act in ipairs(actions) do
-    if act.name == 'mv' and act.src ~= nil and dst_set[act.src]
-      and overrides[act.src] == nil then
-      local tmp = first_free_temp(root)
-      local ok, err = fs.rename(act.src, tmp)
-      if not ok then
-        -- B1/T-023: return the temps accumulated so far ALONGSIDE the error,
-        -- so the caller can report each entry that is now parked at a temp path
-        -- instead of returning the error alone and orphaning them silently.
-        return nil, err, temps
-      end
-      overrides[act.src] = tmp
-      temps[#temps + 1] = tmp
-    end
-  end
-  return { overrides = overrides, temps = temps }
-end
+--
+-- The staging mechanism itself lives in `action.lua` (`action.stage_moves` /
+-- `action.first_free_temp`) because the group REVERSAL has to use the very same
+-- one: a swap and its reversal must both route through `.direct-tmp-<n>`, or the
+-- reversal renames a live name over a name whose contents are not saved anywhere
+-- (the reported data-loss path). This module keeps the B5/T-023 reporting around
+-- it: the orphan temps of a failed staging rename and the temp of a move that
+-- never landed are named, never silently dropped.
+local stage_moves = action_mod.stage_moves
 
 -- ---------------------------------------------------------------------------
 -- Buffer options (D11)
@@ -518,6 +482,35 @@ local function build_actions(root, plan)
   return actions, yanks
 end
 
+-- log_applied(actions, applied) -> records the applied actions in history (B5
+-- steps 2-3). History is written per GROUP of interlinked moves (B6): a swap or
+-- an N-way rotation is ONE entry, so one `DirectUndo` reverses the whole
+-- permutation instead of renaming a live name over an unsaved one. Every other
+-- action is its own entry, exactly as before.
+--
+-- A group with any member that did NOT apply is not recorded at all: its
+-- reversal would pass through a colliding name (the reported defect), and B5
+-- already never records a reversal for entries that were never written (the
+-- Paste precedent). A singleton group is logged only when its action applied.
+local function log_applied(actions, applied)
+  for _, group in ipairs(action_mod.move_groups(actions)) do
+    local members, complete = {}, true
+    for _, index in ipairs(group) do
+      if not applied[index] then
+        complete = false
+      end
+      members[#members + 1] = actions[index]
+    end
+    if complete then
+      if #members == 1 then
+        history.log(members[1])
+      else
+        history.log(action_mod.Group(members))
+      end
+    end
+  end
+end
+
 -- Buffer:sync() -> true when a classified sync was applied (the buffer was
 -- re-listed and marked nomodified), nil, reason when nothing was applied
 -- (ambiguous, an unsafe path, a refused yank, or an unreadable root).
@@ -561,7 +554,7 @@ function Buffer:sync()
   end
 
   -- B11/D3: swap/chain renames are staged before the real moves.
-  local staging, stage_err, stage_temps = stage_moves(self.root, actions)
+  local staging, stage_err, stage_temps = stage_moves(actions)
   if staging == nil and stage_err ~= nil then
     ui.notify('Action failed - could not stage renames: ' .. tostring(stage_err),
       vim.log.levels.ERROR)
@@ -578,8 +571,13 @@ function Buffer:sync()
     return nil, stage_err
   end
 
-  local failed = {}
-  for _, act in ipairs(actions) do
+  -- B5 steps 2-3: apply every action, then push the successes to history as
+  -- whole dependent move groups (B6). `history.log` reports a failed history
+  -- write itself -- it never raises and never swallows the failure (P2-NB4,
+  -- incl. the redo-reset failure) -- so the ignored return here cannot hide a
+  -- write error.
+  local failed, applied = {}, {}
+  for i, act in ipairs(actions) do
     local exec_action = act
     if staging ~= nil and act.name == 'mv'
       and staging.overrides[act.src] ~= nil then
@@ -587,12 +585,7 @@ function Buffer:sync()
     end
     local ok, res, aerr = pcall(exec_action['do'])
     if ok and res then
-      -- B5 steps 2-3: successes are pushed to history and become the current
-      -- entry (the ORIGINAL action, never a temp path, B11). `history.log`
-      -- reports a failed history write itself -- it never raises and never
-      -- swallows the failure (P2-NB4, incl. the redo-reset failure) -- so the
-      -- ignored return here cannot hide a write error.
-      history.log(act)
+      applied[i] = true
       self.current_entry = result_entry(act)
     else
       ui.notify('Action failed - ' .. action_mod.describe_action(act),
@@ -600,6 +593,7 @@ function Buffer:sync()
       failed[#failed + 1] = act
     end
   end
+  log_applied(actions, applied)
 
   -- B11: remove any staged temp that was not consumed. On the all-success path
   -- every temp is consumed, so this is normally a no-op. On the failure path a

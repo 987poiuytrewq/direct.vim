@@ -71,8 +71,8 @@ H.describe('sync: applying actions (B4/B5)', function()
     H.assert_fs_eq(ws, { 'a.txt', 'b.txt' })
     H.assert_false(vim.bo.modified, 're-listed and nomodified')
     H.assert_eq(history_lines('undo.log'),
-      { '#direct-history-v2', 'touch\t' .. ws .. '/b.txt' }, 'exactly one touch line')
-    H.assert_eq(history_lines('redo.log'), { '#direct-history-v2' },
+      { '#direct-history-v3', 'touch\t' .. ws .. '/b.txt' }, 'exactly one touch line')
+    H.assert_eq(history_lines('redo.log'), { '#direct-history-v3' },
       'a new action resets the redo branch to its marker')
   end)
 
@@ -87,7 +87,7 @@ H.describe('sync: applying actions (B4/B5)', function()
     H.assert_true(ok == true, 'sync applied')
     H.assert_fs_eq(ws, { 'adir/', 'zdir/', 'afile.txt', 'keep.txt' })
     H.assert_eq(history_lines('undo.log'), {
-      '#direct-history-v2',
+      '#direct-history-v3',
       'mkdir\t' .. ws .. '/adir/',
       'mkdir\t' .. ws .. '/zdir/',
       'touch\t' .. ws .. '/afile.txt',
@@ -112,7 +112,7 @@ H.describe('sync: applying actions (B4/B5)', function()
       'the deleted file was copied into the register before removal')
     H.assert_notified('Yanked ' .. ws .. '/b.txt', vim.log.levels.INFO)
     local undo = history_lines('undo.log')
-    H.assert_eq(undo[1], '#direct-history-v2', 'the log is version-marked')
+    H.assert_eq(undo[1], '#direct-history-v3', 'the log is version-marked')
     H.assert_true(undo[2]:sub(1, 3) == 'rm\t', 'an rm line was logged')
     H.assert_true(undo[2]:find(ws .. '/b.txt\t', 1, true) ~= nil, 'the rm line names the source')
   end)
@@ -180,7 +180,7 @@ H.describe('sync: applying actions (B4/B5)', function()
     H.assert_fs_eq(ws, { 'b.txt' })
     H.assert_eq(vim.fn.readfile(ws .. '/b.txt'), { 'a' }, 'content survived the move')
     H.assert_eq(history_lines('undo.log'),
-      { '#direct-history-v2', 'mv\t' .. ws .. '/a.txt\t' .. ws .. '/b.txt' })
+      { '#direct-history-v3', 'mv\t' .. ws .. '/a.txt\t' .. ws .. '/b.txt' })
   end)
 
   H.it('RENAME (directory): moves the tree with trailing slashes on both ends (B4)', function()
@@ -195,7 +195,7 @@ H.describe('sync: applying actions (B4/B5)', function()
     H.assert_true(ok == true, 'sync applied')
     H.assert_fs_eq(ws, { 'new/', 'new/inner.txt' })
     H.assert_eq(history_lines('undo.log'),
-      { '#direct-history-v2', 'mv\t' .. ws .. '/old/\t' .. ws .. '/new/' })
+      { '#direct-history-v3', 'mv\t' .. ws .. '/old/\t' .. ws .. '/new/' })
   end)
 
   H.it('notifies a single joined B15 summary of the applied actions (B15)', function()
@@ -403,7 +403,7 @@ H.describe('sync: safety guards (T-021/T-022)', function()
     H.assert_notified('Action failed - Created c.txt', vim.log.levels.ERROR)
     H.assert_notified('1 action(s) failed', vim.log.levels.ERROR)
     H.assert_eq(history_lines('undo.log'),
-      { '#direct-history-v2', 'touch\t' .. ws .. '/b.txt' },
+      { '#direct-history-v3', 'touch\t' .. ws .. '/b.txt' },
       'only the successful action reached history')
 
     H.assert_true(history.undo() ~= nil, 'the logged success is undoable')

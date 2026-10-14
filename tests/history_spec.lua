@@ -8,7 +8,7 @@
 -- O2).
 --
 -- T-017/D18 (version gate): every log this module writes carries
--- `#direct-history-v2` as its FIRST line; a foreign (Python-era) log is never
+-- `#direct-history-v3` as its FIRST line; a foreign (Python-era) log is never
 -- executed but quarantined aside as <name>.legacy[.<n>]; an absent/empty/
 -- marker-only log is empty history; a marked log replays across processes.
 
@@ -18,7 +18,7 @@ local action = require('direct.action')
 local fs = require('direct.fs')
 local paths = require('direct.paths')
 
-local MARKER = '#direct-history-v2'
+local MARKER = '#direct-history-v3'
 
 H.describe('history', function()
   local function history_dir(sb)
@@ -241,7 +241,7 @@ H.describe('history', function()
     local undo_path = vim.fs.joinpath(history_dir(sb), 'undo.log')
     local redo_path = vim.fs.joinpath(history_dir(sb), 'redo.log')
     H.assert_eq(vim.fn.readfile(undo_path),
-      { '#direct-history-v2',
+      { '#direct-history-v3',
         'mv\t' .. sb.root .. '/a.txt\t' .. sb.root .. '/b.txt' },
       'the version marker plus one undo line is recorded')
 
@@ -260,20 +260,20 @@ H.describe('history', function()
 
     H.assert_notified('Failed to undo action - Moved b.txt to a.txt')
     H.assert_eq(vim.fn.readfile(undo_path),
-      { '#direct-history-v2',
+      { '#direct-history-v3',
         'mv\t' .. sb.root .. '/a.txt\t' .. sb.root .. '/b.txt' },
       'the original line was pushed back onto undo.log (D13)')
-    H.assert_eq(vim.fn.readfile(redo_path), { '#direct-history-v2' },
+    H.assert_eq(vim.fn.readfile(redo_path), { '#direct-history-v3' },
       'nothing was pushed to the redo log; it holds only the marker')
 
     -- With the stub restored the same undo succeeds and re-logs the reversal.
     H.assert_true(history.undo() ~= nil, 'undo succeeds after the stub is restored')
     H.assert_true(fs.exists(sb.root .. '/a.txt'), 'file restored')
     H.assert_false(fs.exists(sb.root .. '/b.txt'), 'renamed name gone')
-    H.assert_eq(vim.fn.readfile(undo_path), { '#direct-history-v2' },
+    H.assert_eq(vim.fn.readfile(undo_path), { '#direct-history-v3' },
       'undo.log drained back to the marker')
     H.assert_eq(vim.fn.readfile(redo_path),
-      { '#direct-history-v2',
+      { '#direct-history-v3',
         'mv\t' .. sb.root .. '/b.txt\t' .. sb.root .. '/a.txt' },
       'the reversal was pushed to redo.log after the marker')
   end)
@@ -293,7 +293,7 @@ H.describe('history', function()
     local touch = action.Touch(sb.root .. '/c.txt')
     touch['do']()
     history.log(touch)
-    H.assert_eq(vim.fn.readfile(redo_path), { '#direct-history-v2' },
+    H.assert_eq(vim.fn.readfile(redo_path), { '#direct-history-v3' },
       'log() reset the redo log to its marker')
 
     H.capture_messages()
@@ -393,12 +393,12 @@ H.describe('history', function()
   H.it('a marker-only log is empty history (T-017)', function()
     local sb = H.sandbox()
     local hist = history_dir(sb)
-    H.mkfile(hist, 'undo.log', { '#direct-history-v2' })
+    H.mkfile(hist, 'undo.log', { '#direct-history-v3' })
     H.capture_messages()
     H.assert_nil(history.undo(), 'a marker-only undo log has nothing to undo')
     H.assert_notified('Nothing to undo')
 
-    H.mkfile(hist, 'redo.log', { '#direct-history-v2' })
+    H.mkfile(hist, 'redo.log', { '#direct-history-v3' })
     H.capture_messages()
     H.assert_nil(history.redo(), 'a marker-only redo log has nothing to redo')
     H.assert_notified('Nothing to redo')
@@ -420,7 +420,7 @@ H.describe('history', function()
       H.assert_true(h.log(move) == true, 'process A logged the move')
     end)
 
-    H.assert_eq(vim.fn.readfile(undo_path)[1], '#direct-history-v2',
+    H.assert_eq(vim.fn.readfile(undo_path)[1], '#direct-history-v3',
       'the on-disk log carries the version marker')
     H.assert_true(H.exists(sb.root, 'b.txt'), 'process A left the moved file')
 

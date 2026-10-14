@@ -26,6 +26,16 @@
 --     re-validated here;
 --   * `reverse` swaps src/dst and inverts the renames per the exact
 --     action<->reversal mapping (T-014; follows the Python REVERSALS table);
+--   * interlinked moves (a swap, an N-way rotation, an open chain) are recorded
+--     and reversed as ONE `g` group entry, because reversing them one action at
+--     a time renames a live name straight over a name another reversal still has
+--     to read -- the Greptile PR #1 `buffer.lua:595` data-loss path ("undo
+--     destroys swapped contents"). `moves` are staged through the SAME
+--     `.direct-tmp-<n>` mechanism the save uses (`M.stage_moves`), on the save
+--     path and on the reversal path alike, so no intermediate state can pass
+--     through a colliding name (B11/D3). `M.move_groups` decides which moves
+--     are interlinked; `M.Group` owns their execution and their serialization
+--     (`g\t<count>\t<src>\t<dst>...`, see `M.serialize_group`);
 --   * trash naming is `<digest(src)>` with the first free `-<n>` suffix (B10/
 --     D16), and the chosen path is stored in `dst` so Restore reverses to the
 --     exact entry; a Restore/RestoreDirectory leaves an empty marker (file /
@@ -545,8 +555,259 @@ function M.Unpaste(src, dst, src_names, dst_names)
 end
 
 -- ---------------------------------------------------------------------------
+-- Interlinked moves: staging, grouping, group reversal (B6/B11/D3)
+-- ---------------------------------------------------------------------------
+
+-- parent_dir(path) -> the directory the staging temp for `path` belongs in. The
+-- trailing slash of a directory line is stripped BEFORE the parent is taken:
+-- `vim.fs.dirname('/ws/old/')` is '/ws/old', not '/ws' (measured on 0.12.5), so
+-- it cannot be used here. Every entry staged for one sync belongs to the sync
+-- root, so the temp spelling is exactly the `<root>/.direct-tmp-<n>` the save
+-- has always used -- and because the temp is created in the entry's OWN
+-- directory, the staging rename can never cross a filesystem.
+local function parent_dir(path)
+  local trimmed = tostring(path):gsub('/+$', '')
+  local dir = trimmed:match('^(.*)/[^/]*$')
+  if dir == nil or dir == '' then
+    return '/'
+  end
+  return dir
+end
+
+-- first_free_temp(dir) -> the first free `<dir>/.direct-tmp-<n>`.
+function M.first_free_temp(dir)
+  local n = 1
+  local candidate = M.fs.join(dir, '.direct-tmp-' .. n)
+  while M.fs.exists(candidate) do
+    n = n + 1
+    candidate = M.fs.join(dir, '.direct-tmp-' .. n)
+  end
+  return candidate
+end
+
+-- stage_moves(actions) -> { overrides = { src -> tmp }, temps = { tmp } } when a
+-- rename `dst` is also some action's `src` (a swap, a chain or a rotation), else
+-- nil. Only `mv` actions participate. A staging rename failure returns
+-- `nil, err, temps`, where `temps` are the entries ALREADY renamed to their temp
+-- path: the caller must report them, because the entry no longer sits at its
+-- original name and silently discarding the list would orphan it (B1/T-023).
+-- The caller executes each Move from `overrides[src]` when present, while
+-- `history.log` and `current_entry` keep using the ORIGINAL action (B11:
+-- `current_entry` must never be a temp path).
+--
+-- This is the ONE staging mechanism: `Buffer:sync` applies a save through it and
+-- `M.Group` applies a group reversal through it, so the reversal of a swap gets
+-- exactly the protection the swap itself gets (the reported bug was that the
+-- reversal had none: it renamed a live name over a name whose contents had not
+-- been saved anywhere yet).
+function M.stage_moves(actions)
+  actions = actions or {}
+  local dst_set = {}
+  for _, act in ipairs(actions) do
+    if act.name == 'mv' and act.dst ~= nil then
+      dst_set[act.dst] = true
+    end
+  end
+  local needed = false
+  for _, act in ipairs(actions) do
+    if act.name == 'mv' and act.src ~= nil and dst_set[act.src] then
+      needed = true
+      break
+    end
+  end
+  if not needed then
+    return nil
+  end
+  local overrides, temps = {}, {}
+  for _, act in ipairs(actions) do
+    if act.name == 'mv' and act.src ~= nil and dst_set[act.src]
+      and overrides[act.src] == nil then
+      local tmp = M.first_free_temp(parent_dir(act.src))
+      local ok, err = M.fs.rename(act.src, tmp)
+      if not ok then
+        -- B1/T-023: return the temps accumulated so far ALONGSIDE the error, so
+        -- the caller can report each entry that is now parked at a temp path
+        -- instead of returning the error alone and orphaning them silently.
+        return nil, err, temps
+      end
+      overrides[act.src] = tmp
+      temps[#temps + 1] = tmp
+    end
+  end
+  return { overrides = overrides, temps = temps }
+end
+
+-- move_groups(actions) -> an ordered partition of the action list into the
+-- groups history records together. Two `mv` actions belong together when one's
+-- `dst` is the other's `src` (transitively): that link is exactly what makes a
+-- one-action-at-a-time rename unsafe, because the destination of one move still
+-- has to be read by another (B11/D3). Every other action -- a Touch, a
+-- MakeDirectory, a Remove, a Paste/Unpaste, or a `mv` sharing no name with
+-- another -- is its own single-action group.
+--
+-- What the UI can produce and what it therefore groups: a two-file swap (a
+-- 2-cycle), an N-way rotation (a cycle of length > 2, from permuting the
+-- equal-length listing), and an open chain (a -> b -> ..., when the permutation
+-- consumes a fresh name at its tail). Two moves that share no name stay two
+-- entries. In a RENAME plan the `src` names are distinct and the `dst` names are
+-- distinct (the duplicate check runs first), so a shared name links at most two
+-- moves and the components are paths and cycles.
+--
+-- Returns { { <index>, ... }, ... }: groups in ascending first-index order,
+-- every action index exactly once, a group of one being an independent action.
+function M.move_groups(actions)
+  actions = actions or {}
+  local parent = {}
+  for i = 1, #actions do
+    parent[i] = i
+  end
+  local function root(i)
+    while parent[i] ~= i do
+      parent[i] = parent[parent[i]]
+      i = parent[i]
+    end
+    return i
+  end
+  local at_path = {}
+  for i, act in ipairs(actions) do
+    local paths = {}
+    if type(act.src) == 'string' then
+      paths[#paths + 1] = act.src
+    end
+    if type(act.dst) == 'string' then
+      paths[#paths + 1] = act.dst
+    end
+    if act.name == 'mv' then
+      for _, path in ipairs(paths) do
+        local other = at_path[path]
+        if other == nil then
+          at_path[path] = i
+        else
+          local a, b = root(other), root(i)
+          if a ~= b then
+            parent[b] = a
+          end
+        end
+      end
+    end
+  end
+  local groups, at_root = {}, {}
+  for i = 1, #actions do
+    local r = root(i)
+    if at_root[r] == nil then
+      at_root[r] = {}
+      groups[#groups + 1] = at_root[r]
+    end
+    at_root[r][#at_root[r] + 1] = i
+  end
+  return groups
+end
+
+-- Group(actions) -- the interlinked `mv` actions of one sync, recorded and
+-- reversed as ONE history entry (B6). `do()` reuses `M.stage_moves`, so a group
+-- reversal is staged exactly like the save that created it. A failure -- staging
+-- or a move that does not land -- returns `nil, err` after reporting every entry
+-- left parked at a temp path (B1/T-023/B5: report, never silently discard) and
+-- never attempts a rollback: the caller (history) keeps the entry so the undo can
+-- be retried (D13).
+--
+-- The name `g` never collides with an action name: every other serialized line
+-- starts with the name of a single-entry action. `describe()` joins the member
+-- descriptions, so `summarize` still emits ONE B15 summary per undo press.
+function M.Group(actions)
+  local self = { name = 'g', actions = actions }
+  local function report_temps(staging)
+    for _, tmp in ipairs(staging ~= nil and staging.temps or {}) do
+      if M.fs.exists(tmp) then
+        M.ui.notify('direct: a failed move left the staged entry ' .. tmp,
+          vim.log.levels.ERROR)
+      end
+    end
+  end
+  self['do'] = function()
+    local members = self.actions or {}
+    local staging, stage_err, stage_temps = M.stage_moves(members)
+    if staging == nil and stage_err ~= nil then
+      for _, tmp in ipairs(stage_temps or {}) do
+        if M.fs.exists(tmp) then
+          M.ui.notify('direct: a failed rename left the staged entry ' .. tmp,
+            vim.log.levels.ERROR)
+        end
+      end
+      return nil, 'could not stage renames: ' .. tostring(stage_err)
+    end
+    for _, act in ipairs(members) do
+      local exec = act
+      if staging ~= nil and act.name == 'mv'
+        and staging.overrides[act.src] ~= nil then
+        exec = M.Move(staging.overrides[act.src], act.dst)
+      end
+      local ok, res, err = pcall(exec['do'])
+      if not ok then
+        report_temps(staging)
+        return nil, tostring(res)
+      end
+      if res == nil then
+        report_temps(staging)
+        return nil, err ~= nil and tostring(err) or 'action failed'
+      end
+    end
+    return true
+  end
+  function self.describe()
+    local parts = {}
+    for _, member in ipairs(self.actions or {}) do
+      parts[#parts + 1] = M.describe_action(member)
+    end
+    return table.concat(parts, ', ')
+  end
+  return self
+end
+
+-- ---------------------------------------------------------------------------
 -- Serialization (T-014)
 -- ---------------------------------------------------------------------------
+
+-- checked_line(words) -> the FIELD_SEPARATOR-joined line | nil, err. The P2-NB2/
+-- B2 representability gate runs over every assembled field HERE, so every entry
+-- kind (`NAME\tfield...` and the `g\t<count>\t<src>\t<dst>...` group) is checked
+-- by the same code and no caller can emit an unrepresentable line.
+local function checked_line(words)
+  for _, word in ipairs(words) do
+    local reason = M.path_reason(word)
+    if reason ~= nil then
+      return nil, 'cannot serialize action: ' .. reason .. ': ' .. tostring(word)
+    end
+  end
+  return table.concat(words, FIELD_SEPARATOR)
+end
+
+-- serialize_group(action) -> `g\t<count>\t<src>\t<dst>...` | nil, err.
+--
+-- The format decision (Greptile PR #1 review). Only the interlinked moves of one
+-- RENAME sync can be grouped (see `M.move_groups`), so a group is serialized as
+-- its member count followed by that many src/dst pairs: fixed arity makes the
+-- line unambiguous without nesting the field separator inside a field, and a
+-- count that does not match the field number is refused by `deserialize` rather
+-- than half-replayed. A different group shape (a non-`mv` member) would need a
+-- new marker, which the version gate already handles. The tab framing of an
+-- ACTION line is untouched: a path carrying a tab is still refused.
+function M.serialize_group(action)
+  local members = action.actions
+  if type(members) ~= 'table' or #members < 2 then
+    return nil, 'cannot serialize group: at least two actions are required'
+  end
+  local words = { 'g', tostring(#members) }
+  for _, member in ipairs(members) do
+    if type(member) ~= 'table' or member.name ~= 'mv'
+      or type(member.src) ~= 'string' or type(member.dst) ~= 'string' then
+      return nil, 'cannot serialize group: only move actions can be grouped'
+    end
+    words[#words + 1] = member.src
+    words[#words + 1] = member.dst
+  end
+  return checked_line(words)
+end
 
 -- serialize(action) -> `NAME\tfield...` | nil, err. The field order follows the
 -- Python version verbatim: src then dst (each present on the action), then for
@@ -564,6 +825,9 @@ function M.serialize(action)
   if type(action) ~= 'table' or type(action.name) ~= 'string' then
     return nil, 'cannot serialize action'
   end
+  if action.name == 'g' then
+    return M.serialize_group(action)
+  end
   local words = { action.name }
   if action.src ~= nil then
     words[#words + 1] = action.src
@@ -576,19 +840,18 @@ function M.serialize(action)
     words[#words + 1] = table.concat(src_names, ' ')
     words[#words + 1] = table.concat(dst_names, ' ')
   end
-  for _, word in ipairs(words) do
-    local reason = M.path_reason(word)
-    if reason ~= nil then
-      return nil, 'cannot serialize action: ' .. reason .. ': ' .. tostring(word)
-    end
-  end
-  return table.concat(words, FIELD_SEPARATOR)
+  return checked_line(words)
 end
 
 -- deserialize(line) -> the action the line denotes, or nil, err for a
 -- malformed or unknown line. Destructive actions are rebuilt through their
 -- factories with the serialized dst passed verbatim, so a trashed entry is
 -- always restored to (and from) the exact recorded path (B10).
+--
+-- A `g` line is validated before anything is rebuilt: the member count must be a
+-- plain decimal of at least two and must match the number of src/dst fields
+-- exactly, otherwise the whole line is refused (the history then keeps it, D13).
+-- A group is never partially executed: a refusal here means nothing ran at all.
 function M.deserialize(line)
   if type(line) ~= 'string' or line == '' then
     return nil, 'invalid action line'
@@ -615,6 +878,21 @@ function M.deserialize(line)
   elseif name == 'up' then
     return M.Unpaste(words[2], words[3],
       M.split_names(words[4]), M.split_names(words[5]))
+  elseif name == 'g' then
+    local count = words[2]
+    if type(count) ~= 'string' or count:match('^%d+$') == nil then
+      return nil, 'invalid group line: bad member count'
+    end
+    count = tonumber(count)
+    if count < 2 or #words ~= 2 + 2 * count then
+      return nil, string.format('invalid group line: %d field(s) for %d move(s)',
+        #words - 2, count)
+    end
+    local members = {}
+    for i = 1, count do
+      members[#members + 1] = M.Move(words[1 + 2 * i], words[2 + 2 * i])
+    end
+    return M.Group(members)
   end
   return nil, 'unknown action name: ' .. tostring(name)
 end
@@ -629,6 +907,12 @@ end
 --   mkdir   -> rmdir
 --   p       -> up        (src/dst swapped, renames inverted)
 --   up      -> p         (src/dst swapped, renames inverted)
+--   g       -> g         (every member reversed, in reverse order)
+--
+-- A group reversal applies all its members through the staging path, so the
+-- recorded order cannot change the filesystem outcome; reversing order as well
+-- keeps the pair a true involution (undo -> redo -> undo reproduces the original
+-- record), which is what makes the redo log entry byte-identical for a swap.
 function M.reverse_action(action)
   if type(action) ~= 'table' then
     return nil, 'invalid action'
@@ -653,6 +937,19 @@ function M.reverse_action(action)
   elseif action.name == 'up' then
     local src_names, dst_names = M.split_pairs(action.renames)
     return M.Paste(action.dst, action.src, dst_names, src_names)
+  elseif action.name == 'g' then
+    local members = {}
+    for i = #(action.actions or {}), 1, -1 do
+      local rev, err = M.reverse_action(action.actions[i])
+      if not rev then
+        return nil, err
+      end
+      members[#members + 1] = rev
+    end
+    if #members < 2 then
+      return nil, 'no reversal for group: fewer than two actions'
+    end
+    return M.Group(members)
   end
   return nil, 'no reversal for action: ' .. tostring(action.name)
 end

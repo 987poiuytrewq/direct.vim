@@ -11,6 +11,12 @@
 --     the serialized reversal is pushed onto redo.log and the B15 summary is
 --     notified once; on failure the ORIGINAL line is pushed back onto its
 --     source log (D13) and an error is notified;
+--   * one entry is one action OR one `g` group of interlinked moves (`action.
+--     Group`), which reverses the whole group -- staged through `stage_moves`,
+--     like the save -- as a SINGLE user-visible step. Nothing extra is needed
+--     here for that: a group entry goes through exactly the same pop / reverse /
+--     execute / re-log path as a single action, which is why the grouping cannot
+--     be lost across a restart (it is on disk, not in memory);
 --   * the `Nothing to undo` / `Nothing to redo` message belongs HERE, not to
 --     log.pop, which returns nil silently on an empty log (T-008/T-015);
 --   * data-dir failures (B9/O2) are captured and reported, never raised.
@@ -21,13 +27,24 @@
 -- replay (a `p` line naming `my file.txt` splits back into `my` + `file.txt`
 -- and an undo then deletes unrelated files). The Lua history therefore owns its
 -- log format: the FIRST line of every log it writes is the version marker
--- `#direct-history-v2`, which is never a parseable action line. A log is
+-- `#direct-history-v3`, which is never a parseable action line. A log is
 -- consumed only when its first line is the marker; an absent, empty or
 -- marker-only log is simply empty history. A non-empty log whose first line is
 -- NOT the marker is FOREIGN: no line is executed, a WARN is notified, and the
 -- file is quarantined aside as `<name>.legacy` (or the first free
 -- `<name>.legacy.<n>`). A foreign file is never appended to; when it cannot be
 -- renamed it is left untouched and treated as no history.
+--
+-- The marker is bumped whenever the entry FORMAT changes, and that is a
+-- correctness requirement, not housekeeping: the grouped-move fix (Greptile PR
+-- #1, `buffer.lua:595`) records a two-file swap as ONE `g` entry, while a v2 log
+-- holds that same swap as TWO independent `mv` lines. Replaying a v2 log under
+-- the new code would reverse the swap one move at a time and destroy a file --
+-- exactly the reported bug -- so a superseded log (v2 included) must be, and is,
+-- detected as foreign by the check above and quarantined with the same WARN
+-- ("Ignoring history written by an older version") and the same guarantee: never
+-- partially replayed, never a crash. The cost is the documented one: undo
+-- history does not survive a format bump.
 
 local M = {}
 
@@ -42,8 +59,11 @@ M.ui = require('direct.ui')
 
 -- The version marker: the FIRST line of every log this module writes. It starts
 -- with '#', so `action.deserialize` can never mistake it for an entry (every
--- action name is a bare word), and no separator logic applies to it.
-local MARKER = '#direct-history-v2'
+-- action name is a bare word), and no separator logic applies to it. Bumped from
+-- v2 to v3 when a swap became ONE `g` group entry (see the version-gate note
+-- above): a v2 log's two independent `mv` lines for a swap are not safe to
+-- replay under the new grouping.
+local MARKER = '#direct-history-v3'
 
 -- log_paths() -> undo_path, redo_path | nil, err.
 local function log_paths()
@@ -240,7 +260,7 @@ function M._reverse(which)
     return nil, rev_err
   end
 
-  local ok, result = pcall(rev['do'])
+  local ok, result, do_err = pcall(rev['do'])
   if ok and result ~= nil then
     -- The reversal is recorded on the destination log. `append_entry` keeps the
     -- marker first and refuses to append to a foreign file.
@@ -255,9 +275,18 @@ function M._reverse(which)
   end
 
   -- D13: a failed reversal pushes the original line back onto its source log
-  -- (the Python version silently dropped it).
+  -- (the Python version silently dropped it). The reason an action returned --
+  -- `EACCES`, the staging failure of a group, ... -- is part of the message: a
+  -- group reversal that failed halfway must be diagnosable, not just "failed".
   log_mod.push(src_path, line)
-  local why = ok and 'action failed' or tostring(result)
+  local why
+  if not ok then
+    why = tostring(result)
+  elseif do_err ~= nil then
+    why = tostring(do_err)
+  else
+    why = 'action failed'
+  end
   M.ui.notify('Failed to ' .. which .. ' action - '
     .. M.action.summarize({ rev }) .. ' (' .. why .. ')',
     vim.log.levels.ERROR)
