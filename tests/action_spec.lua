@@ -137,6 +137,28 @@ H.describe('action', function()
       'trashed directory tree keeps its inodes')
   end)
 
+  -- F3 (review): the trash name search asked fs.exists, which FOLLOWS a symlink,
+  -- so a DANGLING symlink already sitting at `<trash>/<digest>` read as free and
+  -- the picker handed the destructive rename a destination that is in fact
+  -- taken -- which `require_complete = true` now refuses, so Remove would fail
+  -- on a name the picker had called free. It asks the same shared helper as the
+  -- paste clash loop and the copy, so the three cannot disagree.
+  H.it('first_free_trash skips a name occupied by a dangling symlink (F3)', function()
+    local sb = H.sandbox()
+    local trash = M.paths.join(sb.data_home, 'direct/trash')
+    H.mkdir(trash, '')
+    H.mkfile(sb.root, 'f.txt', { 'f' })
+    local src = sb.root .. '/f.txt'
+    local base = M.paths.digest(src)
+    H.assert_true(vim.uv.fs_symlink(trash .. '/nowhere', trash .. '/' .. base) == true,
+      'dangling symlink occupying the base trash name')
+    H.assert_false(vim.uv.fs_stat(trash .. '/' .. base) ~= nil,
+      'the following check reports the name free -- the disagreement F3 removes')
+
+    H.assert_eq(M.first_free_trash(trash, src), trash .. '/' .. base .. '-1',
+      'the picker skips the occupied name instead of naming a taken destination')
+  end)
+
   H.it('Restore brings a file and RestoreDirectory a tree back (T-012)', function()
     local sb = H.sandbox()
     H.mkfile(sb.root, 'f.txt', { 'f' })

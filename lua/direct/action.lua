@@ -132,11 +132,11 @@ end
 function M.first_free_trash(trash_dir, src)
   local base = M.paths.digest(src)
   local dst = M.fs.join(trash_dir, base)
-  if not M.fs.exists(dst) then
+  if not M.fs.taken(dst) then
     return dst
   end
   local n = 1
-  while M.fs.exists(dst .. '-' .. n) do
+  while M.fs.taken(dst .. '-' .. n) do
     n = n + 1
   end
   return dst .. '-' .. n
@@ -444,7 +444,7 @@ function M.Paste(src, dst, src_names, dst_names)
         -- answer (D8a/B3/N2) still skips the entry and leaves the existing
         -- destination untouched.
         local attempts = 0
-        while M.fs.exists(full_dst) do
+        while M.fs.taken(full_dst) do
           attempts = attempts + 1
           if attempts > M.PASTE_CLASH_ATTEMPTS then
             M.ui.notify('Skipped ' .. pair.src, vim.log.levels.WARN)

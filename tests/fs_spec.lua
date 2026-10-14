@@ -483,6 +483,210 @@ H.describe('fs', function()
     H.assert_fs_eq(src, { 'a.txt', 'clash' }, 'the source is untouched')
   end)
 
+  -- F1 (review): the cleanup a refused copy performs used to walk ctx.created
+  -- newest-first and hand every created DIRECTORY to rm_tree, a recursive forced
+  -- delete. A file that anything else -- another process, a plugin, another
+  -- Neovim instance -- placed inside a directory this copy created, after the
+  -- copy created it, was not in ctx.created, yet the recursive delete took it
+  -- with the directory. The cleanup is now structurally incapable of removing
+  -- anything it did not create: recorded files are unlinked one by one, and
+  -- recorded directories are removed only while EMPTY (fs_rmdir, innermost
+  -- first). This test is the point of the round: the injected foreign file
+  -- survives, the copy's own partials are gone, an emptied created directory is
+  -- removed, and a created directory that is no longer empty is left in place.
+  --
+  -- The injection is deterministic: M.mkdirp is a module-table seam (section 8),
+  -- and the stub runs at the copy's first mkdirp -- inside the walk, after the
+  -- destination directory exists and before its listing -- so the foreign file
+  -- and the late source entry are both created mid-copy. No sleeping.
+  H.it('a refused copy never removes a foreign entry that appeared inside a directory it created (F1)', function()
+    local sb = H.sandbox()
+    local root = H.mkdir(sb.root, 'tree')
+    H.mkfile(root, 'a.txt', { 'a' })
+    H.mkfile(root, 'sub/b.txt', { 'b' })
+    local dst = sb.root .. '/dst'
+
+    local injected = false
+    local real_mkdirp = fs.mkdirp
+    local restore = H.stub(fs, 'mkdirp', function(path)
+      local ok, err = real_mkdirp(path)
+      if ok and not injected and path == dst then
+        injected = true
+        -- FOREIGN: placed inside the destination directory by someone who is
+        -- not the copy, after the copy created it.
+        vim.fn.writefile({ 'FOREIGN' }, dst .. '/foreign.txt')
+        -- The refusal trigger, sorted last so the copy's own partials exist:
+        -- 'a.txt' and 'sub/b.txt' are already copied when the walk reaches it.
+        vim.uv.fs_symlink(root .. '/a.txt', root .. '/zz-late')
+      end
+      return ok, err
+    end)
+    local ok, err = fs.copy_tree(root, dst, { require_complete = true })
+    restore()
+
+    H.assert_true(injected, 'the foreign entry and the late entry were created during the copy')
+    H.assert_nil(ok, 'the late entry refuses the copy: ' .. tostring(err))
+    H.assert_true(type(err) == 'string' and err:find('zz-late', 1, true) ~= nil,
+      'the error names the entry that appeared late: ' .. tostring(err))
+    H.assert_true(fs.exists(dst .. '/foreign.txt'),
+      'the foreign file the copy did not create survives the cleanup')
+    H.assert_eq(vim.fn.readfile(dst .. '/foreign.txt'), { 'FOREIGN' },
+      'the foreign file keeps its contents')
+    H.assert_false(fs.exists(dst .. '/a.txt'),
+      'the copy\'s own partial file is removed')
+    H.assert_false(fs.exists(dst .. '/sub'),
+      'the created directory that the cleanup emptied is removed')
+    H.assert_true(fs.is_dir(dst),
+      'the created directory that is no longer empty is left behind, not force-deleted')
+    H.assert_fs_eq(dst, { 'foreign.txt' },
+      'the destination holds exactly the foreign entry and nothing this copy created')
+    H.assert_fs_eq(root, { 'a.txt', 'sub/', 'sub/b.txt', 'zz-late@' },
+      'the source is untouched, the late entry included')
+  end)
+
+  -- F2 (review): removing the up-front scan made the destructive path create and
+  -- copy before it discovered an uncopyable entry, so "abort before destroying
+  -- anything" held only retrospectively -- and a failed destructive copy also
+  -- rewrote destination entries on the way. `require_complete = true` gets a
+  -- pre-scan again, refusing BEFORE any mkdirp or write, so the common case
+  -- touches nothing at all. The contract is pinned on the write primitives
+  -- themselves (module-table seams), not merely on the return value.
+  H.it('a destructive refusal in the common case performs zero writes (F2)', function()
+    local sb = H.sandbox()
+    local root = H.mkdir(sb.root, 'tree')
+    H.mkfile(root, 'a.txt', { 'a' })
+    H.mkfile(root, 'sub/b.txt', { 'b' })
+    pcall(vim.uv.fs_symlink, root .. '/a.txt', root .. '/zz-link')
+    H.assert_true(vim.uv.fs_lstat(root .. '/zz-link') ~= nil, 'symlink created')
+
+    local primitives = { 'mkdirp', 'copy_file', 'rm_file', 'rm_tree' }
+    local calls = { mkdirp = 0, copy_file = 0, rm_file = 0, rm_tree = 0 }
+    local restores = {}
+    for _, name in ipairs(primitives) do
+      local real = fs[name]
+      restores[#restores + 1] = H.stub(fs, name, function(...)
+        calls[name] = calls[name] + 1
+        return real(...)
+      end)
+    end
+    local dst = sb.root .. '/dst'
+    local ok, err = fs.copy_tree(root, dst, { require_complete = true })
+    for _, restore in ipairs(restores) do
+      restore()
+    end
+
+    H.assert_nil(ok, 'the copy is refused: ' .. tostring(err))
+    H.assert_true(type(err) == 'string' and err:find('zz-link', 1, true) ~= nil,
+      'the refusal names the offending entry: ' .. tostring(err))
+    H.assert_eq(calls, { mkdirp = 0, copy_file = 0, rm_file = 0, rm_tree = 0 },
+      'the common-case refusal writes nothing: not even a directory')
+    H.assert_false(fs.exists(dst), 'no destination was created')
+    H.assert_fs_eq(root, { 'a.txt', 'sub/', 'sub/b.txt', 'zz-link@' },
+      'the source is untouched')
+  end)
+
+  -- F3 (review): the copy's ownership check used lstat while the free-name
+  -- checks elsewhere used the following stat behind fs.exists, so the two could
+  -- disagree about a DANGLING symlink at the destination: the name is occupied,
+  -- but the following check reports it free and a write then lands through the
+  -- link. Both now go through one shared helper, fs.taken, which uses lstat and
+  -- counts a dangling symlink as taken -- deliberately, because the name is
+  -- occupied and a write through it reaches something the user already has.
+  H.it('the copy counts a dangling symlink at the destination as taken, like every free-name check (F3)', function()
+    local sb = H.sandbox()
+    local root = H.mkdir(sb.root, 'tree')
+    H.mkfile(root, 'a.txt', { 'a' })
+    local dst = sb.root .. '/dst'
+    H.assert_true(vim.uv.fs_symlink(sb.root .. '/nowhere', dst) == true,
+      'dangling symlink occupying the destination name')
+    H.assert_true(fs.taken(dst) == true,
+      'the shared helper counts a dangling symlink as taken')
+    H.assert_false(fs.exists(dst),
+      'the following check reports the name free -- the disagreement F3 removes')
+
+    local ok, err = fs.copy_tree(root, dst, { require_complete = true })
+
+    H.assert_nil(ok, 'the copy refuses the taken destination: ' .. tostring(err))
+    H.assert_true(type(err) == 'string' and err:find('destination exists', 1, true) ~= nil,
+      'the refusal names the destination clash: ' .. tostring(err))
+    local st = vim.uv.fs_lstat(dst)
+    H.assert_true(st ~= nil and st.type == 'link',
+      'the dangling link is itself untouched, not replaced or written through')
+    H.assert_false(fs.exists(sb.root .. '/nowhere'),
+      'nothing was created at the link target')
+    H.assert_fs_eq(root, { 'a.txt' }, 'the source is untouched')
+  end)
+
+  -- F6 (review): `copy_file` overwrites, so in complete mode a destination entry
+  -- that already existed was rewritten before a later failure, and a failed
+  -- destructive copy could leave a destination mutated. Complete mode now
+  -- refuses a destination that is already taken -- through the same shared
+  -- helper as F3 -- instead of overwriting it. Best-effort mode keeps its
+  -- overwrite semantics: that is the yank/paste contract, not a bug.
+  H.it('complete mode refuses an already-taken destination instead of overwriting (F6)', function()
+    local sb = H.sandbox()
+    local src = H.mkdir(sb.root, 'src')
+    H.mkfile(src, 'a.txt', { 'NEW' })
+    local dst = H.mkdir(sb.root, 'dst')
+    H.mkfile(dst, 'a.txt', { 'OLD' })
+
+    local ok, err = fs.copy_tree(src, dst, { require_complete = true })
+
+    H.assert_nil(ok, 'complete mode refuses the taken destination: ' .. tostring(err))
+    H.assert_true(type(err) == 'string' and err:find('destination exists', 1, true) ~= nil,
+      'the refusal names the destination clash: ' .. tostring(err))
+    H.assert_eq(vim.fn.readfile(dst .. '/a.txt'), { 'OLD' },
+      'the existing destination file is not overwritten')
+    H.assert_fs_eq(dst, { 'a.txt' }, 'the destination is exactly as it was')
+    H.assert_fs_eq(src, { 'a.txt' }, 'the source is untouched')
+
+    -- The same tree on the path that destroys nothing: the overwrite stays.
+    local bok = fs.copy_tree(src, dst)
+    H.assert_true(bok == true, 'best-effort mode still succeeds on the same tree')
+    H.assert_eq(vim.fn.readfile(dst .. '/a.txt'), { 'NEW' },
+      'best-effort mode keeps its overwrite semantics (yank/paste)')
+  end)
+
+  -- F6, late arm: the pre-scan cannot see a destination entry that a foreign
+  -- writer creates while the copy runs, so the walk re-checks every destination
+  -- path it is about to use. It refuses rather than overwriting, and the cleanup
+  -- then leaves the foreign entry alone -- including the directory it sits in,
+  -- which is no longer empty and so is not removed.
+  H.it('a complete-mode copy refuses a destination entry that appeared mid-copy, and removes nothing of it (F6)', function()
+    local sb = H.sandbox()
+    local src = H.mkdir(sb.root, 'src')
+    H.mkfile(src, 'a.txt', { 'a' })
+    H.mkfile(src, 'zz-clash', { 'SOURCE FILE' })
+    local dst = sb.root .. '/dst'
+
+    local injected = false
+    local real_mkdirp = fs.mkdirp
+    local restore = H.stub(fs, 'mkdirp', function(path)
+      local ok, err = real_mkdirp(path)
+      if ok and not injected and path == dst then
+        injected = true
+        -- FOREIGN: a destination entry created by someone else, mid-copy.
+        H.mkfile(dst, 'zz-clash/keep.txt', { 'PRE-EXISTING DATA' })
+      end
+      return ok, err
+    end)
+    local ok, err = fs.copy_tree(src, dst, { require_complete = true })
+    restore()
+
+    H.assert_true(injected, 'the foreign destination entry was created during the copy')
+    H.assert_true(fs.exists(dst .. '/zz-clash/keep.txt'),
+      'the foreign entry the copy did not create survives the cleanup')
+    H.assert_eq(vim.fn.readfile(dst .. '/zz-clash/keep.txt'), { 'PRE-EXISTING DATA' },
+      'the foreign entry keeps its contents')
+    H.assert_nil(ok, 'the copy refuses instead of writing to it: ' .. tostring(err))
+    H.assert_true(type(err) == 'string' and err:find('destination exists', 1, true) ~= nil,
+      'the refusal names the destination clash: ' .. tostring(err))
+    H.assert_false(fs.exists(dst .. '/a.txt'), 'the copy\'s own partial file is removed')
+    H.assert_fs_eq(dst, { 'zz-clash/', 'zz-clash/keep.txt' },
+      'the destination holds exactly the foreign entry and nothing this copy created')
+    H.assert_fs_eq(src, { 'a.txt', 'zz-clash' }, 'the source is untouched')
+  end)
+
   H.it('list_dir is sorted and the thin wrappers behave', function()
     local sb = H.sandbox()
     H.mkfile(sb.root, 'c.txt', { 'c' })

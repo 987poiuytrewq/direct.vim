@@ -348,6 +348,40 @@ H.describe('register', function()
     H.assert_notified('Skipped f.txt')
   end)
 
+  -- F3 (review): the clash loop asked fs.exists, which FOLLOWS a symlink, so a
+  -- DANGLING symlink occupying the destination name read as free: the loop never
+  -- asked, and the paste wrote straight through the link -- while the copy's own
+  -- ownership check (fs.taken, lstat) called the same path taken. The loop now
+  -- asks the same shared helper, so the two cannot disagree: the name is
+  -- occupied, the user is asked, and nothing is written through the link.
+  H.it('the paste clash loop counts a dangling symlink at the destination as taken (F3)', function()
+    local sb = H.sandbox()
+    H.mkfile(sb.root, 'f.txt', { 'reg-f' })
+    H.assert_true(reg.yank({ sb.root .. '/f.txt' }) == true, 'yank')
+    local ws = H.mkdir(sb.root, 'ws')
+    H.assert_true(vim.uv.fs_symlink(ws .. '/nowhere', ws .. '/f.txt') == true,
+      'dangling symlink occupying the paste destination name')
+    H.assert_false(fs.exists(ws .. '/f.txt'),
+      'the following check reports the name free -- the disagreement F3 removes')
+
+    local prompts = 0
+    local restore = H.stub(ui, 'prompt', function()
+      prompts = prompts + 1
+      return 'f-copy.txt'
+    end)
+    local ok, perr = xpcall(function() reg.paste(ws) end, debug.traceback)
+    restore()
+    if not ok then error(perr, 0) end
+
+    H.assert_eq(prompts, 1, 'the clash loop asks, because the name is taken')
+    local st = vim.uv.fs_lstat(ws .. '/f.txt')
+    H.assert_true(st ~= nil and st.type == 'link',
+      'the dangling link is untouched, not replaced or written through')
+    H.assert_false(fs.exists(ws .. '/nowhere'), 'nothing was created at the link target')
+    H.assert_eq(vim.fn.readfile(ws .. '/f-copy.txt'), { 'reg-f' },
+      'the copy landed under the fresh name the answer gave')
+  end)
+
   H.it('an empty prompt answer skips the entry and reports it (T-013/D8a)', function()
     local sb = H.sandbox()
     H.mkfile(sb.root, 'f.txt', { 'f' })
