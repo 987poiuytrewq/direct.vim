@@ -588,9 +588,12 @@ end
 -- stage_moves(actions) -> { overrides = { src -> tmp }, temps = { tmp } } when a
 -- rename `dst` is also some action's `src` (a swap, a chain or a rotation), else
 -- nil. Only `mv` actions participate. A staging rename failure returns
--- `nil, err, temps`, where `temps` are the entries ALREADY renamed to their temp
--- path: the caller must report them, because the entry no longer sits at its
--- original name and silently discarding the list would orphan it (B1/T-023).
+-- `nil, err, temps, overrides`, where `temps` are the entries ALREADY renamed to
+-- their temp path and `overrides` is the partial src -> tmp map that put them
+-- there: the caller must report them, because the entry no longer sits at its
+-- original name and silently discarding the list would orphan it (B1/T-023) --
+-- and `overrides` is what lets a caller UNWIND the renames that landed and
+-- restore the pre-attempt state (B1).
 -- The caller executes each Move from `overrides[src]` when present, while
 -- `history.log` and `current_entry` keep using the ORIGINAL action (B11:
 -- `current_entry` must never be a temp path).
@@ -625,10 +628,12 @@ function M.stage_moves(actions)
       local tmp = M.first_free_temp(parent_dir(act.src))
       local ok, err = M.fs.rename(act.src, tmp)
       if not ok then
-        -- B1/T-023: return the temps accumulated so far ALONGSIDE the error, so
-        -- the caller can report each entry that is now parked at a temp path
-        -- instead of returning the error alone and orphaning them silently.
-        return nil, err, temps
+        -- B1/T-023: return the temps accumulated so far ALONGSIDE the error
+        -- (and the partial overrides that name each temp's original path), so
+        -- the caller can report -- and, where it must, restore -- each entry
+        -- that is now parked at a temp path instead of returning the error
+        -- alone and orphaning them silently.
+        return nil, err, temps, overrides
       end
       overrides[act.src] = tmp
       temps[#temps + 1] = tmp
@@ -705,11 +710,17 @@ end
 
 -- Group(actions) -- the interlinked `mv` actions of one sync, recorded and
 -- reversed as ONE history entry (B6). `do()` reuses `M.stage_moves`, so a group
--- reversal is staged exactly like the save that created it. A failure -- staging
--- or a move that does not land -- returns `nil, err` after reporting every entry
--- left parked at a temp path (B1/T-023/B5: report, never silently discard) and
--- never attempts a rollback: the caller (history) keeps the entry so the undo can
--- be retried (D13).
+-- reversal is staged exactly like the save that created it. A staging failure
+-- first UNWINDS every rename that landed -- each staged member is renamed back
+-- to its original path, so the failure leaves the pre-attempt state and the
+-- entry stays retryable (B1: a member parked at `.direct-tmp-<n>` while the
+-- unchanged group is re-inserted would make the next undo target a path that no
+-- longer exists, permanently stuck); an unwind that itself cannot rename a
+-- member back is reported loudly naming the temp path, never swallowed. A move
+-- that does not land still returns `nil, err` after reporting every entry left
+-- parked at a temp path (B1/T-023/B5: report, never silently discard). Either
+-- way the caller (history) keeps the entry so the undo can be retried (D13) --
+-- the re-insert is never dropped to mask the failure.
 --
 -- The name `g` never collides with an action name: every other serialized line
 -- starts with the name of a single-entry action. `describe()` joins the member
@@ -726,8 +737,27 @@ function M.Group(actions)
   end
   self['do'] = function()
     local members = self.actions or {}
-    local staging, stage_err, stage_temps = M.stage_moves(members)
+    local staging, stage_err, stage_temps, stage_overrides =
+      M.stage_moves(members)
     if staging == nil and stage_err ~= nil then
+      -- B1: unwind the staging renames that ALREADY landed before reporting,
+      -- so a failed group application leaves the pre-attempt state and the
+      -- entry the caller re-inserts stays retryable. Every original path is
+      -- still free (no move has executed yet) and distinct, so no restore can
+      -- collide. A member that cannot be renamed back is reported loudly by
+      -- its temp path -- never left to linger silently.
+      local overrides = stage_overrides or {}
+      for _, act in ipairs(members) do
+        local tmp = act.src ~= nil and overrides[act.src] or nil
+        if tmp ~= nil and M.fs.exists(tmp) then
+          local rok, rerr = M.fs.rename(tmp, act.src)
+          if not rok then
+            M.ui.notify('direct: could not restore the staged entry ' .. tmp
+              .. ' to ' .. tostring(act.src) .. ': ' .. tostring(rerr),
+              vim.log.levels.ERROR)
+          end
+        end
+      end
       for _, tmp in ipairs(stage_temps or {}) do
         if M.fs.exists(tmp) then
           M.ui.notify('direct: a failed rename left the staged entry ' .. tmp,

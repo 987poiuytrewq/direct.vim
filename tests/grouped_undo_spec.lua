@@ -377,6 +377,88 @@ H.describe('grouped move undo (B6/B11/D3)', function()
     H.assert_eq(vim.fn.readfile(ws .. '/b.txt'), { 'CONTENT-B' })
   end)
 
+  H.it('a staging failure on a LATE member leaves no member displaced (B1)', function()
+    local _, history, fs = modules()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkfile(ws, 'a.txt', { 'CONTENT-A' })
+    H.mkfile(ws, 'b.txt', { 'CONTENT-B' })
+    swap_through_sync(ws)
+
+    -- Fail the SECOND staging rename: the first member is ALREADY parked at
+    -- .direct-tmp-1 when the failure hits (the check above only ever failed
+    -- the first rename, so nothing was staged there).
+    local real_rename = fs.rename
+    local staged = 0
+    local restore = H.stub(fs, 'rename', function(src, dst)
+      if tostring(dst):match('%.direct%-tmp%-%d+$') then
+        staged = staged + 1
+        if staged == 2 then
+          return nil, 'EACCES'
+        end
+      end
+      return real_rename(src, dst)
+    end)
+    H.capture_messages()
+    H.with_cwd(ws, function()
+      H.assert_nil(history.undo(), 'the failed staging refuses the undo')
+    end)
+    restore()
+
+    H.assert_notified('could not stage renames')
+    H.assert_fs_eq(ws, { 'a.txt', 'b.txt' },
+      'the failure left no .direct-tmp-* anywhere in the tree')
+    H.assert_eq(vim.fn.readfile(ws .. '/a.txt'), { 'CONTENT-B' },
+      'a.txt holds its pre-attempt content at its original path')
+    H.assert_eq(vim.fn.readfile(ws .. '/b.txt'), { 'CONTENT-A' },
+      'b.txt holds its pre-attempt content at its original path')
+    -- The entry is kept for the retry (D13); it is NOT dropped to make the
+    -- retry stop failing.
+    H.assert_eq(history_lines('undo.log'), { MARKER, swap_line(ws) },
+      'the group entry is pushed back onto its source log')
+  end)
+
+  H.it('a grouped undo that failed at a late member is retryable once the fault clears (B1)', function()
+    local _, history, fs = modules()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkfile(ws, 'a.txt', { 'CONTENT-A' })
+    H.mkfile(ws, 'b.txt', { 'CONTENT-B' })
+    swap_through_sync(ws)
+
+    local real_rename = fs.rename
+    local staged = 0
+    local restore = H.stub(fs, 'rename', function(src, dst)
+      if tostring(dst):match('%.direct%-tmp%-%d+$') then
+        staged = staged + 1
+        if staged == 2 then
+          return nil, 'EACCES'
+        end
+      end
+      return real_rename(src, dst)
+    end)
+    H.capture_messages()
+    H.with_cwd(ws, function()
+      H.assert_nil(history.undo(), 'the first undo fails on the late member')
+    end)
+    restore()
+
+    -- The obstruction is gone: the SAME undo entry must now succeed.
+    H.capture_messages()
+    local retried
+    H.with_cwd(ws, function()
+      retried = history.undo()
+    end)
+    H.assert_not_nil(retried, 'the retried undo succeeds after the fault clears')
+    H.assert_fs_eq(ws, { 'a.txt', 'b.txt' }, 'no .direct-tmp-* left behind')
+    H.assert_eq(vim.fn.readfile(ws .. '/a.txt'), { 'CONTENT-A' },
+      'the retry restored a.txt')
+    H.assert_eq(vim.fn.readfile(ws .. '/b.txt'), { 'CONTENT-B' },
+      'the retry restored b.txt')
+  end)
+
   H.it('a group reversal that fails midway reports the entry left at its temp', function()
     local _, _, fs, action, _, ui = modules()
     local sb = H.sandbox()
