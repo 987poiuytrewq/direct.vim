@@ -506,11 +506,8 @@ function Buffer:sync()
     return nil, stage_err
   end
 
-  -- steps 2-3: apply every action, then push the successes to history as
-  -- whole dependent move groups. `history.log` reports a failed history
-  -- write itself -- it never raises and never swallows the failure (
-  -- incl. the redo-reset failure) -- so the ignored return here cannot hide a
-  -- write error.
+  -- Apply each action and record successful work in history, grouping dependent
+  -- moves into one entry. `history.log` reports write failures without raising.
   local failed, applied = {}, {}
   for i, act in ipairs(actions) do
     local exec_action = act
