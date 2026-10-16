@@ -229,10 +229,8 @@ function M.rename(src, dst)
     return nil, err, code
   end
   if M.is_dir(src) then
-    -- The source is REMOVED below, so the copy must be complete: an entry it
-    -- could not reproduce must refuse the move instead of being destroyed
-    -- silently (; follow-up moved the refusal from copy_tree's default
-    -- behaviour to this explicit request).
+    -- This path removes the source after copying, so require a complete copy.
+    -- Non-destructive yank/paste callers can continue using best-effort mode.
     local cok, cerr = M.copy_tree(src, dst, { require_complete = true })
     if not cok then
       return nil, cerr
@@ -365,8 +363,8 @@ local function uncopyable(ctx, path, kind)
   return nil
 end
 
--- discard(created) undoes what a FAILED copy created, newest first. It is
--- structurally incapable of deleting anything else : recorded files are
+-- discard(created) undoes what a failed copy created, newest first. It is
+-- structurally incapable of deleting anything else: recorded files are
 -- unlinked one by one, and recorded directories are removed only when they are
 -- EMPTY (fs_rmdir), innermost-first because the list is walked newest-first.
 -- There is no recursive forced delete anywhere in this path, so an entry that
@@ -386,20 +384,14 @@ local function discard(created)
   end
 end
 
--- copy_dir(from, to, ctx) -> true | nil, err. The recursion behind copy_tree and
--- the authority on what a copy reproduces: it classifies every entry as it walks
--- and copies plain files and real directories. It does not depend on the
--- pre-scan, so an entry that appears after that pass is still refused (or
--- skipped and reported) when the walk reaches it -- the round that narrowed the
--- refusal to one up-front scan could miss such an entry, and `rename`'s EXDEV
- -- fallback then removed the source, which could destroy data.
+-- copy_dir is the live copy walk and the authority on what can be reproduced.
+-- It classifies entries as it goes, so a path created after the pre-scan is
+-- still refused or reported before an EXDEV fallback removes the source.
 --
--- The destination is never written to against its owner: a path that is already
--- taken is REFUSED in complete mode (-- overwriting it would mutate a
--- destination the failed copy might not be able to restore) and left to
--- overwrite in best-effort mode, which is the yank/paste contract. Calls go
--- through the module table (M.mkdirp, M.list_dir, M.copy_file, M.taken), so the
--- seam rule holds here too.
+-- A destination belongs to its owner. Complete mode refuses an occupied path
+-- rather than overwrite data a later failure might not restore. Best-effort
+-- mode retains overwrite behavior for non-destructive yank/paste. Calls use the
+-- module table so stubs on M.mkdirp, M.list_dir, M.copy_file, and M.taken work.
 --
 -- A skipped directory (best-effort mode) is a SUCCESS carrying a ctx.skipped
 -- record, not a failure: only a real I/O failure or a refusal returns nil, err.
@@ -464,12 +456,9 @@ local function copy_dir(from, to, ctx)
   return true
 end
 
--- prescan(path, offender) -> offender | nil, err. Depth-first walk of the whole
--- source in deterministic order  that `classify`s every entry WITHOUT
--- creating or writing anything, so a destructive copy refuses an uncopyable
--- entry before it touches the destination at all : the common case then
--- leaves no trace to undo, and the copy's own cleanup is only reached by an
--- entry that appears after this pass (which the walk still catches).
+-- prescan performs a deterministic depth-first walk before any writes. Complete
+-- mode can therefore refuse unsupported entries without touching the
+-- destination; the live copy walk still catches entries that appear later.
 local function prescan(path, offender)
   local names = M.list_dir(path)
   if not names then
@@ -496,26 +485,17 @@ local function prescan(path, offender)
   return nil
 end
 
--- copy_tree(src, dst[, opts]) -> true[, skipped] | nil, err. Recursive
--- hand-rolled (no `cp -r`), with mkdir -p semantics; iteration goes through
--- M.list_dir, so ordering is deterministic  and module-table stubs are
--- honoured.
+-- copy_tree recursively copies with mkdir -p semantics and deterministic
+-- module-table iteration, so operation stubs remain effective.
 --
--- `opts.require_complete` is the DESTRUCTIVE caller's contract: the caller
--- removes the source after a successful copy (`rename`'s EXDEV fallback), so it
--- gets the strongest one. An entry the copy cannot reproduce is REFUSED, naming
--- it, and it is refused by a pre-scan BEFORE anything is created; a destination
--- path that is already taken is refused rather than overwritten ; and an
--- entry that appears only after that pre-scan is refused by the walk itself.
--- Whatever a failed copy did create is then discarded surgically, so the source
--- is left completely intact and nothing this copy did not create is removed.
+-- `require_complete` is for destructive callers that remove the source after
+-- copying. It refuses unsupported entries and occupied destinations; the live
+-- walk also catches late entries. Failure cleanup removes only paths this copy
+-- created, leaving the source and foreign destination data intact.
 --
--- Without it the copy is best-effort, which is what a yank or a paste needs
--- they destroy nothing, so an entry that merely cannot be reproduced must not
--- fail the whole operation. Such entries are SKIPPED and returned as `skipped`
--- (a list of `{ path, kind }`, nil when nothing was skipped) so the caller can
--- report them; an uncopyable entry is never dropped silently, and an existing
--- destination keeps its overwrite semantics.
+-- Default best-effort mode is for non-destructive yank/paste: unsupported
+-- entries are skipped and returned in `skipped` for the caller to report, while
+-- existing destinations retain their overwrite behavior.
 function M.copy_tree(src, dst, opts)
   if not M.is_dir(src) then
     return nil, 'not a directory: ' .. tostring(src)
