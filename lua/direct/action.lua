@@ -578,7 +578,7 @@ end
 function M.first_free_temp(dir)
   local n = 1
   local candidate = M.fs.join(dir, '.direct-tmp-' .. n)
-  while M.fs.exists(candidate) do
+  while M.fs.taken(candidate) do
     n = n + 1
     candidate = M.fs.join(dir, '.direct-tmp-' .. n)
   end
@@ -711,16 +711,13 @@ end
 -- Group(actions) -- the interlinked `mv` actions of one sync, recorded and
 -- reversed as ONE history entry (B6). `do()` reuses `M.stage_moves`, so a group
 -- reversal is staged exactly like the save that created it. A staging failure
--- first UNWINDS every rename that landed -- each staged member is renamed back
--- to its original path, so the failure leaves the pre-attempt state and the
--- entry stays retryable (B1: a member parked at `.direct-tmp-<n>` while the
--- unchanged group is re-inserted would make the next undo target a path that no
--- longer exists, permanently stuck); an unwind that itself cannot rename a
--- member back is reported loudly naming the temp path, never swallowed. A move
--- that does not land still returns `nil, err` after reporting every entry left
--- parked at a temp path (B1/T-023/B5: report, never silently discard). Either
--- way the caller (history) keeps the entry so the undo can be retried (D13) --
--- the re-insert is never dropped to mask the failure.
+-- attempts to UNWIND every rename that landed, using atomic no-replace renames.
+-- When that succeeds, the pre-attempt state is restored and the entry is
+-- retryable. When a destination is occupied or the platform lacks the atomic
+-- primitive, the original remains at its named temp path; the error calls for
+-- manual recovery before retry. Every stranded temp is reported (B1/T-023/B5),
+-- and the caller retains the history entry (D13) rather than silently dropping
+-- it to mask the failure.
 --
 -- The name `g` never collides with an action name: every other serialized line
 -- starts with the name of a single-entry action. `describe()` joins the member
@@ -729,7 +726,7 @@ function M.Group(actions)
   local self = { name = 'g', actions = actions }
   local function report_temps(staging)
     for _, tmp in ipairs(staging ~= nil and staging.temps or {}) do
-      if M.fs.exists(tmp) then
+      if M.fs.taken(tmp) then
         M.ui.notify('direct: a failed move left the staged entry ' .. tmp,
           vim.log.levels.ERROR)
       end
@@ -741,25 +738,29 @@ function M.Group(actions)
       M.stage_moves(members)
     if staging == nil and stage_err ~= nil then
       -- B1: unwind the staging renames that ALREADY landed before reporting,
-      -- so a failed group application leaves the pre-attempt state and the
-      -- entry the caller re-inserts stays retryable. Every original path is
-      -- still free (no move has executed yet) and distinct, so no restore can
-      -- collide. A member that cannot be renamed back is reported loudly by
-      -- its temp path -- never left to linger silently.
+      -- so a failed group application leaves the pre-attempt state where safe.
+      -- Restores use atomic no-replace rename: ordinary rename could destroy a
+      -- concurrent destination, and checking before it would be racy. If a
+      -- restore fails, the original remains at its temp path. History retains
+      -- the action, but it is not safe to retry until the user manually recovers
+      -- that temp and resolves the collision.
       local overrides = stage_overrides or {}
       for _, act in ipairs(members) do
         local tmp = act.src ~= nil and overrides[act.src] or nil
-        if tmp ~= nil and M.fs.exists(tmp) then
-          local rok, rerr = M.fs.rename(tmp, act.src)
+        if tmp ~= nil and M.fs.taken(tmp) then
+          local rok, rerr = M.fs.rename_noreplace(tmp, act.src)
           if not rok then
-            M.ui.notify('direct: could not restore the staged entry ' .. tmp
-              .. ' to ' .. tostring(act.src) .. ': ' .. tostring(rerr),
+            local occupied = M.fs.taken(act.src)
+            local cause = occupied and 'destination is occupied' or tostring(rerr)
+            M.ui.notify('direct: could not restore staged entry ' .. tmp
+              .. ' to ' .. tostring(act.src) .. ' (' .. cause
+              .. '); temp preserved; manual recovery required before retry',
               vim.log.levels.ERROR)
           end
         end
       end
       for _, tmp in ipairs(stage_temps or {}) do
-        if M.fs.exists(tmp) then
+        if M.fs.taken(tmp) then
           M.ui.notify('direct: a failed rename left the staged entry ' .. tmp,
             vim.log.levels.ERROR)
         end

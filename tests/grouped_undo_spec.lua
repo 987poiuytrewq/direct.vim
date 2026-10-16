@@ -419,6 +419,158 @@ H.describe('grouped move undo (B6/B11/D3)', function()
       'the group entry is pushed back onto its source log')
   end)
 
+  H.it('rollback collision does not overwrite an occupant', function()
+    local _, history, fs = modules()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkfile(ws, 'a.txt', { 'CONTENT-A' })
+    H.mkfile(ws, 'b.txt', { 'CONTENT-B' })
+    swap_through_sync(ws)
+
+    local real_rename = fs.rename
+    local staged, temp, destination, staged_contents = 0, nil, nil, nil
+    local restore = H.stub(fs, 'rename', function(src, dst)
+      if tostring(dst):match('%.direct%-tmp%-%d+$') then
+        staged = staged + 1
+        if staged == 1 then
+          temp, destination = dst, src
+          staged_contents = vim.fn.readfile(src)
+          local ok, err = real_rename(src, dst)
+          if not ok then return nil, err end
+          H.mkfile(ws, vim.fs.basename(destination), 'CONCURRENT-OCCUPANT')
+          return true
+        end
+        return nil, 'forced late staging failure'
+      end
+      return real_rename(src, dst)
+    end)
+    H.capture_messages()
+    H.with_cwd(ws, function()
+      H.assert_nil(history.undo(), 'late staging failure aborts the group')
+    end)
+    restore()
+
+    H.assert_eq(vim.fn.readfile(destination), { 'CONCURRENT-OCCUPANT' },
+      'rollback must not replace the concurrently created occupant')
+    H.assert_eq(vim.fn.readfile(temp), staged_contents,
+      'the staged original remains recoverable at its temp path')
+    H.assert_notified(temp)
+    H.assert_notified(destination)
+    H.assert_eq(history_lines('undo.log'), { MARKER, swap_line(ws) },
+      'the failed group remains in history')
+    H.assert_notified('manual recovery required')
+  end)
+
+  H.it('dangling symlink is restored on rollback', function()
+    local _, history, fs, action = modules()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local link = ws .. '/a.txt'
+    local target = 'missing-target'
+    H.assert_true(vim.uv.fs_symlink(target, link) ~= nil,
+      'create the dangling symlink fixture')
+    H.mkfile(ws, 'b.txt', { 'CONTENT-B' })
+    local group = action.Group({
+      action.Move(link, ws .. '/b.txt'),
+      action.Move(ws .. '/b.txt', link),
+    })
+    H.assert_true(history.log(group), 'record the group for undo')
+
+    local real_rename = fs.rename
+    local staged = 0
+    local restore = H.stub(fs, 'rename', function(src, dst)
+      if tostring(dst):match('%.direct%-tmp%-%d+$') then
+        staged = staged + 1
+        if staged == 2 then return nil, 'forced late staging failure' end
+      end
+      return real_rename(src, dst)
+    end)
+    H.capture_messages()
+    H.with_cwd(ws, function()
+      H.assert_nil(history.undo(), 'late staging failure aborts the group')
+    end)
+    restore()
+
+    H.assert_eq(vim.uv.fs_readlink(link), target,
+      'rollback restores the dangling symlink with its original target')
+    H.assert_false(fs.taken(ws .. '/.direct-tmp-1'),
+      'no staged symlink remains')
+    H.assert_eq(history_lines('undo.log'), {
+      MARKER,
+      'g\t2\t' .. link .. '\t' .. ws .. '/b.txt\t' .. ws .. '/b.txt\t' .. link,
+    }, 'the group remains available for retry')
+    H.assert_true(history.undo() ~= nil,
+      'retry succeeds after the staging fault clears')
+    H.assert_eq(vim.uv.fs_readlink(ws .. '/b.txt'), target,
+      'the retry moves the same dangling symlink without changing its target')
+    H.assert_eq(vim.fn.readfile(link), { 'CONTENT-B' },
+      'the other group member is restored at its expected path')
+  end)
+
+  H.it('rollback failure reports temp and retains history', function()
+    local _, history, fs, action, _, ui = modules()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkfile(ws, 'a.txt', { 'CONTENT-A' })
+    H.mkfile(ws, 'b.txt', { 'CONTENT-B' })
+    local group = action.Group({
+      action.Move(ws .. '/b.txt', ws .. '/a.txt'),
+      action.Move(ws .. '/a.txt', ws .. '/b.txt'),
+    })
+    H.assert_true(history.log(group), 'record the group for undo')
+
+    local real_rename, real_rename_noreplace = fs.rename, fs.rename_noreplace
+    local staged, temp, destination = 0, nil, nil
+    local restore_rename = H.stub(fs, 'rename', function(src, dst)
+      if tostring(dst):match('%.direct%-tmp%-%d+$') then
+        staged = staged + 1
+        if staged == 1 then temp, destination = dst, src end
+        if staged == 2 then return nil, 'forced late staging failure' end
+      end
+      return real_rename(src, dst)
+    end)
+    local restore_noreplace = H.stub(fs, 'rename_noreplace', function(src, dst)
+      if src == temp and dst == destination then
+        return nil, 'forced rollback failure'
+      end
+      return real_rename_noreplace(src, dst)
+    end)
+    local notifications = {}
+    local restore_notify = H.stub(ui, 'notify', function(message, level)
+      notifications[#notifications + 1] = { message = message, level = level }
+    end)
+    H.with_cwd(ws, function()
+      H.assert_nil(history.undo(), 'late staging and restoration failures abort')
+    end)
+    restore_notify()
+    restore_noreplace()
+    restore_rename()
+
+    local rollback_error
+    for _, notification in ipairs(notifications) do
+      if notification.message:find('could not restore staged entry', 1, true) then
+        rollback_error = notification
+        break
+      end
+    end
+    H.assert_not_nil(rollback_error, 'restoration failure is reported')
+    H.assert_eq(rollback_error.level, vim.log.levels.ERROR,
+      'restoration failure uses ERROR severity')
+    H.assert_true(rollback_error.message:find(temp, 1, true) ~= nil,
+      'the error names the preserved temp path')
+    H.assert_true(rollback_error.message:find(destination, 1, true) ~= nil,
+      'the error names the original destination')
+    H.assert_true(rollback_error.message:find('manual recovery required before retry', 1, true) ~= nil,
+      'a stranded staged entry is not presented as automatically retryable')
+    H.assert_eq(history_lines('undo.log'), {
+      MARKER,
+      'g\t2\t' .. ws .. '/b.txt\t' .. ws .. '/a.txt\t' .. ws .. '/a.txt\t' .. ws .. '/b.txt',
+    }, 'the group remains in history after rollback itself fails')
+  end)
+
   H.it('a grouped undo that failed at a late member is retryable once the fault clears (B1)', function()
     local _, history, fs = modules()
     clean_buffers()

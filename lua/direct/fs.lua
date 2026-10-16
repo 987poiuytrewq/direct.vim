@@ -267,6 +267,50 @@ function M.rename(src, dst)
   return true
 end
 
+-- rename_noreplace(src, dst) -> true | nil, err. Rollback must not use the
+-- ordinary rename contract: POSIX rename replaces an occupied destination, and
+-- checking M.taken(dst) first would still leave a TOCTOU window. Use the native
+-- atomic exclusive-rename operation on supported Unix platforms. If it is not
+-- available, fail closed so the caller can preserve and report the staged path.
+function M.rename_noreplace(src, dst)
+  if type(src) ~= 'string' or type(dst) ~= 'string' then
+    return nil, 'invalid path'
+  end
+  local ffi_ok, ffi = pcall(require, 'ffi')
+  if not ffi_ok then
+    return nil, 'atomic no-replace rename is unavailable (LuaJIT FFI unavailable)'
+  end
+  pcall(ffi.cdef, [[
+    int renamex_np(const char *from, const char *to, unsigned int flags);
+    int renameat2(int olddirfd, const char *oldpath, int newdirfd,
+      const char *newpath, unsigned int flags);
+    char *strerror(int errnum);
+  ]])
+
+  local sysname = vim.uv.os_uname().sysname
+  local ok, result = pcall(function()
+    if sysname == 'Darwin' then
+      -- macOS RENAME_EXCL (renamex_np): atomically refuse an existing target.
+      return ffi.C.renamex_np(src, dst, 0x00000004)
+    elseif sysname == 'Linux' then
+      -- Linux RENAME_NOREPLACE (renameat2), with both paths relative to cwd.
+      return ffi.C.renameat2(-100, src, -100, dst, 0x00000001)
+    end
+    error('atomic no-replace rename is unavailable on ' .. tostring(sysname))
+  end)
+  if not ok then
+    return nil, tostring(result)
+  end
+  if result == 0 then
+    return true
+  end
+  local code = ffi.errno()
+  local err_ok, err = pcall(function()
+    return ffi.string(ffi.C.strerror(code))
+  end)
+  return nil, (err_ok and err or ('errno ' .. tostring(code)))
+end
+
 -- copy_file(src, dst) -> true | nil, err, code (vim.uv.fs_copyfile preserves
 -- mode by default).
 function M.copy_file(src, dst)
