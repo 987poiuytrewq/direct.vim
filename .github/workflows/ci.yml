@@ -1,0 +1,52 @@
+name: CI
+
+# `push` only, so one commit produces one workflow run. It stays unfiltered
+# (no `branches:`/`tags:`) because a push to a branch that has no PR must still
+# trigger a run -- that is how the red-run self-test was performed. What this
+# trades away:
+#   - Pull requests from forks will not trigger CI at all: a push in a fork
+#     does not trigger the upstream repository's workflows.
+#   - CI no longer tests the branch merged with the base (`pull_request` ran on
+#     `refs/pull/*/merge`), so a branch that is green alone but breaks when
+#     combined with `master` is only discovered by the run on `master` after
+#     merging.
+#   - Unfiltered `push` also means tag pushes trigger CI (harmless, but worth
+#     knowing).
+on: push
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test with Neovim (stable)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Neovim
+        # `version: stable` is resolved dynamically at run time, so the exact
+        # Neovim build CI exercises can drift without any change to this file.
+        # This commit SHA is pinned deliberately, for auditability, instead of
+        # referencing the `v1.6.1` tag: `v1.6.1` is a lightweight tag that
+        # resolves straight to this same commit, so a reviewer can verify the
+        # pin, and it changes only through an explicit edit.
+        uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1.6.1
+        with:
+          neovim: true
+          version: stable
+          # Version-floor gap: the plugin supports `neovim >= 0.11`, but this
+          # job exercises only whatever `stable` resolves to at run time (NVIM
+          # v0.12.6 on the 847bf9e runs). The 0.11 floor is therefore NOT
+          # covered by this workflow: a green badge means "passes on today's
+          # stable", not "passes the supported floor". Treat the floor as
+          # unverified until a job pins 0.11 explicitly.
+
+      - name: Show the resolved Neovim version
+        run: nvim --version | head -n 1
+
+      - name: Run the test suite
+        run: nvim --headless -l tests/run.lua

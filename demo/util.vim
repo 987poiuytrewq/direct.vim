@@ -5,12 +5,16 @@ endfunction
 
 function Input(characters)
 silent execute "normal! " . a:characters
-python << endOfPython
-import random
-import time
-duration = random.uniform(0.01, 0.05)
-time.sleep(duration)
-endOfPython
+call luaeval('vim.uv.sleep(30)')
+redraw!
+endfunction
+
+" Mapped() drives :normal WITHOUT the bang, so buffer-local mappings fire and
+" <> notation is translated from the double-quoted argument (e.g. "\<CR>").
+" Input() uses :normal!, which skips mappings entirely, so a mapped key such as
+" the direct listing's <CR> must be pressed through Mapped().
+function Mapped(characters)
+silent execute "normal " . a:characters
 redraw!
 endfunction
 
@@ -22,7 +26,3 @@ for character in characters
 endfor
 call Pause()
 endfunction
-
-augroup autosave
-  autocmd!
-augroup END
