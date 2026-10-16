@@ -8,8 +8,8 @@ local M = {}
 -- Thin pure wrappers
 -- ---------------------------------------------------------------------------
 
--- abspath(path) -> absolute path | nil, 'invalid path'. Non-string input is
--- rejected before any call : vim.fs.abspath raises on nil.
+-- abspath(path) -> absolute path | nil, 'invalid path'. Reject non-strings
+-- before calling vim.fs.abspath, which raises on nil.
 function M.abspath(path)
   if type(path) ~= 'string' then
     return nil, 'invalid path'
@@ -17,9 +17,8 @@ function M.abspath(path)
   return vim.fs.abspath(path)
 end
 
--- basename strips a trailing slash before delegating: `vim.fs.basename('/a/b/')`
--- is '' , which would make a directory yank store an empty name. Non-string
--- input returns nil, 'invalid path' without raising .
+-- Strip trailing slashes before basename: vim.fs.basename('/a/b/') is empty,
+-- which would make a directory yank store an empty name.
 function M.basename(path)
   if type(path) ~= 'string' then
     return nil, 'invalid path'
@@ -62,10 +61,8 @@ function M.exists(path)
   return M.stat(path) ~= nil
 end
 
--- taken(path) -> boolean: is this path already occupied by something? THE shared
--- helper for every "is this name free for a write?" question -- the Paste clash
--- loop, the trash name search and the copy's own destination checks all use it
--- so they cannot drift apart .
+-- taken(path) is the shared occupancy check for paste clashes, trash names, and
+-- copy destinations, so those write paths cannot disagree.
 --
 -- It uses lstat, NOT the following stat behind M.exists: a DANGLING symlink
 -- occupies the name and counts as taken. That is the deliberate choice -- a
@@ -81,8 +78,7 @@ function M.taken(path)
   return ok and st ~= nil
 end
 
--- is_dir/is_file follow symlinks (stat, not lstat), matching Python's
--- os.path.isdir / os.path.isfile. They are predicates, so they return booleans.
+-- is_dir/is_file follow symlinks and always return booleans.
 function M.is_dir(path)
   local st = M.stat(path)
   return st ~= nil and st.type == 'directory'
@@ -93,8 +89,8 @@ function M.is_file(path)
   return st ~= nil and st.type == 'file'
 end
 
--- realpath(path) -> the resolved path, or the input when it cannot be resolved
--- . vim.fs.realpath does not exist on the target runtime .
+-- Return the resolved path, or the original input if resolution fails. Use
+-- vim.uv.fs_realpath because vim.fs.realpath is unavailable in this runtime.
 function M.realpath(path)
   if type(path) ~= 'string' or path == '' then
     return path
@@ -154,7 +150,7 @@ end
 
 -- read_dir_lines(root, ignore_set) -> the listing pipeline as a string array
 -- directories first (each with a trailing '/'), then files, each group sorted
--- ascending. Symlinks are resolved with a following stat ; entries whose
+-- ascending. Symlinks are resolved with a following stat; entries whose
 -- stat fails (broken symlink) or whose target is neither a file nor a directory
 -- (fifo, socket, device) are omitted, matching Python where isdir and isfile are
 -- both false. `ignore_set` is a list of paths (the glob results of &wildignore
@@ -199,8 +195,7 @@ end
 -- same_path(a, b) -> ino+dev equality, the Lua equivalent of
 -- os.path.samefile; falls back to normalised-string equality when either side
 -- cannot be stat'ed. This is spelling-independent, so it is correct for a root
--- reached through a symlinked prefix . Non-string inputs return
--- nil, 'invalid path' instead of raising inside vim.fs.normalize .
+-- reached through a symlinked prefix. Reject non-strings before normalize.
 function M.same_path(a, b)
   if type(a) ~= 'string' or type(b) ~= 'string' then
     return nil, 'invalid path'
@@ -217,7 +212,7 @@ end
 -- Mutation
 -- ---------------------------------------------------------------------------
 
--- rename(src, dst) -> true | nil, err, code. On EXDEV only  it falls back
+-- rename(src, dst) -> true | nil, err, code. On EXDEV only, it falls back
 -- to copy-then-remove; every other libuv error propagates untouched, so a
 -- permission failure is never masked as a successful move.
 function M.rename(src, dst)
@@ -579,7 +574,7 @@ end
 -- path, so it is pcall-guarded; a 0 return also signals failure. Non-string
 -- input is rejected before any call: vim.fn.mkdir would otherwise coerce a
 -- number to a directory name in the cwd and create a literal `v:null`
--- directory for a nil argument .
+-- directory for a nil argument.
 function M.mkdirp(path)
   if type(path) ~= 'string' then
     return nil, 'invalid path'
@@ -594,9 +589,8 @@ function M.mkdirp(path)
   return true
 end
 
--- touch(path) -> true | nil, err. defines touch as
--- `vim.fn.writefile({}, path)` (create/truncate to empty). Non-string input is
--- rejected before any call so a nil cannot reach writefile .
+-- touch creates or truncates an empty file with writefile; reject non-strings
+-- before the call so nil cannot reach writefile.
 function M.touch(path)
   if type(path) ~= 'string' then
     return nil, 'invalid path'

@@ -1,7 +1,4 @@
--- tests/zzz_isolation_observer_spec.lua -- sorts last, so it runs after
--- tests/isolation_spec.lua and proves the *cross-file* half of the isolation
--- guarantee (reviewer B1/B2): foreign autocmds and leaked options registered by
--- a previous spec file are gone.
+-- tests/zzz_isolation_observer_spec.lua -- last-sorted cross-file isolation check.
 
 local H = require('tests.support.harness')
 
@@ -38,10 +35,9 @@ H.describe('isolation: cross-file', function()
       'filetypeplugin augroup preserved across the autocmd reset')
   end)
 
-  -- T-002 (reviewer B3): the machinery must still *work*, not merely exist.
-  -- isolation_spec.lua left a temp rtp dir with an ftplugin in
-  -- `g:direct_probe_ft_rtp`; re-triggering FileType here -- one file boundary
-  -- later -- must still source it.
+  -- The machinery must still *work*, not merely exist: isolation_spec.lua left a
+  -- temp rtp dir with an ftplugin in `g:direct_probe_ft_rtp`, and re-triggering
+  -- FileType here -- one file boundary later -- must still source it.
   H.it('still sources an ftplugin from a temp rtp dir after the file boundary', function()
     local dir = vim.g.direct_probe_ft_rtp
     H.assert_not_nil(dir, 'isolation_spec left the probe rtp dir')

@@ -1,10 +1,5 @@
--- tests/ui_spec.lua -- the injectable prompt seam and notify routing (T-009,
--- D9/R1). The behavioural prompt tests (paste clash) live in P2; this file pins
--- that the seam itself exists, that with_prompt replaces it, and that
--- vim.fn.input is never reached under `-l`. It also holds the N3 harness
--- self-test: a stale ui table cannot silently make with_prompt miss its stub
--- and reach the real vim.fn.input, which under `--headless -l` would truncate
--- the run (exit 0, leaked temp root) instead of failing loudly.
+-- tests/ui_spec.lua -- injectable prompt routing and stale-module safeguards.
+-- Under `-l`, the real prompt would block or abort instead of failing safely.
 
 local H = require('tests.support.harness')
 
@@ -29,12 +24,12 @@ H.describe('ui', function()
     H.assert_eq(answer, 'renamed.txt', 'with_prompt answered through the seam')
   end)
 
-  -- N3: the stale-module trap. A spec that stubs a freshly-required ui table
-  -- while the consumer modules captured an older one would miss the stub; the
-  -- real ui.prompt then calls vim.fn.input, which under `--headless -l`
-  -- terminates the whole process (truncated stdout, no RUN: line, exit 0). The
-  -- poison must turn that into a loud, catchable Lua error instead.
-  H.it('a stale ui stub loud-fails instead of truncating the run via vim.fn.input (N3)', function()
+  -- The stale-module trap. A spec that stubs a freshly-required ui table while
+  -- the consumer modules captured an older one would miss the stub; the real
+  -- ui.prompt then calls vim.fn.input, which under `--headless -l` terminates the
+  -- whole process (truncated stdout, no RUN: line, exit 0). The poison must turn
+  -- that into a loud, catchable Lua error instead.
+  H.it('a stale ui stub loud-fails instead of truncating the run via vim.fn.input', function()
     local ui = require('direct.ui')     -- the consumer table this spec holds
     local saved = package.loaded['direct.ui']
     package.loaded['direct.ui'] = nil   -- simulate the harness per-file unload
@@ -56,9 +51,9 @@ H.describe('ui', function()
       'vim.fn.input is restored after the raise')
   end)
 
-  -- N3: the stale-module detection guard. with_prompt must refuse to run when
-  -- the table it would stub is not the one the file captured before the unload.
-  H.it('with_prompt raises on a stale ui-module mismatch instead of missing the stub (N3)', function()
+  -- with_prompt must refuse to run when the table it would stub is not the one
+  -- the file captured before the unload.
+  H.it('with_prompt raises on a stale ui-module mismatch instead of missing the stub', function()
     local saved = H._file_ui
     H._file_ui = {} -- a captured table distinct from the fresh require below
     local ok, err = pcall(H.with_prompt, function() end, { 'x' })

@@ -1,16 +1,5 @@
--- tests/history_spec.lua -- undo/redo over undo.log / redo.log (T-015, T-017).
---
--- Proves: undo/redo round trip for every action type; the empty-log message
--- belongs to history.undo/redo (T-008 correction: log.pop returns nil
--- silently); a failed reversal pushes the original line back and notifies
--- (D13); log() after an undo clears the redo log; the B15 success summary is
--- notified exactly once; and data-dir failures are reported, not raised (B9/
--- O2).
---
--- T-017/D18 (version gate): every log this module writes carries
--- `#direct-history-v3` as its FIRST line; a foreign (Python-era) log is never
--- executed but quarantined aside as <name>.legacy[.<n>]; an absent/empty/
--- marker-only log is empty history; a marked log replays across processes.
+-- tests/history_spec.lua -- undo/redo, versioned logs, and failure recovery.
+-- The marker prevents unsafe legacy replay; failed reversals remain retryable.
 
 local H = require('tests.support.harness')
 local history = require('direct.history')
@@ -51,7 +40,7 @@ H.describe('history', function()
     end
   end
 
-  H.it('undo/redo round-trips per action type (T-015)', function()
+  H.it('undo/redo round-trips per action type', function()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
     local reg = H.mkdir(sb.data_home, 'reg')
@@ -146,18 +135,10 @@ H.describe('history', function()
       {}, { 'u.txt' })
   end)
 
-  -- B6/AC9 (spec 11.3 "10-step alternation"): TEN stacked logged mutations,
-  -- undone one at a time in strict LIFO order, then redone in order. The plan is
-  -- chosen to exercise the two paths the per-type roundtrips above do NOT cover:
-  --   * the trash `-<n>` collision -- the same basename `same.txt` is removed
-  --     twice, so the second removal (step 7) must land on
-  --     `<digest(same.txt)>-1`; and
-  --   * a directory delete/restore -- a tree with content is removed (step 3)
-  --     and must come back whole.
-  -- Undo order matters: undoing step 2 (remove tree/inner.txt) requires step 3's
-  -- RestoreDirectory to have rebuilt `tree` first, so a LIFO regression fails
-  -- loudly at a specific filesystem state, not only in a message assertion.
-  H.it('ten stacked mutations undo one LIFO step at a time, then redo in order (B6)', function()
+  -- Ten stacked mutations verify strict LIFO undo followed by ordered redo.
+  -- The sequence covers repeated trash naming and a directory restore whose
+  -- ordering matters: the tree must be rebuilt before undoing its inner file.
+  H.it('ten stacked mutations undo one LIFO step at a time, then redo in order', function()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
 
@@ -221,7 +202,7 @@ H.describe('history', function()
       'redo re-applied all ten steps to the final state')
   end)
 
-  H.it('undo/redo on empty logs notify Nothing to undo / Nothing to redo (T-008)', function()
+  H.it('undo/redo on empty logs notify Nothing to undo / Nothing to redo', function()
     local sb = H.sandbox()
     H.capture_messages()
     H.assert_nil(history.undo(), 'undo on an empty log returns nil')
@@ -231,7 +212,7 @@ H.describe('history', function()
     H.assert_notified('Nothing to redo')
   end)
 
-  H.it('a failing reversal keeps the undo entry on the source log and notifies (D13)', function()
+  H.it('a failing reversal keeps the undo entry on the source log and notifies', function()
     local sb = H.sandbox()
     H.mkfile(sb.root, 'a.txt', { 'a' })
     local move = action.Move(sb.root .. '/a.txt', sb.root .. '/b.txt')
@@ -247,7 +228,7 @@ H.describe('history', function()
 
     -- The reversal of the move is Move(b -> a); make fs.rename fail so the
     -- undo cannot execute. cwd is the workspace so the failure message is
-    -- CWD-relative (B15/N8).
+    -- Descriptions are relative to the current working directory.
     local restore = H.stub(fs, 'rename', function()
       return nil, 'forced failure'
     end)
@@ -262,7 +243,7 @@ H.describe('history', function()
     H.assert_eq(vim.fn.readfile(undo_path),
       { '#direct-history-v3',
         'mv\t' .. sb.root .. '/a.txt\t' .. sb.root .. '/b.txt' },
-      'the original line was pushed back onto undo.log (D13)')
+      'the original line was pushed back onto undo.log')
     H.assert_eq(vim.fn.readfile(redo_path), { '#direct-history-v3' },
       'nothing was pushed to the redo log; it holds only the marker')
 
@@ -301,7 +282,7 @@ H.describe('history', function()
     H.assert_notified('Nothing to redo')
   end)
 
-  -- T-017 B1 / D18: the Python predecessor wrote undo.log/redo.log in this SAME
+  -- The Python predecessor wrote undo.log/redo.log in this same
   -- directory with a format whose separator information is destroyed when the
   -- line is written, so no name-level guard can make a legacy line safe to
   -- replay. The Lua history therefore version-marks its logs and refuses to
@@ -309,7 +290,7 @@ H.describe('history', function()
   -- `p` line names `my file.txt`, which splits into `my` + `file.txt` on reload;
   -- before the gate, undo replayed it as an Unpaste and permanently deleted the
   -- unrelated ws/my and ws/file.txt.
-  H.it('a foreign (Python-era) log is quarantined, never executed (T-017/D18)', function()
+  H.it('a foreign (Python-era) log is quarantined, never executed', function()
     local sb = H.sandbox()
     local hist = history_dir(sb)
     local ws = H.mkdir(sb.root, 'ws')
@@ -345,7 +326,7 @@ H.describe('history', function()
     H.assert_notified('Nothing to undo')
   end)
 
-  H.it('a foreign log with existing .legacy names is quarantined to .legacy.<n> (T-017)', function()
+  H.it('a foreign log with existing .legacy names is quarantined to .legacy.<n>', function()
     local sb = H.sandbox()
     local hist = history_dir(sb)
     local undo_path = vim.fs.joinpath(hist, 'undo.log')
@@ -365,7 +346,7 @@ H.describe('history', function()
       'the foreign log lands on the first free suffix')
   end)
 
-  H.it('an unquarantinable foreign log is left untouched and never appended to (T-017)', function()
+  H.it('an unquarantinable foreign log is left untouched and never appended to', function()
     local sb = H.sandbox()
     local hist = history_dir(sb)
     local undo_path = vim.fs.joinpath(hist, 'undo.log')
@@ -390,7 +371,7 @@ H.describe('history', function()
       'log() never appended to the unquarantinable foreign log')
   end)
 
-  H.it('a marker-only log is empty history (T-017)', function()
+  H.it('a marker-only log is empty history', function()
     local sb = H.sandbox()
     local hist = history_dir(sb)
     H.mkfile(hist, 'undo.log', { '#direct-history-v3' })
@@ -404,10 +385,10 @@ H.describe('history', function()
     H.assert_notified('Nothing to redo')
   end)
 
-  -- D18: the marker lives on disk, so a log written by one process is replayed
+  -- The marker lives on disk, so a log written by one process is replayed
   -- by another. A fresh module graph over the same on-disk state stands in for
   -- the second process.
-  H.it('a version-marked log written by one process is undone by another (D18)', function()
+  H.it('a version-marked log written by one process is undone by another', function()
     local sb = H.sandbox()
     H.mkfile(sb.root, 'a.txt', { 'a' })
     local undo_path = vim.fs.joinpath(history_dir(sb), 'undo.log')
@@ -434,7 +415,7 @@ H.describe('history', function()
     H.assert_false(H.exists(sb.root, 'b.txt'), 'b.txt is gone')
   end)
 
-  H.it('undo success notifies the B15 joined summary exactly once', function()
+  H.it('undo success notifies the joined summary exactly once', function()
     local sb = H.sandbox()
     H.mkfile(sb.root, 'a.txt', { 'a' })
     local touch = action.Touch(sb.root .. '/a.txt')
@@ -454,7 +435,7 @@ H.describe('history', function()
       'the serialized form is never used in the message')
   end)
 
-  H.it('history reports an unavailable data dir instead of raising (B9/O2)', function()
+  H.it('history reports an unavailable data dir instead of raising', function()
     local sb = H.sandbox()
     H.mkfile(sb.data_home, 'direct', { 'occupied' }) -- <home>/direct is a file
 

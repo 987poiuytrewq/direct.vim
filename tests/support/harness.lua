@@ -1,42 +1,19 @@
 -- tests/support/harness.lua -- zero-dependency test harness for direct.nvim.
+-- Uses Neovim built-ins and Lua's standard library.
+-- Provides registration, assertions, sandboxes, buffer/prompt helpers, and isolation.
+
+-- `assert_eq(actual, expected[, msg])` is the default; `assert_buf_eq` takes
+-- expected lines first because it reads the actual buffer named by its second arg.
 --
--- No plenary / busted / luarocks / mini.nvim. Only Neovim built-ins
--- (vim.uv, vim.fs, vim.fn, vim.api) and the Lua stdlib.
+-- Isolation model:
+-- * Snapshot every global option at setup and restore it at every file/test
+--   boundary; an allowlist would miss options a test mutates.
+-- * Clear post-boot augroups/autocmds, including default-group `FileType` hooks.
+--   Filetype machinery survives because it is part of the boot baseline.
+-- * Forget plugin modules before re-sourcing the plugin so tests cannot retain
+--   stale module tables. Set each file's XDG_DATA_HOME before that re-source.
 --
--- Public surface (spec section 11.1):
---   describe / it / assert_eq / assert_true / assert_false / assert_nil / assert_error
---   sandbox, mkfile, mkdir, ls, exists, inode_of
---   fs_snapshot / assert_fs_eq
---   buf_lines / assert_buf_eq
---   stub
---   capture_messages / assert_notified
---   with_prompt / with_env / with_option
---
--- Assertion convention: assert_eq(actual, expected[, msg]).
---   The buffer oracle is the deliberate exception: assert_buf_eq(expected, bufnr)
---   takes the expectation first because the actual value is read from the buffer
---   named by the second argument (nil -> current buffer), matching the
---   `assert_buf_eq(lines)` form documented in spec section 11.1.
---
--- Isolation model (spec section 11.1; reviewer B1/B2/B3/B7):
---   * Options: every global option is snapshotted once at setup() and restored
---     at every file and test boundary. A hardcoded allowlist leaked every option
---     it did not name (reviewer B2, reproduced with `ignorecase`), so the
---     baseline is now "all global options" and nothing can be omitted.
---   * Autocmds: every augroup/autocmd created after the boot baseline is cleared
---     at every boundary, including default-group `FileType` handlers. The
---     filetype machinery (`filetypeplugin`/`filetypeindent`) survives purely by
---     boot-baseline membership -- `filetype plugin on` runs before setup()
---     captures the baseline. plugin/direct.lua is re-sourced at file boundaries
---     so its own autocmds are re-registered (reviewer B1/B1-1).
---   * Modules: plugin modules are forgotten before the plugin is re-sourced so a
---     later phase that requires modules at source time cannot capture stale
---     tables (reviewer B7).
---   * Env: the per-spec XDG_DATA_HOME is set before the plugin is re-sourced so
---     the plugin resolves its data dir against the current spec (reviewer B3).
---
--- The runner (tests/run.lua) drives per-spec isolation through the private
--- _begin_file / _end_file / _begin_test / _end_test hooks.
+-- The runner drives these boundaries through the private lifecycle hooks.
 
 local M = {}
 
@@ -45,12 +22,12 @@ local M = {}
 -- ---------------------------------------------------------------------------
 
 M._base = nil                 -- temp root for this run (realpath-resolved)
-M._verbose = false            -- per-assert output when true (spec 11.1)
+M._verbose = false            -- per-assert output when true
 M._suites = {}                -- registered describe() blocks, for the current file
 M._current = nil              -- describe() block currently open
 M._sandboxes = {}             -- sandboxes created during the current test
 M._file_home = nil            -- per-spec XDG_DATA_HOME temp dir
-M._file_ui = nil              -- direct.ui captured before the per-file unload (N3)
+M._file_ui = nil              -- direct.ui captured before the per-file unload
 M._option_snapshot = nil      -- every global option captured at setup()
 M._boot_augroups = nil        -- augroups present at boot (protected baseline)
 M._boot_autocmd_kinds = nil   -- autocmd identities present at boot (protected baseline)
@@ -64,7 +41,7 @@ function M.setup(opts)
   M._verbose = opts.verbose or false
 
   -- Option baseline: every global option. Any option a spec mutates is restored
-  -- at the next boundary, so no option can leak (reviewer B2).
+  -- at the next boundary, so no option can leak.
   M._option_snapshot = {}
   for name in pairs(vim.api.nvim_get_all_options_info()) do
     pcall(function() M._option_snapshot[name] = vim.o[name] end)
@@ -87,7 +64,7 @@ end
 -- that clears and re-registers its augroup on re-source still matches the
 -- baseline. The command is part of the identity: without it, a spec autocmd
 -- that merely reuses a boot group/event/pattern would match a baseline entry
--- and survive every boundary (reviewer P1 fix).
+-- and survive every boundary.
 function M._autocmd_kind(au)
   return string.format('%s\0%s\0%s\0%s',
     au.group_name or '', au.event or '', au.pattern or '', au.command or '')
@@ -117,7 +94,7 @@ function M.reset_registry()
 end
 
 -- ---------------------------------------------------------------------------
--- Verbose per-assert tracing (spec section 11.1: --verbose = per-assert output)
+-- Verbose per-assert tracing (verbose = per-assert output)
 -- ---------------------------------------------------------------------------
 
 local function trace(line)
@@ -383,17 +360,10 @@ end
 -- duration of fn. `answers` is either a list (consumed in order) or a function
 -- used verbatim as the prompt implementation.
 --
--- N3 hardening: a spec that stubs the freshly-required ui table while the
--- plugin captured an older one would silently miss the stub, and the real
--- ui.prompt would call vim.fn.input -- which under `--headless -l` terminates
--- the whole process (truncated output, no `RUN:` line, exit code 0, leaked
--- `direct-tests-*` temp root): a silently-green false pass. Two guards:
---   * stale-module detection -- if this file captured a `direct.ui` table
---     before the per-file unload (B7), the table `with_prompt` stubs must be
---     that same table; a mismatch raises instead of running fn; and
---   * input poisoning -- vim.fn.input is replaced by a raising stub for the
---     duration of fn, so any bypass of the prompt seam raises loudly instead of
---     truncating the run, whatever the cause.
+-- A stale ui table can make a stub miss and reach the real vim.fn.input, which
+-- aborts `-l` before the runner reports a result. Guard both failure paths:
+-- * Require stubs to target the ui table captured by this file before unload.
+-- * Replace vim.fn.input with a raising stub while the prompt seam is active.
 function M.with_prompt(fn, answers)
   local ui = require('direct.ui')
   if M._file_ui ~= nil and ui ~= M._file_ui then
@@ -429,7 +399,7 @@ end
 -- with_env(vars, fn): temporarily overwrites the named environment variables,
 -- runs fn, and restores every one even if fn raises. Presence is tracked
 -- explicitly: a variable that was unset before the call must be unset again
--- afterwards, and `nil` cannot be stored as a table key (reviewer B8-1).
+-- afterwards; `nil` cannot be stored as a table key.
 function M.with_env(vars, fn)
   local saved = {}
   for name in pairs(vars) do
@@ -459,9 +429,8 @@ function M.with_option(name, value, fn)
   end
 end
 
--- with_cwd(dir, fn): scoped window-local cwd change; the previous cwd is
--- restored even if fn raises. Used by the B15 description oracle, because
--- action descriptions are CWD-relative (`fnamemodify <path> :.`).
+-- with_cwd(dir, fn) scopes the window cwd and restores it even if fn raises.
+-- Action descriptions are CWD-relative, so tests need this scoped seam.
 function M.with_cwd(dir, fn)
   local old = vim.fn.getcwd()
   pcall(vim.cmd, 'lcd ' .. vim.fn.fnameescape(dir))
@@ -485,10 +454,10 @@ end
 -- machinery is registered before setup() captures `_boot_augroups` /
 -- `_boot_autocmd_kinds`. An earlier version also exempted every `FileType`
 -- autocmd by event, which kept a spec's own default-group FileType handler
--- alive forever (reviewer B1-1); that blanket exemption is gone.
+-- alive forever; that blanket exemption is gone.
 
 -- Remove every augroup/autocmd created since the boot baseline. Foreign state
--- registered by one spec can never leak into a later one (reviewer B1).
+-- registered by one test can never leak into a later one.
 local function clear_foreign_autocmds()
   if not M._boot_augroups then return end
   for _, name in ipairs(vim.fn.getcompletion('', 'augroup')) do
@@ -531,15 +500,15 @@ end
 
 function M._begin_file()
   wipe_buffers()
-  -- N3: remember the ui table this file captured at load time (if any) before
+  -- remember the ui table this file captured at load time (if any) before
   -- forgetting the direct.* modules. `with_prompt` stubs the freshly-required
   -- table, so if the two differ the spec's consumer modules hold a stale table
   -- and the stub would silently miss (the real vim.fn.input path).
   M._file_ui = package.loaded['direct.ui']
-  forget_direct_modules()                 -- B7: unload before the re-source
+  forget_direct_modules()                 -- unload before the re-source
   reset_options()
   M._file_home = mkdtemp('direct-spec')
-  vim.env.XDG_DATA_HOME = M._file_home    -- B3: home before the re-source
+  vim.env.XDG_DATA_HOME = M._file_home    -- home before the re-source
   reset_runtime()
 end
 
@@ -552,11 +521,9 @@ function M._end_file()
   reset_options()
   reset_runtime()
   -- Forgetting the direct.* modules AFTER the re-source means the next file's
-  -- `_begin_file` captures `_file_ui` from what THAT file's own chunk required,
-  -- not from the module table a PREVIOUS file happened to leave in
-  -- `package.loaded`. Without this, a later `with_prompt` spec (e.g. ui_spec)
-  -- compares the fresh require against a stale foreign table and false-fails
-  -- (P2-NB3).
+  -- `_begin_file` captures `_file_ui` from this file's chunk, not a table a
+  -- previous file left in `package.loaded`. Otherwise `with_prompt` can compare
+  -- against a stale table and falsely report that the stub failed.
   forget_direct_modules()
 end
 
@@ -589,7 +556,7 @@ end
 -- per-test isolation and returns a report:
 --   { text, suites, specs, passed, failed }
 -- _begin_file / _end_file are wrapped so a cleanup failure is reported instead
--- of aborting the whole spec file (reviewer B4).
+-- of aborting the whole test file.
 function M.run_all()
   local lines = {}
   local total_passed, total_failed, total_specs = 0, 0, 0
@@ -607,7 +574,7 @@ function M.run_all()
         M._assert_log = {}
         local ok, err = xpcall(test.fn, debug.traceback)
         -- Contain a throwing teardown: report it against this spec instead of
-        -- aborting the remaining tests in the file (reviewer NB-4).
+        -- aborting the remaining tests in the file.
         local end_ok, end_err = xpcall(M._end_test, debug.traceback)
         if not end_ok then
           if ok then

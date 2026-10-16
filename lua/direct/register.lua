@@ -1,16 +1,11 @@
 -- lua/direct/register.lua -- persistent yank/paste register.
--- Names are validated before storage and again when read; paste destinations
--- are checked before copying. Non-destructive copies report skipped entries.
--- This module does not access buffers; M.relist is the swappable refresh hook.
+-- Names and destinations are checked before copying; skipped entries are reported.
+-- Buffer refresh is delegated through the swappable M.relist hook.
 
 local M = {}
 
--- Entry-name validation is owned by action.entry_name_reason (the single
--- source of truth): a name carrying the ' ' ENTRY_SEPARATOR -- the join
--- separator of the serialized p/up name lists (Python ENTRY_SEPARATOR parity
--- action.serialize) -- or the '\t' FIELD_SEPARATOR (the NAME\tfield... line
--- separator) cannot round-trip, so both are refused at the yank boundary
---  and at the Paste clash answer .
+-- Names containing a space or tab cannot round-trip through serialized p/up
+-- lists, so reject them both when yanking and when answering a paste prompt.
 
 M.fs = require('direct.fs')
 M.paths = require('direct.paths')
@@ -18,9 +13,7 @@ M.action = require('direct.action')
 M.history = require('direct.history')
 M.ui = require('direct.ui')
 
--- relist: function field, nil until wires the command surface to the real
--- buffer re-list. Called by paste(dst, true) after a successful paste; the
--- `{dir}`-form paste never calls it.
+-- Called after a successful no-argument paste; the `{dir}` form never re-lists.
 M.relist = nil
 
 -- content -> the absolute register path recorded in register/content (the
@@ -53,10 +46,8 @@ function M.yank(sources)
       vim.log.levels.ERROR)
     return nil, err
   end
-  -- validate every entry name BEFORE the first write (the digest mkdirp
-  -- below), so a refused yank -- space / tab, decided by
-  -- action.entry_name_reason -- leaves no stray register digest dir behind.
-  -- Each source must also exist, or the yank fails before anything is copied.
+  -- Validate every name and source before creating the digest directory, so a
+  -- refused yank leaves no partial register entry.
   for _, src in ipairs(sources) do
     local st = M.fs.stat(src)
     if not st then
@@ -85,11 +76,10 @@ function M.yank(sources)
     if not ok then
       return nil, skipped
     end
-    -- the raw source path, one line per source, in input order.
+    -- Report each raw source path in input order.
     M.ui.notify('Yanked ' .. src, vim.log.levels.INFO)
-    -- follow-up : a yank destroys nothing, so an entry the copy
-    -- cannot reproduce (a symlink, a FIFO, an unreadable directory) is skipped
-    -- rather than failing the yank -- but it must not vanish silently either.
+    -- Yank destroys nothing, so skip unsupported entries rather than fail the
+    -- whole operation, but report every omission.
     local n = skipped ~= nil and #skipped or 0
     if n > 0 then
       M.ui.notify('Skipped ' .. n .. ' ' .. (n == 1 and 'entry' or 'entries')
@@ -119,13 +109,9 @@ function M._yank_one(dst, src)
   if name == nil or name == '' then
     return nil, 'cannot yank: no basename for ' .. tostring(src)
   end
-  -- an entry name carrying the ' ' ENTRY_SEPARATOR or the '\t'
-  -- FIELD_SEPARATOR cannot round-trip through the p/up serialization
-  -- (action.entry_name_reason): a space would split into two names on reload
-  -- and desync the renames lists, letting Unpaste delete an unrelated file; a
-  -- tab would break the `NAME\tfield...` line framing. Refuse it here, before
-  -- it can enter the register (yank also pre-validates so no digest dir is
-  -- created; this keeps a direct _yank_one caller just as safe).
+  -- A space splits p/up name lists after reload; a tab splits history fields.
+  -- Either could make undo target unrelated paths, so reject the name before it
+  -- enters the register (yank also validates before creating the digest dir).
   local reason = M.action.entry_name_reason(name)
   if reason ~= nil then
     local msg = 'cannot yank: entry name ' .. reason .. ': ' .. tostring(name)
@@ -195,17 +181,15 @@ function M.paste(dst, relist_flag, name)
     end
   end
   if #pasteable == 0 then
-    -- nothing survived filtering (a legacy dir whose every entry carries a
-    -- separator/control char, or an empty listing). Do NOT build a no-op Paste
-    -- it would claim `Pasted into <dir>/` and log a `p\t...\t\t` history line
-    -- that names nothing and arms a pointless undo. Report and stop.
+    -- Do not build a no-op action when filtering leaves nothing: it would claim
+    -- a paste succeeded and create a history entry that names no files.
     M.ui.notify('Nothing to paste', vim.log.levels.WARN)
     return nil
   end
-  -- `:DirectPasteAs {name}` renames the FIRST pasted entry (the
+  -- `:DirectPasteAs {name}` renames the first pasted entry (the
   -- smallest source name, which is the first pair Paste's sorted `renames`
   -- walks). The name must be representable for the same reason a yanked name
-  -- must: a ' ' would split the dst name list and a '\t' would break the line.
+  -- must: a space splits the destination list and a tab breaks the history line.
   local dst_names = vim.deepcopy(pasteable)
   if name ~= nil and name ~= '' then
     local name_reason = M.action.entry_name_reason(name)

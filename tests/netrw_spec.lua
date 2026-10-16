@@ -1,31 +1,14 @@
--- tests/netrw_spec.lua -- netrw neutralisation (R2 fix, spec 7 B12 / T-028).
+-- tests/netrw_spec.lua -- netrw interception and startup ordering.
+-- `-l` skips runtimepath plugins, so this test sources netrw explicitly.
+
+-- 1. Sourcing netrw registers `FileExplorer`'s `BufEnter`; fire `VimEnter`
+--    explicitly because `-l` does not fire it, then wait for the scheduled clear.
+-- 2. Verify `:edit <dir>` yields a direct listing rather than a netrw buffer.
+-- 3. Exercise CLI order: `BufEnter` occurs before `VimEnter` while netrw is loaded.
+-- 4. Put the repository before `$VIMRUNTIME` so netrw can register after our
+--    handler in the same startup batch; the deferred clear must still remove it.
 --
--- netrw is NOT loaded under `nvim --headless -l` (no runtimepath plugins), so
--- this file sources `plugin/netrwPlugin.vim` itself and pins the three clauses
--- of T-028 / AC12:
---
---   1. after sourcing, netrw's `FileExplorer` group really does install a
---      `BufEnter` autocmd; firing `VimEnter` explicitly (under `-l` `VimEnter`
---      never fires on its own, spec 11.1) leaves ZERO `FileExplorer` `BufEnter`
---      autocmds -- synchronously, via our handler's clear, and again after the
---      tick-deferred clear the handler schedules;
---   2. `:edit <dir>` then yields `filetype=direct` with the correct listing
---      (not a netrw buffer);
---   3. the CLI ordering -- `BufEnter` firing *before* `VimEnter`, while netrw is
---      still loaded -- is still captured by the intercept registered at load,
---      and a non-direct directory buffer is converted (reviewer B1: a dead
---      predicate cannot satisfy this);
---   4. the repo-before-`$VIMRUNTIME` order, including a `FileExplorer` group
---      registered *after* our `VimEnter` handler inside the same batch, is
---      neutralised once startup completes.
---
--- netrw guards on `g:loaded_netrwPlugin`, so each `it` resets it (and clears the
--- group) before re-sourcing.
---
--- Since B12 now also clears on the next event-loop tick (`vim.schedule`), an
--- assertion that `count == 0` after firing `VimEnter` must let that tick run
--- first (`settle_netrw`) -- otherwise the assertion would depend on whether the
--- synchronous clear happened to suffice.
+-- Each test resets netrw's loaded guard and clears the group before re-sourcing.
 
 local H = require('tests.support.harness')
 
@@ -78,8 +61,8 @@ local function enter_buffer_named(path)
   vim.api.nvim_buf_set_name(0, path)
 end
 
-H.describe('netrw neutralisation (R2 / T-028)', function()
-  H.it('netrw installs FileExplorer BufEnter autocmds and VimEnter removes them (R2/T-028)', function()
+H.describe('netrw neutralisation', function()
+  H.it('netrw installs FileExplorer BufEnter autocmds and VimEnter removes them', function()
     clean_buffers()
     load_netrw()
 
@@ -91,7 +74,7 @@ H.describe('netrw neutralisation (R2 / T-028)', function()
     H.assert_eq(settle_netrw(), 0, 'the VimEnter handler cleared them all')
   end)
 
-  H.it(':edit {dir} after neutralisation is a direct buffer with the correct listing (R2/T-028)', function()
+  H.it(':edit {dir} after neutralisation is a direct buffer with the correct listing', function()
     clean_buffers()
     local sb = H.sandbox()
     local dir = H.mkdir(sb.root, 'dir')
@@ -108,7 +91,7 @@ H.describe('netrw neutralisation (R2 / T-028)', function()
     H.assert_buf_eq({ 'sub/', 'a.txt' })
   end)
 
-  H.it('a BufEnter before VimEnter (CLI startup) is captured while netrw is loaded (R2/T-028)', function()
+  H.it('a BufEnter before VimEnter (CLI startup) is captured while netrw is loaded', function()
     clean_buffers()
     local sb = H.sandbox()
     local dir = H.mkdir(sb.root, 'clidir')
@@ -124,7 +107,7 @@ H.describe('netrw neutralisation (R2 / T-028)', function()
     H.assert_buf_eq({ 'c.txt' })
   end)
 
-  H.it('a non-direct directory buffer is converted by the intercept (reviewer B1) (R2/T-028)', function()
+  H.it('a non-direct directory buffer is converted by the intercept', function()
     clean_buffers()
     local sb = H.sandbox()
     local dir = H.mkdir(sb.root, 'plaindir')
@@ -143,12 +126,12 @@ H.describe('netrw neutralisation (R2 / T-028)', function()
     H.assert_buf_eq({ 'd.txt' })
   end)
 
-  H.it('repo before $VIMRUNTIME: FileExplorer registered after our VimEnter handler is still cleared (R2/T-028/AC12)', function()
+  H.it('repo before $VIMRUNTIME: FileExplorer registered after our VimEnter handler is still cleared', function()
     clean_buffers()
 
-    -- AC12 says "after our VimEnter handler there are zero `#FileExplorer`
-    -- `BufEnter` autocmds". With the repo BEFORE $VIMRUNTIME that handler runs
-    -- before netrw's plugin file, so the group can still appear (or reappear)
+    -- Expect no `#FileExplorer` `BufEnter` autocmds after our VimEnter handler.
+    -- With the repo before `$VIMRUNTIME`, our handler runs before netrw's plugin,
+    -- so the group can appear again after the synchronous clear.
     -- after the synchronous clear. Reproduce both halves of that order:
     --
     --   (a) netrw's plugin file sourced after our plugin (the rtp order);

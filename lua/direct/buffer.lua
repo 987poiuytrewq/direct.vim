@@ -270,10 +270,8 @@ local function set_options(bufnr)
   })
 end
 
--- result_entry(action) -> the entry a succeeded action leaves as the current
--- entry (Python `Action.do` parity): the destination of Touch
--- MakeDirectory / Move, nil for the removals. The original action is used, so a
--- staged temp path can never become the current entry .
+-- Return the destination left by a successful create/move, or nil for removals.
+-- Use the original action so a staging temp can never become current_entry.
 local function result_entry(act)
   if act.name == 'mv' or act.name == 'touch' or act.name == 'mkdir' then
     return act.dst
@@ -285,9 +283,8 @@ end
 -- Attach / create
 -- ---------------------------------------------------------------------------
 
--- Buffer(path) -> a Buffer for `path`, with the existing buffer for the same
--- directory made current or a new one created. `current_entry` is captured from
--- the PRE-ATTACH current buffer name .
+-- Capture current_entry before switching buffers, then reuse a buffer only when
+-- fs.same_path confirms that it represents the requested directory.
 function M.Buffer(path)
   local root = paths.root(path)
   local self = setmetatable({
@@ -297,7 +294,7 @@ function M.Buffer(path)
 
   for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
     local name = vim.api.nvim_buf_get_name(bufnr)
-    -- path identity, never `==` (a symlinked prefix makes the buffer
+    -- Compare by path identity, never `==` (a symlinked prefix makes the buffer
     -- name and root different spellings of the same directory) and never
     -- `vim.fn.bufnr` (which pattern-matches and is spelling-sensitive).
     if name ~= '' and fs.same_path(name, root) then
@@ -311,15 +308,13 @@ function M.Buffer(path)
   return self
 end
 
--- M.restore -> the Buffer for the current direct buffer (Python
--- `Buffer.restore`). It attaches only; the caller decides when to list.
+-- Attach to the current buffer's directory without listing; the caller decides when to refresh.
 function M.restore()
   local name = vim.api.nvim_buf_get_name(vim.api.nvim_get_current_buf())
   return M.Buffer(name)
 end
 
--- M.list(path) -> attach/create the buffer for `path` and list it (the
--- `:DirectList {dir}` equivalent). Returns the Buffer.
+-- List a directory in an attached direct buffer.
 function M.list(path)
   local buffer = M.Buffer(path)
   buffer:list()
@@ -330,9 +325,8 @@ end
 -- listing
 -- ---------------------------------------------------------------------------
 
--- place_cursor(lines) -> move the cursor to the first line whose full path is
--- `same_path` as current_entry (-safe), leaving it where it was otherwise
--- . The column is reset to 0 on a match.
+-- Restore the cursor to the pre-attach entry; leave it unchanged if that entry
+-- no longer exists. Reset the column on a match.
 function Buffer:place_cursor(lines)
   if self.current_entry == nil then
     return
@@ -345,8 +339,7 @@ function Buffer:place_cursor(lines)
   end
 end
 
--- Buffer:list -> replace the buffer lines with the directory listing, set the
--- direct-buffer options , restore the cursor, and mark nomodified.
+-- Refresh the listing and restore cursor/options; mark unmodified after refresh.
 --
 -- (hardening): a directory can hold an entry whose NAME carries a
 -- newline (or another control character / a tab). Such a name can never be a
@@ -392,9 +385,8 @@ end
 -- sync
 -- ---------------------------------------------------------------------------
 
--- build_actions(root, plan) -> actions, yanks. ADD/DELETE are emitted in
--- dirs-then-name order ; a DELETE also records the removed paths for the
--- auto-yank (step 1), carrying the trailing slash for a directory.
+-- build_actions returns actions and yanks. ADD/DELETE follow dirs-then-name
+-- order; deleted directory paths retain their trailing slash in the auto-yank.
 local function build_actions(root, plan)
   local actions, yanks = {}, {}
   if plan.kind == 'ADD' then
@@ -485,8 +477,8 @@ function Buffer:sync()
 
   local actions, yanks = build_actions(self.root, plan)
 
-  -- step 1: yank the removed paths before any action. A refused yank leaves
-  -- the filesystem untouched (the register guard, decides).
+  -- Yank removed paths before applying actions. If yanking is refused, leave
+  -- the filesystem untouched.
   if #yanks > 0 then
     local ok, yerr = register.yank(yanks)
     if not ok then
@@ -556,16 +548,16 @@ function Buffer:sync()
     end
   end
 
-  -- step 4: always re-list (the buffer now reflects reality), then
-  -- nomodified. list also restores the cursor from current_entry.
+  -- Re-list so the buffer reflects the filesystem, restore the cursor, and
+  -- mark it unmodified only after the refresh succeeds.
   self:list()
 
   if #actions > 0 then
-    -- one joined summary of the classified actions.
+    -- Emit one joined summary for the classified actions.
     ui.notify(action_mod.summarize(actions), vim.log.levels.INFO)
   end
   if #failed > 0 then
-    -- step 5: one extra summary error naming the count and the actions.
+    -- Emit one additional error summary naming the failed actions.
     local names = {}
     for _, act in ipairs(failed) do
       names[#names + 1] = action_mod.describe_action(act)
@@ -580,11 +572,9 @@ end
 -- open / get_paths
 -- ---------------------------------------------------------------------------
 
--- Buffer:open(line) -> open the entry under the cursor. A trailing '/' opens a
--- new direct listing; otherwise the file is `:edit`ed (: fnameescape +
--- vim.cmd, never string.format into a command).: the previous direct
--- buffer is wiped only when it is no longer current -- the observable property
--- is asserted, never the (unverified) E937.
+-- Open directories with a direct listing and files with `:edit`. Pass paths
+-- through fnameescape so special characters cannot become Ex syntax. Remove
+-- the old direct buffer only after another buffer is current.
 function Buffer:open(line)
   local path = M.entry_path(self.root, line)
   local direct_buf = vim.api.nvim_get_current_buf()

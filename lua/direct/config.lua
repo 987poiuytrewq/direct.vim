@@ -91,7 +91,7 @@ end
 -- with the same lhs but a different rhs belongs to the user and is left alone
 -- and a GLOBAL fallback (buffer == 0) is not this buffer's mapping at all --
 -- `keymap.del(..., { buffer = true })` raises E31 on it, so it must not even be
--- attempted .
+-- attempted.
 --
 -- The guard is PER MAPPING: a deletion that fails is reported and must not
 -- silently abort the rest of that buffer's mappings (a single pcall around the

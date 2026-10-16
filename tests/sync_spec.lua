@@ -1,11 +1,5 @@
--- tests/sync_spec.lua -- sync classification and application (T-020, T-021, the
--- ambiguous half of T-022, the staging-failure report of T-023/B1; spec
--- B4/B5/B11/B15, D3, D4, D17).
---
--- Drives `buffer.Buffer:sync()` end to end against a real temp workspace and the
--- real history/register data dirs, then asserts the filesystem oracle, the buffer
--- oracle, the recorded history lines, and the notifications. The P4 command
--- surface does not exist yet, so `buffer` is called directly.
+-- tests/sync_spec.lua -- end-to-end sync classification and application.
+-- Exercises filesystem changes, history, buffer state, and notifications.
 
 local H = require('tests.support.harness')
 local buffer = require('direct.buffer')
@@ -37,18 +31,18 @@ local function list_edit_and_sync(ws, lines)
   return buf, ok, reason
 end
 
-H.describe('sync: classification (B4)', function()
+H.describe('sync: classification', function()
   H.it('duplicate wins over every class; then ADD/DELETE/RENAME; else mixed', function()
     H.assert_eq(buffer.classify({ 'a', 'a' }, { 'a' }),
       { kind = 'AMBIGUOUS', reason = 'duplicate' }, 'duplicate is checked first')
 
     H.assert_eq(buffer.classify({ 'a', 'b' }, { 'a' }), { kind = 'ADD', added = { 'b' } })
     H.assert_eq(buffer.classify({ 'b', 'a/' }, {}), { kind = 'ADD', added = { 'a/', 'b' } },
-      'ADD is emitted dirs-then-name (D17)')
+      'ADD is emitted dirs-then-name')
 
     H.assert_eq(buffer.classify({ 'a' }, { 'a', 'b' }), { kind = 'DELETE', removed = { 'b' } })
     H.assert_eq(buffer.classify({}, { 'b', 'a/' }),
-      { kind = 'DELETE', removed = { 'a/', 'b' } }, 'DELETE is emitted dirs-then-name (D17)')
+      { kind = 'DELETE', removed = { 'a/', 'b' } }, 'DELETE is emitted dirs-then-name')
 
     H.assert_eq(buffer.classify({ 'b' }, { 'a' }),
       { kind = 'RENAME', moves = { { src = 'a', dst = 'b' } } })
@@ -58,8 +52,8 @@ H.describe('sync: classification (B4)', function()
   end)
 end)
 
-H.describe('sync: applying actions (B4/B5)', function()
-  H.it('ADD (file): creates the file and logs one touch action (B4/B5)', function()
+H.describe('sync: applying actions', function()
+  H.it('ADD (file): creates the file and logs one touch action', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -76,7 +70,7 @@ H.describe('sync: applying actions (B4/B5)', function()
       'a new action resets the redo branch to its marker')
   end)
 
-  H.it('ADD (directory + dirs-then-name ordering): mkdir lines are logged first (B4/D17)', function()
+  H.it('ADD (directory + dirs-then-name ordering): mkdir lines are logged first', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -91,10 +85,10 @@ H.describe('sync: applying actions (B4/B5)', function()
       'mkdir\t' .. ws .. '/adir/',
       'mkdir\t' .. ws .. '/zdir/',
       'touch\t' .. ws .. '/afile.txt',
-    }, 'directories first, then files, each sorted (D17)')
+    }, 'directories first, then files, each sorted')
   end)
 
-  H.it('DELETE (file): moves it to trash, auto-yanks it, and logs an rm line (B4/B5)', function()
+  H.it('DELETE (file): moves it to trash, auto-yanks it, and logs an rm line', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -117,7 +111,7 @@ H.describe('sync: applying actions (B4/B5)', function()
     H.assert_true(undo[2]:find(ws .. '/b.txt\t', 1, true) ~= nil, 'the rm line names the source')
   end)
 
-  H.it('DELETE (directory): trashes the tree and yanks it with its trailing slash (B4/B5)', function()
+  H.it('DELETE (directory): trashes the tree and yanks it with its trailing slash', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -139,12 +133,9 @@ H.describe('sync: applying actions (B4/B5)', function()
     H.assert_true(undo[2]:sub(1, 6) == 'rmdir\t', 'an rmdir line was logged')
   end)
 
-  -- B5/AC11: the two halves -- sync auto-yanks a deleted entry (above) and a
-  -- yanked entry pastes back (register_spec) -- driven as ONE end-to-end path:
-  -- delete a line, :write, then paste the auto-yanked entry into another
-  -- directory. This is the only case that proves the auto-yank's register is
-  -- directly consumable by the real paste path.
-  H.it('delete via :write then paste the auto-yanked entry into another dir (B5/AC11)', function()
+  -- Exercise both halves end to end: delete through `:write`, then paste the
+  -- auto-yanked entry into another directory using the real register path.
+  H.it('delete via :write then paste the auto-yanked entry into another dir', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -168,7 +159,7 @@ H.describe('sync: applying actions (B4/B5)', function()
       'the entry content survived the delete/paste round trip')
   end)
 
-  H.it('RENAME (file): moves it and logs one mv action (B4)', function()
+  H.it('RENAME (file): moves it and logs one mv action', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -183,7 +174,7 @@ H.describe('sync: applying actions (B4/B5)', function()
       { '#direct-history-v3', 'mv\t' .. ws .. '/a.txt\t' .. ws .. '/b.txt' })
   end)
 
-  H.it('RENAME (directory): moves the tree with trailing slashes on both ends (B4)', function()
+  H.it('RENAME (directory): moves the tree with trailing slashes on both ends', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -198,7 +189,7 @@ H.describe('sync: applying actions (B4/B5)', function()
       { '#direct-history-v3', 'mv\t' .. ws .. '/old/\t' .. ws .. '/new/' })
   end)
 
-  H.it('notifies a single joined B15 summary of the applied actions (B15)', function()
+  H.it('notifies a single joined summary of the applied actions', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -215,8 +206,8 @@ H.describe('sync: applying actions (B4/B5)', function()
   end)
 end)
 
-H.describe('sync: ambiguous (D4/OQ7)', function()
-  H.it('mixed add+delete: notifies reason and both sides, changes nothing, stays modified (B4/D4)', function()
+H.describe('sync: ambiguous', function()
+  H.it('mixed add+delete: notifies reason and both sides, changes nothing, stays modified', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -232,14 +223,14 @@ H.describe('sync: ambiguous (D4/OQ7)', function()
     H.assert_eq(reason, 'mixed', 'the reason')
     H.assert_fs_eq(ws, { 'a.txt', 'b.txt' }, 'no filesystem change')
     H.assert_eq(history_lines('undo.log'), {}, 'no history was written')
-    H.assert_true(vim.bo.modified, 'the buffer stays modified (D4/OQ7)')
+    H.assert_true(vim.bo.modified, 'the buffer stays modified')
     H.assert_buf_eq({ 'a.txt', 'x.txt', 'y.txt' }, 0, 'the buffer was NOT re-listed')
     H.assert_notified('Ambiguous buffer content (mixed)', vim.log.levels.ERROR)
     H.assert_notified('actual:   a.txt, x.txt, y.txt', vim.log.levels.ERROR)
     H.assert_notified('expected: a.txt, b.txt', vim.log.levels.ERROR)
   end)
 
-  H.it('a duplicated line is reported as ambiguous, not collapsed (B4/R7)', function()
+  H.it('a duplicated line is reported as ambiguous, not collapsed', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -260,8 +251,8 @@ H.describe('sync: ambiguous (D4/OQ7)', function()
   end)
 end)
 
-H.describe('sync: safety guards (T-021/T-022)', function()
-  H.it('swap rename (a<->b) completes with no data loss and no leftover temp (B11/D3)', function()
+H.describe('sync: safety guards', function()
+  H.it('swap rename (a<->b) completes with no data loss and no leftover temp', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -271,12 +262,12 @@ H.describe('sync: safety guards (T-021/T-022)', function()
     local _, ok = list_edit_and_sync(ws, { 'b.txt', 'a.txt' })
 
     H.assert_true(ok == true, 'sync applied')
-    H.assert_fs_eq(ws, { 'a.txt', 'b.txt' }, 'exactly two files, no .direct-tmp-* (B11)')
+    H.assert_fs_eq(ws, { 'a.txt', 'b.txt' }, 'exactly two files, no .direct-tmp-*')
     H.assert_eq(vim.fn.readfile(ws .. '/a.txt'), { 'B' }, 'a.txt received the swapped content')
     H.assert_eq(vim.fn.readfile(ws .. '/b.txt'), { 'A' }, 'b.txt received the swapped content')
   end)
 
-  H.it('chain rename (a->b->c->d) completes with no leftovers (B11/D3)', function()
+  H.it('chain rename (a->b->c->d) completes with no leftovers', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -287,13 +278,13 @@ H.describe('sync: safety guards (T-021/T-022)', function()
     local _, ok = list_edit_and_sync(ws, { 'b.txt', 'c.txt', 'd.txt' })
 
     H.assert_true(ok == true, 'sync applied')
-    H.assert_fs_eq(ws, { 'b.txt', 'c.txt', 'd.txt' }, 'no .direct-tmp-* remains (B11)')
+    H.assert_fs_eq(ws, { 'b.txt', 'c.txt', 'd.txt' }, 'no .direct-tmp-* remains')
     H.assert_eq(vim.fn.readfile(ws .. '/b.txt'), { 'A' })
     H.assert_eq(vim.fn.readfile(ws .. '/c.txt'), { 'B' })
     H.assert_eq(vim.fn.readfile(ws .. '/d.txt'), { 'C' })
   end)
 
-  H.it('a failed staging rename reports the orphaned temp instead of leaving it silent (B11/T-023/B1)', function()
+  H.it('a failed staging rename reports the orphaned temp instead of leaving it silent', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -327,7 +318,7 @@ H.describe('sync: safety guards (T-021/T-022)', function()
 
     local tmp = ws .. '/.direct-tmp-1'
     H.assert_true(fs.exists(tmp), 'the first entry really was staged to a temp')
-    H.assert_notified(tmp, 'the orphaned staged path is named, never silent (B1)')
+    H.assert_notified(tmp, 'the orphaned staged path is named, never silent')
     H.assert_eq(vim.fn.readfile(tmp), { 'A' },
       'the orphaned temp still holds the entry moved out of a.txt')
     -- No action ran after the failed staging and no history line was written.
@@ -337,7 +328,7 @@ H.describe('sync: safety guards (T-021/T-022)', function()
     H.assert_true(vim.bo.modified, 'the refused sync leaves the buffer modified')
   end)
 
-  H.it('a path the history framing cannot represent is refused before any change (T-023/NB2)', function()
+  H.it('a path the history framing cannot represent is refused before any change', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -357,7 +348,7 @@ H.describe('sync: safety guards (T-021/T-022)', function()
     H.assert_notified('Unsafe entry', vim.log.levels.ERROR)
   end)
 
-  H.it('an unsafe name on the DISK side is refused too (T-023/NB2)', function()
+  H.it('an unsafe name on the DISK side is refused too', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -374,7 +365,7 @@ H.describe('sync: safety guards (T-021/T-022)', function()
     H.assert_notified('Unsafe entry', vim.log.levels.ERROR)
   end)
 
-  H.it('a failing action is reported, the others apply, and only successes are logged/undoable (B5/R18)', function()
+  H.it('a failing action is reported, the others apply, and only successes are logged/undoable', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')

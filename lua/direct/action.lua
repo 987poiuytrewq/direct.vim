@@ -43,14 +43,10 @@ function M.rel(path)
   return rel
 end
 
--- close_src_buffer(src) -> true | nil, err. Closes every buffer whose name
--- denotes the same path as `src` (fs.realpath, spelling-independent) before a
--- destructive action, matching the Python `_close_src_buffer`. Identity is the
--- resolved PATHNAME, not fs.same_path: same_path compares ino+dev, so it also
--- matched every HARD LINK to `src` and force-closed unrelated modified buffers
--- . realpath collapses a symlinked prefix (, the `/tmp` -> `/private/tmp`
--- case), `..` and trailing slashes, so the same file reached by a different
--- spelling still closes, while two distinct hardlink names stay distinct.
+-- Close buffers for the resolved pathname before destructive actions. Do not
+-- use inode identity: that would also close buffers for distinct hard links.
+-- realpath normalizes symlink prefixes, `..`, and trailing slashes while keeping
+-- different hard-link names distinct.
 -- Pure defence and parity: nothing here may raise, so every buffer API call is
 -- pcall-guarded.
 function M.close_src_buffer(src)
@@ -141,7 +137,7 @@ end
 -- `entry_name_reason` at their owning boundaries (register.yank/_yank_one and
 -- the Paste clash answer). This is the universal guard `serialize` runs over
 -- every field, so EVERY caller that can emit a history line is covered -- not
--- only the sync boundary that refuses early .
+-- only the sync boundary that refuses early.
 function M.path_reason(path)
   if type(path) ~= 'string' then
     return 'invalid path'
@@ -155,10 +151,8 @@ function M.path_reason(path)
   return nil
 end
 
--- zipped(src_names, dst_names) -> ordered `{ { src, dst },... }` pairs (the
--- Python `dict(zip(...))` kept deterministic by). Ordering is by ascending
--- src name, so the renames list is sorted regardless of the caller's order and
--- the clash-prompt answers are consumed in that documented order .
+-- Build source/destination pairs in ascending source-name order so serialization
+-- and clash-prompt order do not depend on the caller's input order.
 local function zipped(src_names, dst_names)
   local pairs_list = {}
   local n = math.min(#(src_names or {}), #(dst_names or {}))
@@ -348,18 +342,18 @@ end
 -- `src` into the directory `dst`. `renames` is the ordered zip of the two name
 -- lists, sorted ascending by src name . On a destination clash the
 -- user is prompted for a new name; renames[i].dst is updated so the
--- serialization always reflects what was actually pasted . The prompt is
+-- serialization always reflects what was actually pasted. The prompt is
 -- re-asked while the answer still names an existing path: an existing
 -- destination is never written to (a directory is never merged into, a file is
 -- never overwritten), so Undo -- which removes what `renames` records -- can
--- never delete data that predated the paste . An empty
--- cancelled or separator-carrying answer (: one containing the ' '
+-- never delete data that predated the paste. An empty, cancelled, or
+-- separator-carrying answer (one containing the ' '
 -- ENTRY_SEPARATOR or the '\t' FIELD_SEPARATOR could not round-trip) skips the
--- entry and reports it  -- ui.prompt re-raises after inputrestore on
+-- entry and reports it. ui.prompt re-raises after inputrestore on
 -- cancel/error, so the prompt is wrapped in pcall and a raise behaves exactly
 -- like an empty answer. Skipped entries are pruned from `renames` before
 -- `do` returns, so serialize/Unpaste never name an entry that was not
--- actually written .
+-- actually written.
 function M.Paste(src, dst, src_names, dst_names)
   local self = {
     name = 'p',
@@ -528,12 +522,10 @@ end
 -- `nil, err, temps, overrides`, where `temps` are the entries ALREADY renamed to
 -- their temp path and `overrides` is the partial src -> tmp map that put them
 -- there: the caller must report them, because the entry no longer sits at its
--- original name and silently discarding the list would orphan it  --
--- and `overrides` is what lets a caller UNWIND the renames that landed and
--- restore the pre-attempt state .
+-- original name and silently discarding the list would orphan it. The overrides
+-- also let callers unwind landed renames and restore the pre-attempt state.
 -- The caller executes each Move from `overrides[src]` when present, while
--- `history.log` and `current_entry` keep using the ORIGINAL action (
--- `current_entry` must never be a temp path).
+-- `history.log` and `current_entry` keep using the original action, never a temp path.
 --
 -- This is the ONE staging mechanism: `Buffer:sync` applies a save through it and
 -- `M.Group` applies a group reversal through it, so the reversal of a swap gets
@@ -807,12 +799,12 @@ end
 -- deserialize(line) -> the action the line denotes, or nil, err for a
 -- malformed or unknown line. Destructive actions are rebuilt through their
 -- factories with the serialized dst passed verbatim, so a trashed entry is
--- always restored to (and from) the exact recorded path .
+-- always restored to and from the exact recorded path.
 --
 -- A `g` line is validated before anything is rebuilt: the member count must be a
 -- plain decimal of at least two and must match the number of src/dst fields
--- exactly, otherwise the whole line is refused (the history then keeps it,).
--- A group is never partially executed: a refusal here means nothing ran at all.
+-- exactly; otherwise refuse the whole line so history can retain it. A group is
+-- never partially executed: a refusal means nothing ran.
 function M.deserialize(line)
   if type(line) ~= 'string' or line == '' then
     return nil, 'invalid action line'
@@ -933,8 +925,7 @@ end
 -- Human summaries
 -- ---------------------------------------------------------------------------
 
--- describe_action(action) -> the human description (never the serialized
--- form,).
+-- describe_action(action) -> a human-readable description, never serialized text.
 function M.describe_action(action)
   if type(action) == 'table' and type(action.describe) == 'function' then
     return action.describe()
@@ -942,9 +933,8 @@ function M.describe_action(action)
   return tostring(action)
 end
 
--- summarize(actions) -> the joined summary: descriptions `, `-joined with
--- the first character of the whole string upper-cased and every other
--- character untouched (the Python `print_actions` behaviour).
+-- summarize(actions) joins descriptions with `, ` and uppercases only the first
+-- character of the resulting string.
 function M.summarize(actions)
   local parts = {}
   for _, action in ipairs(actions or {}) do
