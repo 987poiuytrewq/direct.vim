@@ -13,7 +13,7 @@ local FIELD_SEPARATOR = '\t'
 -- Paste clash prompt cap (follow-up): a `ui.prompt` that keeps answering a
 -- name that still exists -- a stub, or a broken/hostile prompt -- would
 -- otherwise spin forever and freeze the editor. After this many collisions the
--- entry is SKIPPED and reported, exactly like a cancelled answer : the
+-- entry is SKIPPED and reported, exactly like a cancelled answer: the
 -- existing destination is never written to.
 M.PASTE_CLASH_ATTEMPTS = 10
 
@@ -21,7 +21,7 @@ M.PASTE_CLASH_ATTEMPTS = 10
 -- Helpers
 -- ---------------------------------------------------------------------------
 
--- rel(path) -> the CWD-relative spelling of a path , the Lua
+-- rel(path) -> the CWD-relative spelling of a path, the Lua
 -- equivalent of Python's os.path.relpath. `:p:.` resolves the path first so a
 -- lexical mismatch (e.g. /tmp vs /private/tmp) cannot suppress the relative
 -- form; a path equal to the cwd yields '.', matching Python's relpath(cwd).
@@ -69,7 +69,7 @@ function M.close_src_buffer(src)
 end
 
 -- first_free_trash(trash_dir, src) -> `<trash>/<digest(src)>` or the first
--- free `<digest>-<n>` when that path already exists . The result is
+-- free `<digest>-<n>` when that path already exists. The result is
 -- persisted in the action's `dst` field and serialized, so `Restore` always
 -- reverses to the exact entry.
 function M.first_free_trash(trash_dir, src)
@@ -99,15 +99,15 @@ end
 -- `up` serialization, else a short reason: 'empty' | 'contains a space' |
 -- 'contains a tab' | 'contains a control character'. A name carrying the ' '
 -- ENTRY_SEPARATOR would split into two names on reload and desync the src/dst
--- name lists, letting Unpaste delete an unrelated file ; a name
+-- name lists, letting Unpaste delete an unrelated file; a name
 -- carrying the '\t' FIELD_SEPARATOR would break the `NAME\tfield...` line
--- framing itself ; and any OTHER control character -- most importantly an
--- embedded '\n' -- is refused too , so the log round trip never depends on
+-- framing itself; and any OTHER control character -- most importantly an
+-- embedded '\n' -- is refused too, so the log round trip never depends on
 -- `vim.fn.writefile` encoding a NL as NUL to keep the line framing intact.
 -- This is the validator for the boundaries that feed a name into the
 -- serialization: register.yank / _yank_one refuse such a name before it can
 -- enter the register, and Paste refuses a separator-carrying clash answer
--- exactly like an empty/cancelled one . `deserialize` deliberately does
+-- exactly like an empty/cancelled one. `deserialize` deliberately does
 -- not re-validate: it only ever rebuilds actions from the Lua-owned
 -- version-marked history log, where a separator-free name is guaranteed by
 -- construction.
@@ -204,7 +204,7 @@ end
 -- Remove(src, [dst]) -- the trash destination is resolved eagerly when `dst`
 -- is nil (parity: the Python `__init__` computed it), so a freshly built
 -- action is immediately serializable; an explicit `dst` (used by deserialize)
--- is kept verbatim so `Restore` reverses to the exact entry . A
+-- is kept verbatim so `Restore` reverses to the exact entry. A
 -- resolution failure is deferred to `do`, which returns nil, err (
 -- consumers branch, nothing raises).
 function M.Remove(src, dst)
@@ -340,7 +340,7 @@ end
 
 -- Paste(src, dst, src_names, dst_names) copies entries from the register
 -- `src` into the directory `dst`. `renames` is the ordered zip of the two name
--- lists, sorted ascending by src name . On a destination clash the
+-- lists, sorted ascending by src name. On a destination clash the
 -- user is prompted for a new name; renames[i].dst is updated so the
 -- serialization always reflects what was actually pasted. The prompt is
 -- re-asked while the answer still names an existing path: an existing
@@ -382,7 +382,7 @@ function M.Paste(src, dst, src_names, dst_names)
         -- path that does not exist (at most PASTE_CLASH_ATTEMPTS times: a
         -- prompt that stays stuck on an existing name is skipped, never spun
         -- on); an empty, cancelled or separator-carrying
-        -- answer  still skips the entry and leaves the existing
+        -- answer still skips the entry and leaves the existing
         -- destination untouched.
         local attempts = 0
         while M.fs.taken(full_dst) do
@@ -419,7 +419,7 @@ function M.Paste(src, dst, src_names, dst_names)
             last = full_dst
             copied[#copied + 1] = { src = pair.src, dst = pair.dst }
           elseif st.type == 'directory' then
-            -- follow-up : a paste destroys nothing, so an entry the
+            -- A paste destroys nothing, so an entry the
             -- copy cannot reproduce is skipped and REPORTED (the register is
             -- persisted, untrusted data) rather than failing the paste or
             -- vanishing silently.
@@ -575,7 +575,7 @@ end
 -- groups history records together. Two `mv` actions belong together when one's
 -- `dst` is the other's `src` (transitively): that link is exactly what makes a
 -- one-action-at-a-time rename unsafe, because the destination of one move still
--- has to be read by another . Every other action -- a Touch, a
+-- has to be read by another. Every other action -- a Touch, a
 -- MakeDirectory, a Remove, a Paste/Unpaste, or a `mv` sharing no name with
 -- another -- is its own single-action group.
 --
@@ -737,7 +737,7 @@ end
 
 -- serialize_group(action) -> `g\t<count>\t<src>\t<dst>...` | nil, err.
 --
--- The format decision . Only the interlinked moves of one
+-- The format decision. Only the interlinked moves of one
 -- RENAME sync can be grouped (see `M.move_groups`), so a group is serialized as
 -- its member count followed by that many src/dst pairs: fixed arity makes the
 -- line unambiguous without nesting the field separator inside a field, and a

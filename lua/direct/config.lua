@@ -11,7 +11,7 @@ local defaults = {
 M.defaults = defaults
 M.options = vim.deepcopy(defaults)
 
--- Global mapping : normal `-` opens the current buffer's directory.
+-- Global mapping: normal `-` opens the current buffer's directory.
 M.GLOBAL_MAP = {
   mode = 'n',
   lhs = '-',
@@ -31,8 +31,8 @@ M._setup_called = false
 M._vim_enter_installed = false
 M._installed = vim.fn.maparg(M.GLOBAL_MAP.lhs, M.GLOBAL_MAP.mode) == M.GLOBAL_MAP.rhs
 
--- The nine buffer-local mappings for filetype=direct buffers , owned
--- here  so setup can clear and restore them in
+-- The nine buffer-local mappings for filetype=direct buffers, owned
+-- here so setup can clear and restore them in
 -- ALREADY-open direct buffers. Installed by `ftplugin/direct.lua` via
 -- `install_buffer_mappings(0)`. Built on `<Cmd>` (never a `:` command that
 -- would leave visual mode / re-trigger mappings); the buffer-local `-` wins
@@ -181,7 +181,7 @@ function M.setup(opts)
   return M.options
 end
 
--- on_vim_enter -> boolean (installed?). The VimEnter handler : installs
+-- on_vim_enter -> boolean (installed?). The VimEnter handler installs
 -- the default mapping at most once and only when setup was never called.
 function M.on_vim_enter()
   if M._setup_called or M._vim_enter_installed then

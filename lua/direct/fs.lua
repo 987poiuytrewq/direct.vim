@@ -123,7 +123,7 @@ function M.iter_dir(path)
   return iter
 end
 
--- list_dir(path) -> names sorted byte-wise ascending , or nil, err.
+-- list_dir(path) -> names sorted byte-wise ascending, or nil, err.
 function M.list_dir(path)
   if not M.is_dir(path) then
     return nil, 'not a directory: ' .. tostring(path)

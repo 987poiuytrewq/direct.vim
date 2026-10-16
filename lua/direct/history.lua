@@ -5,7 +5,7 @@
 local M = {}
 
 -- The `direct.log` helper module. A plain local is safe here because the
--- public entry point of THIS module is also named `log` , so a field
+-- public entry point of THIS module is also named `log`, so a field
 -- `M.log` cannot hold both; nothing in the suite stubs direct.log.
 local log_mod = require('direct.log')
 local fs = require('direct.fs')
@@ -133,9 +133,9 @@ function M.log(action)
   -- A new action invalidates the redo branch. The redo log is reset to its
   -- marker-only (empty-history) state rather than plain `{}`, so it stays
   -- Lua-owned and a later marker check is unambiguous. `prepare` runs FIRST so a
-  -- FOREIGN redo log  is quarantined aside instead of being silently
+  -- FOREIGN redo log is quarantined aside instead of being silently
   -- clobbered by the marker write; a failure to prepare or to write is reported
-  -- rather than swallowed , so the caller still sees the new action
+  -- rather than swallowed, so the caller still sees the new action
   -- as logged while the reset failure is surfaced.
   local pok, prep_err = prepare(redo_path)
   if not pok then

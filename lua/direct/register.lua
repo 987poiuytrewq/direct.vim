@@ -138,7 +138,7 @@ end
 -- true for the no-arg form (pastes into the buffer root and re-lists via
 -- M.relist), false for `:DirectPaste {dir}` (never re-lists).
 --
--- `name`  is the `:DirectPasteAs {name}` extension: when given, the
+-- `name` is the `:DirectPasteAs {name}` extension: when given, the
 -- first pasted entry (the smallest source name, matching Paste's sorted
 -- `renames`) is pasted as `name` instead. The extension is additive -- the three
 -- existing call shapes (`paste(dst)`, `paste(dst, true)`, `paste(dst, false)`)

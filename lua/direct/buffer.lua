@@ -22,14 +22,14 @@ Buffer.__index = Buffer
 -- ---------------------------------------------------------------------------
 
 -- is_dir_line(line) -> true for a directory entry. The trailing slash is the
--- convention : a directory is never distinguished from a file by a
+-- convention: a directory is never distinguished from a file by a
 -- filesystem stat here.
 local function is_dir_line(line)
   return type(line) == 'string' and line:sub(-1) == '/'
 end
 
 -- dirs_then_name(lines) -> a copy ordered directories first, each group sorted
--- ascending by byte-wise comparison . A directory line carries its
+-- ascending by byte-wise comparison. A directory line carries its
 -- trailing '/', so the two groups never interleave.
 local function dirs_then_name(lines)
   local dirs, files = {}, {}
@@ -68,7 +68,7 @@ function M.entry_path(root, line)
 end
 
 -- current_entry([name]) -> `name` when it names an existing filesystem entry
--- else nil . Defaults to the current buffer's stored name: the buffer name
+-- else nil. Defaults to the current buffer's stored name: the buffer name
 -- `nvim_buf_get_name` returns (the resolved spelling). `same_path` makes the
 -- spelling irrelevant, so no `bufname('%')` accessor is needed.
 function M.current_entry(name)
@@ -129,7 +129,7 @@ end
 -- { kind = 'DELETE', removed = <lines, dirs-then-name> }
 -- { kind = 'RENAME', moves = { { src = <expected line>, dst = <actual line> } } }
 -- { kind = 'AMBIGUOUS', reason = 'duplicate' | 'mixed' }
--- The duplicate check is FIRST : the Python version collapsed
+-- The duplicate check is FIRST: the Python version collapsed
 -- duplicates through set diffs, and a duplicated line in a RENAME-shaped edit
 -- produced a self-move.
 function M.classify(actual, expected)
@@ -197,7 +197,7 @@ end
 -- the sync-boundary framing guard
 -- ---------------------------------------------------------------------------
 
--- unsafe_path_reason(path) -> the shared `action.path_reason` : nil
+-- unsafe_path_reason(path) -> the shared `action.path_reason`: nil
 -- when `path` can round-trip through the `NAME\tfield...` history framing, else
 -- a short reason. A tab IS the field separator, so it would split one path into
 -- two fields; any other control character (a newline included) cannot survive
@@ -225,7 +225,7 @@ local function first_unsafe(root, lines)
 end
 
 -- ambiguous_message(plan, actual, expected) names the reason and both sides of
--- the comparison  so the user can see what desynced.
+-- the comparison so the user can see what desynced.
 local function ambiguous_message(plan, actual, expected)
   return string.format(
     'Ambiguous buffer content (%s). '
@@ -256,7 +256,7 @@ local function set_options(bufnr)
   vim.bo[bufnr].buflisted = true
   vim.bo[bufnr].swapfile = false
   vim.bo[bufnr].filetype = 'direct'
-  -- BufWriteCmd <buffer> DirectSync : a `:write` in a direct
+  -- BufWriteCmd <buffer> DirectSync: a `:write` in a direct
   -- buffer routes to the sync instead of writing a file. Recreated per listing
   -- (the augment `direct`) after clearing this buffer's own autocmds, matching
   -- the retired `autocmd! * <buffer>` so repeated listings cannot stack handlers.
@@ -417,8 +417,8 @@ local function build_actions(root, plan)
   return actions, yanks
 end
 
--- log_applied(actions, applied) -> records the applied actions in history (
--- steps 2-3). History is written per GROUP of interlinked moves : a swap or
+-- log_applied(actions, applied) records successful actions in history. History
+-- is written per GROUP of interlinked moves: a swap or
 -- an N-way rotation is ONE entry, so one `DirectUndo` reverses the whole
 -- permutation instead of renaming a live name over an unsaved one. Every other
 -- action is its own entry, exactly as before.
@@ -507,7 +507,7 @@ function Buffer:sync()
   end
 
   -- steps 2-3: apply every action, then push the successes to history as
-  -- whole dependent move groups . `history.log` reports a failed history
+  -- whole dependent move groups. `history.log` reports a failed history
   -- write itself -- it never raises and never swallows the failure (
   -- incl. the redo-reset failure) -- so the ignored return here cannot hide a
   -- write error.
