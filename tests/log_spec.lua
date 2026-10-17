@@ -1,4 +1,4 @@
--- tests/log_spec.lua -- whole-file line log contract (T-008, D12/R10).
+-- tests/log_spec.lua -- whole-file line log contract.
 
 local H = require('tests.support.harness')
 local log = require('direct.log')
@@ -18,7 +18,7 @@ H.describe('log', function()
     H.assert_eq(vim.fn.readfile(path), {}, 'empty after popping every line')
   end)
 
-  H.it('popping the only line leaves an empty file and returns the line (R10)', function()
+  H.it('popping the only line leaves an empty file and returns the line', function()
     local sb = H.sandbox()
     local path = sb.root .. '/undo.log'
     log.push(path, 'only')
@@ -50,7 +50,7 @@ H.describe('log', function()
     H.assert_eq(vim.fn.readfile(path), {}, 'log emptied')
   end)
 
-  H.it('push() rejects a non-string line without writing (B4)', function()
+  H.it('push() rejects a non-string line without writing', function()
     local sb = H.sandbox()
     local path = sb.root .. '/typecheck.log'
     local r, e = log.push(path, 42)
@@ -61,10 +61,10 @@ H.describe('log', function()
     H.assert_eq(vim.fn.readfile(path), { 'ok' }, 'only the valid push reached the file')
   end)
 
-  -- T-017: the history version marker (T-017/D18) has to control the FIRST
-  -- line of the file, so the history module needs a whole-file write that is
-  -- not an append and not clear({'a','b'}).
-  H.it('write() replaces the whole file with the given lines (T-017)', function()
+  -- The history version marker has to control the FIRST line of the file, so the
+  -- history module needs a whole-file write that is neither an append nor
+  -- clear({'a','b'}).
+  H.it('write() replaces the whole file with the given lines', function()
     local sb = H.sandbox()
     local path = sb.root .. '/undo.log'
     H.assert_true(log.write(path, { '#direct-history-v2' }) == true,
@@ -79,7 +79,7 @@ H.describe('log', function()
       'the previous content is gone, not appended to')
   end)
 
-  H.it('write() rejects a non-table without touching the file (T-017)', function()
+  H.it('write() rejects a non-table without touching the file', function()
     local sb = H.sandbox()
     local path = sb.root .. '/typecheck2.log'
     local r, e = log.write(path, 'not a table')

@@ -1,15 +1,9 @@
--- tests/health_spec.lua -- `:checkhealth direct` (spec section 5 / T-027 / D1).
---
--- `:checkhealth direct` loads `lua/direct/health.lua`, opens the `health://`
--- buffer and fills it with the report. Under `--headless` it also writes a
--- progress line to stdout; the report itself lives in the buffer. This file
--- asserts the two facts T-027 requires: the Neovim version against the 0.11
--- floor, and the resolved data directory (B9).
+-- tests/health_spec.lua -- checks the health report's version and data directory.
 
 local H = require('tests.support.harness')
 
-H.describe('health: :checkhealth direct (T-027)', function()
-  H.it('reports the Neovim version floor and the resolved data directory (T-027)', function()
+H.describe('health: :checkhealth direct', function()
+  H.it('reports the Neovim version floor and the resolved data directory', function()
     local paths = require('direct.paths')
 
     vim.cmd('checkhealth direct')

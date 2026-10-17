@@ -160,13 +160,14 @@ so `:DirectUndo` reverses a paste as well.
     :DirectPasteAs {name}
         Paste into the current buffer's directory as {name}.
 
+`:DirectSync`, `open()` (the public API used by the entry mappings),
 `:DirectUndo`, `:DirectRedo`, `:DirectYank`, `:DirectPaste` (no argument) and
 `:DirectPasteAs` report an error and do nothing when the current buffer is not a
-direct buffer. `:DirectPaste {dir}` is the exception: it pastes into an
-explicitly named directory and never touches the current buffer, so it needs no
-direct buffer. `:DirectList`, `:DirectListBuffer`, `:DirectListCwd` and
-`:DirectSync` are not restricted this way: they do not act on the current
-buffer's listing.
+direct buffer. The listing commands `:DirectList`, `:DirectListBuffer` and
+`:DirectListCwd` remain available from ordinary buffers; they list a directory
+without operating on the current buffer's listing. `:DirectPaste {dir}` is also
+available from an ordinary buffer: it pastes into the explicitly named
+directory and never touches the current buffer.
 
 ==============================================================================
 9. Mappings                                                *direct.vim-mappings*

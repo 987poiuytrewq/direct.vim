@@ -1,8 +1,8 @@
--- tests/isolation_spec.lua -- self-test for the harness isolation guarantees
--- (reviewer B1 autocmds, B2 options).
+-- tests/isolation_spec.lua -- tests within-file and cross-file state isolation.
+
 --
 -- This file proves the *within-file* half (one `it` cannot leak into the next)
--- and deliberately leaves foreign state behind in its final spec so
+-- and deliberately leaves foreign state behind in its final test so
 -- tests/zzz_isolation_observer_spec.lua -- which sorts last and runs after this
 -- file -- can prove the *cross-file* half.
 
@@ -78,7 +78,7 @@ H.describe('isolation: cross-file probe', function()
   end)
 end)
 
--- B1-1: a default-group FileType autocmd must not survive the file boundary.
+-- a default-group FileType autocmd must not survive the file boundary.
 -- The BufEnter probes above cannot catch the removed `event == 'FileType'`
 -- exemption because they never register a FileType handler.
 H.describe('isolation: default-group FileType probe', function()
@@ -92,7 +92,7 @@ H.describe('isolation: default-group FileType probe', function()
   end)
 end)
 
--- T-002 (reviewer B3): `filetype plugin on` must actually work under `-l`, and
+-- `filetype plugin on` must actually work under `-l`, and
 -- the filetype machinery must survive the harness's per-boundary autocmd/option
 -- reset. An ftplugin in a temp rtp dir bumps `g:direct_probe_ft_count`; the
 -- observer spec (which sorts last, after this file's boundary) re-triggers it
@@ -124,7 +124,7 @@ H.describe('isolation: filetype machinery probe', function()
   end)
 end)
 
--- B8-1: with_env must restore a variable that was unset before the call,
+-- with_env must restore a variable that was unset before the call,
 -- including when fn raises. `saved[name] = nil` never created a key, so the
 -- restore loop skipped it and the value leaked.
 H.describe('isolation: with_env restores unset variables', function()

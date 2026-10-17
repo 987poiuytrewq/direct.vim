@@ -1,12 +1,5 @@
--- tests/buffer_spec.lua -- buffer attach/create, listing, current entry, open
--- (T-018, T-019, and the `open` half of T-022; spec B1-B3, B8, B9, B13, D2,
--- D8b, D11, D14).
---
--- The P4 command surface does not exist yet, so this file drives `buffer`
--- directly and thereby pins the P3 module API the commands will wrap. The B3/B9
--- attach case is asserted with a symlinked prefix the spec builds itself, because
--- the harness realpaths its temp root (11.1 step 3) and would otherwise mask a
--- spelling-sensitive buffer-reuse comparison.
+-- tests/buffer_spec.lua -- listing, path identity, cursor, and open behavior.
+-- The symlink-prefix fixture avoids the harness realpath masking path spelling.
 
 local H = require('tests.support.harness')
 local buffer = require('direct.buffer')
@@ -26,8 +19,8 @@ local function make_symlink(target, link)
   return vim.uv.fs_lstat(link) ~= nil
 end
 
-H.describe('buffer: listing (B1/B13)', function()
-  H.it('dirs render first then files, each group sorted, hidden entries kept (B1)', function()
+H.describe('buffer: listing', function()
+  H.it('dirs render first then files, each group sorted, hidden entries kept', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -40,15 +33,15 @@ H.describe('buffer: listing (B1/B13)', function()
     buffer.list(ws)
 
     H.assert_buf_eq({ 'a-dir/', 'b-dir/', '.hidden', 'a.txt', 'z.txt' })
-    -- D11: options via vim.bo, never a global `set`.
+    -- options via vim.bo, never a global `set`.
     H.assert_eq(vim.bo.buftype, 'acwrite', 'buftype')
     H.assert_eq(vim.bo.buflisted, true, 'buflisted')
     H.assert_eq(vim.bo.swapfile, false, 'noswapfile')
     H.assert_eq(vim.bo.filetype, 'direct', 'filetype')
-    H.assert_false(vim.bo.modified, 'nomodified only after a real refresh (D11)')
+    H.assert_false(vim.bo.modified, 'nomodified only after a real refresh')
   end)
 
-  H.it('resolves symlinks: dir link renders as name/, file link as name, broken link omitted (B1/R3)', function()
+  H.it('resolves symlinks: dir link renders as name/, file link as name, broken link omitted', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -65,7 +58,7 @@ H.describe('buffer: listing (B1/B13)', function()
     H.assert_buf_eq({ 'dirlink/', 'realdir/', 'filelink', 'realfile.txt' })
   end)
 
-  H.it('wildignore removes matching entries and tolerates spaces around commas (B13)', function()
+  H.it('wildignore removes matching entries and tolerates spaces around commas', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -84,7 +77,7 @@ H.describe('buffer: listing (B1/B13)', function()
       'wildignore filters the listing only, it does not delete')
   end)
 
-  H.it('glob uses nosuf, so a suffix option cannot fabricate an ignore match (B13)', function()
+  H.it('glob uses nosuf, so a suffix option cannot fabricate an ignore match', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -99,15 +92,13 @@ H.describe('buffer: listing (B1/B13)', function()
       end)
     end)
 
-    -- only the exact pattern match is ignored (nosuf).
+    -- `nosuf` makes the exact glob match the only ignored entry.
     H.assert_buf_eq({ 'note.md' })
   end)
 
-  -- P3-NB1: an entry whose name carries a newline can never be a buffer line
-  -- (`nvim_buf_set_lines` raises on it), so listing its directory used to abort.
-  -- The line is dropped with a notification; a representable space-named entry
-  -- must still list.
-  H.it('a newline-named entry is dropped with a notice, a space-named one survives (NB1)', function()
+  -- A newline cannot be represented in a buffer line, so skip it with a notice
+  -- rather than aborting the listing; space-named entries remain representable.
+  H.it('a newline-named entry is dropped with a notice, a space-named one survives', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -123,8 +114,8 @@ H.describe('buffer: listing (B1/B13)', function()
   end)
 end)
 
-H.describe('buffer: current entry and cursor (B2)', function()
-  H.it('cursor lands on the current FILE entry (B2)', function()
+H.describe('buffer: current entry and cursor', function()
+  H.it('cursor lands on the current FILE entry', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -141,7 +132,7 @@ H.describe('buffer: current entry and cursor (B2)', function()
     H.assert_eq(vim.api.nvim_win_get_cursor(0)[2], 0, 'column reset to 0')
   end)
 
-  H.it('cursor lands on the current DIRECTORY entry (B2)', function()
+  H.it('cursor lands on the current DIRECTORY entry', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -158,7 +149,7 @@ H.describe('buffer: current entry and cursor (B2)', function()
     H.assert_eq(vim.api.nvim_win_get_cursor(0)[1], 2, 'cursor is on zsub/')
   end)
 
-  H.it('a current entry that is missing on disk yields nil and leaves the cursor put (B2)', function()
+  H.it('a current entry that is missing on disk yields nil and leaves the cursor put', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -169,22 +160,22 @@ H.describe('buffer: current entry and cursor (B2)', function()
     vim.api.nvim_buf_set_name(0, ws .. '/gone.txt') -- never created on disk
 
     local buf = buffer.Buffer(ws)
-    H.assert_nil(buf.current_entry, 'a missing current entry is nil (B2)')
+    H.assert_nil(buf.current_entry, 'a missing current entry is nil')
     buf:list()
 
     H.assert_buf_eq({ 'a.txt', 'b.txt' })
     H.assert_eq(vim.api.nvim_win_get_cursor(0)[1], 1, 'cursor was left where it was')
   end)
 
-  H.it('entry_path keeps a directory trailing slash and special-cases the root (B1/B5)', function()
+  H.it('entry_path keeps a directory trailing slash and special-cases the root', function()
     H.assert_eq(buffer.entry_path('/a/b', 'dir/'), '/a/b/dir/', 'dir line keeps /')
     H.assert_eq(buffer.entry_path('/a/b', 'f.txt'), '/a/b/f.txt', 'file line')
     H.assert_eq(buffer.entry_path('/', 'f.txt'), '/f.txt', 'root is special-cased')
   end)
 end)
 
-H.describe('buffer: attach by path identity (B3/B9)', function()
-  H.it('reuses the buffer for the same directory, repeated attaches included (B3)', function()
+H.describe('buffer: attach by path identity', function()
+  H.it('reuses the buffer for the same directory, repeated attaches included', function()
     clean_buffers()
     local sb = H.sandbox()
     local root = paths.root(sb.root)
@@ -199,7 +190,7 @@ H.describe('buffer: attach by path identity (B3/B9)', function()
     H.assert_eq(second.root, first.root, 'same root')
   end)
 
-  H.it('does not reuse a buffer for a nested entry of the root (B3, reviewer B2)', function()
+  H.it('does not reuse a buffer for a nested entry of the root', function()
     clean_buffers()
     local sb = H.sandbox()
     local root = paths.root(sb.root)
@@ -220,7 +211,7 @@ H.describe('buffer: attach by path identity (B3/B9)', function()
       'the current buffer is the one for exactly <root>')
   end)
 
-  H.it('reuses the buffer for a root reached through an unresolved symlinked prefix (B9)', function()
+  H.it('reuses the buffer for a root reached through an unresolved symlinked prefix', function()
     clean_buffers()
     local sb = H.sandbox()
     local real_parent = H.mkdir(sb.root, 'real-parent')
@@ -238,11 +229,11 @@ H.describe('buffer: attach by path identity (B3/B9)', function()
     local created_nr = vim.api.nvim_get_current_buf()
     local stored = vim.api.nvim_buf_get_name(created_nr)
 
-    -- B9 premise: nvim_buf_set_name resolved the symlinked prefix, so the stored
+    -- nvim_buf_set_name resolves the symlinked prefix, so the stored
     -- spelling differs from the unresolved root. Without this the case would be
     -- vacuous rather than wrong, which is why it is asserted, not skipped.
     H.assert_true(stored ~= unresolved,
-      'nvim resolved the symlinked prefix (B9 premise): ' .. stored)
+      'nvim resolved the symlinked prefix: ' .. stored)
     H.assert_eq(stored, real, 'the stored name is the resolved spelling')
     H.assert_true(fs.same_path(stored, unresolved),
       'the resolved and unresolved spellings denote the same directory')
@@ -264,8 +255,8 @@ H.describe('buffer: attach by path identity (B3/B9)', function()
   end)
 end)
 
-H.describe('buffer: open and ranged paths (B8/D8b/D14)', function()
-  H.it('open() on a file edits it and wipes the previous direct buffer (B8/D8b)', function()
+H.describe('buffer: open and ranged paths', function()
+  H.it('open() on a file edits it and wipes the previous direct buffer', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -283,7 +274,7 @@ H.describe('buffer: open and ranged paths (B8/D8b/D14)', function()
       'the previous direct buffer is gone')
   end)
 
-  H.it('open() on a directory line opens a new direct listing (B8)', function()
+  H.it('open() on a directory line opens a new direct listing', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -299,7 +290,7 @@ H.describe('buffer: open and ranged paths (B8/D8b/D14)', function()
       'the new buffer denotes the sub directory')
   end)
 
-  H.it('open() edits a file whose name contains a space (D14)', function()
+  H.it('open() edits a file whose name contains a space', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -313,7 +304,7 @@ H.describe('buffer: open and ranged paths (B8/D8b/D14)', function()
     H.assert_buf_eq({ 'x' }, 0)
   end)
 
-  H.it('get_paths() returns absolute paths for the range, directories keep the slash (B8)', function()
+  H.it('get_paths() returns absolute paths for the range, directories keep the slash', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')

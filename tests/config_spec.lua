@@ -1,10 +1,8 @@
--- tests/config_spec.lua -- defaults, setup merge, and mapping lifecycle (T-010,
--- D10).
+-- tests/config_spec.lua -- configuration and mapping lifecycle.
 
 local H = require('tests.support.harness')
 
--- P2 (Greptile, PR #1): buffer-local direct mappings must be removable and
--- restorable for ALREADY-open direct buffers, which needs `buffer` to open one.
+-- Open direct buffers let these tests verify mapping removal and restoration.
 local buffer = require('direct.buffer')
 
 -- A fresh module table: config is stateful (lifecycle flags), and the harness
@@ -62,7 +60,7 @@ H.describe('config', function()
   H.it('the VimEnter install runs exactly once and setup() suppresses it', function()
     local config = fresh_config()
     config.clear_mappings()
-    -- No setup() call: the D10 deferred install applies the default once.
+    -- No setup() call: the deferred install applies the default once.
     H.assert_true(config.install_deferred() == true, 'first VimEnter installs')
     H.assert_true(vim.fn.maparg('-', 'n') ~= '', 'mapping present after install')
     H.assert_false(config.install_deferred() == true, 'second VimEnter is a no-op')
@@ -77,10 +75,9 @@ H.describe('config', function()
     H.assert_eq(vim.fn.maparg('-', 'n'), '', 'no global mapping under map_default_keys=false')
   end)
 
-  -- P2 (Greptile, PR #1): clear_mappings used to delete the global `-`
-  -- unconditionally, so setup({ map_default_keys = false }) removed a mapping
-  -- the USER installed even when the plugin never installed one.
-  H.it('setup({ map_default_keys = false }) spares a user-owned global - mapping (P2)', function()
+  -- Clearing must preserve a user-owned global `-` when the plugin did not
+  -- install it, even when setup disables the default mappings.
+  H.it('setup({ map_default_keys = false }) spares a user-owned global - mapping', function()
     local config = fresh_config()
     config.clear_mappings() -- remove whatever the plugin installed at the file boundary
     vim.keymap.set('n', '-', ':echo "user"<CR>', {})
@@ -95,7 +92,7 @@ H.describe('config', function()
     vim.keymap.del('n', '-')
   end)
 
-  H.it('setup({ map_default_keys = false }) still removes the mapping the plugin installed (P2)', function()
+  H.it('setup({ map_default_keys = false }) still removes the mapping the plugin installed', function()
     local config = fresh_config()
     config.clear_mappings()
     config.setup({ map_default_keys = true })
@@ -104,7 +101,7 @@ H.describe('config', function()
     H.assert_eq(vim.fn.maparg('-', 'n'), '', 'the plugin mapping is removed')
   end)
 
-  H.it('clear_mappings with nothing installed is a harmless no-op (P2)', function()
+  H.it('clear_mappings with nothing installed is a harmless no-op', function()
     local config = fresh_config()
     config.clear_mappings()
     vim.keymap.set('n', '-', ':echo "user"<CR>', {})
@@ -116,9 +113,8 @@ H.describe('config', function()
     vim.keymap.del('n', '-')
   end)
 
-  -- P2 (Greptile, PR #1): the buffer-local maps are installed by the ftplugin
-  -- and were never cleared, so setup({ map_default_keys = false }) after a
-  -- direct buffer is already open left the option looking ineffective.
+  -- The ftplugin installs buffer-local maps; setup must also clear them from
+  -- direct buffers that were already open when the option changed.
   local function open_direct_buffer()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -133,7 +129,7 @@ H.describe('config', function()
     return vim.fn.maparg(lhs, mode, false, true).rhs
   end
 
-  H.it('setup({ map_default_keys = false }) clears buffer-local maps in already-open direct buffers (P2)', function()
+  H.it('setup({ map_default_keys = false }) clears buffer-local maps in already-open direct buffers', function()
     local config = fresh_config()
     config.clear_mappings()
     config.setup({ map_default_keys = true })
@@ -149,7 +145,7 @@ H.describe('config', function()
     pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
   end)
 
-  H.it('clearing does not disturb other buffers and their buffer-local maps (P2)', function()
+  H.it('clearing does not disturb other buffers and their buffer-local maps', function()
     local config = fresh_config()
     config.clear_mappings()
     config.setup({ map_default_keys = true })
@@ -175,7 +171,7 @@ H.describe('config', function()
     pcall(vim.api.nvim_buf_delete, other, { force = true })
   end)
 
-  H.it('re-enabling map_default_keys restores the maps in already-open direct buffers (P2)', function()
+  H.it('re-enabling map_default_keys restores the maps in already-open direct buffers', function()
     local config = fresh_config()
     config.clear_mappings()
     config.setup({ map_default_keys = true })
@@ -191,20 +187,16 @@ H.describe('config', function()
     pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
   end)
 
-  -- P2 follow-up (Greptile, PR #1): maparg inside a direct buffer reports a
-  -- GLOBAL fallback with buffer == 0 when the buffer has no local mapping of
-  -- that lhs, and `keymap.del(mode, lhs, { buffer = true })` on a mapping that
-  -- is not the buffer's raises E31. Only a buffer-local mapping can be deleted
-  -- from a buffer, so the deletion must not even be ATTEMPTED for a fallback --
-  -- and it must never abort the rest of that buffer's mappings, which is what
-  -- the single pcall around the whole loop did while reporting success.
-  H.it('a global-only mapping is left alone and does not stop the rest of the clearing (P2)', function()
+  -- maparg reports a global fallback with buffer == 0 when no local map exists;
+  -- deleting it as buffer-local raises E31. Skip that fallback and isolate each
+  -- deletion so one failure does not prevent clearing the remaining maps.
+  H.it('a global-only mapping is left alone and does not stop the rest of the clearing', function()
     local config = fresh_config()
     config.clear_mappings()
     config.setup({ map_default_keys = true })
     local bufnr = open_direct_buffer()
 
-    -- Reachable state (Greptile): the buffer has no local `u` (its ftplugin
+    -- Reachable state: the buffer has no local `u` (its ftplugin
     -- mapping was cleared, or never installed) while a global `u` carrying the
     -- plugin's own rhs resolves through it.
     vim.keymap.del('n', 'u', { buffer = true })
@@ -226,10 +218,8 @@ H.describe('config', function()
     pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
   end)
 
-  -- P2 follow-up (Greptile, PR #1): a deletion that fails must not take the
-  -- rest of the buffer's mappings down with it, and must not be swallowed --
-  -- the user has to be able to find out.
-  H.it('a failing deletion warns and does not stop the remaining mappings (P2)', function()
+  -- A failed deletion should warn without stopping later mappings from clearing.
+  H.it('a failing deletion warns and does not stop the remaining mappings', function()
     local config = fresh_config()
     config.clear_mappings()
     config.setup({ map_default_keys = true })
@@ -253,11 +243,9 @@ H.describe('config', function()
     pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
   end)
 
-  -- P2 follow-up (Greptile, PR #1): buffer-local ownership is the exact
-  -- question here -- a user's own buffer-local override of `u` in a direct
-  -- buffer is buffer-local and must be spared, while the plugin's own maps
-  -- around it are still cleared.
-  H.it('clearing spares a user-owned buffer-local override of u (P2)', function()
+  -- Preserve a user's buffer-local `u` override while clearing the plugin's
+  -- other mappings in the same direct buffer.
+  H.it('clearing spares a user-owned buffer-local override of u', function()
     local config = fresh_config()
     config.clear_mappings()
     config.setup({ map_default_keys = true })
@@ -274,13 +262,13 @@ H.describe('config', function()
     pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
   end)
 
-  -- P2 follow-up (review hardening): a buffer can be unloaded between the
+  -- A buffer can be unloaded between the
   -- snapshot taken by clear_buffer_mappings and the nvim_buf_call that reads
   -- its maps, and nvim_buf_call raises on an invalid handle. The window itself
   -- cannot be opened deterministically from a test, so the API seam synthesises
   -- exactly the documented failure; the guard must swallow it, since the buffer
   -- is going away anyway.
-  H.it('clear_buffer_mappings ignores a buffer that goes away before the call (P2)', function()
+  H.it('clear_buffer_mappings ignores a buffer that goes away before the call', function()
     local config = fresh_config()
     config.clear_mappings()
     config.setup({ map_default_keys = true })

@@ -1,5 +1,5 @@
--- tests/fs_spec.lua -- the filesystem seam contract (T-007, spec section 8).
---
+-- tests/fs_spec.lua -- filesystem operations, copy safety, and error handling.
+
 -- Proves: operations return true or nil, err and never raise; predicates
 -- return booleans; symlinks are resolved for listing while broken links are
 -- omitted; same_path is ino+dev regardless of spelling; rename falls back to
@@ -46,7 +46,7 @@ H.describe('fs', function()
     H.assert_false(fs.same_path(sb.root, sb.root .. '/a.txt'), 'same_path false across entries')
   end)
 
-  H.it('non-string inputs return nil, err instead of raising (B2)', function()
+  H.it('non-string inputs return nil, err instead of raising', function()
     local sb = H.sandbox()
     local r, e = fs.rename(nil, sb.root .. '/x')
     H.assert_nil(r, 'rename(nil, dst) returns nil')
@@ -62,7 +62,7 @@ H.describe('fs', function()
     H.assert_true(type(e) == 'string' and #e > 0, 'rm_file(nil) carries an err')
   end)
 
-  H.it('same_path is ino+dev for two spellings of a symlinked prefix (B9/D2)', function()
+  H.it('same_path is ino+dev for two spellings of a symlinked prefix', function()
     local sb = H.sandbox()
     H.mkdir(sb.root, 'outer/sub')
     H.mkfile(sb.root, 'outer/sub/x.txt', { 'x' })
@@ -114,7 +114,7 @@ H.describe('fs', function()
     H.assert_eq(vim.fn.readfile(sb.root .. '/dst.txt'), { 'payload' }, 'content copied')
   end)
 
-  H.it('a non-EXDEV rename error propagates and leaves the source intact (D5)', function()
+  H.it('a non-EXDEV rename error propagates and leaves the source intact', function()
     local sb = H.sandbox()
     H.mkfile(sb.root, 'src.txt', { 'payload' })
     local restore = H.stub(vim.uv, 'fs_rename', function()
@@ -147,18 +147,10 @@ H.describe('fs', function()
       { 'sub/', 'sub/deep.txt', 'top.txt' }, 'tree copied recursively')
   end)
 
-  -- P1 (Greptile, PR #1): copy_tree used to copy only 'file'/'directory' stats
-  -- and silently skip everything else while still returning true, and
-  -- rename()'s EXDEV fallback then removed the source tree -- so a cross-device
-  -- move destroyed symlinks/FIFOs/sockets with no warning.
-  --
-  -- P1 follow-up (review): the refusal is the DESTRUCTIVE caller's contract, so
-  -- it is REQUESTED (`{ require_complete = true }`) by the caller that removes
-  -- the source after a successful copy -- rename's EXDEV fallback, which the
-  -- tests below pin end to end. The WALK is the single authority (there is no
-  -- up-front-only scan to outrun), and a refusal discards whatever the copy had
-  -- already created, so the source is intact and no destination is left behind.
-  H.it('copy_tree with require_complete refuses a symlink tree, leaving no destination (P1)', function()
+  -- A cross-device move removes its source after copying, so it requires a
+  -- complete copy and must refuse unsupported entries. Yank and paste destroy
+  -- nothing; they may skip such entries, but must report each omission.
+  H.it('copy_tree with require_complete refuses a symlink tree, leaving no destination', function()
     local sb = H.sandbox()
     local root = H.mkdir(sb.root, 'tree')
     H.mkfile(root, 'a.txt', { 'a' })
@@ -178,12 +170,9 @@ H.describe('fs', function()
       'the source tree is untouched')
   end)
 
-  -- P1 follow-up (review, Greptile P1): the same tree copied by a caller that
-  -- destroys NOTHING (a yank, a paste) must not fail -- failing it broke an
-  -- ordinary yank of any tree that merely CONTAINS a symlink. Everything
-  -- reproducible is copied, the symlink is left out, and the omission is
-  -- REPORTED as the second return value instead of being dropped silently.
-  H.it('copy_tree without require_complete copies what it can and reports the symlink it skipped (P1)', function()
+  -- Non-destructive copies still copy reproducible entries, skip unsupported
+  -- ones, and report omissions instead of failing the entire yank or paste.
+  H.it('copy_tree without require_complete copies what it can and reports the symlink it skipped', function()
     local sb = H.sandbox()
     local root = H.mkdir(sb.root, 'tree')
     H.mkfile(root, 'a.txt', { 'a' })
@@ -205,7 +194,7 @@ H.describe('fs', function()
       'the source tree is untouched')
   end)
 
-  H.it('an EXDEV move of a tree holding a symlink fails loudly and keeps the source (P1)', function()
+  H.it('an EXDEV move of a tree holding a symlink fails loudly and keeps the source', function()
     local sb = H.sandbox()
     local root = H.mkdir(sb.root, 'tree')
     H.mkfile(root, 'a.txt', { 'a' })
@@ -226,7 +215,7 @@ H.describe('fs', function()
     H.assert_fs_eq(root, { 'a.txt', 'link@' }, 'nothing was destroyed')
   end)
 
-  H.it('copy_tree with require_complete refuses a FIFO, leaving no destination (P1)', function()
+  H.it('copy_tree with require_complete refuses a FIFO, leaving no destination', function()
     local sb = H.sandbox()
     local root = H.mkdir(sb.root, 'tree')
     H.mkfile(root, 'a.txt', { 'a' })
@@ -246,20 +235,11 @@ H.describe('fs', function()
     H.assert_false(fs.exists(sb.root .. '/dst'), 'no partial destination left behind')
   end)
 
-  -- P1 follow-up (review): `list_dir` returns nil only for a non-directory; a
-  -- directory whose entries cannot be read (EACCES) goes through `iter_dir`,
-  -- which swallows the scandir failure and yields nothing -- so `list_dir`
-  -- returned an EMPTY listing and the copy saw "nothing uncopyable". It then
-  -- returned TRUE with the locked subtree silently missing (probe at 51bb146),
-  -- and on the EXDEV move path the source is removed afterwards: a silent
-  -- destroy that the refusal exists to prevent.
-  --
-  -- This test REPLACES the pre-scan-era test of the same guarantee. The walk is
-  -- now the single authority, so the guarantee is kept by copy_dir probing each
-  -- directory with fs_scandir as it descends; the locked subtree is placed after
-  -- a copyable one so the destination the refusal discards is genuinely non-empty.
-  -- Skipped under root, which ignores permission bits.
-  H.it('copy_tree with require_complete refuses an unreadable directory, leaving no destination (P1)', function()
+  -- vim.fs.dir can make an unreadable directory look empty, hiding data before
+  -- an EXDEV move removes the source. The copy walk probes with fs_scandir; this
+  -- fixture puts the locked subtree last to verify partial-copy cleanup. Root
+  -- bypasses permission bits, so the test returns early there.
+  H.it('copy_tree with require_complete refuses an unreadable directory, leaving no destination', function()
     if vim.uv.getuid ~= nil and vim.uv.getuid() == 0 then
       return
     end
@@ -287,11 +267,9 @@ H.describe('fs', function()
       'locked/inner.txt' }, 'the source is untouched')
   end)
 
-  -- P1 follow-up (review): a caller that destroys nothing gets a best-effort
-  -- copy. The locked subtree is REPORTED, never silently short: an empty
-  -- `locked/` standing in for contents that could not be read would hide the
-  -- omission instead of surfacing it.
-  H.it('copy_tree without require_complete reports an unreadable directory it skipped (P1)', function()
+  -- Best-effort copies may skip unreadable subtrees, but must report them rather
+  -- than silently creating an empty stand-in.
+  H.it('copy_tree without require_complete reports an unreadable directory it skipped', function()
     if vim.uv.getuid ~= nil and vim.uv.getuid() == 0 then
       return
     end
@@ -316,18 +294,14 @@ H.describe('fs', function()
       'the source is untouched')
   end)
 
-  -- P1 regression (Greptile on 7d5ce12, "Moves can lose new entries"): the
-  -- round that narrowed the refusal replaced the per-subtree re-check with one
-  -- up-front scan, so an entry that appeared AFTER that scan was neither refused
-  -- nor reported -- copy_dir simply left it out -- and rename's EXDEV fallback
-  -- then removed the source, destroying it silently. The walk is now the single
-  -- authority and re-lists every directory as it descends, so each entry is
-  -- classified after the copy has started.
+  -- An up-front scan can miss entries created during copying. The walk must
+  -- re-list each directory as it descends so late entries are refused or reported
+  -- before an EXDEV fallback can remove the source.
   --
-  -- The injection is deterministic: M.mkdirp is a module-table seam (section 8),
+  -- The injection is deterministic: M.mkdirp is a module-table seam,
   -- and the stub creates the entry at the copy's first mkdirp, i.e. inside the
   -- walk. No sleeping and no reliance on scheduling, so this cannot flake.
-  H.it('an entry that appears after the copy started still refuses the copy (P1)', function()
+  H.it('an entry that appears after the copy started still refuses the copy', function()
     local sb = H.sandbox()
     local root = H.mkdir(sb.root, 'tree')
     H.mkfile(root, 'a.txt', { 'a' })
@@ -356,10 +330,8 @@ H.describe('fs', function()
       'the source is untouched, the late entry included')
   end)
 
-  -- The other half of the same regression: on a path that destroys nothing, the
-  -- late entry must still be REPORTED. At 7d5ce12 it was followed as a copy of
-  -- its target and copy_tree returned true with no skip report at all.
-  H.it('an entry that appears after the copy started is still reported, not dropped (P1)', function()
+  -- Best-effort copies must also report late entries instead of silently omitting them.
+  H.it('an entry that appears after the copy started is still reported, not dropped', function()
     local sb = H.sandbox()
     local root = H.mkdir(sb.root, 'tree')
     H.mkfile(root, 'a.txt', { 'a' })
@@ -389,10 +361,9 @@ H.describe('fs', function()
       'the source is untouched')
   end)
 
-  -- End to end on the path the invariant is about: a source-removing move must
-  -- never delete a source it could not copy completely, whenever the entry shows
-  -- up. At 7d5ce12 this probe returned true and the source tree was gone.
-  H.it('a cross-device move never removes a source it could not copy completely (P1)', function()
+  -- Verify the destructive EXDEV path too: a move must never remove a source it
+  -- could not copy completely.
+  H.it('a cross-device move never removes a source it could not copy completely', function()
     local sb = H.sandbox()
     local root = H.mkdir(sb.root, 'tree')
     H.mkfile(root, 'a.txt', { 'a' })
@@ -424,9 +395,9 @@ H.describe('fs', function()
       'nothing was destroyed')
   end)
 
-  -- The cleanup a refusal now performs must undo only what THAT copy created: a
-  -- destination that already existed belongs to its owner and is left alone.
-  H.it('a refused copy removes only what it created (P1)', function()
+  -- A refused copy may remove only paths it created; existing destinations
+  -- belong to their owner and must remain untouched.
+  H.it('a refused copy removes only what it created', function()
     local sb = H.sandbox()
     local root = H.mkdir(sb.root, 'tree')
     H.mkfile(root, 'a.txt', { 'a' })
@@ -442,13 +413,12 @@ H.describe('fs', function()
       'only the entries the copy created are undone, never the pre-existing destination')
   end)
 
-  -- P1 (Greptile, on 14cbb3f, "Failed copies delete existing data"): the cleanup
-  -- a failed copy performs recorded a destination FILE path without checking
+  -- A failed copy once recorded a destination file without checking
   -- whether something was already there. A source file whose name clashes with
   -- an existing destination DIRECTORY makes copy_file fail (EISDIR), and the
   -- cleanup then deleted that directory -- and everything inside it -- although
   -- the copy never created it. Only paths this copy created may be undone.
-  H.it('a failed copy never deletes a pre-existing destination directory (P1)', function()
+  H.it('a failed copy never deletes a pre-existing destination directory', function()
     local sb = H.sandbox()
     local src = H.mkdir(sb.root, 'src')
     H.mkfile(src, 'a.txt', { 'a' })
@@ -467,7 +437,7 @@ H.describe('fs', function()
 
   -- The same guarantee on the best-effort path: a hard failure there also cleans
   -- up, and it must undo only what this copy created.
-  H.it('a failed best-effort copy never deletes a pre-existing destination directory (P1)', function()
+  H.it('a failed best-effort copy never deletes a pre-existing destination directory', function()
     local sb = H.sandbox()
     local src = H.mkdir(sb.root, 'src')
     H.mkfile(src, 'a.txt', { 'a' })
@@ -483,23 +453,16 @@ H.describe('fs', function()
     H.assert_fs_eq(src, { 'a.txt', 'clash' }, 'the source is untouched')
   end)
 
-  -- F1 (review): the cleanup a refused copy performs used to walk ctx.created
-  -- newest-first and hand every created DIRECTORY to rm_tree, a recursive forced
-  -- delete. A file that anything else -- another process, a plugin, another
-  -- Neovim instance -- placed inside a directory this copy created, after the
-  -- copy created it, was not in ctx.created, yet the recursive delete took it
-  -- with the directory. The cleanup is now structurally incapable of removing
-  -- anything it did not create: recorded files are unlinked one by one, and
-  -- recorded directories are removed only while EMPTY (fs_rmdir, innermost
-  -- first). This test is the point of the round: the injected foreign file
-  -- survives, the copy's own partials are gone, an emptied created directory is
-  -- removed, and a created directory that is no longer empty is left in place.
+  -- Recursive cleanup could delete a foreign file added after the copy created
+  -- its parent directory. Cleanup now unlinks only recorded files and removes
+  -- recorded directories only while empty. This fixture verifies that foreign
+  -- data survives while the copy's own partial files are removed.
   --
-  -- The injection is deterministic: M.mkdirp is a module-table seam (section 8),
+  -- The injection is deterministic: M.mkdirp is a module-table seam,
   -- and the stub runs at the copy's first mkdirp -- inside the walk, after the
   -- destination directory exists and before its listing -- so the foreign file
   -- and the late source entry are both created mid-copy. No sleeping.
-  H.it('a refused copy never removes a foreign entry that appeared inside a directory it created (F1)', function()
+  H.it('a refused copy preserves foreign entries inside its destination', function()
     local sb = H.sandbox()
     local root = H.mkdir(sb.root, 'tree')
     H.mkfile(root, 'a.txt', { 'a' })
@@ -544,14 +507,9 @@ H.describe('fs', function()
       'the source is untouched, the late entry included')
   end)
 
-  -- F2 (review): removing the up-front scan made the destructive path create and
-  -- copy before it discovered an uncopyable entry, so "abort before destroying
-  -- anything" held only retrospectively -- and a failed destructive copy also
-  -- rewrote destination entries on the way. `require_complete = true` gets a
-  -- pre-scan again, refusing BEFORE any mkdirp or write, so the common case
-  -- touches nothing at all. The contract is pinned on the write primitives
-  -- themselves (module-table seams), not merely on the return value.
-  H.it('a destructive refusal in the common case performs zero writes (F2)', function()
+  -- Complete mode pre-scans unsupported trees so common refusals happen before
+  -- any write. Stubbing the write primitives verifies that guarantee directly.
+  H.it('a destructive refusal in the common case performs zero writes', function()
     local sb = H.sandbox()
     local root = H.mkdir(sb.root, 'tree')
     H.mkfile(root, 'a.txt', { 'a' })
@@ -585,14 +543,10 @@ H.describe('fs', function()
       'the source is untouched')
   end)
 
-  -- F3 (review): the copy's ownership check used lstat while the free-name
-  -- checks elsewhere used the following stat behind fs.exists, so the two could
-  -- disagree about a DANGLING symlink at the destination: the name is occupied,
-  -- but the following check reports it free and a write then lands through the
-  -- link. Both now go through one shared helper, fs.taken, which uses lstat and
-  -- counts a dangling symlink as taken -- deliberately, because the name is
-  -- occupied and a write through it reaches something the user already has.
-  H.it('the copy counts a dangling symlink at the destination as taken, like every free-name check (F3)', function()
+  -- fs.taken uses lstat so a dangling destination symlink is treated as
+  -- occupied, matching the copy and paste clash checks and preventing writes
+  -- through a path the user already owns.
+  H.it('a dangling destination symlink counts as an occupied name', function()
     local sb = H.sandbox()
     local root = H.mkdir(sb.root, 'tree')
     H.mkfile(root, 'a.txt', { 'a' })
@@ -602,7 +556,7 @@ H.describe('fs', function()
     H.assert_true(fs.taken(dst) == true,
       'the shared helper counts a dangling symlink as taken')
     H.assert_false(fs.exists(dst),
-      'the following check reports the name free -- the disagreement F3 removes')
+      'the following check reports the name free')
 
     local ok, err = fs.copy_tree(root, dst, { require_complete = true })
 
@@ -617,13 +571,9 @@ H.describe('fs', function()
     H.assert_fs_eq(root, { 'a.txt' }, 'the source is untouched')
   end)
 
-  -- F6 (review): `copy_file` overwrites, so in complete mode a destination entry
-  -- that already existed was rewritten before a later failure, and a failed
-  -- destructive copy could leave a destination mutated. Complete mode now
-  -- refuses a destination that is already taken -- through the same shared
-  -- helper as F3 -- instead of overwriting it. Best-effort mode keeps its
-  -- overwrite semantics: that is the yank/paste contract, not a bug.
-  H.it('complete mode refuses an already-taken destination instead of overwriting (F6)', function()
+  -- Complete mode refuses taken destinations because copy_file overwrites them.
+  -- Best-effort mode retains overwrite behavior for yank and paste.
+  H.it('complete mode refuses an already-taken destination instead of overwriting', function()
     local sb = H.sandbox()
     local src = H.mkdir(sb.root, 'src')
     H.mkfile(src, 'a.txt', { 'NEW' })
@@ -647,12 +597,9 @@ H.describe('fs', function()
       'best-effort mode keeps its overwrite semantics (yank/paste)')
   end)
 
-  -- F6, late arm: the pre-scan cannot see a destination entry that a foreign
-  -- writer creates while the copy runs, so the walk re-checks every destination
-  -- path it is about to use. It refuses rather than overwriting, and the cleanup
-  -- then leaves the foreign entry alone -- including the directory it sits in,
-  -- which is no longer empty and so is not removed.
-  H.it('a complete-mode copy refuses a destination entry that appeared mid-copy, and removes nothing of it (F6)', function()
+  -- A pre-scan cannot see destinations created during copying, so the walk
+  -- checks each path immediately before use and leaves foreign entries intact.
+  H.it('complete mode refuses a destination entry created mid-copy', function()
     local sb = H.sandbox()
     local src = H.mkdir(sb.root, 'src')
     H.mkfile(src, 'a.txt', { 'a' })
@@ -725,11 +672,9 @@ H.describe('fs', function()
     H.assert_eq(count, 0, 'iter_dir on a bad path yields nothing')
   end)
 
-  H.it('copy_tree honours a stub on M.copy_file (module-table seam, O1)', function()
-    -- The seam rule (section 8: functions call each other through the module
-    -- table) is pinned here: a test stub on M.copy_file must be seen by
-    -- M.copy_tree. A previous pass captured copy_file locally, the suite
-    -- stayed green, and nothing pinned the seam (P1 gate review, O1).
+  H.it('copy_tree honours a stub on M.copy_file (module-table seam)', function()
+    -- Calls go through the module table so a stub on M.copy_file reaches
+    -- M.copy_tree; this test protects that injection seam.
     local sb = H.sandbox()
     H.mkfile(sb.root, 'tree/a.txt', { 'a' })
     local restore = H.stub(fs, 'copy_file', function()
@@ -743,8 +688,8 @@ H.describe('fs', function()
     H.assert_false(fs.exists(sb.root .. '/copy/a.txt'), 'no file was copied')
   end)
 
-  H.it('mkdirp/touch/basename/abspath reject non-string input without touching disk (O3)', function()
-    -- O3 sweep: without the guards, fs.mkdirp(42) creates a directory named
+  H.it('mkdirp/touch/basename/abspath reject non-string input without touching disk', function()
+    -- Without the guards, fs.mkdirp(42) creates a directory named
     -- `42` in the cwd and fs.mkdirp(nil) creates a literal `v:null`
     -- directory (a stray `v:null/` from that class of bug already sat in the
     -- repo root before this phase). Each call must return nil, err and create

@@ -1,19 +1,12 @@
--- tests/action_spec.lua -- filesystem actions, serialization, reversal.
---
--- Covers T-012 (single-entry actions: Move, Remove, RemoveDirectory, Restore,
--- RestoreDirectory, Touch, MakeDirectory -- ino preservation, B10 trash naming
--- with the -<n> suffix, no nesting) and T-014 (the exact
--- action<->serialization<->reversal mapping for all 9 action types, following
--- the spec's table verbatim: src/dst swapped and renames inverted for p/up).
--- The Paste/Unpaste prompt-seam acceptance (T-013) lives in register_spec.lua
--- per the spec.
+-- tests/action_spec.lua -- filesystem actions and history serialization.
+-- Covers reversals, pathname identity, trash handling, and paste behavior.
 
 local H = require('tests.support.harness')
 local M = require('direct.action')
 local paths = require('direct.paths')
 
 H.describe('action', function()
-  H.it('Move preserves the inode for files and directories (T-012)', function()
+  H.it('Move preserves the inode for files and directories', function()
     local sb = H.sandbox()
     H.mkfile(sb.root, 'a.txt', { 'a' })
     H.mkdir(sb.root, 'dir1')
@@ -37,24 +30,18 @@ H.describe('action', function()
     H.assert_false(H.exists(sb.root, 'dir1'), 'directory source gone')
   end)
 
-  -- P1 (Greptile, PR #1): close_src_buffer matched with fs.same_path, which is
-  -- ino+dev identity -- so EVERY hard link to a file matched, and renaming one
-  -- link force-closed the buffers of all the others, discarding unsaved edits.
-  -- The match must be the resolved PATHNAME (fs.realpath), not inode identity:
-  -- distinct hard links are distinct names; the same file reached through a
-  -- symlinked prefix, `..` or a trailing slash still matches (B9).
-  H.describe('action: close_src_buffer pathname identity (P1)', function()
-    H.it('a buffer on one hardlink survives close_src_buffer of another (P1)', function()
+  -- Match the resolved pathname, not inode identity: hard links are distinct
+  -- names, while symlink prefixes, `..`, and trailing slashes resolve alike.
+  H.describe('action: close_src_buffer pathname identity', function()
+    H.it('a buffer on one hardlink survives close_src_buffer of another', function()
       local sb = H.sandbox()
       H.mkfile(sb.root, 'a.txt', { 'a' })
       H.assert_true(vim.uv.fs_link(sb.root .. '/a.txt', sb.root .. '/b.txt') == true,
         'hardlink created')
 
-      -- nvim itself refuses a SECOND buffer for the other hardlink (E95 -- its
-      -- own ino+dev name unification), which is exactly what makes the P1 bug
-      -- destructive: the single buffer for a.txt is at risk whenever a
-      -- destructive action targets the OTHER hardlink name, because the old
-      -- fs.same_path(b.txt, a.txt) matched by inode.
+      -- Neovim refuses a second buffer for the other hard link (E95), so an
+      -- inode-based close could discard the only buffer's unsaved edits when
+      -- an action targets the other pathname.
       local buf = vim.api.nvim_create_buf(true, false)
       vim.api.nvim_buf_set_name(buf, sb.root .. '/a.txt')
       vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'unsaved edit' })
@@ -70,7 +57,7 @@ H.describe('action', function()
       pcall(vim.api.nvim_buf_delete, buf, { force = true })
     end)
 
-    H.it('still closes a buffer whose name is the resolved target (symlinked prefix, B9)', function()
+    H.it('still closes a buffer whose name is the resolved target (symlinked prefix)', function()
       -- The trap the naive fix falls into: nvim resolves a symlinked prefix in
       -- the stored buffer name (the macOS /tmp -> /private/tmp case), so a
       -- plain vim.fs.normalize(a) == normalize(b) comparison would MISS the
@@ -92,7 +79,7 @@ H.describe('action', function()
       H.assert_false(vim.api.nvim_buf_is_valid(buf), 'the buffer was closed')
     end)
 
-    H.it('matches the same file reached through a .. or a trailing-slash spelling (P1)', function()
+    H.it('matches the same file reached through a .. or a trailing-slash spelling', function()
       local sb = H.sandbox()
       H.mkdir(sb.root, 'sub')
       H.mkfile(sb.root, 'real.txt', { 'x' })
@@ -112,7 +99,7 @@ H.describe('action', function()
     end)
   end)
 
-  H.it('Remove and RemoveDirectory send entries to the trash (T-012, B10)', function()
+  H.it('Remove and RemoveDirectory send entries to the trash', function()
     local sb = H.sandbox()
     H.mkfile(sb.root, 'f.txt', { 'f' })
     H.mkdir(sb.root, 'dir1')
@@ -137,13 +124,9 @@ H.describe('action', function()
       'trashed directory tree keeps its inodes')
   end)
 
-  -- F3 (review): the trash name search asked fs.exists, which FOLLOWS a symlink,
-  -- so a DANGLING symlink already sitting at `<trash>/<digest>` read as free and
-  -- the picker handed the destructive rename a destination that is in fact
-  -- taken -- which `require_complete = true` now refuses, so Remove would fail
-  -- on a name the picker had called free. It asks the same shared helper as the
-  -- paste clash loop and the copy, so the three cannot disagree.
-  H.it('first_free_trash skips a name occupied by a dangling symlink (F3)', function()
+  -- Use the same lstat-based occupancy check as copy and paste: a dangling
+  -- symlink occupies the trash name even though fs.exists follows it.
+  H.it('first_free_trash skips a dangling symlink at the candidate name', function()
     local sb = H.sandbox()
     local trash = M.paths.join(sb.data_home, 'direct/trash')
     H.mkdir(trash, '')
@@ -153,13 +136,13 @@ H.describe('action', function()
     H.assert_true(vim.uv.fs_symlink(trash .. '/nowhere', trash .. '/' .. base) == true,
       'dangling symlink occupying the base trash name')
     H.assert_false(vim.uv.fs_stat(trash .. '/' .. base) ~= nil,
-      'the following check reports the name free -- the disagreement F3 removes')
+      'the following check reports the name free')
 
     H.assert_eq(M.first_free_trash(trash, src), trash .. '/' .. base .. '-1',
       'the picker skips the occupied name instead of naming a taken destination')
   end)
 
-  H.it('Restore brings a file and RestoreDirectory a tree back (T-012)', function()
+  H.it('Restore brings a file and RestoreDirectory a tree back', function()
     local sb = H.sandbox()
     H.mkfile(sb.root, 'f.txt', { 'f' })
     H.mkdir(sb.root, 'dir1')
@@ -175,7 +158,7 @@ H.describe('action', function()
       'file restored with content')
     H.assert_true(M.RestoreDirectory(rmdir.dst, rmdir.src)['do']() ~= nil,
       'restore directory succeeds')
-    -- D16: a restore moves the content out and leaves an EMPTY MARKER at the
+    -- Restore moves the content out and leaves an EMPTY MARKER at the
     -- trash slot, so the trash dir holds two marker entries alongside the
     -- restored workspace (an empty file and an empty directory).
     H.assert_fs_eq(sb.root, {
@@ -187,12 +170,12 @@ H.describe('action', function()
       'dir1/',
       'dir1/sub.txt',
       'f.txt',
-    }, 'workspace back to the original shape, trash holds only the D16 markers')
+    }, 'workspace back to the original shape, trash holds only the markers')
     H.assert_eq(vim.fn.readfile(remove.dst), {}, 'the marker file is empty')
     H.assert_eq(#vim.fn.readdir(rmdir.dst), 0, 'the marker directory is empty')
   end)
 
-  H.it('remove/restore/remove yields two distinct trash entries with no nesting (D16)', function()
+  H.it('remove/restore/remove yields two distinct trash entries with no nesting', function()
     local sb = H.sandbox()
     H.mkfile(sb.root, 'f.txt', { 'f' })
 
@@ -213,7 +196,7 @@ H.describe('action', function()
 
     H.assert_true(t1 ~= t2, 'two distinct trash entries')
     H.assert_eq(vim.fs.basename(t2), vim.fs.basename(t1) .. '-1',
-      'the second entry is the first free -<n> sibling (B10)')
+      'the second entry is the first free -<n> sibling')
 
     -- No nesting: the trash dir holds exactly two sibling entries, and the
     -- second is a file like the first (not a directory inside the first).
@@ -228,7 +211,7 @@ H.describe('action', function()
     H.assert_eq(vim.fn.isdirectory(t2), 0, 'no nested directory was created')
   end)
 
-  H.it('Touch and MakeDirectory create entries (T-012)', function()
+  H.it('Touch and MakeDirectory create entries', function()
     local sb = H.sandbox()
     H.assert_true(M.Touch(sb.root .. '/new.txt')['do']() ~= nil, 'touch succeeds')
     H.assert_true(H.exists(sb.root, 'new.txt'), 'file created')
@@ -237,7 +220,7 @@ H.describe('action', function()
     H.assert_eq(vim.fn.isdirectory(sb.root .. '/newdir'), 1, 'directory created')
   end)
 
-  H.it('describe() is CWD-relative and human (B15/N8)', function()
+  H.it('describe() is CWD-relative and human', function()
     local sb = H.sandbox()
     H.mkfile(sb.root, 'a.txt', { 'a' })
     H.mkdir(sb.root, 'tree')
@@ -263,7 +246,7 @@ H.describe('action', function()
     end)
   end)
 
-  H.it('serialize() emits NAME\\tfield... lines (T-014)', function()
+  H.it('serialize() emits NAME\\tfield... lines', function()
     local sb = H.sandbox()
     H.assert_eq(M.serialize(M.Move('/r/a', '/r/b')), 'mv\t/r/a\t/r/b', 'mv')
     H.assert_eq(M.serialize(M.Touch('/r/t')), 'touch\t/r/t', 'touch')
@@ -273,7 +256,7 @@ H.describe('action', function()
 
     local remove = M.Remove('/r/f')
     H.assert_eq(M.serialize(remove), 'rm\t/r/f\t' .. remove.dst,
-      'rm stores the resolved trash dst (B10)')
+      'rm stores the resolved trash dst')
 
     H.assert_eq(
       M.serialize(M.Paste('/r/reg', '/r/dst', { 'a', 'b' }, { 'a', 'b' })),
@@ -283,8 +266,8 @@ H.describe('action', function()
       'up\t/r/dst\t/r/reg\ta b\ta b', 'up appends the two name lists')
   end)
 
-  H.it('path_reason and serialize refuse only unrepresentable path fields (B2/P2-NB2)', function()
-    -- P3-NB2: path_reason is the universal guard serialize runs over every
+  H.it('path_reason and serialize refuse only unrepresentable path fields', function()
+    -- path_reason is the universal guard serialize runs over every
     -- field. A normal path and a SPACE path are representable; a tab (the
     -- FIELD_SEPARATOR) and any other control character (a newline included) are
     -- not.
@@ -303,7 +286,7 @@ H.describe('action', function()
       'a space path serializes verbatim')
   end)
 
-  H.it('entry_name_reason rejects empty, separator and control-char names (B2/B3/N2/O2)', function()
+  H.it('entry_name_reason rejects empty, separator and control-char names', function()
     H.assert_nil(M.entry_name_reason('notes.txt'),
       'a normal name can round-trip')
     H.assert_eq(M.entry_name_reason(''), 'empty', 'an empty name is refused')
@@ -316,11 +299,11 @@ H.describe('action', function()
       'an embedded NL is refused (the round trip no longer leans on the NUL encoding)')
   end)
 
-  H.it('reverse(serialize(a)) round-trips all 9 action types (T-014)', function()
+  H.it('reverse(serialize(a)) round-trips all 9 action types', function()
     local sb = H.sandbox()
     local root = sb.root
     local reg = H.mkdir(sb.root, 'reg')
-    -- The reversal mapping follows the spec table verbatim (the Python
+    -- The reversal mapping follows the documented action contract (the Python
     -- REVERSALS): mv/rm/rmdir/rs/rsdir swap src/dst; rs/rsdir/touch/mkdir
     -- reverse into a freshly-trashed rm/rmdir of the destination; p/up swap
     -- src/dst and invert the renames lists.
@@ -387,7 +370,7 @@ H.describe('action', function()
       'double reversal returns the original paste')
   end)
 
-  H.it('deserialize and reverse return nil, err for malformed lines (T-014)', function()
+  H.it('deserialize and reverse return nil, err for malformed lines', function()
     local r, e = M.deserialize('bogus\ta\tb')
     H.assert_nil(r, 'deserialize of an unknown name returns nil')
     H.assert_true(type(e) == 'string' and #e > 0, 'deserialize carries an err')
@@ -399,7 +382,7 @@ H.describe('action', function()
     H.assert_nil(r, 'reverse of an empty line returns nil')
   end)
 
-  H.it('Paste copies files and trees; Unpaste removes them without trashing (T-013)', function()
+  H.it('Paste copies files and trees; Unpaste removes them without trashing', function()
     local sb = H.sandbox()
     local reg = H.mkdir(sb.root, 'reg')
     H.mkfile(reg, 'f.txt', { 'f' })
@@ -420,7 +403,7 @@ H.describe('action', function()
       'the register itself is untouched')
   end)
 
-  H.it('summarize() joins descriptions with a single leading capital (B15)', function()
+  H.it('summarize() joins descriptions with a single leading capital', function()
     local sb = H.sandbox()
     H.mkfile(sb.root, 'a.txt', { 'a' })
     H.mkfile(sb.root, 'c.txt', { 'c' })
