@@ -126,7 +126,12 @@ function M.yank(first, last)
     first, last = last, first
   end
   local b = buffer.restore()
-  local sources = b:get_paths(first, last)
+  local sources, path_err = b:get_paths(first, last)
+  if not sources then
+    ui.notify('direct: cannot yank selection: ' .. tostring(path_err),
+      vim.log.levels.ERROR)
+    return nil, path_err
+  end
   register.yank(sources)
   return b:list()
 end

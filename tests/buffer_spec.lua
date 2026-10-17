@@ -48,6 +48,243 @@ H.describe('buffer: listing (B1/B13)', function()
     H.assert_false(vim.bo.modified, 'nomodified only after a real refresh (D11)')
   end)
 
+  H.it('keeps the root flat and unfolds one directory level lazily (Phase 1)', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local sub = H.mkdir(ws, 'sub')
+    H.mkdir(sub, 'nested')
+    H.mkfile(sub, 'inside.txt', { 'inside' })
+    H.mkfile(ws, 'root.txt', { 'root' })
+
+    local global_foldmethod = vim.go.foldmethod
+    local listing = buffer.list(ws)
+    H.assert_buf_eq({ 'sub/', 'root.txt' }, 0)
+    H.assert_eq(vim.wo.foldmethod, 'expr', 'folding is configured locally for this window')
+    H.assert_eq(vim.go.foldmethod, global_foldmethod, 'global fold options are untouched')
+    H.assert_false(vim.bo.modified, 'flat initial listing stays clean')
+
+    local before = vim.fn.undotree()
+    local calls = 0
+    local read = buffer.read
+    buffer.read = function(path)
+      calls = calls + 1
+      return read(path)
+    end
+    local ok, err = pcall(function()
+      listing:unfold(1)
+      H.assert_buf_eq({ 'sub/', '  nested/', '  inside.txt', 'root.txt' }, 0)
+      H.assert_eq(calls, 1, 'one immediate-child read')
+      H.assert_false(vim.bo.modified, 'display-only expansion remains clean')
+      listing:unfold(1)
+      H.assert_eq(calls, 1, 'repeat expansion does not re-read')
+      H.assert_eq(vim.api.nvim_buf_line_count(0), 4, 'repeat expansion does not duplicate')
+      H.assert_eq(vim.api.nvim_win_get_cursor(0)[1], 1, 'cursor stays on the directory')
+      H.assert_eq(vim.fn.undotree().seq_cur, before.seq_cur,
+        'expansion does not add an undo entry')
+    end)
+    buffer.read = read
+    if not ok then error(err) end
+  end)
+
+  H.it('zo and za unfold and visually collapse without unloading children', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkdir(ws, 'sub')
+    H.mkfile(ws, 'sub/inside.txt', { 'inside' })
+    buffer.list(ws)
+
+    vim.api.nvim_feedkeys('zo', 'mx', false)
+    H.assert_buf_eq({ 'sub/', '  inside.txt' }, 0)
+    H.assert_eq(vim.fn.foldclosed(1), -1, 'zo leaves the directory unfolded')
+    vim.api.nvim_feedkeys('za', 'mx', false)
+    H.assert_eq(vim.fn.foldclosed(1), 1, 'za visually closes the directory fold')
+    H.assert_eq(vim.api.nvim_buf_line_count(0), 2,
+      'collapse does not unload materialized child rows')
+    vim.api.nvim_feedkeys('za', 'mx', false)
+    H.assert_eq(vim.fn.foldclosed(1), -1, 'za opens a loaded fold')
+  end)
+
+  H.it('preserves a manually collapsed fold when the buffer is re-entered', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkdir(ws, 'sub')
+    H.mkfile(ws, 'sub/inside.txt', { 'inside' })
+    buffer.list(ws)
+    local bufnr = vim.api.nvim_get_current_buf()
+    vim.api.nvim_feedkeys('zo', 'mx', false)
+    vim.api.nvim_feedkeys('za', 'mx', false)
+    H.assert_eq(vim.fn.foldclosed(1), 1, 'directory fold is collapsed before switching')
+
+    vim.cmd('enew')
+    vim.cmd('buffer ' .. bufnr)
+
+    H.assert_eq(vim.fn.foldclosed(1), 1,
+      'BufWinEnter preserves the user-collapsed fold')
+    H.assert_eq(vim.api.nvim_buf_line_count(bufnr), 2,
+      're-entry does not unload materialized children')
+  end)
+
+  H.it('nested directories reveal only their immediate children when unfolded', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local sub = H.mkdir(ws, 'sub')
+    H.mkdir(sub, 'nested')
+    H.mkfile(sub, 'sibling.txt', { 'sibling' })
+    H.mkfile(sub, 'nested/deep.txt', { 'deep' })
+    local listing = buffer.list(ws)
+
+    listing:unfold(1)
+    H.assert_buf_eq({ 'sub/', '  nested/', '  sibling.txt' }, 0,
+      'the root unfold is exactly one level')
+    listing:unfold(2)
+    H.assert_buf_eq({ 'sub/', '  nested/', '    deep.txt', '  sibling.txt' }, 0,
+      'nested contents are materialized only on the nested directory')
+    H.assert_eq(listing:get_paths(3, 3), { ws .. '/sub/nested/deep.txt' })
+  end)
+
+  H.it('child paths resolve through row identity for open and yank (Phase 1)', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkdir(ws, 'sub')
+    H.mkfile(ws, 'sub/inside.txt', { 'inside' })
+    local direct = require('direct')
+    local listing = direct.list(ws)
+    listing:unfold(1)
+
+    H.assert_eq(listing:get_paths(2, 2), { ws .. '/sub/inside.txt' },
+      'child path comes from its baseline, not root plus indentation')
+    local register = require('direct.register')
+    local original_yank = register.yank
+    local yanked
+    register.yank = function(sources) yanked = vim.deepcopy(sources); return true end
+    local ok, err = pcall(direct.yank, 2, 2)
+    register.yank = original_yank
+    if not ok then error(err) end
+    H.assert_eq(yanked, { ws .. '/sub/inside.txt' }, 'DirectYank uses child identity')
+
+    direct.open('  inside.txt')
+    H.assert_true(fs.same_path(vim.api.nvim_buf_get_name(0), ws .. '/sub/inside.txt'),
+      'open uses the child baseline path')
+    H.assert_buf_eq({ 'inside' }, 0)
+  end)
+
+  H.it('<CR> still opens a nested listing and replaces the previous direct buffer', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkdir(ws, 'sub')
+    H.mkfile(ws, 'sub/inside.txt', { 'inside' })
+    local direct = require('direct')
+    direct.list(ws)
+    local previous = vim.api.nvim_get_current_buf()
+
+    vim.api.nvim_feedkeys('\r', 'mx', false)
+
+    H.assert_buf_eq({ 'inside.txt' }, 0)
+    H.assert_true(fs.same_path(vim.api.nvim_buf_get_name(0), ws .. '/sub'),
+      '<CR> opens the directory listing')
+    H.assert_false(vim.api.nvim_buf_is_valid(previous),
+      'the prior direct buffer is wiped as before')
+  end)
+
+  H.it('full list replacement reattaches child identities without re-reading', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkdir(ws, 'sub')
+    H.mkfile(ws, 'sub/inside.txt', { 'inside' })
+    local listing = buffer.list(ws)
+    listing:unfold(1)
+    local ns = vim.api.nvim_get_namespaces()['direct-listing-rows']
+    local child_mark = vim.api.nvim_buf_get_extmarks(0, ns, { 1, 0 }, { 1, -1 }, {})[1]
+    H.assert_not_nil(child_mark, 'child row has an identity mark')
+
+    listing:list()
+
+    H.assert_buf_eq({ 'sub/', '  inside.txt' }, 0)
+    local mark = vim.api.nvim_buf_get_extmark_by_id(0, ns, child_mark[1], { details = true })
+    H.assert_true(#mark > 0 and mark[1] == 1, 'child identity was reattached after replacement')
+    H.assert_eq(listing:get_paths(2, 2), { ws .. '/sub/inside.txt' })
+  end)
+
+  H.it('extmark invalidation and undo_restore preserve identity lifecycle', function()
+    clean_buffers()
+    local bufnr = vim.api.nvim_get_current_buf()
+    local ns = vim.api.nvim_create_namespace('direct-test-extmark-lifecycle')
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { 'before', 'target' })
+    -- Move the initial setup out of the active undo block so deletion and its
+    -- recovery are tested as a distinct undo transaction.
+    vim.cmd('undo')
+    vim.cmd('redo')
+    local id = vim.api.nvim_buf_set_extmark(bufnr, ns, 1, 0, {
+      invalidate = true, undo_restore = true,
+    })
+    vim.api.nvim_buf_set_lines(bufnr, 1, 2, false, {})
+    local invalid = vim.api.nvim_buf_get_extmark_by_id(bufnr, ns, id, { details = true })
+    H.assert_true(#invalid > 0 and invalid[3].invalid == true,
+      'deleted identity is visible as invalid, not silently absent')
+    vim.cmd('undo')
+    local restored = vim.api.nvim_buf_get_extmark_by_id(bufnr, ns, id, { details = true })
+    H.assert_true(#restored > 0 and not restored[3].invalid,
+      'undo_restore reattaches the identity at its exact position')
+    H.assert_eq(restored[1], 1, 'identity returns to its original line')
+  end)
+
+  H.it('wiping one direct buffer releases its state and scoped autocmds only', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local first_root = H.mkdir(sb.root, 'first')
+    local second_root = H.mkdir(sb.root, 'second')
+    H.mkfile(first_root, 'first.txt', { 'first' })
+    H.mkfile(second_root, 'second.txt', { 'second' })
+
+    buffer.list(first_root)
+    local first_buf = vim.api.nvim_get_current_buf()
+    local first_win = vim.api.nvim_get_current_win()
+    vim.cmd('vsplit')
+    buffer.list(second_root)
+    local second_buf = vim.api.nvim_get_current_buf()
+    local second_win = vim.api.nvim_get_current_win()
+    H.assert_true(first_buf ~= second_buf, 'the two roots have separate buffers')
+    H.assert_not_nil(buffer._state_for_test(first_buf), 'first direct buffer owns row state')
+    H.assert_not_nil(buffer._state_for_test(second_buf), 'second direct buffer owns row state')
+
+    local scoped_before = 0
+    for _, au in ipairs(vim.api.nvim_get_autocmds({ group = 'direct' })) do
+      if au.buffer == first_buf then scoped_before = scoped_before + 1 end
+    end
+    H.assert_true(scoped_before > 0, 'first direct buffer has scoped autocmds')
+
+    -- Keep both windows on the surviving buffer so deleting the now-hidden
+    -- direct buffer cannot invoke Neovim's normal displayed-buffer replacement.
+    vim.api.nvim_win_set_buf(first_win, second_buf)
+    vim.api.nvim_buf_delete(first_buf, { force = true })
+
+    H.assert_nil(buffer._state_for_test(first_buf), 'BufWipeout releases its row state')
+    H.assert_true(buffer._state_for_test(second_buf) ~= nil,
+      'wiping the first buffer preserves the second state')
+    H.assert_false(vim.api.nvim_buf_is_valid(first_buf), 'first direct buffer is wiped')
+    H.assert_true(vim.api.nvim_buf_is_valid(second_buf), 'surviving buffer remains valid')
+    H.assert_true(vim.api.nvim_win_is_valid(first_win), 'the other window survives the wipe')
+    H.assert_true(vim.api.nvim_win_is_valid(second_win), 'the survivor window remains valid')
+    H.assert_eq(vim.api.nvim_win_get_buf(first_win), second_buf,
+      'the other window remains on the surviving buffer')
+    H.assert_eq(vim.api.nvim_win_get_buf(second_win), second_buf,
+      'the surviving window stays on its direct buffer')
+    H.assert_eq(buffer.restore():get_paths(1, 1), { second_root .. '/second.txt' },
+      'the surviving buffer still resolves its paths')
+    local scoped_after = 0
+    for _, au in ipairs(vim.api.nvim_get_autocmds({ group = 'direct' })) do
+      if au.buffer == first_buf then scoped_after = scoped_after + 1 end
+    end
+    H.assert_eq(scoped_after, 0, 'wiping removes first-buffer autocmds')
+  end)
+
   H.it('resolves symlinks: dir link renders as name/, file link as name, broken link omitted (B1/R3)', function()
     clean_buffers()
     local sb = H.sandbox()

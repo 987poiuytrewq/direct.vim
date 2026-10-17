@@ -215,6 +215,527 @@ H.describe('sync: applying actions (B4/B5)', function()
   end)
 end)
 
+H.describe('sync with unfolded children (Phase 1)', function()
+  H.it('syncs a root file rename while clean child baselines are loaded', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkdir(ws, 'sub')
+    H.mkfile(ws, 'root.txt', { 'root' })
+    H.mkfile(ws, 'sub/inside.txt', { 'inside' })
+    local listing = buffer.list(ws)
+    listing:unfold(1)
+    local classified
+    local classify = buffer.classify
+    buffer.classify = function(actual, expected)
+      classified = { vim.deepcopy(actual), vim.deepcopy(expected) }
+      return classify(actual, expected)
+    end
+    vim.api.nvim_buf_set_text(0, 2, 0, 2, #('root.txt'), { 'renamed.txt' })
+
+    local ok, err = listing:sync()
+    buffer.classify = classify
+
+    H.assert_true(ok == true, tostring(err))
+    H.assert_eq(classified[1], { 'sub/', 'renamed.txt' },
+      'only depth-zero rows are classifier input')
+    H.assert_eq(classified[2], { 'sub/', 'root.txt' }, 'expected is root-only')
+    H.assert_fs_eq(ws, { 'renamed.txt', 'sub/', 'sub/inside.txt' })
+    H.assert_buf_eq({ 'sub/', '  inside.txt', 'renamed.txt' }, 0)
+    H.assert_eq(listing:get_paths(2, 2), { ws .. '/sub/inside.txt' },
+      'child identity survives full refresh')
+
+    vim.api.nvim_buf_set_lines(0, 2, 3, false, {})
+    H.assert_true(listing:sync() == true, 'a root-file delete remains supported')
+    H.assert_false(fs.exists(ws .. '/renamed.txt'), 'root file was deleted')
+    local content = register.content()
+    H.assert_not_nil(content, 'normal unblocked root deletes still auto-yank')
+    H.assert_eq(vim.fn.readfile(content .. '/renamed.txt'), { 'root' },
+      'root file contents were auto-yanked')
+  end)
+
+  H.it('root rename undo then :write preserves unchanged child identities', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkdir(ws, 'sub')
+    H.mkfile(ws, 'root.txt', { 'root' })
+    H.mkfile(ws, 'sub/inside.txt', { 'inside' })
+    local listing = require('direct').list(ws)
+    listing:unfold(1)
+    local materialization_seq = vim.fn.undotree().seq_cur
+
+    vim.api.nvim_win_set_cursor(0, { 3, 0 })
+    vim.api.nvim_feedkeys('ccrenamed.txt\27', 'xt', false)
+    H.assert_buf_eq({ 'sub/', '  inside.txt', 'renamed.txt' }, 0,
+      'normal-mode editing renames the root entry')
+    vim.cmd('undo')
+    H.assert_buf_eq({ 'sub/', '  inside.txt', 'root.txt' }, 0,
+      'undo restores the root filename before writing')
+    H.assert_eq(vim.fn.undotree().seq_cur, materialization_seq,
+      'undo returns to the child materialization history baseline')
+
+    local ok, err = pcall(vim.cmd, 'write')
+
+    H.assert_true(ok, tostring(err))
+    H.assert_buf_eq({ 'sub/', '  inside.txt', 'root.txt' }, 0,
+      'the root-only save keeps the materialized display')
+    H.assert_false(vim.bo.modified, 'successful :write marks the listing clean')
+    H.assert_fs_eq(ws, { 'root.txt', 'sub/', 'sub/inside.txt' },
+      'undo recovery does not change filesystem entries')
+    H.assert_eq(listing:get_paths(2, 2), { ws .. '/sub/inside.txt' },
+      'recovered row identity still resolves its child path')
+  end)
+
+  H.it('root rename undo with a duplicate or mismatched child fails closed', function()
+    for _, hostile in ipairs({ 'duplicate', 'mismatch' }) do
+      clean_buffers()
+      local sb = H.sandbox()
+      local ws = H.mkdir(sb.root, 'ws')
+      H.mkdir(ws, 'sub')
+      H.mkfile(ws, 'root.txt', { 'root' })
+      H.mkfile(ws, 'sub/inside.txt', { 'inside' })
+      local listing = buffer.list(ws)
+      listing:unfold(1)
+      vim.cmd('let &undolevels = &undolevels')
+      vim.api.nvim_buf_set_text(0, 2, 0, 2, #('root.txt'), { 'renamed.txt' })
+      vim.cmd('undo')
+      if hostile == 'duplicate' then
+        vim.api.nvim_buf_set_lines(0, 2, 2, false, { '  inside.txt' })
+      else
+        vim.api.nvim_buf_set_text(0, 1, 2, 1, #('  inside.txt'), { '  changed.txt' })
+      end
+
+      local classified = 0
+      local classify = buffer.classify
+      buffer.classify = function(...) classified = classified + 1; return classify(...) end
+      local ok, reason = listing:sync()
+      buffer.classify = classify
+
+      H.assert_nil(ok, hostile .. ' child baseline is refused')
+      H.assert_true(tostring(reason):find('child', 1, true) ~= nil
+        or tostring(reason):find('identity', 1, true) ~= nil, tostring(reason))
+      H.assert_eq(classified, 0, hostile .. ' damage stops before classification')
+      H.assert_true(vim.bo.modified, hostile .. ' refusal keeps the buffer modified')
+      H.assert_fs_eq(ws, { 'root.txt', 'sub/', 'sub/inside.txt' },
+        hostile .. ' damage has no filesystem effects')
+    end
+  end)
+
+  H.it('recovers a reported-invalid direct child mark before root-only sync', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local sub = H.mkdir(ws, 'sub')
+    H.mkdir(sub, 'nested')
+    H.mkfile(sub, 'sibling.txt', { 'sibling' })
+    H.mkfile(sub .. '/nested', 'deep.txt', { 'deep' })
+    H.mkfile(ws, 'root.txt', { 'root' })
+    local listing = buffer.list(ws)
+    listing:unfold(1)
+    listing:unfold(2)
+    H.assert_buf_eq({
+      'sub/', '  nested/', '    deep.txt', '  sibling.txt', 'root.txt',
+    }, 0, 'the full ordered child subtree is materialized')
+
+    local bufnr = vim.api.nvim_get_current_buf()
+    local namespace = vim.api.nvim_get_namespaces()['direct-listing-rows']
+    local child_mark = vim.api.nvim_buf_get_extmarks(bufnr, namespace,
+      { 1, 0 }, { 1, -1 }, {})[1]
+    H.assert_not_nil(child_mark, 'the direct child has a real row identity')
+    local invalid_id = child_mark[1]
+    local state = buffer._state_for_test(bufnr)
+    local root_id = state.root_ids[1]
+    local direct_child = state.expanded[root_id].children[1]
+    local sibling = state.expanded[root_id].children[2]
+    local grandchild = state.expanded[direct_child.id].children[1]
+    H.assert_eq(direct_child.id, invalid_id, 'the simulated invalid identity is the first child')
+    H.assert_eq(direct_child.parent, root_id, 'direct child retains its root parent')
+    H.assert_eq(direct_child.order, 1, 'first child order is materialized')
+    H.assert_eq(sibling.parent, root_id, 'sibling retains the same root parent')
+    H.assert_eq(sibling.order, 2, 'sibling order is materialized')
+    H.assert_eq(grandchild.parent, direct_child.id, 'nested child retains its direct parent')
+    H.assert_eq(grandchild.text, '    deep.txt', 'nested child text is unchanged')
+    local original_get_extmarks = vim.api.nvim_buf_get_extmarks
+    local original_set_extmark = vim.api.nvim_buf_set_extmark
+    local original_classify = buffer.classify
+    local restored = false
+    local classified_actual, classified_expected
+    vim.api.nvim_buf_get_extmarks = function(mark_buf, ns, first, last, opts)
+      local marks = original_get_extmarks(mark_buf, ns, first, last, opts)
+      if mark_buf == bufnr and ns == namespace then
+        for _, mark in ipairs(marks) do
+          if mark[1] == invalid_id then
+            mark[4] = vim.tbl_extend('force', mark[4] or {}, { invalid = true })
+          end
+        end
+      end
+      return marks
+    end
+    vim.api.nvim_buf_set_extmark = function(mark_buf, ns, row, col, opts)
+      if mark_buf == bufnr and ns == namespace and opts.id == invalid_id
+        and row == 1 then
+        restored = true
+      end
+      return original_set_extmark(mark_buf, ns, row, col, opts)
+    end
+
+    -- Keep this valid root rename in the materialization undo block. The
+    -- reported-invalid mark is injected below, independently of Neovim's
+    -- version-specific natural invalidation behavior.
+    local materialization_seq = vim.fn.undotree().seq_cur
+    vim.cmd('undojoin')
+    vim.api.nvim_buf_set_text(bufnr, 4, 0, 4, #('root.txt'), { 'renamed.txt' })
+    H.assert_eq(vim.fn.undotree().seq_cur, materialization_seq,
+      'the root-only operation remains at the materialization undo baseline')
+
+    buffer.classify = function(actual, expected)
+      classified_actual, classified_expected = vim.deepcopy(actual), vim.deepcopy(expected)
+      local mark = original_get_extmarks(bufnr, namespace, 0, -1, { details = true })
+      local recovered_mark
+      for _, entry in ipairs(mark) do
+        if entry[1] == invalid_id then recovered_mark = entry; break end
+      end
+      H.assert_not_nil(recovered_mark, 'child identity exists before classification')
+      H.assert_true(not (recovered_mark[4] and recovered_mark[4].invalid),
+        'recovered identity is valid before classification')
+      H.assert_eq(recovered_mark[2], 1, 'identity is restored to its baseline row')
+      return original_classify(actual, expected)
+    end
+    local ok, sync_result, sync_err = pcall(function() return listing:sync() end)
+    vim.api.nvim_buf_get_extmarks = original_get_extmarks
+    vim.api.nvim_buf_set_extmark = original_set_extmark
+    buffer.classify = original_classify
+    H.assert_true(ok, tostring(sync_result))
+    H.assert_true(sync_result == true, tostring(sync_err))
+
+    H.assert_true(restored, 'sync restored the actual direct-namespace child mark')
+    H.assert_eq(classified_actual, { 'sub/', 'renamed.txt' },
+      'only root rows reach the classifier')
+    H.assert_eq(classified_expected, { 'sub/', 'root.txt' },
+      'disk comparison contains root rows only')
+    H.assert_fs_eq(ws, { 'renamed.txt', 'sub/', 'sub/nested/',
+      'sub/nested/deep.txt', 'sub/sibling.txt' }, 'the root rename applied')
+    H.assert_buf_eq({
+      'sub/', '  nested/', '    deep.txt', '  sibling.txt', 'renamed.txt',
+    }, 0, 'child rows remain display-only and unchanged')
+    H.assert_eq(listing:get_paths(3, 3), { ws .. '/sub/nested/deep.txt' },
+      'nested child identity still resolves to its parent path')
+  end)
+
+  H.it('duplicate reported-invalid child marks fail closed before classification', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkdir(ws, 'sub')
+    H.mkfile(ws, 'sub/inside.txt', { 'inside' })
+    H.mkfile(ws, 'root.txt', { 'root' })
+    local listing = buffer.list(ws)
+    listing:unfold(1)
+    local bufnr = vim.api.nvim_get_current_buf()
+    local namespace = vim.api.nvim_get_namespaces()['direct-listing-rows']
+    local child_mark = vim.api.nvim_buf_get_extmarks(bufnr, namespace,
+      { 1, 0 }, { 1, -1 }, {})[1]
+    local original_get_extmarks = vim.api.nvim_buf_get_extmarks
+    vim.api.nvim_buf_get_extmarks = function(mark_buf, ns, first, last, opts)
+      local marks = original_get_extmarks(mark_buf, ns, first, last, opts)
+      if mark_buf == bufnr and ns == namespace then
+        for _ = 1, 2 do
+          marks[#marks + 1] = {
+            child_mark[1], child_mark[2], child_mark[3], { invalid = true },
+          }
+        end
+      end
+      return marks
+    end
+    local classified, yanked = 0, 0
+    local original_classify, original_yank = buffer.classify, register.yank
+    local register_before = register.content()
+    local undo_before, redo_before = history_lines('undo.log'), history_lines('redo.log')
+    buffer.classify = function(...) classified = classified + 1; return original_classify(...) end
+    register.yank = function(...) yanked = yanked + 1; return original_yank(...) end
+    local called, sync_result, reason = pcall(function() return listing:sync() end)
+    vim.api.nvim_buf_get_extmarks = original_get_extmarks
+    buffer.classify, register.yank = original_classify, original_yank
+
+    H.assert_true(called, tostring(sync_result))
+    H.assert_nil(sync_result, 'duplicate invalid identities are refused')
+    H.assert_true(tostring(reason):find('identity', 1, true) ~= nil, tostring(reason))
+    H.assert_eq(classified, 0, 'malformed identity report stops before classification')
+    H.assert_eq(yanked, 0, 'malformed identity report stops before auto-yank')
+    H.assert_true(vim.bo[bufnr].modified, 'refusal keeps the buffer modified')
+    H.assert_fs_eq(ws, { 'root.txt', 'sub/', 'sub/inside.txt' },
+      'malformed identity report has no filesystem effects')
+    H.assert_eq(register.content(), register_before, 'malformed identity leaves register unchanged')
+    H.assert_eq(history_lines('undo.log'), undo_before, 'malformed identity writes no undo history')
+    H.assert_eq(history_lines('redo.log'), redo_before, 'malformed identity leaves redo history unchanged')
+  end)
+
+  H.it('Windows path components reject device names and trailing dot/space aliases', function()
+    local invalid = {
+      'CON', 'con.txt', 'PRN.log', 'AUX', 'NUL.txt', 'COM1', 'LPT9.ext',
+      'CON ', 'nul.txt ', 'CON.', 'normal.txt.',
+    }
+    for _, name in ipairs(invalid) do
+      H.assert_not_nil(buffer._component_reason(name, 'win32'), name .. ' is unsafe on Windows')
+    end
+    for _, name in ipairs({ 'normal.txt', 'console.txt', 'COM10.txt', 'NULish' }) do
+      H.assert_nil(buffer._component_reason(name, 'win32'), name .. ' is a valid non-device name')
+    end
+    H.assert_nil(buffer._component_reason('literal\\name', 'posix'),
+      'POSIX backslashes remain literal')
+  end)
+
+  H.it('refuses classifier-proposed root directory rename and delete before side effects', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkdir(ws, 'sub')
+    H.mkfile(ws, 'sub/inside.txt', { 'inside' })
+    H.mkfile(ws, 'root.txt', { 'root' })
+    local listing = buffer.list(ws)
+    listing:unfold(1)
+    local register_calls, fs_mutations, classified = 0, 0, {}
+    local yank, classify = register.yank, buffer.classify
+    local mutation_names = { 'rename', 'rename_noreplace', 'copy_file',
+      'copy_tree', 'rm_tree', 'mkdirp' }
+    local original_fs = {}
+    for _, name in ipairs(mutation_names) do
+      local method_name = name
+      original_fs[method_name] = fs[method_name]
+      fs[method_name] = function(...)
+        fs_mutations = fs_mutations + 1
+        return original_fs[method_name](...)
+      end
+    end
+    register.yank = function() register_calls = register_calls + 1; return true end
+    local register_before = register.content()
+    local undo_before, redo_before = history_lines('undo.log'), history_lines('redo.log')
+    fs_mutations = 0
+    buffer.classify = function(actual, expected)
+      local plan = classify(actual, expected)
+      classified[#classified + 1] = {
+        actual = vim.deepcopy(actual), expected = vim.deepcopy(expected), plan = plan,
+      }
+      return plan
+    end
+    vim.api.nvim_buf_set_text(0, 0, 0, 0, #('sub/'), { 'other/' })
+    local renamed, rename_err = listing:sync()
+
+    -- Restore the spelling, then delete the marked root row while retaining its
+    -- materialized child. The root identity is invalidated, but child identities
+    -- must remain available for root-only classification.
+    vim.api.nvim_buf_set_text(0, 0, 0, 0, #('other/'), { 'sub/' })
+    vim.api.nvim_buf_set_lines(0, 0, 1, false, {})
+    local deleted, delete_err = listing:sync()
+    buffer.classify, register.yank = classify, yank
+    for _, name in ipairs(mutation_names) do fs[name] = original_fs[name] end
+    H.assert_nil(renamed, 'loaded descendant blocks a root-directory rename')
+    H.assert_true(tostring(rename_err):find('unfolded descendants', 1, true) ~= nil,
+      tostring(rename_err))
+    H.assert_eq(classified[1].actual, { 'other/', 'root.txt' },
+      'rename classification receives root rows only')
+    H.assert_eq(classified[1].expected, { 'sub/', 'root.txt' },
+      'expected entries are root rows only')
+    H.assert_eq(classified[1].plan.kind, 'RENAME', 'classifier proposes the rename')
+    H.assert_eq(classified[1].plan.moves,
+      { { src = 'sub/', dst = 'other/' } }, 'classified root rename')
+    H.assert_true(fs.exists(ws .. '/sub'), 'rename changed no filesystem entry')
+    H.assert_false(fs.exists(ws .. '/other'), 'no renamed directory was created')
+    H.assert_nil(deleted, 'loaded descendant blocks a classifier-proposed delete')
+    H.assert_true(tostring(delete_err):find('unfolded descendants', 1, true) ~= nil,
+      tostring(delete_err))
+    H.assert_eq(classified[2].actual, { 'root.txt' },
+      'deletion classification excludes loaded children and deleted root')
+    H.assert_eq(classified[2].expected, { 'sub/', 'root.txt' },
+      'delete classification compares the root listing')
+    H.assert_eq(classified[2].plan.kind, 'DELETE', 'classifier proposes the delete')
+    H.assert_eq(classified[2].plan.removed, { 'sub/' }, 'classified root deletion')
+    H.assert_eq(register_calls, 0, 'blocked batches do not auto-yank')
+    H.assert_eq(fs_mutations, 0, 'blocked batches make no filesystem mutation calls')
+    H.assert_eq(register.content(), register_before, 'blocked batches preserve register state')
+    H.assert_fs_eq(ws, { 'root.txt', 'sub/', 'sub/inside.txt' },
+      'blocked batches preserve files')
+    H.assert_true(vim.bo.modified, 'blocked intent remains modified')
+    H.assert_eq(history_lines('undo.log'), undo_before, 'blocked batches preserve undo history')
+    H.assert_eq(history_lines('redo.log'), redo_before, 'blocked batches preserve redo history')
+  end)
+
+  H.it('child text/add/delete/duplicate/identity damage refuses before classification', function()
+    local cases = {
+      { name = 'changed text', edit = function()
+        vim.api.nvim_buf_set_text(0, 1, 2, 1, #('  inside.txt'), { 'changed.txt' })
+      end },
+      { name = 'added child', edit = function()
+        vim.api.nvim_buf_set_lines(0, 1, 1, false, { '  extra.txt' })
+      end },
+      { name = 'deleted child', edit = function()
+        vim.api.nvim_buf_set_lines(0, 1, 2, false, {})
+      end },
+      { name = 'duplicate child', edit = function()
+        vim.api.nvim_buf_set_lines(0, 2, 2, false, { '  inside.txt' })
+      end },
+      { name = 'lost identity', edit = function()
+        local ns = vim.api.nvim_get_namespaces()['direct-listing-rows']
+        vim.api.nvim_buf_clear_namespace(0, ns, 0, -1)
+      end },
+      { name = 'duplicate identity position', edit = function()
+        local ns = vim.api.nvim_get_namespaces()['direct-listing-rows']
+        vim.api.nvim_buf_set_extmark(0, ns, 1, 0, { id = 1000 })
+      end },
+    }
+    for _, case in ipairs(cases) do
+      clean_buffers()
+      local sb = H.sandbox()
+      local ws = H.mkdir(sb.root, 'ws')
+      H.mkdir(ws, 'sub')
+      H.mkfile(ws, 'sub/inside.txt', { 'inside' })
+      H.mkfile(ws, 'root.txt', { 'root' })
+      local listing = buffer.list(ws)
+      listing:unfold(1)
+      case.edit()
+      local classified, yanked = 0, 0
+      local classify, yank = buffer.classify, register.yank
+      buffer.classify = function(...) classified = classified + 1; return classify(...) end
+      register.yank = function() yanked = yanked + 1; return true end
+      local ok, reason = listing:sync()
+      buffer.classify, register.yank = classify, yank
+      H.assert_nil(ok, case.name .. ' was refused')
+      H.assert_true(tostring(reason):find('child', 1, true) ~= nil
+        or tostring(reason):find('identity', 1, true) ~= nil,
+        case.name .. ': ' .. tostring(reason))
+      H.assert_eq(classified, 0, case.name .. ' stops before classifier')
+      H.assert_eq(yanked, 0, case.name .. ' stops before auto-yank')
+      H.assert_true(vim.bo.modified, case.name .. ' remains modified')
+      H.assert_fs_eq(ws, { 'root.txt', 'sub/', 'sub/inside.txt' },
+        case.name .. ' has no filesystem effects')
+      H.assert_eq(history_lines('undo.log'), {}, case.name .. ' writes no history')
+    end
+  end)
+
+  H.it('blocked mixed root delete has no auto-yank, history, or filesystem effects', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkdir(ws, 'sub')
+    H.mkfile(ws, 'sub/inside.txt', { 'inside' })
+    H.mkfile(ws, 'root.txt', { 'root' })
+    local listing = buffer.list(ws)
+    listing:unfold(1)
+    -- Deleting the loaded root row invalidates its extmark while preserving its
+    -- child identity. It must reach the root classifier, then fail the loaded-
+    -- descendants guard before auto-yank or any other side effect.
+    vim.api.nvim_buf_set_lines(0, 0, 1, false, {})
+    local yanked, classified = 0, 0
+    local classified_actual, classified_expected, plan
+    local classify, yank = buffer.classify, register.yank
+    buffer.classify = function(actual, expected)
+      classified = classified + 1
+      classified_actual, classified_expected = vim.deepcopy(actual), vim.deepcopy(expected)
+      plan = classify(actual, expected)
+      return plan
+    end
+    register.yank = function() yanked = yanked + 1; return true end
+    local ok = listing:sync()
+    buffer.classify, register.yank = classify, yank
+
+    H.assert_nil(ok, 'mixed delete is blocked')
+    H.assert_eq(classified, 1, 'root deletion is classified after root identity loss')
+    H.assert_eq(classified_actual, { 'root.txt' }, 'only root rows reach classifier')
+    H.assert_eq(classified_expected, { 'sub/', 'root.txt' }, 'expected root rows only')
+    H.assert_eq(plan.kind, 'DELETE', 'classifier proposes deleting loaded directory')
+    H.assert_eq(plan.removed, { 'sub/' }, 'classifier identifies deleted root directory')
+    H.assert_eq(yanked, 0, 'no auto-yank is attempted')
+    H.assert_fs_eq(ws, { 'root.txt', 'sub/', 'sub/inside.txt' },
+      'no filesystem action is applied')
+    H.assert_nil(register.content(), 'register pointer remains unchanged')
+    H.assert_eq(history_lines('undo.log'), {}, 'no undo history is written')
+    H.assert_eq(history_lines('redo.log'), {}, 'no redo history is changed')
+    H.assert_true(vim.bo.modified, 'blocked batch remains modified')
+  end)
+
+  H.it('root deletion followed by same-text reinsertion does not revive its identity', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkdir(ws, 'sub')
+    H.mkfile(ws, 'sub/inside.txt', { 'inside' })
+    local listing = buffer.list(ws)
+    listing:unfold(1)
+
+    vim.api.nvim_buf_set_lines(0, 0, 1, false, {})
+    vim.api.nvim_buf_set_lines(0, 0, 0, false, { 'sub/' })
+    local classified, actual, expected = 0, nil, nil
+    local classify = buffer.classify
+    buffer.classify = function(root_actual, root_expected)
+      classified = classified + 1
+      actual, expected = vim.deepcopy(root_actual), vim.deepcopy(root_expected)
+      return classify(root_actual, root_expected)
+    end
+    local ok, err = listing:sync()
+    buffer.classify = classify
+
+    H.assert_true(ok == true, tostring(err))
+    H.assert_eq(classified, 1, 'same-text reinserted root is classified normally')
+    H.assert_eq(actual, { 'sub/' }, 'only the reinserted root row reaches classification')
+    H.assert_eq(expected, { 'sub/' }, 'disk comparison remains root-only')
+    H.assert_buf_eq({ 'sub/' }, 0,
+      'reinserted text gets a fresh identity instead of inheriting stale children')
+    H.assert_fs_eq(ws, { 'sub/', 'sub/inside.txt' }, 'no filesystem action was needed')
+  end)
+
+  H.it('root containment guard rejects traversal and multi-component names', function()
+    for _, malicious in ipairs({ '../escaped', 'x/new.txt' }) do
+      clean_buffers()
+      local sb = H.sandbox()
+      local ws = H.mkdir(sb.root, 'ws')
+      local listing = buffer.list(ws)
+      vim.api.nvim_buf_set_lines(0, 0, -1, false, { malicious })
+      local classified = 0
+      local classify = buffer.classify
+      buffer.classify = function(...) classified = classified + 1; return classify(...) end
+      local ok, reason = listing:sync()
+      buffer.classify = classify
+      H.assert_nil(ok, malicious .. ' is rejected')
+      H.assert_true(tostring(reason):find('component', 1, true) ~= nil,
+        malicious .. ': ' .. tostring(reason))
+      H.assert_eq(classified, 0, 'path guard precedes classification')
+      H.assert_false(fs.exists(sb.root .. '/escaped'), 'parent traversal did not escape')
+      H.assert_false(fs.exists(ws .. '/x'), 'nested component was not created')
+      H.assert_eq(history_lines('undo.log'), {}, 'unsafe input writes no history')
+    end
+  end)
+
+  H.it('refuses root-level names beginning with whitespace', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local listing = buffer.list(ws)
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { ' spaced.txt' })
+    local ok, reason = listing:sync()
+    H.assert_nil(ok, 'leading whitespace cannot be confused with child indentation')
+    H.assert_true(tostring(reason):find('whitespace', 1, true) ~= nil, tostring(reason))
+    H.assert_false(fs.exists(ws .. '/ spaced.txt'), 'no leading-space path is created')
+  end)
+
+  H.it('accepts the single directory marker and POSIX literal backslashes', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local listing = buffer.list(ws)
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'dir/' })
+    H.assert_true(listing:sync() == true, 'dir/ is a valid directory component')
+    H.assert_true(fs.is_dir(ws .. '/dir'), 'directory created')
+
+    if package.config:sub(1, 1) == '/' then
+      listing = buffer.list(ws)
+      vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'dir/', 'literal\\name' })
+      H.assert_true(listing:sync() == true, 'POSIX backslash is a legal literal')
+      H.assert_true(fs.is_file(ws .. '/literal\\name'), 'literal backslash file created')
+    end
+  end)
+end)
+
 H.describe('sync: ambiguous (D4/OQ7)', function()
   H.it('mixed add+delete: notifies reason and both sides, changes nothing, stays modified (B4/D4)', function()
     clean_buffers()

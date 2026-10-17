@@ -2,19 +2,45 @@
 
 Edit directories in Neovim.
 
-Load a directory into a buffer with each line corresponding to a file or a
-subdirectory. You can then edit the buffer to make whatever changes you like to
-your files and directories and, when you save the buffer, your changes are
-synchronised with the filesystem.
+Load a directory into a buffer with each root-level line corresponding to a file
+or subdirectory. Edit those root rows to create, rename, or delete filesystem
+entries. Directories can also be unfolded for browsing; their child rows are
+display-only in Phase 1.
 
 - navigate around the filesystem easily
 - rename, create and delete files and directories
 - yank and paste files and directories
 - full undo and redo history for every change that you make to the filesystem
 
+## Filename highlights
+
+Listing files receive user-overridable `DirectLang<Name>` highlight groups for
+the supported programming languages in GitHub Innovation Graph's 2026Q1
+programming-only top 20. The list is a static snapshot, ranked by `num_pushers`
+summed across economies; because some economy data is suppressed, this method
+is a lower bound, not a complete measure. No data is fetched at runtime.
+PLpgSQL is omitted because Neovim has no dedicated filetype for it.
+
+Exact, case-sensitive matches for `Makefile`, `GNUmakefile`, `CMakeLists.txt`,
+`Rakefile`, `justfile`, `Dockerfile`, `Containerfile`, `Jenkinsfile`,
+`Vagrantfile`, `README.md`, `LICENSE`, `CODEOWNERS`, and `Gemfile` use
+`DirectSpecialFile` instead. This is a bounded conventional filename list, not a
+frequency ranking. These matches take precedence over language detection.
+Directories and dotfiles are not highlighted by these groups; existing hidden
+entry styling remains unchanged. Detection uses Neovim's filename-only filetype
+matching and reads no file contents.
+
+By default `DirectSpecialFile` links to `Special` and language groups link to
+`Type` (the shell group links to `sh`). Define any of these groups yourself
+before listing to override its default link. There is no built-in palette or
+color configuration.
+
+Sources: [Innovation Graph language data](https://raw.githubusercontent.com/github/innovationgraph/main/data/languages.csv)
+and its [datasheet](https://github.com/github/innovationgraph/blob/main/docs/datasheet.md).
+
 ## Requirements
 
-- Neovim >= 0.11
+- Neovim >= 0.12
 - No Python: the plugin is pure Lua and needs nothing beyond the Neovim runtime.
 
 Run `:checkhealth direct` to confirm the version and the data home in use.
@@ -52,12 +78,16 @@ Once a directory is listed, `-` goes up to its parent directory and `<Enter>`
 opens the entry under the cursor: a directory line opens a new listing, a file
 line opens the file.
 
+Use `zo` or `za` on a directory to unfold it in place. Children are read lazily,
+one level at a time; repeating an unfold does not re-read or duplicate them, and
+collapsing only hides the already-loaded rows. The initial listing remains flat.
+This is available in every direct listing and has no configuration toggle.
+
 ## Edit
 
-When viewing a directory, you can edit the listing of files and directories as
-if you were editing a file, using any Vim command (`di`, `o`, `:s`, macros, and
-so on). Saving the buffer synchronises your change with the filesystem and then
-re-lists the directory.
+When viewing a directory, edit its root listing as if you were editing a file,
+using any Vim command (`di`, `o`, `:s`, macros, and so on). Saving synchronises
+root-level changes with the filesystem and then re-lists the directory.
 
 A save is classified as exactly one of *rename*, *create* or *delete*:
 
@@ -80,6 +110,27 @@ changed, no history is written, and the buffer stays modified so you can fix it.
 
 `&wildignore` is honoured: entries matching one of its patterns are not listed
 and are left untouched.
+
+### Unfolded rows (Phase 1)
+
+Only depth-zero/root rows participate in the legacy positional create/delete/
+rename classifier. Unfolded child rows are display-only: editing, adding,
+deleting, duplicating, or losing a child's identity refuses the whole save
+before classifier actions, filesystem changes, auto-yank, register, or history
+effects. Keep child rows exactly as materialized. Directory indentation is
+presentation only; `>>` and `<<` do not enable move synchronization.
+
+A root file rename or other root-file change remains available while its child
+rows are unfolded. A root directory with loaded descendants cannot be renamed
+or deleted in that buffer; collapsing is visual only. Close/wipe and reopen the
+parent listing to start without those loaded descendants. Phase 1 does not ship
+child moves, subtree indentation mapping, or history recovery for tree edits.
+Root names beginning with whitespace and names that could escape the listed
+directory (such as `../x` or `a/b`) are refused at save time.
+
+Windows-specific component checks reject backslashes, drive prefixes, and
+reserved device names. Native Windows filesystem traversal has not been
+verified; this documentation does not claim Windows support.
 
 ### Undo / Redo
 
@@ -139,11 +190,14 @@ Global (normal mode), installed when `map_default_keys` is true:
 |---|---|
 | `-` | `:DirectListBuffer` |
 
-Buffer-local, in a direct buffer, installed when `map_default_keys` is true:
+Buffer-local, in a direct buffer (standard actions follow `map_default_keys`;
+`zo`/`za` are always installed):
 
 | Mode | Key | Action |
 |---|---|---|
 | normal | `<CR>` | open the entry under the cursor |
+| normal | `zo` | lazily unfold one directory level |
+| normal | `za` | lazily unfold or visually collapse one directory |
 | normal | `-` | open `../` (the parent directory) |
 | normal | `u` | `:DirectUndo` |
 | normal | `<C-r>` | `:DirectRedo` |
@@ -152,6 +206,8 @@ Buffer-local, in a direct buffer, installed when `map_default_keys` is true:
 | normal | `p`, `P` | `:DirectPaste` |
 
 The buffer-local `-` wins over the global `-` inside a direct buffer.
+`zo` and `za` are installed for every direct listing, independently of
+`map_default_keys`.
 
 ## Data directory
 
