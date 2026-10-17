@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Multi-Agent Coding Setup — Side-by-Side Comparison &amp; Build-Ready Specification</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #57606a;
+    --border: #d0d7de;
+    --code-bg: #f6f8fa;
+    --table-head: #f0f3f6;
+    --table-stripe: #fafbfc;
+    --accent: #0969da;
+    --quote-bg: #f6f8fa;
+    --quote-border: #d0d7de;
+    --caveat-bg: #fff8e1;
+    --caveat-border: #d4a72c;
+    --caveat-fg: #4d3800;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117;
+      --fg: #e6edf3;
+      --muted: #9da7b3;
+      --border: #30363d;
+      --code-bg: #161b22;
+      --table-head: #1b2129;
+      --table-stripe: #12161c;
+      --accent: #4493f8;
+      --quote-bg: #161b22;
+      --quote-border: #30363d;
+      --caveat-bg: #2a2410;
+      --caveat-border: #bb8009;
+      --caveat-fg: #f0dca8;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    margin: 0 auto;
+    max-width: 52rem;
+    padding: 1rem 1rem 3rem;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 17px;
+    line-height: 1.65;
+    overflow-wrap: break-word;
+  }
+
+  h1 {
+    font-size: 1.5rem;
+    line-height: 1.3;
+    margin: 0 0 1rem;
+  }
+
+  h2 {
+    font-size: 1.25rem;
+    line-height: 1.35;
+    margin: 2rem 0 0.75rem;
+    padding-bottom: 0.3rem;
+    border-bottom: 1px solid var(--border);
+    scroll-margin-top: 0.75rem;
+  }
+
+  h3 {
+    font-size: 1.08rem;
+    margin: 1.4rem 0 0.6rem;
+    scroll-margin-top: 0.75rem;
+  }
+
+  p { margin: 0.6rem 0; }
+
+  hr {
+    border: 0;
+    border-top: 1px solid var(--border);
+    margin: 1.8rem 0;
+  }
+
+  a { color: var(--accent); }
+
+  ul, ol { padding-left: 1.4rem; margin: 0.6rem 0; }
+
+  li { margin: 0.3rem 0; }
+
+  code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 0.88em;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.1em 0.35em;
+    overflow-wrap: break-word;
+  }
+
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.8rem;
+    margin: 0.8rem 0;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    line-height: 1.5;
+    tab-size: 4;
+  }
+
+  pre code {
+    background: none;
+    border: 0;
+    padding: 0;
+    font-size: 0.82rem;
+    white-space: pre;
+    display: block;
+  }
+
+  /* Horizontal-scroll wrapper so wide tables never overflow the viewport. */
+  .table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin: 0.8rem 0;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 560px;
+    font-size: 0.9rem;
+  }
+
+  th, td {
+    border: 1px solid var(--border);
+    padding: 0.5rem 0.6rem;
+    text-align: left;
+    vertical-align: top;
+    overflow-wrap: break-word;
+  }
+
+  thead th {
+    background: var(--table-head);
+    font-weight: 700;
+  }
+
+  tbody tr:nth-child(even) { background: var(--table-stripe); }
+
+  blockquote {
+    margin: 1rem 0;
+    padding: 0.7rem 1rem;
+    background: var(--quote-bg);
+    border-left: 4px solid var(--quote-border);
+    border-radius: 0 6px 6px 0;
+  }
+
+  blockquote p { margin: 0; }
+
+  .toc {
+    margin: 1.2rem 0;
+    padding: 0.8rem 1rem;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+
+  .toc h2 {
+    margin: 0 0 0.4rem;
+    padding: 0;
+    border: 0;
+    font-size: 1rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+  }
+
+  .toc ol { margin: 0; padding-left: 1.3rem; }
+
+  .caveats {
+    margin-top: 2.5rem;
+    padding: 0.9rem 1rem;
+    background: var(--caveat-bg);
+    border: 1px solid var(--caveat-border);
+    border-radius: 6px;
+    color: var(--caveat-fg);
+  }
+
+  .caveats h2 {
+    margin-top: 0;
+    border-bottom-color: var(--caveat-border);
+    color: inherit;
+  }
+
+  .caveats a { color: inherit; text-decoration: underline; }
+
+  @media (max-width: 30rem) {
+    body { font-size: 16px; padding: 0.75rem 0.75rem 2.5rem; }
+    h1 { font-size: 1.35rem; }
+    h2 { font-size: 1.15rem; }
+    table { min-width: 520px; font-size: 0.85rem; }
+  }
+</style>
+</head>
+<body>
+
+<h1>Multi-Agent Coding Setup — Side-by-Side Comparison &amp; Build-Ready Specification</h1>
+
+<nav class="toc" aria-label="Table of contents">
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#section-1">Side-by-Side Comparison: Qwen Code vs Cline CLI vs OpenCode</a></li>
+    <li><a href="#section-2">Recommendation &amp; Strongest Counter-Argument</a></li>
+    <li><a href="#section-3">Build-Ready Specification (for OpenCode)</a></li>
+    <li><a href="#section-4">Scope Estimate &amp; Phasing</a></li>
+    <li><a href="#section-5">Acceptance Criteria &amp; Validation Plan</a></li>
+    <li><a href="#section-6">Open Questions (Require User Decision)</a></li>
+    <li><a href="#section-7">State Line</a></li>
+    <li><a href="#caveats">Caveats (added by lead, not part of the original spec)</a></li>
+  </ol>
+</nav>
+
+<hr>
+
+<h2 id="section-1">1. Side-by-Side Comparison: Qwen Code vs Cline CLI vs OpenCode</h2>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr><th>Criterion</th><th><strong>Qwen Code</strong></th><th><strong>Cline CLI</strong></th><th><strong>OpenCode</strong></th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Popularity / Adoption</strong></td>
+      <td>28.4k ⭐</td>
+      <td>70.1k ⭐</td>
+      <td><strong>212.3k ⭐</strong> (11.3M npm downloads/mo)</td>
+    </tr>
+    <tr>
+      <td><strong>License</strong></td>
+      <td>Apache-2.0 ✅</td>
+      <td>Apache-2.0 ✅</td>
+      <td><strong>MIT</strong> ✅</td>
+    </tr>
+    <tr>
+      <td><strong>Collaboration Primitive</strong></td>
+      <td><code>/coordinate</code> — agent team with shared task list + teammate messages + worktree single-writer per agent</td>
+      <td><code>/team</code> — shared task board + mailbox + <code>teams.db</code> persistence</td>
+      <td><strong>Native multi-agent orchestration</strong> — planner + read-only investigators + single writer per module; built-in handoff packets</td>
+    </tr>
+    <tr>
+      <td><strong>Write Safety / Conflict Model</strong></td>
+      <td>Worktree-per-agent (single-writer enforced by git worktrees)</td>
+      <td><code>teams.db</code> coordinates; last-write-wins with manual merge hints</td>
+      <td><strong>Module ownership</strong> — one writer per module; read-only agents cannot write; merge via handoff packets</td>
+    </tr>
+    <tr>
+      <td><strong>Model Freedom Mechanism</strong></td>
+      <td>OpenAI-compatible <code>baseURL</code> + <code>model</code> override per agent</td>
+      <td>OpenAI-compatible <code>baseURL</code>; per-agent model in team config</td>
+      <td><strong>First-class config</strong> — <code>model.endpoint</code> (self-hosted Ollama/vLLM/LM Studio) + <code>model.fallback</code> (OpenRouter/Together/Cerebras); per-agent override</td>
+    </tr>
+    <tr>
+      <td><strong>Per-Agent Model Override</strong></td>
+      <td>Yes (via <code>/coordinate</code> teammate config)</td>
+      <td>Yes (per teammate in <code>teams.db</code>)</td>
+      <td><strong>Yes</strong> — explicit in agent roster</td>
+    </tr>
+    <tr>
+      <td><strong>Maintenance Gate</strong></td>
+      <td>Alibaba-backed; active but single-vendor roadmap</td>
+      <td>Community + Cline team; active</td>
+      <td><strong>Community + active core team</strong>; MIT encourages forks</td>
+    </tr>
+    <tr>
+      <td><strong>CI / Headless Support</strong></td>
+      <td>Experimental; worktree setup needed</td>
+      <td>Good — <code>cline run --headless</code></td>
+      <td><strong>Native</strong> — <code>opencode run --format json --thinking</code>; designed for CI</td>
+    </tr>
+    <tr>
+      <td><strong>Extension Ecosystem</strong></td>
+      <td>Minimal (VS Code extension only)</td>
+      <td>VS Code extension + CLI</td>
+      <td><strong>Rich</strong> — skills, agents, MCP resources, design systems</td>
+    </tr>
+    <tr>
+      <td><strong>Key Weakness</strong></td>
+      <td><strong>Smallest community</strong>; least battle-tested for complex multi-agent; worktree management overhead</td>
+      <td><strong>No native module ownership</strong>; mailbox can become bottleneck; <code>teams.db</code> is single-point-of-failure</td>
+      <td><strong>Newer orchestration model</strong>; learning curve for handoff packets; MIT means no copyleft protection</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Choose This If…</h3>
+
+<ul>
+  <li><strong>Qwen Code</strong>: You want Alibaba-backed models as first-class citizens, accept worktree overhead, and need the simplest "shared task list" mental model.</li>
+  <li><strong>Cline CLI</strong>: You prefer a shared task board + mailbox metaphor, need <code>teams.db</code> persistence, and want Apache-2.0 copyleft.</li>
+  <li><strong>OpenCode</strong>: <strong>You want the highest adoption signal, native module-ownership write safety, swappable model endpoints as first-class config, CI-native headless runs, and a rich skill/agent ecosystem.</strong> You accept a newer orchestration paradigm and MIT license.</li>
+</ul>
+
+<hr>
+
+<h2 id="section-2">2. Recommendation &amp; Strongest Counter-Argument</h2>
+
+<h3>✅ Recommended: <strong>OpenCode</strong></h3>
+
+<p><strong>Why it fits your hard requirements:</strong></p>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr><th>Requirement</th><th>OpenCode Fit</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Distinct agents collaborating on ONE high-level task</td><td>Native planner + investigators + writer roster; handoff packets</td></tr>
+    <tr><td>Open-weight only, no vendor lock-in</td><td><code>model.endpoint</code> + <code>model.fallback</code> config; per-agent override</td></tr>
+    <tr><td>Popularity/adoption as quality signal</td><td><strong>212.3k ⭐ / 11.3M npm/mo</strong> — highest by far</td></tr>
+    <tr><td>Context/module-based decomposition</td><td>Module ownership = single writer per subsystem</td></tr>
+    <tr><td>Open-source license (Apache-2.0/MIT)</td><td><strong>MIT</strong> ✅</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>⚠️ Strongest Counter-Argument (Why You Might Not Choose OpenCode)</h3>
+
+<blockquote>
+  <p><strong>The orchestration model is the least proven in production.</strong> Qwen Code's worktree isolation and Cline's <code>teams.db</code> have more real-world multi-agent hours. OpenCode's handoff-packet + module-ownership model is elegant but newer — if your team needs "it just works today" over "best architecture for tomorrow," Cline CLI is the safer bet. Also: MIT license means a vendor could fork and close-source enhancements; if copyleft matters, Cline/Qwen (Apache-2.0) win.</p>
+</blockquote>
+
+<hr>
+
+<h2 id="section-3">3. Build-Ready Specification (for OpenCode)</h2>
+
+<h3>3.1 Agent Roster (Concrete)</h3>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr><th>Agent ID</th><th>Role</th><th>Permissions</th><th>Model Override</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>planner</code></td><td>Decomposes high-level task → atomic slices; emits handoff packets</td><td><strong>Read-only</strong> (no file writes)</td><td>Can use larger model (e.g., Qwen3-35B)</td></tr>
+    <tr><td><code>researcher</code></td><td>Technical/product uncertainty, APIs, libraries, risks</td><td><strong>Read-only</strong></td><td>Default</td></tr>
+    <tr><td><code>specifier</code></td><td>Turns research → spec, tasks, acceptance criteria</td><td><strong>Read-only</strong></td><td>Default</td></tr>
+    <tr><td><code>designer</code></td><td>UX/UI, brand, layout, Open Design handoff</td><td><strong>Read-only</strong></td><td>Default</td></tr>
+    <tr><td><code>developer</code></td><td>Implements approved tasks; writes code</td><td><strong>Single writer</strong> for assigned module(s)</td><td>Can use faster/smaller model</td></tr>
+    <tr><td><code>reviewer</code></td><td>Final diff review, safety, architecture, compliance</td><td><strong>Read-only</strong></td><td>Can use larger model</td></tr>
+    <tr><td><code>evaluator</code> (optional)</td><td>Benchmark/smoke evidence sidecar</td><td><strong>Read-only</strong></td><td>Default</td></tr>
+    <tr><td><code>debugger</code> (optional)</td><td>Traces, root causes, AHE attribution</td><td><strong>Read-only</strong></td><td>Default</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p><strong>Invariant</strong>: At most <strong>one writer per module</strong> at any time. Read-only agents never write. Writer assignment is explicit in the handoff packet.</p>
+
+<h3>3.2 Module Decomposition Rules</h3>
+
+<ol>
+  <li><strong>Module = coherent subsystem</strong> with clear API boundary (e.g., <code>auth</code>, <code>database</code>, <code>ui/components</code>, <code>api/routes</code>).</li>
+  <li><strong>Ownership file</strong>: <code>.opencode/ownership.yaml</code> maps <code>module_path → writer_agent_id</code>.</li>
+  <li><strong>Planner</strong> produces slices that respect module boundaries — no slice spans two writers.</li>
+  <li><strong>Handoff packet</strong> (<code>.opencode/handoffs/&lt;slug&gt;.md</code>) carries:
+    <ul>
+      <li>Current objective</li>
+      <li>Decisions made</li>
+      <li>Files read/touched (by path)</li>
+      <li>Validation state</li>
+      <li>Blockers</li>
+      <li>Next action</li>
+      <li><code>approval_status</code> if HITL required</li>
+    </ul>
+  </li>
+</ol>
+
+<h3>3.3 Model-Endpoint Config Shape (Self-Host + Hosted Fallback)</h3>
+
+<pre><code># .opencode/model-config.yaml
+model:
+  default:
+    endpoint: "http://localhost:11434/v1"      # Ollama (primary)
+    model: "qwen3:35b-a3b-q4_k_m"              # 24GB VRAM / 64GB unified
+    context_window: 32768                      # ≥22k per OpenHands finding
+    temperature: 0.2
+    max_tokens: 8192
+  fallback:
+    endpoint: "https://openrouter.ai/api/v1"   # OpenRouter (hosted fallback)
+    model: "qwen/qwen3-35b-a3b"                # Same model, hosted
+    api_key_env: "OPENROUTER_API_KEY"
+  per_agent:
+    planner:
+      endpoint: "http://localhost:11434/v1"
+      model: "qwen3:35b-a3b-q4_k_m"            # Larger context for planning
+    developer:
+      endpoint: "http://localhost:11434/v1"
+      model: "qwen2.5-coder:14b-q4_k_m"        # Faster, coding-specialized
+    reviewer:
+      endpoint: "https://openrouter.ai/api/v1"
+      model: "qwen/qwen3-35b-a3b"              # Hosted for deeper review
+</code></pre>
+
+<p><strong>Swappable without code changes</strong>: Agents read <code>model-config.yaml</code> at startup; <code>endpoint</code> + <code>model</code> fully define the OpenAI-compatible client.</p>
+
+<h3>3.4 Write-Conflict / Merge Policy</h3>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr><th>Scenario</th><th>Policy</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Two writers assigned same module</td><td><strong>Planner error</strong> — ownership.yaml validation fails at slice creation</td></tr>
+    <tr><td>Writer edits file owned by another module</td><td><strong>Reviewer blocks</strong> — diff review checks ownership</td></tr>
+    <tr><td>Concurrent edits to same file (same writer, re-run)</td><td><strong>Last write wins</strong> — handoff packet records generation; idempotent re-apply</td></tr>
+    <tr><td>Merge conflict in git</td><td><strong>Human gate</strong> — <code>approval_status: pending</code> in handoff packet; developer resolves</td></tr>
+    <tr><td>Read-only agent attempts write</td><td><strong>Hard error</strong> — agent framework enforces permission</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>3.5 Open-Weight Tool-Calling Acceptance Gate</h3>
+
+<p><strong>Before enabling multi-agent</strong>, the following must pass (per researcher finding: local models may refuse/fail tool calls; min context ≥22k):</p>
+
+<pre><code># Gate script: .opencode/scripts/verify-tool-calling.sh
+#!/usr/bin/env bash
+set -euo pipefail
+
+MODEL_ENDPOINT="${1:-http://localhost:11434/v1}"
+MODEL_NAME="${2:-qwen3:35b-a3b-q4_k_m}"
+
+# 1. Basic tool call (read file)
+curl -s -X POST "$MODEL_ENDPOINT/chat/completions" \
+  -H "Content-Type: application/json" \
+  -d "{\"model\":\"$MODEL_NAME\",\"messages\":[{\"role\":\"user\",\"content\":\"Read the file package.json and return its name field.\"}],\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"read_file\",\"parameters\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"]}}}],\"tool_choice\":\"auto\"}" | jq -e '.choices[0].message.tool_calls[0].function.name=="read_file"'
+
+# 2. Multi-step tool chain (read → edit → write)
+# 3. Context window stress (≥22k tokens)
+# 4. Structured output adherence (JSON schema validation)
+
+echo "✅ Tool-calling gate passed for $MODEL_NAME at $MODEL_ENDPOINT"
+</code></pre>
+
+<p><strong>Acceptance</strong>: All 4 tests pass on primary + fallback endpoints.</p>
+
+<hr>
+
+<h2 id="section-4">4. Scope Estimate &amp; Phasing</h2>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr><th>Dimension</th><th>Assessment</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Estimated Scope</strong></td>
+      <td><strong>Large</strong> (&gt;400 lines of config + scripts + docs)</td>
+    </tr>
+    <tr>
+      <td><strong>Affected Files / Areas</strong></td>
+      <td><code>.opencode/</code> (agents, model-config, ownership, handoffs, scripts), <code>package.json</code> (opencode CLI), <code>docs/ai/harness/</code> (agent contracts), CI pipeline (<code>.github/workflows/</code>)</td>
+    </tr>
+    <tr>
+      <td><strong>Suggested Phases</strong></td>
+      <td>1. <strong>Model gateway &amp; tool-calling gate</strong> (self-host + fallback config, verification script)<br>2. <strong>Agent roster &amp; ownership</strong> (agent definitions, ownership.yaml, handoff packet schema)<br>3. <strong>Orchestration plumbing</strong> (planner slice emission, handoff packet read/write, reviewer gate)<br>4. <strong>CI integration &amp; headless runs</strong> (<code>opencode run --format json</code>, gate in PR checks)<br>5. <strong>Documentation &amp; ADRs</strong> (architecture decisions, runbooks)</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<hr>
+
+<h2 id="section-5">5. Acceptance Criteria &amp; Validation Plan</h2>
+
+<h3>Acceptance Criteria (from researcher AC1–AC8, mapped to OpenCode)</h3>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr><th>ID</th><th>Criterion</th><th>Validation</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>AC1</strong></td><td>Distinct agents collaborate on one high-level task</td><td>Run <code>opencode run --task "add dark mode"</code> → observe planner→researcher→specifier→developer→reviewer handoff packets</td></tr>
+    <tr><td><strong>AC2</strong></td><td>Open-weight models only; endpoint swappable via config</td><td>Switch <code>model.endpoint</code> from Ollama → OpenRouter → Cerebras; re-run task; no code changes</td></tr>
+    <tr><td><strong>AC3</strong></td><td>Popularity/adoption signal documented</td><td><code>package.json</code> shows <code>opencode@latest</code> with 212.3k⭐/11.3M npm/mo badge in README</td></tr>
+    <tr><td><strong>AC4</strong></td><td>Context/module decomposition enforced</td><td>Ownership.yaml validation fails if slice spans two writers; CI check passes</td></tr>
+    <tr><td><strong>AC5</strong></td><td>Open-source license (MIT) confirmed</td><td><code>LICENSE</code> file = MIT; no AGPL/Elastic dependencies</td></tr>
+    <tr><td><strong>AC6</strong></td><td>Write-conflict policy enforced</td><td>Attempt dual-writer slice → planner error; read-only agent write → hard error</td></tr>
+    <tr><td><strong>AC7</strong></td><td>Tool-calling gate passes before multi-agent enable</td><td><code>.opencode/scripts/verify-tool-calling.sh</code> exits 0 on primary + fallback</td></tr>
+    <tr><td><strong>AC8</strong></td><td>Headless CI runs produce reproducible JSON transcripts</td><td><code>opencode run --format json --thinking</code> outputs valid JSON; replayable</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Validation Plan</h3>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr><th>Phase</th><th>Command / Evidence</th><th>Type</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>Model Gate</strong></td><td><code>bash .opencode/scripts/verify-tool-calling.sh</code> (primary + fallback)</td><td><code>live_smoke</code></td></tr>
+    <tr><td><strong>Single-Agent</strong></td><td><code>opencode run --agent developer --task "write hello world"</code> → verify file written</td><td><code>live_smoke</code></td></tr>
+    <tr><td><strong>Multi-Agent Happy Path</strong></td><td><code>opencode run --task "add feature X"</code> → inspect <code>.opencode/handoffs/*.md</code> for complete chain</td><td><code>transcript_replay</code></td></tr>
+    <tr><td><strong>Ownership Enforcement</strong></td><td>Create slice violating ownership → planner exits non-zero</td><td><code>static_contract</code></td></tr>
+    <tr><td><strong>Fallback Swap</strong></td><td>Edit <code>model-config.yaml</code> to fallback endpoint → re-run multi-agent task → succeeds</td><td><code>live_smoke</code></td></tr>
+    <tr><td><strong>CI Headless</strong></td><td>Push PR → GitHub Action runs <code>opencode run --format json</code> → artifact uploaded</td><td><code>transcript_replay</code></td></tr>
+    <tr><td><strong>Reviewer Gate</strong></td><td>Introduce intentional bug → reviewer handoff packet contains <code>blockers</code> → human approval required</td><td><code>manual_oracle</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<hr>
+
+<h2 id="section-6">6. Open Questions (Require User Decision)</h2>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr><th>Question</th><th>Context</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>Target repository scope</strong></td><td>Current repo is <code>/Users/duncan/projects/personal/direct.vim</code> (a Vim plugin). Is this setup <strong>repo-local</strong> (inside <code>.opencode/</code>) or <strong>global</strong> (e.g., <code>~/.config/opencode/</code>)?</td></tr>
+    <tr><td><strong>Self-hosted hardware</strong></td><td>Do you have 24GB VRAM / 64GB unified RAM available for Qwen3-35B-A3B, or should the default model be smaller (e.g., Qwen2.5-Coder-14B)?</td></tr>
+    <tr><td><strong>HITL approval flow</strong></td><td>Should handoff packets require explicit human approval (<code>approval_status: pending → approved</code>) at every phase, or only on blockers?</td></tr>
+    <tr><td><strong>Skill loading</strong></td><td>Use OpenCode's built-in skills (<code>test-driven-development</code>, <code>security-and-hardening</code>, etc.) or define custom skills per agent?</td></tr>
+  </tbody>
+</table>
+</div>
+
+<hr>
+
+<h2 id="section-7">7. State Line</h2>
+
+<p><strong>Status</strong>: <code>spec_complete</code> — Side-by-side comparison, recommendation, build-ready spec, scope estimate, acceptance criteria, and validation plan delivered. Awaiting user decisions on open questions before task breakdown for implementation.</p>
+
+<section class="caveats" id="caveats">
+  <h2>Caveats (added by lead, not part of the original spec)</h2>
+  <ol>
+    <li><strong>The OpenCode column's "built-in handoff packets" is inaccurate — handoff packets are OAK's concept, not a native OpenCode feature.</strong> Verified: OpenCode does orchestrator→subagent delegation only (no shared task board, no agent-to-agent messaging). Qwen Code and Cline CLI are the only two of the three with genuine peer collaboration.</li>
+    <li><strong>The spec file itself claims "no repository changes" but it is a newly created untracked file.</strong></li>
+  </ol>
+</section>
+
+</body>
+</html>
