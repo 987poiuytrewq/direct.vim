@@ -3,7 +3,7 @@
 -- `:checkhealth direct` loads `lua/direct/health.lua`, opens the `health://`
 -- buffer and fills it with the report. Under `--headless` it also writes a
 -- progress line to stdout; the report itself lives in the buffer. This file
--- asserts the two facts T-027 requires: the Neovim version against the 0.11
+-- asserts the two facts T-027 requires: the Neovim version against the 0.12
 -- floor, and the resolved data directory (B9).
 
 local H = require('tests.support.harness')
@@ -21,7 +21,8 @@ H.describe('health: :checkhealth direct (T-027)', function()
 
     local text = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), '\n')
     H.assert_true(text:find('Neovim', 1, true) ~= nil, 'the report names Neovim')
-    H.assert_true(text:find('0.11', 1, true) ~= nil, 'the report states the 0.11 floor')
+    H.assert_true(text:find('(>= 0.12 required)', 1, true) ~= nil,
+      'the report states the 0.12 floor')
     H.assert_true(text:find('OK', 1, true) ~= nil, 'the version check is OK on this runtime')
     H.assert_true(text:find('data directory: ' .. paths.data_home(), 1, true) ~= nil,
       'the report names the resolved data directory')

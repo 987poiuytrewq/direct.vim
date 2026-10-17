@@ -19,9 +19,13 @@ permissions:
 
 jobs:
   test:
-    name: Test with Neovim (stable)
+    name: Test with Neovim (${{ matrix.neovim-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        neovim-version: [v0.12.0, stable]
 
     steps:
       - name: Check out the repository
@@ -37,13 +41,7 @@ jobs:
         uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1.6.1
         with:
           neovim: true
-          version: stable
-          # Version-floor gap: the plugin supports `neovim >= 0.11`, but this
-          # job exercises only whatever `stable` resolves to at run time (NVIM
-          # v0.12.6 on the 847bf9e runs). The 0.11 floor is therefore NOT
-          # covered by this workflow: a green badge means "passes on today's
-          # stable", not "passes the supported floor". Treat the floor as
-          # unverified until a job pins 0.11 explicitly.
+          version: ${{ matrix.neovim-version }}
 
       - name: Show the resolved Neovim version
         run: nvim --version | head -n 1
