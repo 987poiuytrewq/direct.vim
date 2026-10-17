@@ -195,6 +195,79 @@ H.describe('entry: direct-buffer guard', function()
     end
   end)
 
+  H.it(':DirectSync is rejected in a named normal buffer without changing it', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local file = H.mkfile(sb.root, 'plain.txt', { 'on disk' })
+    enter_buffer_named(file)
+    local buf = vim.api.nvim_get_current_buf()
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'unsaved contents' })
+    vim.bo[buf].modified = true
+    H.assert_eq(vim.bo[buf].filetype, '', 'sanity: the buffer is not direct')
+
+    H.capture_messages()
+    -- The guard uses an ERROR-level notification, which Neovim also surfaces
+    -- as an Ex-command error; contain that expected rejection here.
+    pcall(vim.cmd, 'DirectSync')
+
+    H.assert_notified('DirectSync can only be used in a direct buffer')
+    H.assert_true(vim.api.nvim_buf_is_valid(buf), 'the normal buffer remains valid')
+    H.assert_eq(vim.api.nvim_get_current_buf(), buf, 'the current buffer is unchanged')
+    H.assert_eq(vim.api.nvim_buf_get_name(buf), file, 'the buffer name is unchanged')
+    H.assert_buf_eq({ 'unsaved contents' })
+    H.assert_true(vim.bo[buf].modified, 'the modified state is unchanged')
+    H.assert_eq(vim.fn.readfile(file), { 'on disk' }, 'the file on disk is unchanged')
+  end)
+
+  H.it(':DirectSync is rejected in an unnamed normal buffer at the cwd root', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    H.with_cwd(sb.root, function()
+      vim.cmd('enew')
+      local buf = vim.api.nvim_get_current_buf()
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'scratch contents' })
+      vim.bo[buf].modified = true
+      H.assert_eq(vim.api.nvim_buf_get_name(buf), '', 'sanity: the buffer is unnamed')
+      H.assert_eq(vim.bo[buf].filetype, '', 'sanity: the buffer is not direct')
+
+      H.capture_messages()
+      -- The guard uses an ERROR-level notification, which Neovim also surfaces
+      -- as an Ex-command error; contain that expected rejection here.
+      pcall(vim.cmd, 'DirectSync')
+
+      H.assert_notified('DirectSync can only be used in a direct buffer')
+      H.assert_true(vim.api.nvim_buf_is_valid(buf), 'the unnamed buffer remains valid')
+      H.assert_eq(vim.api.nvim_get_current_buf(), buf, 'the current buffer is unchanged')
+      H.assert_eq(vim.api.nvim_buf_get_name(buf), '', 'the buffer remains unnamed')
+      H.assert_buf_eq({ 'scratch contents' })
+      H.assert_true(vim.bo[buf].modified, 'the modified state is unchanged')
+    end)
+  end)
+
+  H.it('open() is rejected in a modified normal buffer without changing it', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local file = H.mkfile(sb.root, 'plain.txt', { 'on disk' })
+    enter_buffer_named(file)
+    local buf = vim.api.nvim_get_current_buf()
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'unsaved contents' })
+    vim.bo[buf].modified = true
+    H.assert_eq(vim.bo[buf].filetype, '', 'sanity: the buffer is not direct')
+
+    H.capture_messages()
+    local ok, result = pcall(function() return require('direct').open() end)
+
+    H.assert_true(ok, 'open() returns without raising')
+    H.assert_nil(result, 'open() returns nil when guarded')
+    H.assert_notified('open can only be used in a direct buffer')
+    H.assert_true(vim.api.nvim_buf_is_valid(buf), 'the normal buffer remains valid')
+    H.assert_eq(vim.api.nvim_get_current_buf(), buf, 'the current buffer is unchanged')
+    H.assert_eq(vim.api.nvim_buf_get_name(buf), file, 'the buffer name is unchanged')
+    H.assert_buf_eq({ 'unsaved contents' })
+    H.assert_true(vim.bo[buf].modified, 'the modified state is unchanged')
+    H.assert_eq(vim.fn.readfile(file), { 'on disk' }, 'the file on disk is unchanged')
+  end)
+
   H.it(':DirectPaste {dir} is exempt: it pastes outside a direct buffer and leaves it untouched', function()
     clean_buffers()
     local sb = H.sandbox()

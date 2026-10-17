@@ -521,7 +521,7 @@ function M._end_file()
   reset_options()
   reset_runtime()
   -- Forgetting the direct.* modules AFTER the re-source means the next file's
-  -- `_begin_file` captures `_file_ui` from this file's chunk, not a table a
+  -- `_begin_file` captures `_file_ui` from that file's own chunk, not a table a
   -- previous file left in `package.loaded`. Otherwise `with_prompt` can compare
   -- against a stale table and falsely report that the stub failed.
   forget_direct_modules()

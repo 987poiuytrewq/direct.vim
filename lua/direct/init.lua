@@ -1,6 +1,6 @@
 -- lua/direct/init.lua -- public API facade; dispatch and the direct-buffer guard.
--- The `:DirectPaste {dir}` form is deliberately exempt from that guard (it never
--- touches the current buffer); every other mutating command requires filetype=direct.
+-- Current-buffer operations require filetype=direct; listing and the explicit
+-- `:DirectPaste {dir}` form are exempt because they do not operate on that buffer.
 
 local M = {}
 
@@ -50,14 +50,19 @@ function M.list_cwd()
 end
 
 function M.open(line)
+  if not guard('open') then
+    return nil
+  end
   if line == nil then
     line = vim.fn.getline('.')
   end
   return buffer.restore():open(line)
 end
 
--- Intentionally not guarded: bound to BufWriteCmd it only runs in a direct buffer.
 function M.sync()
+  if not guard('DirectSync') then
+    return nil
+  end
   return buffer.restore():sync()
 end
 
