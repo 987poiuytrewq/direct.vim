@@ -185,7 +185,7 @@ echo "✅ Tool-calling gate passed for $MODEL_NAME at $MODEL_ENDPOINT"
 
 | Question | Context |
 |----------|---------|
-| **Target repository scope** | Current repo is `/Users/duncan/projects/personal/direct.vim` (a Vim plugin). Is this setup **repo-local** (inside `.opencode/`) or **global** (e.g., `~/.config/opencode/`)? |
+| **Target repository scope** | This Vim plugin repository: is this setup **repo-local** (inside `.opencode/`) or **global** (e.g., `~/.config/opencode/`)? |
 | **Self-hosted hardware** | Do you have 24GB VRAM / 64GB unified RAM available for Qwen3-35B-A3B, or should the default model be smaller (e.g., Qwen2.5-Coder-14B)? |
 | **HITL approval flow** | Should handoff packets require explicit human approval (`approval_status: pending → approved`) at every phase, or only on blockers? |
 | **Skill loading** | Use OpenCode's built-in skills (`test-driven-development`, `security-and-hardening`, etc.) or define custom skills per agent? |
