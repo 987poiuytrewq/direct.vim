@@ -31,7 +31,7 @@ entry styling remains unchanged. Detection uses Neovim's filename-only filetype
 matching and reads no file contents.
 
 By default `DirectSpecialFile` links to `Special` and language groups link to
-`Type` (the shell group links to `sh`). Define any of these groups yourself
+`Type`. Define any of these groups yourself
 before listing to override its default link. There is no built-in palette or
 color configuration.
 

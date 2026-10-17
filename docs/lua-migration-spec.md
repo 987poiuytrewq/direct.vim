@@ -615,9 +615,9 @@ ranking: the exact, case-sensitive basenames `Makefile`, `GNUmakefile`,
 `Jenkinsfile`, `Vagrantfile`, `README.md`, `LICENSE`, `CODEOWNERS`, and `Gemfile`.
 These names take precedence over detected language filetypes, and a row receives
 exactly one mark. `DirectSpecialFile` defaults to a link to `Special`; one
-`DirectLang<Name>` group per mapped language defaults to `Type`, except Shell,
-which links to `sh`. All definitions use `default=true`, so user definitions
-are preserved. No palette, plugin colors, option, or new dependency is added.
+`DirectLang<Name>` group per mapped language defaults to `Type`. All definitions
+use `default=true`, so user definitions are preserved. No palette, plugin
+colors, option, or new dependency is added.
 
 Sources: [Innovation Graph language data](https://raw.githubusercontent.com/github/innovationgraph/main/data/languages.csv)
 and [datasheet](https://github.com/github/innovationgraph/blob/main/docs/datasheet.md).

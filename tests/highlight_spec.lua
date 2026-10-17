@@ -88,9 +88,13 @@ H.describe('listing filename highlights', function()
     for _, language in ipairs(expected_languages) do
       H.assert_eq(vim.api.nvim_get_hl(0, { name = language.group, link = true }), {
         default = true,
-        link = language.filetype == 'sh' and 'sh' or 'Type',
+        link = 'Type',
       }, language.name .. ' standard default link')
     end
+    local shell_target = vim.api.nvim_get_hl(0, { name = 'Type' })
+    H.assert_true(next(shell_target) ~= nil, 'standard Type group resolves to usable highlight attributes')
+    H.assert_eq(vim.api.nvim_get_hl(0, { name = 'DirectLangShell', link = false }), shell_target,
+      'shell filename group resolves to the standard Type attributes')
 
     assert_row_highlight(0, by_name['sample.js'], 'DirectLangJavaScript', 0, #'sample.js')
     assert_row_highlight(0, by_name['sample.py'], 'DirectLangPython', 0, #'sample.py')
@@ -163,25 +167,36 @@ H.describe('listing filename highlights', function()
   H.it('preserves user-defined defaults and applies one mark to an exact special match', function()
     clean_buffers()
     local original = vim.api.nvim_get_hl(0, { name = 'DirectLangJavaScript', link = true })
+    local original_shell = vim.api.nvim_get_hl(0, { name = 'DirectLangShell', link = true })
     vim.api.nvim_set_hl(0, 'DirectLangJavaScript', { fg = 0x123456 })
+    vim.api.nvim_set_hl(0, 'DirectLangShell', { fg = 0x654321 })
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
     H.mkfile(ws, 'app.js', '')
+    H.mkfile(ws, 'install.sh', '')
     H.mkfile(ws, 'readme.md', '')
     buffer.list(ws)
 
     H.assert_eq(vim.api.nvim_get_hl(0, { name = 'DirectLangJavaScript', link = true }),
       { fg = 0x123456 }, 'default link does not overwrite an existing user highlight')
+    H.assert_eq(vim.api.nvim_get_hl(0, { name = 'DirectLangShell', link = true }),
+      { fg = 0x654321 }, 'default link does not overwrite a user shell highlight')
     local lines = H.buf_lines()
     local row = {}
     for index, line in ipairs(lines) do row[line] = index - 1 end
     assert_row_highlight(0, row['app.js'], 'DirectLangJavaScript', 0, #'app.js')
+    assert_row_highlight(0, row['install.sh'], 'DirectLangShell', 0, #'install.sh')
     H.assert_nil(row_mark(0, row['readme.md']), 'README matching is exact and case-sensitive')
 
     if next(original) then
       vim.api.nvim_set_hl(0, 'DirectLangJavaScript', original)
     else
       vim.api.nvim_set_hl(0, 'DirectLangJavaScript', {})
+    end
+    if next(original_shell) then
+      vim.api.nvim_set_hl(0, 'DirectLangShell', original_shell)
+    else
+      vim.api.nvim_set_hl(0, 'DirectLangShell', {})
     end
   end)
 end)

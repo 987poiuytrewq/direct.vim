@@ -54,7 +54,7 @@ local function define_groups()
   for _, language in ipairs(languages) do
     vim.api.nvim_set_hl(0, language.group, {
       default = true,
-      link = language.filetype == 'sh' and 'sh' or 'Type',
+      link = 'Type',
     })
   end
 end
