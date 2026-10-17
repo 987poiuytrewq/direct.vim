@@ -601,7 +601,7 @@ END_SPEC_INPUT</pre>
 - **Primary recommendation: cheap VPS + Tailscale + mosh + tmux + OpenCode client/server.** Specifically a 4 vCPU / 8 GB / 80–160 GB box at $5–10/mo.
 - **Selected primary candidates, in order:** Contabo Cloud VPS 10 (~$4.9/mo, 3C/8G/75 GB NVMe, 32 TB EU traffic) → OVH VPS-2 ($10/mo, 4C/8G/75 GB, unmetered, daily backup included) → Hetzner CX33 (~$9.9/mo, 4C/8G/80 GB, 20 TB) *contingent on availability*.
 - **Do not recommend Hetzner as unconditional primary** — active capacity incident since 2026-06-26 restricting new cloud server creation; all CX/CAX currently shown unavailable.
-- **Remote access stack (fixed):** Tailscale Personal (free, ≤6 users, unlimited user devices) as the private overlay → SSH key-only, password auth off, root login off, SSH bound to the tailnet interface only → tmux on the box (the load-bearing persistence layer) → mosh for interactive shells on lossy links → `opencode serve --hostname 0.0.0.0` with `OPENCODE_SERVER_PASSWORD` set, reachable only via tailnet or SSH port-forward.
+- **Remote access stack (fixed):** Tailscale Personal (free, ≤6 users, unlimited user devices) as the private overlay → SSH key-only, password auth off, root login off, SSH bound to the tailnet interface only → tmux on the box (the load-bearing persistence layer) → mosh for interactive shells on lossy links → run the default `opencode serve` on `127.0.0.1:4096` and access it through SSH local port forwarding. If direct tailnet access is required, bind only to the VPS's tailnet interface address (never `0.0.0.0`) and configure the firewall to deny the service port on public interfaces and allow it only over the tailnet. Set `OPENCODE_SERVER_PASSWORD` as defense in depth; password authentication does not make public exposure safe or replace network restrictions.
 - **Explicitly reject:** ngrok (MITM on a key-holding box), port-forward + DDNS on a residential IP, Cloudflare Tunnel as primary transport (TCP/HTTP-oriented; mosh cannot traverse the HTTPS path; fine as a fallback on locked-down networks), plain public SSH.
 - **Headscale** is the named sovereignty alternative to Tailscale (free, self-hosted, BSD-3, but single-tailnet scope only).
 - **OpenCode fit is native, not adapted:** verified client/server architecture (`opencode serve` on `127.0.0.1:4096` by default, `opencode attach`, `opencode web`, `opencode pair`). No VS Code required — this is a pure terminal path.
@@ -623,7 +623,7 @@ END_SPEC_INPUT</pre>
 
 ### Technical constraints
 - OpenCode remote-serve has a known upstream bug where the frontend hardcodes `localhost:4096` (issue #6063) — the pinned OpenCode version must be validated before the workflow is relied upon.
-- `OPENCODE_SERVER_PASSWORD` unset = documented-insecure web server. Must be set for any non-localhost exposure.
+- `OPENCODE_SERVER_PASSWORD` unset = documented-insecure web server. Set it as defense in depth for non-localhost exposure; it does not replace tailnet-only binding and firewall restrictions.
 - shared-vCPU lines are acceptable (the workload is bursty, not sustained); do not pay for dedicated vCPU.
 - Hetzner CAX (ARM) lines risk toolchain friction — prefer x86 unless verified.
 - Codespaces (if used at all) is capped at a 240-minute idle timeout and 30-day stopped-retention; it cannot be an always-on primary.
