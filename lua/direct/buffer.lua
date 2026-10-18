@@ -1,70 +1,13 @@
--- lua/direct/buffer.lua -- buffer model, listing, sync (spec section 5 / B1-B5,
--- B8, B11-B13, D2-D4, D8b, D11, D14, D17; T-018..T-023).
---
--- Responsibility: attach/create a direct buffer, list a directory into it,
--- classify and apply a sync, open an entry, expose the ranged paths.
---
--- Contracts implemented here:
---   * B3 attach: reuse an existing buffer only when a buffer's STORED name
---     denotes the same directory as root -- path identity via `fs.same_path`
---     (ino+dev), never `==` and never `vim.fn.bufnr` (which pattern-matches the
---     unresolved `bufname()` spelling). `paths.root()` absolutises the input;
---     the comparison is spelling-independent, so a root under a symlinked
---     prefix reuses the one buffer instead of creating a duplicate (B9).
---   * B1/B13 listing: `fs.read_dir_lines` (symlink resolution, broken/
---     non-regular omission, dirs-then-files, byte-wise sorting) with the
---     `&wildignore` ignore set built with `glob(path, true, true, true)`
---     (`nosuf` second, `alllinks` fourth) and compared through `same_path`.
---   * B2 current entry: captured from the PRE-ATTACH current buffer name; the
---     cursor is restored from it with `same_path` after every listing.
---   * B4/B5 sync: duplicate -> AMBIGUOUS, ADD/DELETE/RENAME, D17 ordering,
---     delete auto-yank, per-action error capture, history only for successes
---     (grouped per `action.move_groups`, B6), always re-list, one joined summary
---     (B15), one failure summary. Phase 1 preflights extmark-backed child rows,
---     excludes them from classification, and refuses root directory mutations
---     when descendants are loaded.
---   * B11/D3 rename clobber guard: swap/chain renames stage to
---     `<root>/.direct-tmp-<n>` first (`action.stage_moves`, the ONE staging
---     mechanism, reused by the group reversal). `current_entry` is never a temp
---     path. A staging rename that FAILS returns the temps already staged
---     alongside the error, and the caller reports each orphan path, so a
---     `.direct-tmp-*` left behind by a failed staging rename is never silent
---     (T-023/B1).
---   * B6 grouped history (Greptile PR #1, `buffer.lua:595`): history is written
---     per GROUP of interlinked moves (`action.move_groups`), not per action.
---     Swapping two files used to record two `mv` lines, so one `DirectUndo`
---     renamed a live name straight over a name whose content had not been saved
---     anywhere -- destroying it. A group of two or more moves is recorded as one
---     `g` entry and reversed as one staged step; a group with any member that did
---     NOT apply is not recorded at all, because a reversal of a half-applied
---     permutation would collide exactly the same way (the Paste precedent: B5
---     never records a reversal for entries that were never written).
---   * D4/OQ7 ambiguous: notify the reason and both sides, change nothing, write
---     no history, do NOT re-list, leave the buffer modified.
---   * B8/D8b open: trailing `/` opens a new direct listing, otherwise `:edit`
---     (D14: `fnameescape` + `vim.cmd`, never a raw path interpolated into a
---     command). The previous direct buffer is wiped only when it is no longer
---     current (the observable property; no `E937` claim).
---   * P2-NB2 (T-023 data-integrity): a path carrying the serialization
---     FIELD_SEPARATOR ('\t') or any other control character cannot round-trip
---     through the `NAME\tfield...` history framing, so the sync boundary
---     REFUSES it before any action or history write. `action.path_reason` is
---     the shared guard and `action.serialize` re-checks it on every field, so
---     no other caller can emit an unrepresentable line either (B2).
---     Re-framing the log was
---     rejected: the on-disk format is shared with the D18 history version gate,
---     and changing it would invalidate the marker contract. A `' '` (space) is
---     NOT refused here: the single-action framing is tab-delimited, so a space
---     in a path is safe (the ' ' ENTRY_SEPARATOR only matters for `p`/`up`
---     multi-actions, which the sync boundary never builds).
---
--- This module never calls `vim.fn.input` directly (it goes through `ui`), so it
--- is headless-safe and satisfies the T-023 GREP gate.
+-- lua/direct/buffer.lua -- directory buffer model, listing, sync, and open operations.
+-- Path identity uses fs.same_path. Sync validates edits, stages dependent
+-- moves, records only successful actions, and re-lists the filesystem state.
+-- Unfolded child rows retain their filesystem identities; sync classifies only
+-- root entries and refuses directory mutations while descendants are loaded.
 
 local M = {}
 
--- Module tables are captured once so tests can stub `fs.rename`,
--- `history.log`, `register.yank`, `ui.notify`, ... on the very tables the
+-- Module tables are captured once so tests can stub `fs.rename`
+-- `history.log`, `register.yank`, `ui.notify`,... on the very tables the
 -- code below resolves through.
 local fs = require('direct.fs')
 local paths = require('direct.paths')
@@ -150,14 +93,14 @@ end
 -- ---------------------------------------------------------------------------
 
 -- is_dir_line(line) -> true for a directory entry. The trailing slash is the
--- convention (B1/B4): a directory is never distinguished from a file by a
+-- convention: a directory is never distinguished from a file by a
 -- filesystem stat here.
 local function is_dir_line(line)
   return type(line) == 'string' and line:sub(-1) == '/'
 end
 
 -- dirs_then_name(lines) -> a copy ordered directories first, each group sorted
--- ascending by byte-wise comparison (B4/D17). A directory line carries its
+-- ascending by byte-wise comparison. A directory line carries its
 -- trailing '/', so the two groups never interleave.
 local function dirs_then_name(lines)
   local dirs, files = {}, {}
@@ -181,7 +124,7 @@ local function dirs_then_name(lines)
 end
 
 -- entry_path(root, line) -> the absolute entry a buffer line denotes. The
--- spelling is `root .. '/' .. line`, so a directory line keeps its trailing '/'
+-- spelling is `root.. '/'.. line`, so a directory line keeps its trailing '/'
 -- (Python `os.path.join` parity): the delete auto-yank path and the trash
 -- digest are therefore the trailing-slash string, exactly as in the Python
 -- version. The only root that already ends in a separator is '/'.
@@ -195,8 +138,8 @@ function M.entry_path(root, line)
   return root .. '/' .. line
 end
 
--- current_entry([name]) -> `name` when it names an existing filesystem entry,
--- else nil (B2). Defaults to the current buffer's stored name: the buffer name
+-- current_entry([name]) -> `name` when it names an existing filesystem entry
+-- else nil. Defaults to the current buffer's stored name: the buffer name
 -- `nvim_buf_get_name` returns (the resolved spelling). `same_path` makes the
 -- spelling irrelevant, so no `bufname('%')` accessor is needed.
 function M.current_entry(name)
@@ -212,13 +155,13 @@ function M.current_entry(name)
   return nil
 end
 
--- ignore_set(root) -> the B13 ignore set: the union of
--- `glob(root .. '/' .. pattern, true, true, true)` over the comma-separated,
+-- ignore_set(root) -> the ignore set: the union of
+-- `glob(root.. '/'.. pattern, true, true, true)` over the comma-separated
 -- trimmed, non-empty `&wildignore` patterns, or nil when there are none. The
 -- four glob arguments are {expr}, {nosuf}, {list}, {alllinks}: `nosuf` must be
 -- passed or 'suffixes'/'wildmenu' would fabricate matches, `{list}` makes the
 -- result an array, and `{alllinks}` follows symlinks while globbing. The
--- comparison itself is `same_path` (B13/D6 hardening), which is correct for
+-- comparison itself is `same_path` (hardening), which is correct for
 -- every root spelling.
 function M.ignore_set(root)
   local wildignore = vim.o.wildignore or ''
@@ -243,22 +186,22 @@ function M.ignore_set(root)
   return set
 end
 
--- read(root) -> the B1 listing lines, or nil, err when root is not readable.
+-- read(root) -> the listing lines, or nil, err when root is not readable.
 function M.read(root)
   return fs.read_dir_lines(root, M.ignore_set(root))
 end
 
 -- ---------------------------------------------------------------------------
--- B4 classification
+-- classification
 -- ---------------------------------------------------------------------------
 
--- classify(actual, expected) -> a plan:
---   { kind = 'ADD', added = <lines, dirs-then-name> }
---   { kind = 'DELETE', removed = <lines, dirs-then-name> }
---   { kind = 'RENAME', moves = { { src = <expected line>, dst = <actual line> } } }
---   { kind = 'AMBIGUOUS', reason = 'duplicate' | 'mixed' }
--- The duplicate check is FIRST (R7/OQ3): the Python version collapsed
--- duplicates through set() diffs, and a duplicated line in a RENAME-shaped edit
+-- classify(actual, expected) -> a plan
+-- { kind = 'ADD', added = <lines, dirs-then-name> }
+-- { kind = 'DELETE', removed = <lines, dirs-then-name> }
+-- { kind = 'RENAME', moves = { { src = <expected line>, dst = <actual line> } } }
+-- { kind = 'AMBIGUOUS', reason = 'duplicate' | 'mixed' }
+-- The duplicate check is FIRST: the Python version collapsed
+-- duplicates through set diffs, and a duplicated line in a RENAME-shaped edit
 -- produced a self-move.
 function M.classify(actual, expected)
   actual = actual or {}
@@ -322,16 +265,16 @@ function M.classify(actual, expected)
 end
 
 -- ---------------------------------------------------------------------------
--- P2-NB2: the sync-boundary framing guard
+-- the sync-boundary framing guard
 -- ---------------------------------------------------------------------------
 
--- unsafe_path_reason(path) -> the shared `action.path_reason` (P2-NB2/B2): nil
+-- unsafe_path_reason(path) -> the shared `action.path_reason`: nil
 -- when `path` can round-trip through the `NAME\tfield...` history framing, else
 -- a short reason. A tab IS the field separator, so it would split one path into
 -- two fields; any other control character (a newline included) cannot survive
 -- `vim.fn.writefile`'s line handling either. A space is legal here: only the
 -- `p`/`up` name lists use the ' ' ENTRY_SEPARATOR, and the sync classification
--- never builds those. This boundary keeps its own early refusal for the user;
+-- never builds those. This boundary keeps its own early refusal for the user
 -- `action.serialize` applies the SAME shared guard to every emitted field, so a
 -- path outside the sync path can never bypass it.
 local function unsafe_path_reason(path)
@@ -638,7 +581,7 @@ local function blocks_loaded_directory(bufnr, plan)
 end
 
 -- ambiguous_message(plan, actual, expected) names the reason and both sides of
--- the comparison (B4/B5/D4) so the user can see what desynced.
+-- the comparison so the user can see what desynced.
 local function ambiguous_message(plan, actual, expected)
   return string.format(
     'Ambiguous buffer content (%s). '
@@ -648,20 +591,20 @@ local function ambiguous_message(plan, actual, expected)
 end
 
 -- ---------------------------------------------------------------------------
--- B11/D3 rename staging
+-- rename staging
 -- ---------------------------------------------------------------------------
 --
--- The staging mechanism itself lives in `action.lua` (`action.stage_moves` /
+-- The staging mechanism itself lives in `action.lua` (`action.stage_moves`
 -- `action.first_free_temp`) because the group REVERSAL has to use the very same
 -- one: a swap and its reversal must both route through `.direct-tmp-<n>`, or the
 -- reversal renames a live name over a name whose contents are not saved anywhere
--- (the reported data-loss path). This module keeps the B5/T-023 reporting around
+-- (the reported data-loss path). This module keeps the reporting around
 -- it: the orphan temps of a failed staging rename and the temp of a move that
 -- never landed are named, never silently dropped.
 local stage_moves = action_mod.stage_moves
 
 -- ---------------------------------------------------------------------------
--- Buffer options (D11)
+-- Buffer options
 -- ---------------------------------------------------------------------------
 
 local function set_options(bufnr)
@@ -669,7 +612,7 @@ local function set_options(bufnr)
   vim.bo[bufnr].buflisted = true
   vim.bo[bufnr].swapfile = false
   vim.bo[bufnr].filetype = 'direct'
-  -- BufWriteCmd <buffer> DirectSync (spec section 6): a `:write` in a direct
+  -- BufWriteCmd <buffer> DirectSync: a `:write` in a direct
   -- buffer routes to the sync instead of writing a file. Recreated per listing
   -- (the augment `direct`) after clearing this buffer's own autocmds, matching
   -- the retired `autocmd! * <buffer>` so repeated listings cannot stack handlers.
@@ -700,10 +643,8 @@ local function set_options(bufnr)
   install_fold_options(bufnr)
 end
 
--- result_entry(action) -> the entry a succeeded action leaves as the current
--- entry (Python `Action.do()` parity): the destination of Touch /
--- MakeDirectory / Move, nil for the removals. The original action is used, so a
--- staged temp path can never become the current entry (B11).
+-- Return the destination left by a successful create/move, or nil for removals.
+-- Use the original action so a staging temp can never become current_entry.
 local function result_entry(act)
   if act.name == 'mv' or act.name == 'touch' or act.name == 'mkdir' then
     return act.dst
@@ -712,12 +653,11 @@ local function result_entry(act)
 end
 
 -- ---------------------------------------------------------------------------
--- Attach / create (B3)
+-- Attach / create
 -- ---------------------------------------------------------------------------
 
--- Buffer(path) -> a Buffer for `path`, with the existing buffer for the same
--- directory made current or a new one created. `current_entry` is captured from
--- the PRE-ATTACH current buffer name (B2).
+-- Capture current_entry before switching buffers, then reuse a buffer only when
+-- fs.same_path confirms that it represents the requested directory.
 function M.Buffer(path)
   local root = paths.root(path)
   local self = setmetatable({
@@ -727,7 +667,7 @@ function M.Buffer(path)
 
   for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
     local name = vim.api.nvim_buf_get_name(bufnr)
-    -- B3/B9: path identity, never `==` (a symlinked prefix makes the buffer
+    -- Compare by path identity, never `==` (a symlinked prefix makes the buffer
     -- name and root different spellings of the same directory) and never
     -- `vim.fn.bufnr` (which pattern-matches and is spelling-sensitive).
     if name ~= '' and fs.same_path(name, root) then
@@ -741,15 +681,13 @@ function M.Buffer(path)
   return self
 end
 
--- M.restore() -> the Buffer for the current direct buffer (Python
--- `Buffer.restore()`). It attaches only; the caller decides when to list.
+-- Attach to the current buffer's directory without listing; the caller decides when to refresh.
 function M.restore()
   local name = vim.api.nvim_buf_get_name(vim.api.nvim_get_current_buf())
   return M.Buffer(name)
 end
 
--- M.list(path) -> attach/create the buffer for `path` and list it (the
--- `:DirectList {dir}` equivalent). Returns the Buffer.
+-- List a directory in an attached direct buffer.
 function M.list(path)
   local buffer = M.Buffer(path)
   buffer:list()
@@ -757,12 +695,11 @@ function M.list(path)
 end
 
 -- ---------------------------------------------------------------------------
--- B1/B2 listing
+-- listing
 -- ---------------------------------------------------------------------------
 
--- place_cursor(lines) -> move the cursor to the first line whose full path is
--- `same_path` as current_entry (R4-safe), leaving it where it was otherwise
--- (B2). The column is reset to 0 on a match.
+-- Restore the cursor to the pre-attach entry; leave it unchanged if that entry
+-- no longer exists. Reset the column on a match.
 function Buffer:place_cursor(lines)
   if self.current_entry == nil then
     return
@@ -779,11 +716,9 @@ function Buffer:place_cursor(lines)
   end
 end
 
--- Buffer:list() -> replace the root lines with the directory listing, preserve
--- already-materialized child baselines, reattach row identities, set the
--- direct-buffer options (D11), restore the cursor, and mark nomodified.
+-- Refresh the listing and restore cursor/options; mark unmodified after refresh.
 --
--- P3-NB1 (T-023 hardening): a directory can hold an entry whose NAME carries a
+-- (hardening): a directory can hold an entry whose NAME carries a
 -- newline (or another control character / a tab). Such a name can never be a
 -- buffer line -- `nvim_buf_set_lines` raises "'replacement string' item contains
 -- newlines" -- so listing that directory used to abort the whole listing. The
@@ -995,12 +930,11 @@ function M.fold_open(toggle)
 end
 
 -- ---------------------------------------------------------------------------
--- B4/B5/B11 sync
+-- sync
 -- ---------------------------------------------------------------------------
 
--- build_actions(root, plan) -> actions, yanks. ADD/DELETE are emitted in
--- dirs-then-name order (D17); a DELETE also records the removed paths for the
--- auto-yank (B5 step 1), carrying the trailing slash for a directory.
+-- build_actions returns actions and yanks. ADD/DELETE follow dirs-then-name
+-- order; deleted directory paths retain their trailing slash in the auto-yank.
 local function build_actions(root, plan)
   local actions, yanks = {}, {}
   if plan.kind == 'ADD' then
@@ -1031,14 +965,14 @@ local function build_actions(root, plan)
   return actions, yanks
 end
 
--- log_applied(actions, applied) -> records the applied actions in history (B5
--- steps 2-3). History is written per GROUP of interlinked moves (B6): a swap or
+-- log_applied(actions, applied) records successful actions in history. History
+-- is written per GROUP of interlinked moves: a swap or
 -- an N-way rotation is ONE entry, so one `DirectUndo` reverses the whole
 -- permutation instead of renaming a live name over an unsaved one. Every other
 -- action is its own entry, exactly as before.
 --
 -- A group with any member that did NOT apply is not recorded at all: its
--- reversal would pass through a colliding name (the reported defect), and B5
+-- reversal would pass through a colliding name (the reported defect), and
 -- already never records a reversal for entries that were never written (the
 -- Paste precedent). A singleton group is logged only when its action applied.
 local function log_applied(actions, applied)
@@ -1060,7 +994,7 @@ local function log_applied(actions, applied)
   end
 end
 
--- Buffer:sync() -> true when a classified sync was applied (the buffer was
+-- Buffer:sync -> true when a classified sync was applied (the buffer was
 -- re-listed and marked nomodified), nil, reason when nothing was applied
 -- (ambiguous, an unsafe path, a refused yank, or an unreadable root).
 function Buffer:sync()
@@ -1085,7 +1019,7 @@ function Buffer:sync()
     return nil, read_err
   end
 
-  -- P2-NB2: refuse a path the history framing cannot represent, before any
+  -- refuse a path the history framing cannot represent, before any
   -- action or history write. The buffer is not re-listed and stays modified.
   local unsafe = first_unsafe(self.root, actual) or first_unsafe(self.root, expected)
   if unsafe ~= nil then
@@ -1097,7 +1031,7 @@ function Buffer:sync()
 
   local plan = M.classify(actual, expected)
   if plan.kind == 'AMBIGUOUS' then
-    -- D4/OQ7: notify, change nothing, write no history, do NOT re-list, and
+    -- notify, change nothing, write no history, do NOT re-list, and
     -- leave the buffer modified so the unsaved intent is not discarded.
     ui.notify(ambiguous_message(plan, actual, expected), vim.log.levels.ERROR)
     return nil, plan.reason
@@ -1114,8 +1048,8 @@ function Buffer:sync()
 
   local actions, yanks = build_actions(self.root, plan)
 
-  -- B5 step 1: yank the removed paths before any action. A refused yank leaves
-  -- the filesystem untouched (the register guard, B2/N2, decides).
+  -- Yank removed paths before applying actions. If yanking is refused, leave
+  -- the filesystem untouched.
   if #yanks > 0 then
     local ok, yerr = register.yank(yanks)
     if not ok then
@@ -1125,12 +1059,12 @@ function Buffer:sync()
     end
   end
 
-  -- B11/D3: swap/chain renames are staged before the real moves.
+  -- swap/chain renames are staged before the real moves.
   local staging, stage_err, stage_temps = stage_moves(actions)
   if staging == nil and stage_err ~= nil then
     ui.notify('Action failed - could not stage renames: ' .. tostring(stage_err),
       vim.log.levels.ERROR)
-    -- B1/T-023: a failed staging rename leaves every already-staged entry at
+    -- a failed staging rename leaves every already-staged entry at
     -- its temp path. Report each one -- the same treatment the post-execution
     -- leftover block below gives -- instead of returning on the error alone
     -- and orphaning the temps silently.
@@ -1143,11 +1077,8 @@ function Buffer:sync()
     return nil, stage_err
   end
 
-  -- B5 steps 2-3: apply every action, then push the successes to history as
-  -- whole dependent move groups (B6). `history.log` reports a failed history
-  -- write itself -- it never raises and never swallows the failure (P2-NB4,
-  -- incl. the redo-reset failure) -- so the ignored return here cannot hide a
-  -- write error.
+  -- Apply each action and record successful work in history, grouping dependent
+  -- moves into one entry. `history.log` reports write failures without raising.
   local failed, applied = {}, {}
   for i, act in ipairs(actions) do
     local exec_action = act
@@ -1167,10 +1098,10 @@ function Buffer:sync()
   end
   log_applied(actions, applied)
 
-  -- B11: remove any staged temp that was not consumed. On the all-success path
+  -- remove any staged temp that was not consumed. On the all-success path
   -- every temp is consumed, so this is normally a no-op. On the failure path a
   -- temp left over is reported instead of force-removed: deleting it could
-  -- discard the very entry a failed move could not place, and B5 requires
+  -- discard the very entry a failed move could not place, and requires
   -- failures to be reported without losing data.
   if staging ~= nil then
     for _, tmp in ipairs(staging.temps) do
@@ -1185,16 +1116,16 @@ function Buffer:sync()
     end
   end
 
-  -- B5 step 4: always re-list (the buffer now reflects reality), then
-  -- nomodified. list() also restores the cursor from current_entry.
+  -- Re-list so the buffer reflects the filesystem, restore the cursor, and
+  -- mark it unmodified only after the refresh succeeds.
   self:list()
 
   if #actions > 0 then
-    -- B15: one joined summary of the classified actions.
+    -- Emit one joined summary for the classified actions.
     ui.notify(action_mod.summarize(actions), vim.log.levels.INFO)
   end
   if #failed > 0 then
-    -- B5 step 5: one extra summary error naming the count and the actions.
+    -- Emit one additional error summary naming the failed actions.
     local names = {}
     for _, act in ipairs(failed) do
       names[#names + 1] = action_mod.describe_action(act)
@@ -1206,14 +1137,13 @@ function Buffer:sync()
 end
 
 -- ---------------------------------------------------------------------------
--- B8 open / get_paths
+-- open / get_paths
 -- ---------------------------------------------------------------------------
 
--- Buffer:open(line) -> open the entry under the cursor. Child paths come from
--- their row records; a trailing '/' opens a new direct listing, otherwise the
--- file is `:edit`ed (D14: fnameescape + vim.cmd, never string.format into a
--- command). D8b/R16: the previous direct buffer is wiped only when it is no
--- longer current -- the observable property is asserted, never E937.
+-- Open directories with a direct listing and files with `:edit`. Pass paths
+-- through fnameescape so special characters cannot become Ex syntax. Remove
+-- the old direct buffer only after another buffer is current.
+-- Child paths resolve from their row identities rather than their display text.
 function Buffer:open(line)
   local bufnr = vim.api.nvim_get_current_buf()
   local cursor_row = vim.api.nvim_win_get_cursor(0)[1]

@@ -167,20 +167,22 @@ filesystem change.
 | `:DirectList {dir}` | `{dir}`, `dir` completion | List `{dir}` in a direct buffer. |
 | `:DirectListBuffer` | none | List the directory of the current file, or the working directory when the buffer is not tied to one (no file name, or a non-empty `&buftype`). |
 | `:DirectListCwd` | none | List the current working directory. |
-| `:DirectSync` | none | Classify and apply the current buffer's edits; also runs on `:write`. |
+| `:DirectSync` | none | Classify and apply the current direct buffer's edits; also runs on `:write` in a direct buffer. |
 | `:DirectUndo` | none | Undo the last filesystem action. |
 | `:DirectRedo` | none | Redo the last undone action. |
 | `:DirectYank` | range (default: current line) | Yank the ranged entries. |
 | `:DirectPaste [dir]` | optional `{dir}` (directory completion) | Paste into the current buffer's directory (no argument; re-lists it), or into `{dir}` without touching the current buffer. |
 | `:DirectPasteAs {name}` | `{name}` | Paste into the current buffer's directory as `{name}`. |
 
-`:DirectUndo`, `:DirectRedo`, `:DirectYank`, `:DirectPaste` (no argument) and
-`:DirectPasteAs` report an error and do nothing when the current buffer is not a
-direct buffer. `:DirectPaste {dir}` is the exception: it pastes into an
-explicitly named directory and never touches the current buffer, so it needs no
-direct buffer. `:DirectList`, `:DirectListBuffer`, `:DirectListCwd` and
-`:DirectSync` are not restricted this way: they do not act on the current
-buffer's listing.
+`:DirectSync`, `:DirectUndo`, `:DirectRedo`, `:DirectYank`, `:DirectPaste` (no
+argument), `:DirectPasteAs`, and the public `open()` API report an error and do
+nothing when the current buffer is not a direct buffer. `open()` is also used by
+the direct-buffer entry mappings. `:DirectPaste {dir}` is the exception: it
+pastes into an explicitly named directory and never touches the current buffer,
+so it needs no direct buffer. `:DirectList`, `:DirectListBuffer`,
+`:DirectListCwd`, `list(path)`, `list_buffer()`, and `list_cwd()` are also
+unrestricted because they target an explicit directory or derive one to list
+instead of operating on the current buffer's listing.
 
 ## Mappings
 

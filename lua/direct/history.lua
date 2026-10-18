@@ -1,55 +1,11 @@
--- lua/direct/history.lua -- undo/redo over history/undo.log + redo.log.
---
--- Responsibility (spec section 5 / B6 / D13 / T-015): log(action), undo(),
--- redo() over whole-file logs under `<data_home>/direct/history` (resolved
--- through paths.data_dir('history'), the B9 nil, err shape). This module
--- never refreshes buffers (callers do).
---
--- Contract details:
---   * log(action) pushes action:serialize() onto undo.log and clears redo.log;
---   * undo() pops the last undo.log line, reverses it, executes it; on success
---     the serialized reversal is pushed onto redo.log and the B15 summary is
---     notified once; on failure the ORIGINAL line is pushed back onto its
---     source log (D13) and an error is notified;
---   * one entry is one action OR one `g` group of interlinked moves (`action.
---     Group`), which reverses the whole group -- staged through `stage_moves`,
---     like the save -- as a SINGLE user-visible step. Nothing extra is needed
---     here for that: a group entry goes through exactly the same pop / reverse /
---     execute / re-log path as a single action, which is why the grouping cannot
---     be lost across a restart (it is on disk, not in memory);
---   * the `Nothing to undo` / `Nothing to redo` message belongs HERE, not to
---     log.pop, which returns nil silently on an empty log (T-008/T-015);
---   * data-dir failures (B9/O2) are captured and reported, never raised.
---
--- Version gate (T-017/D18). The Python predecessor wrote undo.log/redo.log in
--- the SAME data dir with a format whose separator information is destroyed when
--- the line is written, so no name-level guard can make a legacy line safe to
--- replay (a `p` line naming `my file.txt` splits back into `my` + `file.txt`
--- and an undo then deletes unrelated files). The Lua history therefore owns its
--- log format: the FIRST line of every log it writes is the version marker
--- `#direct-history-v3`, which is never a parseable action line. A log is
--- consumed only when its first line is the marker; an absent, empty or
--- marker-only log is simply empty history. A non-empty log whose first line is
--- NOT the marker is FOREIGN: no line is executed, a WARN is notified, and the
--- file is quarantined aside as `<name>.legacy` (or the first free
--- `<name>.legacy.<n>`). A foreign file is never appended to; when it cannot be
--- renamed it is left untouched and treated as no history.
---
--- The marker is bumped whenever the entry FORMAT changes, and that is a
--- correctness requirement, not housekeeping: the grouped-move fix (Greptile PR
--- #1, `buffer.lua:595`) records a two-file swap as ONE `g` entry, while a v2 log
--- holds that same swap as TWO independent `mv` lines. Replaying a v2 log under
--- the new code would reverse the swap one move at a time and destroy a file --
--- exactly the reported bug -- so a superseded log (v2 included) must be, and is,
--- detected as foreign by the check above and quarantined with the same WARN
--- ("Ignoring history written by an older version") and the same guarantee: never
--- partially replayed, never a crash. The cost is the documented one: undo
--- history does not survive a format bump.
+-- lua/direct/history.lua -- undo/redo over versioned whole-file logs.
+-- Foreign formats are quarantined rather than replayed; failed reversals keep
+-- their source entry for retry. The marker distinguishes grouped-move records.
 
 local M = {}
 
 -- The `direct.log` helper module. A plain local is safe here because the
--- public entry point of THIS module is also named `log` (B6), so a field
+-- public entry point of THIS module is also named `log`, so a field
 -- `M.log` cannot hold both; nothing in the suite stubs direct.log.
 local log_mod = require('direct.log')
 local fs = require('direct.fs')
@@ -65,7 +21,7 @@ M.ui = require('direct.ui')
 -- replay under the new grouping.
 local MARKER = '#direct-history-v3'
 
--- log_paths() -> undo_path, redo_path | nil, err.
+-- log_paths -> undo_path, redo_path | nil, err.
 local function log_paths()
   local dir, err = M.paths.data_dir('history')
   if not dir then
@@ -151,7 +107,7 @@ local function append_entry(path, line)
   return log_mod.push(path, line)
 end
 
--- log(action) -> true | nil, err. B6: an undo entry is pushed and redo is
+-- log(action) -> true | nil, err.: an undo entry is pushed and redo is
 -- cleared (a new action invalidates the redo branch).
 function M.log(action)
   local undo_path, redo_path = log_paths()
@@ -177,9 +133,9 @@ function M.log(action)
   -- A new action invalidates the redo branch. The redo log is reset to its
   -- marker-only (empty-history) state rather than plain `{}`, so it stays
   -- Lua-owned and a later marker check is unambiguous. `prepare` runs FIRST so a
-  -- FOREIGN redo log (D18/T-017) is quarantined aside instead of being silently
+  -- FOREIGN redo log is quarantined aside instead of being silently
   -- clobbered by the marker write; a failure to prepare or to write is reported
-  -- rather than swallowed (P2-NB1/NB4), so the caller still sees the new action
+  -- rather than swallowed, so the caller still sees the new action
   -- as logged while the reset failure is surfaced.
   local pok, prep_err = prepare(redo_path)
   if not pok then
@@ -222,7 +178,7 @@ function M._reverse(which)
 
   local state = log_state(src_path)
   if state == 'empty' then
-    -- Absent, empty or marker-only: this is the T-008 case -- pop() would
+    -- Absent, empty or marker-only: this is the case -- pop would
     -- return nil silently, so the message belongs to this caller.
     M.ui.notify(which == 'undo' and 'Nothing to undo' or 'Nothing to redo',
       vim.log.levels.INFO)
@@ -253,7 +209,7 @@ function M._reverse(which)
 
   local rev, rev_err = M.action.reverse(line)
   if not rev then
-    -- A line we cannot parse must not be lost either (D13 spirit).
+    -- A line we cannot parse must not be lost either (spirit).
     log_mod.push(src_path, line)
     M.ui.notify('Failed to ' .. which .. ' action - ' .. tostring(rev_err),
       vim.log.levels.ERROR)
@@ -269,14 +225,14 @@ function M._reverse(which)
       M.ui.notify('Failed to ' .. which .. ' action - cannot write history: '
         .. tostring(werr), vim.log.levels.ERROR)
     end
-    -- B15: exactly one joined summary of the executed reversal.
+    -- exactly one joined summary of the executed reversal.
     M.ui.notify(M.action.summarize({ rev }), vim.log.levels.INFO)
     return rev
   end
 
-  -- D13: a failed reversal pushes the original line back onto its source log
+  -- a failed reversal pushes the original line back onto its source log
   -- (the Python version silently dropped it). The reason an action returned --
-  -- `EACCES`, the staging failure of a group, ... -- is part of the message: a
+  -- `EACCES`, the staging failure of a group,... -- is part of the message: a
   -- group reversal that failed halfway must be diagnosable, not just "failed".
   log_mod.push(src_path, line)
   local why

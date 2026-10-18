@@ -1,46 +1,23 @@
--- tests/grouped_undo_spec.lua -- a dependent move group is recorded and
--- reversed as ONE undo step (Greptile review of PR #1, `lua/direct/buffer.lua:
--- 595`: "Undo destroys swapped contents").
+-- tests/grouped_undo_spec.lua -- dependent renames are one undoable action.
+-- Group staging prevents a sequential reversal from overwriting swapped contents.
+
+-- Logging a swap as two moves let one-step undo rename over unsaved contents.
+-- The save was staged, but the old reversal was not.
 --
--- The defect: `Buffer:sync()` logged one history entry per action, so swapping
--- `a.txt` and `b.txt` wrote two `mv` lines. `history.undo()` reverses ONE line,
--- so the first `DirectUndo` after a swap ran `Move(a.txt -> b.txt)`: it renamed
--- the current `a.txt` (holding b's content, because the SAVE stages through
--- `.direct-tmp-*`) straight over `b.txt`, permanently destroying b's original
--- content. The reversal had no such staging protection.
---
--- What the UI can actually produce (investigated, see the `move_groups` test):
---   * a two-file swap -- a 2-cycle;
---   * an N-way rotation -- a cycle of length > 2 (the buffer lines are a
---     permutation of the listing of the same length);
---   * an open chain (a -> b -> c -> ... ) -- produced when the permutation
---     consumes a fresh name at its tail (e.g. `a.txt b.txt c.txt` edited to
---     `b.txt c.txt d.txt`).
---   Every one of these is a set of moves whose destination is also another
---   move's source: that is exactly the set a bare rename of one move at a time
---   cannot apply without passing through a colliding name (B11/D3), and exactly
---   the set `action.move_groups` groups. ADD / DELETE syncs are independent, a
---   yank-paste `p`/`up` is already a single action with its own reversal, and
---   two moves that share no name (`a.txt -> x.txt`, `b.txt -> y.txt`) are
---   independent: they stay one entry each.
---
+-- UI edits produce swaps, rotations, and open chains. These are exactly the
+-- connected move sets where one destination is another move's source; a
+-- one-at-a-time reversal would collide. Independent moves stay separate.
 -- The group is PERSISTED as one log entry (`g<TAB><count><TAB>src<TAB>dst...`),
 -- not grouped in memory: the critical test below performs the swap in THIS
 -- process and undoes it in a real second `nvim --headless -l` process.
 --
--- Superseded logs: the log marker moves from `#direct-history-v2` to
--- `#direct-history-v3`, and that bump is part of the fix, not bookkeeping -- a
--- v2 log holds a swap as TWO independent lines, so replaying it under the new
--- code would destroy data again (its second undo is precisely the reported
--- bug). The existing D18/T-017 gate already treats "first line is not the
--- current marker" as foreign: it notifies, quarantines the file aside and
--- executes nothing, so a superseded log is detected and inert rather than
--- half-replayed.
+-- The format marker is bumped because v2 records a swap as two independent
+-- moves; replaying those under grouped undo could overwrite data again. Old
+-- logs are quarantined without executing any entries.
 
 local H = require('tests.support.harness')
 
--- The repo root, from this spec's own path (<root>/tests/grouped_undo_spec.lua),
--- for the fresh-session script below.
+-- Resolve the repository root from this test file for the fresh-session script.
 local SPEC_FILE = debug.getinfo(1, 'S').source:gsub('^@', '')
 local REPO_ROOT = vim.fs.dirname(vim.fs.dirname(vim.fn.fnamemodify(SPEC_FILE, ':p')))
 
@@ -51,7 +28,7 @@ local function clean_buffers()
   pcall(vim.cmd, '%bwipeout!')
 end
 
-H.describe('grouped move undo (B6/B11/D3)', function()
+H.describe('grouped move undo', function()
   -- Modules are required INSIDE each spec body so the tables the harness
   -- re-sourced at the file boundary are the ones under test (and the ones a
   -- stub is installed on).
@@ -87,7 +64,7 @@ H.describe('grouped move undo (B6/B11/D3)', function()
     vim.cmd('write')
   end
 
-  H.it('undo restores a swapped pair byte-identically in one step, redo re-applies it (B6)', function()
+  H.it('undo restores a swapped pair byte-identically in one step, redo re-applies it', function()
     local _, history = modules()
     clean_buffers()
     local sb = H.sandbox()
@@ -110,7 +87,7 @@ H.describe('grouped move undo (B6/B11/D3)', function()
       'a.txt is byte-identical to before the swap')
     H.assert_eq(vim.fn.readfile(ws .. '/b.txt'), { 'CONTENT-B' },
       'b.txt is byte-identical to before the swap')
-    -- B15: the whole group is ONE user-visible summary, not one per move.
+    -- the whole group is ONE user-visible summary, not one per move.
     H.assert_notified('Moved a.txt to b.txt, Moved b.txt to a.txt')
 
     -- ONE step: an immediate second undo has nothing left to do.
@@ -160,7 +137,7 @@ H.describe('grouped move undo (B6/B11/D3)', function()
   -- actions in memory would pass every in-process test above and still lose data
   -- after a restart, so the undo below runs in a REAL second Neovim process
   -- whose only shared state is the sandbox data dir.
-  H.it('a swap recorded here is undone by a real second Neovim session (D18)', function()
+  H.it('a swap recorded here is undone by a real second Neovim session', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -298,7 +275,7 @@ H.describe('grouped move undo (B6/B11/D3)', function()
     H.assert_eq(vim.fn.readfile(ws .. '/c.txt'), { 'CONTENT-B' })
   end)
 
-  H.it('a superseded #direct-history-v2 log is never replayed (T-017/D18)', function()
+  H.it('a superseded #direct-history-v2 log is never replayed', function()
     local _, history, fs = modules()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -366,7 +343,7 @@ H.describe('grouped move undo (B6/B11/D3)', function()
     H.assert_eq(vim.fn.readfile(ws .. '/b.txt'), { 'CONTENT-A' },
       'the failed undo did not touch b.txt')
     H.assert_fs_eq(ws, { 'a.txt', 'b.txt' }, 'no half-applied group, no temp')
-    -- D13: the group entry is kept so the undo can be retried.
+    -- the group entry is kept so the undo can be retried.
     H.assert_eq(history_lines('undo.log'), { MARKER, swap_line(ws) },
       'the group entry is pushed back onto its source log')
     H.assert_eq(history_lines('redo.log'), { MARKER },
@@ -377,7 +354,7 @@ H.describe('grouped move undo (B6/B11/D3)', function()
     H.assert_eq(vim.fn.readfile(ws .. '/b.txt'), { 'CONTENT-B' })
   end)
 
-  H.it('a staging failure on a LATE member leaves no member displaced (B1)', function()
+  H.it('a staging failure on a LATE member leaves no member displaced', function()
     local _, history, fs = modules()
     clean_buffers()
     local sb = H.sandbox()
@@ -413,7 +390,7 @@ H.describe('grouped move undo (B6/B11/D3)', function()
       'a.txt holds its pre-attempt content at its original path')
     H.assert_eq(vim.fn.readfile(ws .. '/b.txt'), { 'CONTENT-A' },
       'b.txt holds its pre-attempt content at its original path')
-    -- The entry is kept for the retry (D13); it is NOT dropped to make the
+    -- The entry is kept for the retry; it is NOT dropped to make the
     -- retry stop failing.
     H.assert_eq(history_lines('undo.log'), { MARKER, swap_line(ws) },
       'the group entry is pushed back onto its source log')
@@ -571,7 +548,7 @@ H.describe('grouped move undo (B6/B11/D3)', function()
     }, 'the group remains in history after rollback itself fails')
   end)
 
-  H.it('a grouped undo that failed at a late member is retryable once the fault clears (B1)', function()
+  H.it('a grouped undo that failed at a late member is retryable once the fault clears', function()
     local _, history, fs = modules()
     clean_buffers()
     local sb = H.sandbox()
@@ -697,6 +674,6 @@ H.describe('grouped move undo (B6/B11/D3)', function()
       'nothing was moved')
     H.assert_false(fs.exists(ws .. '/.direct-tmp-1'), 'no staging happened')
     H.assert_eq(history_lines('undo.log'), { MARKER, bad },
-      'the unparseable line is pushed back, never lost (D13)')
+      'the unparseable line is pushed back, never lost')
   end)
 end)

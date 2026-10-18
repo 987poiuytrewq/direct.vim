@@ -1,6 +1,6 @@
--- tests/paths_spec.lua -- P0 harness smoke + P1 paths() contract (T-006).
---
--- Proves sandbox()/fs_snapshot shape (P0) and the paths contract: absolute
+-- tests/paths_spec.lua -- sandbox helpers, data paths, hashing, and identity.
+
+-- Proves sandbox()/fs_snapshot shape and the paths contract: absolute
 -- root(), XDG precedence, sha256 digest, and path-identity comparison via
 -- fs.same_path rather than string equality.
 
@@ -38,7 +38,7 @@ H.describe('paths', function()
     })
   end)
 
-  H.it('root() absolutises relative inputs (reviewer B6)', function()
+  H.it('root() absolutises relative inputs', function()
     for _, input in ipairs({ '.', '..', 'a/b' }) do
       local resolved = paths.root(input)
       H.assert_true(resolved:sub(1, 1) == '/',
@@ -58,7 +58,7 @@ H.describe('paths', function()
     vim.cmd('enew')
     vim.api.nvim_buf_set_name(0, root)
     local name = vim.api.nvim_buf_get_name(0)
-    -- B3 attach compares nvim_buf_get_name(b) against root with fs.same_path,
+    -- attach compares nvim_buf_get_name(b) against root with fs.same_path,
     -- never `==`: nvim_buf_set_name resolves a symlinked prefix while
     -- paths.root() does not, so string equality would miss.
     H.assert_true(fs.same_path(name, root),
@@ -75,7 +75,7 @@ H.describe('paths', function()
 
   H.it('data_home() falls back to $HOME/.local/share', function()
     -- with_env restores HOME afterwards; XDG_DATA_HOME must be unset *inside*
-    -- the window (a nil value cannot be a table-literal key, harness B8-1).
+    -- the window (a nil value cannot be a table-literal key, harness).
     H.with_env({ HOME = '/home/direct-probe' }, function()
       vim.env.XDG_DATA_HOME = nil
       H.assert_eq(paths.data_home(), '/home/direct-probe/.local/share',
@@ -101,7 +101,7 @@ H.describe('paths', function()
     H.assert_eq(vim.fn.isdirectory(dir), 1, 'data_dir is created on demand')
   end)
 
-  H.it('data_dir() returns nil, err when <data_home>/direct is a file (B1)', function()
+  H.it('data_dir() returns nil, err when <data_home>/direct is a file', function()
     local sb = H.sandbox()
     H.mkfile(sb.data_home, 'direct', { 'i am a file' })
     local dir, err = paths.data_dir('history')
@@ -112,7 +112,7 @@ H.describe('paths', function()
       'the occupying file is untouched')
   end)
 
-  H.it('data_dir() returns nil, err on a read-only data home (B1)', function()
+  H.it('data_dir() returns nil, err on a read-only data home', function()
     local sb = H.sandbox()
     H.assert_true(vim.uv.fs_chmod(sb.data_home, tonumber('500', 8)) == true,
       'precondition: data home chmod 0500')
@@ -123,10 +123,9 @@ H.describe('paths', function()
     pcall(vim.uv.fs_chmod, sb.data_home, tonumber('700', 8))
   end)
 
-  H.it('digest() is sha256 over NUL-joined paths (D15)', function()
-    -- Oracle pinned to an externally-verified literal (reviewer B7) rather
-    -- than vim.fn.sha256 itself, which is the function digest() wraps and so
-    -- could not catch a wrong separator or join. The literal was produced with
+  H.it('digest() is sha256 over NUL-joined paths', function()
+    -- Compare against a known digest, not vim.fn.sha256 itself, so a wrong
+    -- separator or join is caught. The literal was produced with
     -- `printf 'a\0b\0c' | shasum -a 256` on nvim 0.12.5.
     local expected = '8badde10c760e9b702defb4b5e225de79c515b1d2a5cfb000e140f3c6fbb5629'
     H.assert_eq(paths.digest('a', 'b', 'c'), expected, 'varargs form')
@@ -136,7 +135,7 @@ H.describe('paths', function()
       'argument order is significant (the caller sorts)')
   end)
 
-  H.it('basename() strips a trailing slash (R4)', function()
+  H.it('basename() strips a trailing slash', function()
     H.assert_eq(paths.basename('/a/b/'), 'b', 'trailing slash stripped')
     H.assert_eq(paths.basename('/a/b'), 'b', 'no trailing slash')
     H.assert_eq(paths.basename('dir1/'), 'dir1', 'bare directory')

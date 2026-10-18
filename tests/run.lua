@@ -1,34 +1,26 @@
 -- tests/run.lua -- zero-dependency harness entry point for direct.nvim.
---
+
 -- Usage:
 --   nvim --headless -l tests/run.lua              # run every tests/*_spec.lua
---   nvim --headless -l tests/run.lua sync         # only specs whose name matches "sync"
+--   nvim --headless -l tests/run.lua sync         # filter spec filenames
 --   nvim --headless -l tests/run.lua --verbose    # per-assert output
---   nvim --headless -l tests/run.lua --print-tmp  # also print the temp root
+--   nvim --headless -l tests/run.lua --print-tmp  # print the temp root
 --
--- Boot notes (spec section 11.1), all re-measured on nvim 0.12.5:
---   * `nvim --headless -l` does NOT load user config or plugins from
---     runtimepath, so the repo root is prepended and the runtime files are
---     sourced explicitly below.
---   * Under `-l`, Neovim boots with `filetype plugin:OFF`. `filetype plugin
---     on` is therefore mandatory or `ftplugin/direct.lua` would never load and
---     every buffer-local mapping assertion would be vacuously true.
---   * Under `-l`, `v:vim_did_enter == 1` already when this script starts and
---     `VimEnter` is never fired by the runtime. Specs that depend on `VimEnter`
---     must call `nvim_exec_autocmds('VimEnter', {})` explicitly.
---   * `vim.fs.realpath` does not exist on the target runtime; the temp root is
---     created with `vim.uv.fs_mkdtemp` and resolved with `vim.uv.fs_realpath`.
---   * A boot-scoped XDG_DATA_HOME is set *before* the plugin is sourced
---     (reviewer B3), so the first load resolves against a temp dir rather than
---     the user's real data dir; every later spec is re-pointed by the harness.
+-- Boot behavior verified on Neovim 0.12.5:
+-- * `-l` loads neither user config nor runtimepath plugins, so the repo root is
+--   prepended and plugin/runtime files are sourced explicitly.
+-- * Filetype plugins are off; enable them before capturing the harness baseline
+--   or buffer-local mapping assertions would be vacuous.
+-- * `v:vim_did_enter` is already true and `VimEnter` does not fire under `-l`,
+--   so tests that depend on it dispatch the event explicitly.
+-- * `vim.fs.realpath` is unavailable; resolve the temporary root with `vim.uv`.
+-- * Set a boot-scoped XDG_DATA_HOME before sourcing the plugin, then redirect it
+--   per test file so the first load never touches the user's data directory.
 --
--- Isolation (spec section 11.1): specs/`it` blocks may freely mutate any global
--- *option* -- the harness snapshots every option at setup() and restores it at
--- every file and test boundary (reviewer B2). They may also register any
--- augroup/autocmd, in any group; every augroup/autocmd not present at boot is
--- cleared at every boundary, except the filetype machinery (reviewer B1). Scope
--- a single-assertion change with `with_option(name, value, fn)` or
--- `with_env(vars, fn)`.
+-- Isolation: each test may mutate global options or register autocmds. Snapshot
+-- every option and restore it at file/test boundaries; clear post-boot autocmds
+-- while preserving the boot filetype machinery. Use `with_option`/`with_env` for
+-- a single scoped assertion.
 
 -- Repo root from this script's own path: <root>/tests/run.lua -> <root>.
 local this_file = debug.getinfo(1, 'S').source:gsub('^@', '')
@@ -39,9 +31,8 @@ local root = vim.fs.dirname(tests_dir)
 -- Boot step 1: prepend the repo root.
 vim.opt.runtimepath:prepend(root)
 
--- Boot step 2: create the run temp root and point XDG_DATA_HOME at a boot home
--- BEFORE the plugin is sourced (reviewer B3). The root is realpath-resolved
--- immediately so glob and fs_realpath agree for every fixture derived from it.
+-- Boot step 2: create a temp root and set XDG_DATA_HOME before sourcing the
+-- plugin. Resolve it immediately so fixtures use a consistent real path.
 local os_tmp = vim.uv.os_tmpdir() or vim.env.TMPDIR or '/tmp'
 local created = vim.uv.fs_mkdtemp(vim.fs.joinpath(os_tmp, 'direct-tests-XXXXXX'))
 if not created then
@@ -121,8 +112,7 @@ local function main()
 
   io.write(string.format('== direct tests ==\nrepo: %s\n', root))
   if print_tmp or verbose then
-    -- Opt-in: the temp root differs on every run (reviewer B6), so it must not
-    -- appear in the default output that the determinism gate compares.
+    -- Keep random temp paths out of default output so runs remain comparable.
     io.write(string.format('tmp:  %s\n', base))
   end
   if #specs == 0 then
