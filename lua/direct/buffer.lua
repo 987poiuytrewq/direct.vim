@@ -747,15 +747,20 @@ function Buffer:list()
 
   local bufnr = vim.api.nvim_get_current_buf()
   local old_state = states[bufnr]
-  local old_root_by_text, old_expanded = {}, {}
+  local old_root_candidates, old_expanded = {}, {}
   if old_state then
     old_expanded = old_state.expanded or {}
     local old_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
     for row, line in ipairs(old_lines) do
       local id = row_id_at(bufnr, row - 1)
       local rec = id and old_state.rows[id]
-      if rec and rec.kind == 'root' and old_root_by_text[line] == nil then
-        old_root_by_text[line] = rec
+      -- Reuse a root only while its extmark still identifies the unchanged
+      -- row and its prior path is the same filesystem entry. Edited text may
+      -- happen to equal another root's name; that is not an identity change.
+      if rec and rec.kind == 'root' and line == rec.text and line == rec.name
+        and rec.path
+        and fs.same_path(rec.path, M.entry_path(old_state.root, rec.name)) then
+        old_root_candidates[#old_root_candidates + 1] = rec
       end
     end
   end
@@ -772,8 +777,23 @@ function Buffer:list()
   local roots = {}
   local used_root = {}
   for _, line in ipairs(safe) do
-    local rec = old_root_by_text[line]
-    if rec and not used_root[rec.id] then
+    local path = M.entry_path(self.root, line)
+    local rec, candidate_count = nil, 0
+    for _, candidate in ipairs(old_root_candidates) do
+      if fs.same_path(candidate.path, path) then
+        rec = candidate
+        candidate_count = candidate_count + 1
+      end
+    end
+    local path_count = 0
+    for _, other_line in ipairs(safe) do
+      if fs.same_path(path, M.entry_path(self.root, other_line)) then
+        path_count = path_count + 1
+      end
+    end
+    -- Equivalent spellings may occur more than once (for example two symlink
+    -- aliases). Reuse only a unique prior identity for a unique new row.
+    if candidate_count == 1 and path_count == 1 and not used_root[rec.id] then
       used_root[rec.id] = true
     else
       rec = { id = next_id(state), kind = 'root' }

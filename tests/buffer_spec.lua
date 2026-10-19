@@ -166,6 +166,195 @@ H.describe('buffer: listing', function()
     H.assert_buf_eq({ 'inside' }, 0)
   end)
 
+  H.it('preserves expanded root identity when refresh uses a resolved symlink alias', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local real_parent = H.mkdir(sb.root, 'real-parent')
+    local real = H.mkdir(real_parent, 'workdir')
+    H.mkdir(real, 'a')
+    H.mkfile(real, 'a/inside.txt', { 'child' })
+    local link = sb.root .. '/link'
+    H.assert_true(make_symlink(real_parent, link), 'created the symlinked prefix')
+    local unresolved = link .. '/workdir'
+
+    local listing = buffer.list(unresolved)
+    listing:unfold(1)
+    H.assert_buf_eq({ 'a/', '  inside.txt' }, 0, 'initial listing is expanded')
+    local bufnr = vim.api.nvim_get_current_buf()
+    local namespace = vim.api.nvim_get_namespaces()['direct-listing-rows']
+    local before_marks = vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1, {})
+    local root_id, child_id = before_marks[1][1], before_marks[2][1]
+    H.assert_true(listing.root ~= real, 'the initial listing retains unresolved root spelling')
+
+    -- nvim stores the buffer's canonical spelling. Restore through that alias
+    -- so list() compares the equivalent path against the unresolved saved path.
+    H.assert_eq(vim.api.nvim_buf_get_name(bufnr), real, 'buffer name is the resolved alias')
+    local refreshed = buffer.restore()
+    refreshed:list()
+
+    H.assert_buf_eq({ 'a/', '  inside.txt' }, 0,
+      'the expanded child remains visible after refresh through the alias')
+    local after_marks = vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1, {})
+    H.assert_eq(after_marks[1][1], root_id, 'same root identity is reused')
+    H.assert_eq(after_marks[2][1], child_id, 'same child identity is reused')
+    H.assert_true(fs.same_path(refreshed:get_paths(2, 2)[1], real .. '/a/inside.txt'),
+      'the retained child identity denotes the real directory entry')
+  end)
+
+  H.it('DirectYank refresh does not transfer an edited root identity to matching text', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkdir(ws, 'a')
+    H.mkdir(ws, 'b')
+    H.mkfile(ws, 'a/inside.txt', { 'a child' })
+    H.mkfile(ws, 'unrelated.txt', { 'unrelated' })
+    local direct = require('direct')
+    local listing = direct.list(ws)
+    listing:unfold(1)
+    local before = H.fs_snapshot(ws)
+
+    -- Keep the extmark identity for a/ while changing its visible spelling to
+    -- b/. The real b/ row remains later in the buffer, making duplicate text.
+    vim.api.nvim_buf_set_text(0, 0, 0, 0, 1, { 'b' })
+    local register = require('direct.register')
+    local original_yank = register.yank
+    local yanked
+    register.yank = function(sources) yanked = vim.deepcopy(sources); return true end
+    local ok, err = pcall(vim.cmd, '4DirectYank')
+    register.yank = original_yank
+    if not ok then error(err) end
+
+    H.assert_eq(yanked, { ws .. '/unrelated.txt' },
+      ':DirectYank uses only the selected unrelated root file')
+    H.assert_buf_eq({ 'a/', 'b/', 'unrelated.txt' }, 0,
+      'stale a/ children are discarded instead of rendered under b/')
+    H.assert_eq(H.fs_snapshot(ws), before,
+      'the refresh performs no filesystem actions')
+  end)
+
+  H.it('DirectYank safely re-renders when an edited root creates hostile duplicate rows', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkdir(ws, 'a')
+    H.mkdir(ws, 'b')
+    H.mkfile(ws, 'a/inside.txt', { 'a child' })
+    H.mkfile(ws, 'unrelated.txt', { 'unrelated' })
+    local direct = require('direct')
+    local listing = direct.list(ws)
+    listing:unfold(1)
+    local before = H.fs_snapshot(ws)
+
+    vim.api.nvim_buf_set_text(0, 0, 0, 0, 1, { 'b' })
+    -- Add another indistinguishable root row. Its lack of identity must not
+    -- make the first edited row eligible to inherit a/'s loaded expansion.
+    vim.api.nvim_buf_set_lines(0, 2, 2, false, { 'b/' })
+    local register = require('direct.register')
+    local original_yank = register.yank
+    local yanked
+    register.yank = function(sources) yanked = vim.deepcopy(sources); return true end
+    local ok, err = pcall(vim.cmd, '5DirectYank')
+    register.yank = original_yank
+    if not ok then error(err) end
+
+    H.assert_eq(yanked, { ws .. '/unrelated.txt' },
+      ':DirectYank still resolves the unrelated file in an ambiguous listing')
+    H.assert_buf_eq({ 'a/', 'b/', 'unrelated.txt' }, 0,
+      'ambiguous duplicate text triggers a safe filesystem re-render')
+    H.assert_eq(H.fs_snapshot(ws), before,
+      'the hostile refresh performs no filesystem actions')
+  end)
+
+  H.it('DirectYank discards expansions when distinct root names share a filesystem identity', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local target = H.mkdir(sb.root, 'shared-target')
+    H.mkfile(target, 'child.txt', { 'shared child' })
+    H.mkfile(ws, 'unrelated.txt', { 'unrelated' })
+    local alias_a, alias_b = ws .. '/alias-a', ws .. '/alias-b'
+
+    -- Prefer two real symlink spellings. Some platforms deny symlink creation
+    -- to unprivileged test processes; there the fallback creates two directories
+    -- and stubs only same_path's identity comparison for those roots. The
+    -- existing symlink-prefix and equivalent-symlink tests remain native tests.
+    local native_aliases = make_symlink(target, alias_a)
+      and make_symlink(target, alias_b)
+    local original_same_path = fs.same_path
+    if not native_aliases then
+      for _, alias in ipairs({ alias_a, alias_b }) do
+        if vim.uv.fs_lstat(alias) then pcall(vim.uv.fs_unlink, alias) end
+        vim.fn.mkdir(alias, 'p')
+        H.mkfile(alias, 'child.txt', { 'shared child' })
+      end
+      local normalized_a = alias_a:gsub('/+$', '')
+      local normalized_b = alias_b:gsub('/+$', '')
+      fs.same_path = function(a, b)
+        a, b = type(a) == 'string' and a:gsub('/+$', '') or a,
+          type(b) == 'string' and b:gsub('/+$', '') or b
+        if (a == normalized_a and b == normalized_b)
+          or (a == normalized_b and b == normalized_a) then
+          return true
+        end
+        return original_same_path(a, b)
+      end
+    end
+
+    local direct = require('direct')
+    local listing = direct.list(ws)
+    H.assert_buf_eq({ 'alias-a/', 'alias-b/', 'unrelated.txt' }, 0,
+      'filesystem listing includes both distinct root spellings')
+    H.assert_true(fs.same_path(alias_a, alias_b),
+      'both root spellings have the same filesystem identity')
+    if native_aliases then
+      H.assert_eq(vim.uv.fs_readlink(alias_a), target, 'alias-a is a native symlink')
+      H.assert_eq(vim.uv.fs_readlink(alias_b), target, 'alias-b is a native symlink')
+    end
+
+    listing:unfold(1)
+    H.assert_buf_eq({ 'alias-a/', '  child.txt', 'alias-b/', 'unrelated.txt' }, 0,
+      'one alias has a materialized child before refresh')
+    local bufnr = vim.api.nvim_get_current_buf()
+    local namespace = vim.api.nvim_get_namespaces()['direct-listing-rows']
+    local before_marks = vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1, {})
+    local old_root_a, old_child, old_root_b =
+      before_marks[1][1], before_marks[2][1], before_marks[3][1]
+    H.assert_true(old_root_a ~= old_root_b and old_child ~= old_root_a
+      and old_child ~= old_root_b, 'the two filesystem roots and child start with distinct identities')
+    local before = H.fs_snapshot(ws)
+
+    local register = require('direct.register')
+    local original_yank = register.yank
+    local yanked
+    register.yank = function(sources) yanked = vim.deepcopy(sources); return true end
+    local ok, err = pcall(vim.cmd, '4DirectYank')
+    register.yank = original_yank
+    fs.same_path = original_same_path
+    if not ok then error(err) end
+
+    H.assert_eq(yanked, { ws .. '/unrelated.txt' },
+      ':DirectYank sends only the selected unrelated file to the register')
+    H.assert_buf_eq({ 'alias-a/', 'alias-b/', 'unrelated.txt' }, 0,
+      'refresh discards the ambiguous stale expansion')
+    local after_marks = vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1, {})
+    H.assert_true(after_marks[1][1] ~= old_root_a and after_marks[1][1] ~= old_root_b,
+      'alias-a receives a fresh root identity instead of either ambiguous old identity')
+    H.assert_true(after_marks[2][1] ~= old_root_a and after_marks[2][1] ~= old_root_b,
+      'alias-b receives a fresh root identity instead of either ambiguous old identity')
+    H.assert_true(after_marks[1][1] ~= after_marks[2][1],
+      'the distinct spellings retain distinct row identities')
+    H.assert_eq(#after_marks, 3, 'the stale child identity is discarded from the refreshed rows')
+    for _, mark in ipairs(after_marks) do
+      H.assert_true(mark[1] ~= old_child,
+        'the old child identity is not attached to another alias or row')
+    end
+    H.assert_eq(listing:get_paths(1, 2), { alias_a .. '/', alias_b .. '/' },
+      'the refreshed root paths preserve their own spellings')
+    H.assert_eq(H.fs_snapshot(ws), before,
+      'refresh and yank do not modify filesystem entries')
+  end)
+
   H.it('<CR> still opens a nested listing and replaces the previous direct buffer', function()
     clean_buffers()
     local sb = H.sandbox()
