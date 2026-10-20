@@ -257,11 +257,11 @@ local function set_options(bufnr)
   vim.bo[bufnr].swapfile = false
   vim.bo[bufnr].filetype = 'direct'
   -- BufWriteCmd <buffer> DirectSync: a `:write` in a direct
-  -- buffer routes to the sync instead of writing a file. Recreated per listing
-  -- (the augment `direct`) after clearing this buffer's own autocmds, matching
-  -- the retired `autocmd! * <buffer>` so repeated listings cannot stack handlers.
-  local group = vim.api.nvim_create_augroup('direct', { clear = false })
-  pcall(vim.api.nvim_clear_autocmds, { group = group, buffer = bufnr })
+  -- buffer routes to the sync instead of writing a file. Each buffer owns a
+  -- separate group so re-sourcing plugin/direct.lua can clear its global
+  -- handlers without removing this one. Recreate the group per listing so
+  -- repeated listings cannot stack handlers.
+  local group = vim.api.nvim_create_augroup('direct-buffer-' .. bufnr, { clear = true })
   vim.api.nvim_create_autocmd('BufWriteCmd', {
     group = group,
     buffer = bufnr,
