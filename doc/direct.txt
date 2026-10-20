@@ -47,9 +47,9 @@ Directories and dotfiles are not highlighted by these groups, so existing
 hidden-entry styling remains unchanged. Detection uses Neovim's filename-only
 filetype matching and reads no file contents.
 
-DirectSpecialFile links to Special by default. Each DirectLang<Name> links to
-Type except the shell group, which links to `sh`. Define a group yourself before
-listing to override its default link. There is no built-in palette or color
+DirectSpecialFile links to Special by default. Each DirectLang<Name> group,
+including DirectLangShell, links to Type by default. Define a group yourself
+before listing to override its default link. There is no built-in palette or color
 configuration.
 
 Source: https://raw.githubusercontent.com/github/innovationgraph/main/data/languages.csv
