@@ -33,6 +33,64 @@ local function next_id(state)
   return state.next_id
 end
 
+local function path_identity(path)
+  return fs.path_identity(path, fs.stat(path))
+end
+
+local function add_identity(index, identity, value)
+  if not identity then return end
+  local function add(bucket, key)
+    if not key then return end
+    local entry = bucket[key]
+    if not entry then
+      entry = { count = 0 }
+      bucket[key] = entry
+    end
+    entry.count = entry.count + 1
+    if entry.count == 1 then entry.only = value end
+    if entry.count > 1 then entry.only = nil end
+  end
+  add(index.by_path, identity.path)
+  if identity.inode then
+    add(index.by_inode, identity.inode)
+  else
+    add(index.unknown_by_path, identity.path)
+  end
+end
+
+local function matching_identity_values(index, identity)
+  if not identity then return nil, 0 end
+  if not identity.inode then
+    local entry = index.by_path[identity.path]
+    return entry and entry.only, entry and entry.count or 0
+  end
+  local inode = index.by_inode[identity.inode]
+  local unknown = index.unknown_by_path[identity.path]
+  local count = (inode and inode.count or 0) + (unknown and unknown.count or 0)
+  if count == 1 then return (inode and inode.only) or (unknown and unknown.only), count end
+  return nil, count
+end
+
+local function identity_is_duplicated(identity, counts)
+  if not identity then return false end
+  if identity.inode then
+    return (counts.by_inode[identity.inode] or 0) > 1
+      or (counts.unknown_by_path[identity.path] or 0) > 0
+  end
+  return (counts.by_path[identity.path] or 0) > 1
+end
+
+local function count_identity(counts, identity)
+  if not identity then return end
+  counts.by_path[identity.path] = (counts.by_path[identity.path] or 0) + 1
+  if identity.inode then
+    counts.by_inode[identity.inode] = (counts.by_inode[identity.inode] or 0) + 1
+  else
+    counts.unknown_by_path[identity.path] =
+      (counts.unknown_by_path[identity.path] or 0) + 1
+  end
+end
+
 local function set_row_mark(bufnr, row, id)
   vim.api.nvim_buf_set_extmark(bufnr, namespace, row, 0, {
     id = id,
@@ -161,11 +219,11 @@ end
 -- trimmed, non-empty `&wildignore` patterns, or nil when there are none. The
 -- four glob arguments are {expr}, {nosuf}, {list}, {alllinks}: `nosuf` must be
 -- passed or 'suffixes'/'wildmenu' would fabricate matches, `{list}` makes the
--- result an array, and `{alllinks}` follows symlinks while globbing. The
--- comparison itself is `same_path` (hardening), which is correct for
--- every root spelling.
-function M.ignore_set(root)
-  local wildignore = vim.o.wildignore or ''
+-- result an array, and `{alllinks}` follows symlinks while globbing. Matching
+-- uses indexed device/inode identity with normalized-name fallback, preserving
+-- same_path semantics for every root spelling.
+function M.ignore_set(root, wildignore)
+  if wildignore == nil then wildignore = vim.o.wildignore or '' end
   if wildignore == '' then
     return nil
   end
@@ -888,7 +946,8 @@ function Buffer:list()
 
   local bufnr = vim.api.nvim_get_current_buf()
   local old_state = states[bufnr]
-  local old_root_candidates, old_expanded = {}, {}
+  local old_expanded = {}
+  local old_index = { by_path = {}, by_inode = {}, unknown_by_path = {} }
   if old_state then
     old_expanded = old_state.expanded or {}
     local old_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
@@ -896,14 +955,24 @@ function Buffer:list()
       local id = row_id_at(bufnr, row - 1)
       local rec = id and old_state.rows[id]
       -- Reuse a root only while its extmark still identifies the unchanged
-      -- row and its prior path is the same filesystem entry. Edited text may
+      -- row. `rec.path` is assigned from this row's entry path on every list;
+      -- checking it against the same path again was redundant. Edited text may
       -- happen to equal another root's name; that is not an identity change.
       if rec and rec.kind == 'root' and line == rec.text and line == rec.name
-        and rec.path
-        and fs.same_path(rec.path, M.entry_path(old_state.root, rec.name)) then
-        old_root_candidates[#old_root_candidates + 1] = rec
+        and rec.path then
+        local candidate = { record = rec, identity = path_identity(rec.path) }
+        add_identity(old_index, candidate.identity, candidate)
       end
     end
+  end
+
+  local new_identities, new_counts = {}, {
+    by_path = {}, by_inode = {}, unknown_by_path = {},
+  }
+  for index, line in ipairs(safe) do
+    local identity = path_identity(M.entry_path(self.root, line))
+    new_identities[index] = identity
+    count_identity(new_counts, identity)
   end
 
   local state = {
@@ -918,24 +987,14 @@ function Buffer:list()
   }
   local roots = {}
   local used_root = {}
-  for _, line in ipairs(safe) do
+  for line_index, line in ipairs(safe) do
     local path = M.entry_path(self.root, line)
-    local rec, candidate_count = nil, 0
-    for _, candidate in ipairs(old_root_candidates) do
-      if fs.same_path(candidate.path, path) then
-        rec = candidate
-        candidate_count = candidate_count + 1
-      end
-    end
-    local path_count = 0
-    for _, other_line in ipairs(safe) do
-      if fs.same_path(path, M.entry_path(self.root, other_line)) then
-        path_count = path_count + 1
-      end
-    end
+    local identity = new_identities[line_index]
+    local candidate, candidate_count = matching_identity_values(old_index, identity)
+    local rec = candidate_count == 1 and candidate and candidate.record or nil
     -- Equivalent spellings may occur more than once (for example two symlink
     -- aliases). Reuse only a unique prior identity for a unique new row.
-    if candidate_count == 1 and path_count == 1 and not used_root[rec.id] then
+    if rec and not identity_is_duplicated(identity, new_counts) and not used_root[rec.id] then
       used_root[rec.id] = true
     else
       rec = { id = next_id(state), kind = 'root' }
@@ -956,13 +1015,17 @@ function Buffer:list()
       child.path = M.entry_path(parent_path, child.name)
       child.text = string.rep('  ', depth) .. child.name
       state.rows[child.id] = child
-      rendered[#rendered + 1] = { text = child.text, id = child.id }
+      rendered[#rendered + 1] = {
+        text = child.text, id = child.id, identity = path_identity(child.path),
+      }
       state.display_ids[#state.display_ids + 1] = child.id
       render_children(child.id, child.path, depth + 1)
     end
   end
-  for _, rec in ipairs(roots) do
-    rendered[#rendered + 1] = { text = rec.text, id = rec.id }
+  for root_index, rec in ipairs(roots) do
+    rendered[#rendered + 1] = {
+      text = rec.text, id = rec.id, identity = new_identities[root_index],
+    }
     state.display_ids[#state.display_ids + 1] = rec.id
     if is_dir_line(rec.name) then
       render_children(rec.id, rec.path, 1)
@@ -973,7 +1036,11 @@ function Buffer:list()
   end
 
   local display = {}
-  for _, row in ipairs(rendered) do display[#display + 1] = row.text end
+  local display_identities = {}
+  for index, row in ipairs(rendered) do
+    display[index] = row.text
+    display_identities[index] = row.identity
+  end
   local cursor = vim.api.nvim_win_get_cursor(0)
   vim.api.nvim_buf_clear_namespace(bufnr, namespace, 0, -1)
   local ok, seterr = pcall(vim.api.nvim_buf_set_lines, bufnr, 0, -1, false, display)
@@ -989,7 +1056,8 @@ function Buffer:list()
   highlight.render(bufnr)
   state.materialization_seq = vim.fn.undotree().seq_cur
   set_options(bufnr)
-  self:place_cursor(display)
+  self:place_cursor(display, display_identities,
+    self.current_entry and path_identity(self.current_entry) or nil)
   if self.current_entry == nil then
     pcall(vim.api.nvim_win_set_cursor, 0, {
       math.max(1, math.min(cursor[1], #display)), cursor[2],
