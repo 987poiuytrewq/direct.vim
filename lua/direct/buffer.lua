@@ -164,8 +164,8 @@ end
 -- result an array, and `{alllinks}` follows symlinks while globbing. The
 -- comparison itself is `same_path` (hardening), which is correct for
 -- every root spelling.
-function M.ignore_set(root)
-  local wildignore = vim.o.wildignore or ''
+function M.ignore_set(root, wildignore)
+  if wildignore == nil then wildignore = vim.o.wildignore or '' end
   if wildignore == '' then
     return nil
   end
@@ -187,9 +187,103 @@ function M.ignore_set(root)
   return set
 end
 
--- read(root) -> the listing lines, or nil, err when root is not readable.
-function M.read(root)
-  return fs.read_dir_lines(root, M.ignore_set(root))
+-- read(root[, ignored]) -> listing lines, or nil, err when root is not readable.
+-- `ignored`, when supplied, is the exact list-time &wildignore match set.
+function M.read(root, ignored)
+  if ignored == nil then ignored = M.ignore_set(root) end
+  return fs.read_dir_lines(root, ignored)
+end
+
+-- list_with_snapshot(root) returns the current filtered listing and the names
+-- omitted by that exact list-time wildignore value. Sync uses the captured names
+-- later instead of consulting a possibly changed option.
+local function list_with_snapshot(root)
+  local wildignore = vim.o.wildignore or ''
+  local ignored = M.ignore_set(root, wildignore)
+  local visible, err = M.read(root, ignored)
+  if not visible then return nil, nil, err end
+  local all, all_err = fs.read_dir_lines(root)
+  if not all then return nil, nil, all_err end
+  local function identity(line)
+    return (line:gsub('/+$', ''))
+  end
+  local visible_set = {}
+  for _, line in ipairs(visible) do visible_set[identity(line)] = true end
+  local hidden = {}
+  for _, line in ipairs(all) do
+    local name = identity(line)
+    if not visible_set[name] then hidden[#hidden + 1] = name end
+  end
+  return visible, { path = root, hidden = hidden, wildignore = wildignore }
+end
+
+local function set_directory_snapshot(state, snapshot)
+  state.directory_snapshots = state.directory_snapshots or {}
+  for index, previous in ipairs(state.directory_snapshots) do
+    if fs.same_path(previous.path, snapshot.path) then
+      state.directory_snapshots[index] = snapshot
+      return
+    end
+  end
+  state.directory_snapshots[#state.directory_snapshots + 1] = snapshot
+end
+
+local function get_directory_snapshot(state, path)
+  for _, snapshot in ipairs(state and state.directory_snapshots or {}) do
+    if fs.same_path(snapshot.path, path) then return snapshot end
+  end
+  return nil
+end
+
+local function path_is_ignored(path, ignored)
+  for _, ignored_path in ipairs(ignored or {}) do
+    if fs.same_path(path, ignored_path) then return true end
+  end
+  return false
+end
+
+local function apply_snapshot(root, lines, snapshot)
+  local hidden = {}
+  for _, line in ipairs(snapshot.hidden or {}) do hidden[line] = true end
+  -- Retain the list-time patterns as well as names seen at list time. Reapply
+  -- those patterns to the current directory so matching entries that appeared
+  -- after listing cannot be mistaken for user-visible DELETE sources.
+  local ignored = M.ignore_set(root, snapshot.wildignore or '')
+  local visible = {}
+  for _, line in ipairs(lines) do
+    local identity = line:gsub('/+$', '')
+    if not hidden[identity]
+      and not path_is_ignored(M.entry_path(root, line), ignored) then
+      visible[#visible + 1] = line
+    end
+  end
+  return visible
+end
+
+-- Return a hidden descendant path (or an inspection error) when moving/removing
+-- a visible directory would carry a list-time-wildignored entry with it.
+local function hidden_descendant(directory, snapshot)
+  if snapshot.wildignore == '' then return nil end
+  local visited = {}
+  local function visit(path)
+    local real = fs.realpath(path)
+    if visited[real] then return nil end
+    visited[real] = true
+
+    local lines, err = fs.read_dir_lines(path)
+    if not lines then return nil, err end
+    local ignored = M.ignore_set(path, snapshot.wildignore)
+    for _, line in ipairs(lines) do
+      local child_path = M.entry_path(path, line)
+      if path_is_ignored(child_path, ignored) then return child_path end
+      if is_dir_line(line) then
+        local found, child_err = visit(child_path)
+        if found or child_err then return found, child_err end
+      end
+    end
+    return nil
+  end
+  return visit(directory)
 end
 
 -- ---------------------------------------------------------------------------
@@ -868,7 +962,7 @@ end
 -- entry, and lists the survivors. A ' ' (space) name is NOT dropped: a space is
 -- representable and must still list.
 function Buffer:list()
-  local lines, err = M.read(self.root)
+  local lines, snapshot, err = list_with_snapshot(self.root)
   if not lines then
     ui.notify('direct: cannot list ' .. tostring(self.root) .. ': '
       .. tostring(err), vim.log.levels.ERROR)
@@ -915,7 +1009,9 @@ function Buffer:list()
     display_ids = {},
     fold_windows = old_state and old_state.fold_windows or {},
     materialization_undos = {},
+    directory_snapshots = old_state and vim.deepcopy(old_state.directory_snapshots or {}) or {},
   }
+  set_directory_snapshot(state, snapshot)
   local roots = {}
   local used_root = {}
   for _, line in ipairs(safe) do
@@ -1024,7 +1120,7 @@ function Buffer:unfold(row)
   local just_materialized = false
   if not state.expanded[rec.id] then
     local path = row_path(self.root, rec, line)
-    local children, err = M.read(path)
+    local children, snapshot, err = list_with_snapshot(path)
     if not children then
       ui.notify('direct: cannot unfold ' .. tostring(path) .. ': '
         .. tostring(err), vim.log.levels.ERROR)
@@ -1047,6 +1143,7 @@ function Buffer:unfold(row)
       end
     end
     state.expanded[rec.id] = { children = materialized }
+    set_directory_snapshot(state, snapshot)
     just_materialized = true
     if #materialized > 0 then
       local insert_at, add = row, {}
@@ -1188,6 +1285,15 @@ end
 function Buffer:sync()
   local bufnr = vim.api.nvim_get_current_buf()
   reconcile_undone_materialization(bufnr)
+  local state = states[bufnr]
+  local snapshot = get_directory_snapshot(state, self.root)
+  if not snapshot then
+    vim.bo[bufnr].modified = true
+    local reason = 'list-time filter snapshot is unavailable; re-list this directory'
+    ui.notify('Refusing to sync: ' .. reason .. '; nothing was changed.',
+      vim.log.levels.ERROR)
+    return nil, reason
+  end
   local visible = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local actual, child_err = children_integrity(bufnr, visible)
   if not actual then
@@ -1201,12 +1307,13 @@ function Buffer:sync()
   if #actual == 1 and actual[1] == '' and not vim.bo[bufnr].modified then
     actual = {}
   end
-  local expected, read_err = M.read(self.root)
+  local expected, read_err = fs.read_dir_lines(self.root)
   if not expected then
     ui.notify('direct: cannot read ' .. tostring(self.root) .. ': '
       .. tostring(read_err), vim.log.levels.ERROR)
     return nil, read_err
   end
+  expected = apply_snapshot(self.root, expected, snapshot)
 
   -- refuse a path the history framing cannot represent, before any
   -- action or history write. The buffer is not re-listed and stays modified.
@@ -1236,6 +1343,46 @@ function Buffer:sync()
   end
 
   local actions, yanks = build_actions(self.root, plan)
+
+  -- A visible directory row does not authorize moving its ignored contents.
+  -- Refuse directory deletes and renames before yanking or other side effects.
+  for _, act in ipairs(actions) do
+    if (act.name == 'rmdir' or act.name == 'mv') and fs.is_dir(act.src) then
+      local hidden_path, inspect_err = hidden_descendant(act.src, snapshot)
+      if hidden_path or inspect_err then
+        local reason = hidden_path
+          and ('directory contains hidden entry: ' .. hidden_path)
+          or ('cannot inspect directory descendants: ' .. tostring(inspect_err))
+        vim.bo[bufnr].modified = true
+        ui.notify('Refusing to sync: ' .. reason .. '; nothing was changed.',
+          vim.log.levels.ERROR)
+        return nil, reason
+      end
+    end
+  end
+
+  -- Fail the whole batch before auto-yank/history or staging when an action
+  -- would land on an occupied path. Move destinations that are also move
+  -- sources are safe: stage_moves vacates those paths before applying moves.
+  local move_sources = {}
+  for _, act in ipairs(actions) do
+    if act.name == 'mv' and fs.taken(act.src) then
+      move_sources[vim.fs.normalize((act.src:gsub('/+$', '')))] = true
+    end
+  end
+  for _, act in ipairs(actions) do
+    local destination = act.dst
+    if destination and fs.taken(destination) then
+      local normalized = vim.fs.normalize((destination:gsub('/+$', '')))
+      if not (act.name == 'mv' and move_sources[normalized]) then
+        vim.bo[bufnr].modified = true
+        local reason = 'destination already exists: ' .. destination
+        ui.notify('Refusing to sync: ' .. reason .. '; nothing was changed.',
+          vim.log.levels.ERROR)
+        return nil, reason
+      end
+    end
+  end
 
   -- Yank removed paths before applying actions. If yanking is refused, leave
   -- the filesystem untouched.

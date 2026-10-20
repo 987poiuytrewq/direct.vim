@@ -189,6 +189,11 @@ end
 function M.Move(src, dst)
   local self = { name = 'mv', src = src, dst = dst }
   self['do'] = function()
+    if M.fs.taken(self.dst)
+      and vim.fs.normalize((tostring(self.src):gsub('/+$', '')))
+        ~= vim.fs.normalize((tostring(self.dst):gsub('/+$', ''))) then
+      return nil, 'destination exists: ' .. tostring(self.dst)
+    end
     local ok, err = M.close_src_buffer(self.src)
     if not ok then
       return nil, err
@@ -315,6 +320,9 @@ end
 function M.Touch(dst)
   local self = { name = 'touch', dst = dst }
   self['do'] = function()
+    if M.fs.taken(self.dst) then
+      return nil, 'destination exists: ' .. tostring(self.dst)
+    end
     return M.fs.touch(self.dst)
   end
   function self.describe()
@@ -326,6 +334,9 @@ end
 function M.MakeDirectory(dst)
   local self = { name = 'mkdir', dst = dst }
   self['do'] = function()
+    if M.fs.taken(self.dst) then
+      return nil, 'destination exists: ' .. tostring(self.dst)
+    end
     return M.fs.mkdirp(self.dst)
   end
   function self.describe()
