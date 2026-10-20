@@ -899,16 +899,22 @@ end
 
 -- Restore the cursor to the pre-attach entry; leave it unchanged if that entry
 -- no longer exists. Reset the column on a match.
-function Buffer:place_cursor(lines)
+function Buffer:place_cursor(lines, row_identities, entry_identity)
   if self.current_entry == nil then
     return
   end
   local bufnr = vim.api.nvim_get_current_buf()
   for index, line in ipairs(lines) do
-    local record = current_row_record(bufnr, index - 1)
-    local path = row_path(self.root, record, line)
-      or M.entry_path(self.root, line)
-    if fs.same_path(path, self.current_entry) then
+    local matches
+    if row_identities and entry_identity then
+      matches = fs.path_identities_match(row_identities[index], entry_identity)
+    else
+      local record = current_row_record(bufnr, index - 1)
+      local path = row_path(self.root, record, line)
+        or M.entry_path(self.root, line)
+      matches = fs.same_path(path, self.current_entry)
+    end
+    if matches then
       pcall(vim.api.nvim_win_set_cursor, 0, { index, 0 })
       return
     end
