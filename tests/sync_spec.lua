@@ -1559,6 +1559,35 @@ H.describe('sync: safety guards', function()
     H.assert_notified('hidden', vim.log.levels.ERROR)
   end)
 
+  H.it('matches path-qualified list-time wildignore patterns in descendants', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local parent = H.mkdir(ws, 'parent')
+    local hidden = H.mkfile(parent, 'hidden.log', { 'preserve path-qualified bytes' })
+    H.mkfile(ws, 'keep.txt', { 'keep visible sibling' })
+    local listing
+    H.with_option('wildignore', 'parent/*.log', function()
+      listing = buffer.list(ws)
+    end)
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'keep.txt' })
+    local before = H.fs_snapshot(ws)
+    local hidden_before = vim.fn.readfile(hidden, 'b')
+    local undo_before, redo_before = history_lines('undo.log'), history_lines('redo.log')
+    H.capture_messages()
+
+    local ok, reason = listing:sync()
+
+    H.assert_nil(ok, 'deleting parent must not move a path-qualified hidden descendant')
+    H.assert_true(tostring(reason):find('hidden', 1, true) ~= nil, tostring(reason))
+    H.assert_eq(H.fs_snapshot(ws), before, 'the directory and hidden descendant remain in place')
+    H.assert_eq(vim.fn.readfile(hidden, 'b'), hidden_before, 'hidden bytes are unchanged')
+    H.assert_eq(history_lines('undo.log'), undo_before, 'no undo history is written')
+    H.assert_eq(history_lines('redo.log'), redo_before, 'redo history is unchanged')
+    H.assert_true(vim.bo.modified, 'the unsynced deletion remains visible in the buffer')
+    H.assert_notified('hidden', vim.log.levels.ERROR)
+  end)
+
   H.it('refuses to move a parent containing a filtered dangling symlink', function()
     clean_buffers()
     local sb = H.sandbox()
@@ -1671,7 +1700,10 @@ H.describe('sync: safety guards', function()
     H.assert_eq(H.fs_snapshot(ws), { 'renamed-link@' }, 'only the symlink name changes')
     H.assert_eq(vim.fn.readfile(target .. '/hidden.log', 'b'), { 'target stays untouched', '' },
       'the symlink target remains untouched')
-    H.assert_eq(#history_lines('undo.log'), 1, 'the symlink rename is recorded')
+    H.assert_eq(history_lines('undo.log'), {
+      '#direct-history-v3',
+      'mv\t' .. link .. '\t' .. ws .. '/renamed-link',
+    }, 'exactly one symlink rename is recorded')
   end)
 
   H.it('refuses to rename a visible directory containing list-time hidden descendants', function()

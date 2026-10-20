@@ -242,6 +242,20 @@ local function path_is_ignored(path, ignored)
   return false
 end
 
+local function wildignore_matches(name, wildignore)
+  for pattern in (wildignore or ''):gmatch('[^,]+') do
+    pattern = vim.trim(pattern)
+    if pattern ~= '' then
+      local ok, matched = pcall(function()
+        return vim.fn.match(name, vim.fn.glob2regpat(pattern)) >= 0
+      end)
+      if not ok then return nil, matched end
+      if matched then return true end
+    end
+  end
+  return false
+end
+
 local function apply_snapshot(root, lines, snapshot)
   local hidden = {}
   for _, line in ipairs(snapshot.hidden or {}) do hidden[line] = true end
@@ -260,30 +274,100 @@ local function apply_snapshot(root, lines, snapshot)
   return visible
 end
 
+local function path_without_marker(path)
+  local trimmed = tostring(path):gsub('/+$', '')
+  if trimmed == '' then return '/' end
+  return trimmed
+end
+
+local function relative_path(root, path)
+  local function normalize(value)
+    value = vim.fs.normalize(tostring(value)):gsub('\\', '/')
+    if value:match('^%a:/$') then return value end
+    value = value:gsub('/+$', '')
+    return value == '' and '/' or value
+  end
+  root, path = normalize(root), normalize(path)
+  if path == root then return '' end
+  local prefix = root
+  if prefix:sub(-1) ~= '/' then prefix = prefix .. '/' end
+  if path:sub(1, #prefix) ~= prefix then return nil end
+  return path:sub(#prefix + 1)
+end
+
+local function lstat(path)
+  local ok, result, err = pcall(vim.uv.fs_lstat, path_without_marker(path))
+  if not ok then return nil, tostring(result) end
+  return result, err
+end
+
+local function is_real_directory(path)
+  local stat = lstat(path)
+  return stat ~= nil and stat.type == 'directory'
+end
+
 -- Return a hidden descendant path (or an inspection error) when moving/removing
--- a visible directory would carry a list-time-wildignored entry with it.
-local function hidden_descendant(directory, snapshot)
-  if snapshot.wildignore == '' then return nil end
+-- a visible directory would carry a list-time-wildignored entry with it. The
+-- walk uses raw scandir names: the filtered entry may be a dangling symlink or
+-- an unsupported filesystem type that the display listing intentionally omits.
+local function hidden_descendant(directory, root_snapshot, state)
   local visited = {}
-  local function visit(path)
+  local initial_relative = relative_path(root_snapshot.path, directory)
+  if initial_relative == nil then
+    return nil, 'directory is outside its list-time snapshot'
+  end
+  local function visit(path, inherited_snapshot, relative_directory)
     local real = fs.realpath(path)
     if visited[real] then return nil end
     visited[real] = true
 
-    local lines, err = fs.read_dir_lines(path)
-    if not lines then return nil, err end
-    local ignored = M.ignore_set(path, snapshot.wildignore)
-    for _, line in ipairs(lines) do
-      local child_path = M.entry_path(path, line)
-      if path_is_ignored(child_path, ignored) then return child_path end
-      if is_dir_line(line) then
-        local found, child_err = visit(child_path)
+    local local_snapshot = get_directory_snapshot(state, path)
+    local snapshot = local_snapshot or inherited_snapshot
+    if local_snapshot then relative_directory = '' end
+    local names, scan_err = {}, nil
+    local scan
+    scan, scan_err = vim.uv.fs_scandir(path_without_marker(path))
+    if not scan then return nil, scan_err end
+    while true do
+      local name = vim.uv.fs_scandir_next(scan)
+      if name == nil then break end
+      names[#names + 1] = name
+    end
+    table.sort(names)
+
+    local hidden = {}
+    for _, name in ipairs(snapshot and snapshot.hidden or {}) do
+      hidden[name:gsub('/+$', '')] = true
+    end
+    local ignored = M.ignore_set(snapshot and snapshot.path or path,
+      snapshot and snapshot.wildignore or '')
+    for _, name in ipairs(names) do
+      local child_path = M.entry_path(path_without_marker(path), name)
+      local relative_name = relative_directory == '' and name
+        or (relative_directory .. '/' .. name)
+      local matches, match_err = wildignore_matches(name,
+        snapshot and snapshot.wildignore or '')
+      if matches == false and relative_name ~= name then
+        matches, match_err = wildignore_matches(relative_name,
+          snapshot and snapshot.wildignore or '')
+      end
+      if matches == nil then return nil, match_err end
+      if hidden[name] or matches or path_is_ignored(child_path, ignored) then
+        return child_path
+      end
+
+      local child_stat, stat_err = lstat(child_path)
+      if not child_stat then return nil, stat_err or ('cannot inspect ' .. child_path) end
+      -- A directory symlink is a leaf, not permission to inspect its target.
+      if child_stat.type == 'directory' then
+        local found, child_err = visit(child_path, snapshot or root_snapshot,
+          relative_name)
         if found or child_err then return found, child_err end
       end
     end
     return nil
   end
-  return visit(directory)
+  return visit(directory, root_snapshot, initial_relative)
 end
 
 -- ---------------------------------------------------------------------------
@@ -1243,8 +1327,16 @@ local function build_actions(root, plan)
     end
   elseif plan.kind == 'RENAME' then
     for _, move in ipairs(plan.moves) do
-      actions[#actions + 1] = action_mod.Move(
-        M.entry_path(root, move.src), M.entry_path(root, move.dst))
+      local src = M.entry_path(root, move.src)
+      local dst = M.entry_path(root, move.dst)
+      -- Directory symlinks are displayed with the directory marker, but the
+      -- marker would make rename follow the link instead of moving the link.
+      local source_stat = lstat(src)
+      if source_stat and source_stat.type == 'link' then
+        src = path_without_marker(src)
+        dst = path_without_marker(dst)
+      end
+      actions[#actions + 1] = action_mod.Move(src, dst)
     end
   end
   return actions, yanks
@@ -1347,8 +1439,8 @@ function Buffer:sync()
   -- A visible directory row does not authorize moving its ignored contents.
   -- Refuse directory deletes and renames before yanking or other side effects.
   for _, act in ipairs(actions) do
-    if (act.name == 'rmdir' or act.name == 'mv') and fs.is_dir(act.src) then
-      local hidden_path, inspect_err = hidden_descendant(act.src, snapshot)
+    if (act.name == 'rmdir' or act.name == 'mv') and is_real_directory(act.src) then
+      local hidden_path, inspect_err = hidden_descendant(act.src, snapshot, state)
       if hidden_path or inspect_err then
         local reason = hidden_path
           and ('directory contains hidden entry: ' .. hidden_path)

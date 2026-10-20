@@ -74,7 +74,18 @@ function M.taken(path)
   if type(path) ~= 'string' or path == '' then
     return false
   end
-  local ok, st = pcall(vim.uv.fs_lstat, path)
+  -- A display marker is not part of the filesystem name. In particular,
+  -- lstat("dangling-link/") follows the final slash and fails, hiding the
+  -- occupied symlink name. Keep the single slash for the filesystem root.
+  local lookup = path:gsub('/+$', '')
+  if lookup == '' then
+    lookup = '/'
+  elseif path:match('^%a:[/\\]+$') then
+    -- vim/fs APIs accept forward slashes on Windows; do not turn `C:/` into
+    -- the drive-relative path `C:` while removing a display marker.
+    lookup = path:sub(1, 2) .. '/'
+  end
+  local ok, st = pcall(vim.uv.fs_lstat, lookup)
   return ok and st ~= nil
 end
 
