@@ -416,6 +416,198 @@ H.describe('sync with unfolded children (Phase 1)', function()
       'the saved rows resolve as roots, not stale child rows')
   end)
 
+  H.it('restores child identities after undo reconciliation and redo', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local a = H.mkdir(ws, 'a')
+    H.mkdir(a, 'nested')
+    H.mkfile(a, 'nested/deep.txt', { 'deep' })
+    H.mkfile(ws, 'root.txt', { 'root' })
+    route_write_to_test_buffer()
+    local listing = buffer.list(ws)
+    local bufnr = vim.api.nvim_get_current_buf()
+    local namespace = vim.api.nvim_get_namespaces()['direct-listing-rows']
+
+    listing:unfold(1)
+    listing:unfold(2)
+    local state = buffer._state_for_test(bufnr)
+    local root_id = state.root_ids[1]
+    local child_id = state.expanded[root_id].children[1].id
+    local nested_id = child_id
+    local deep_id = state.expanded[nested_id].children[1].id
+
+    vim.cmd('undo')
+    vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
+    H.assert_nil(state.expanded[nested_id], 'undo reconciliation removes the nested expansion')
+    H.assert_eq(state.rows[deep_id], nil, 'the live nested child record is discarded on undo')
+
+    vim.cmd('redo')
+    vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
+
+    H.assert_buf_eq({ 'a/', '  nested/', '    deep.txt', 'root.txt' }, 0,
+      'redo restores the exact nested child snapshot')
+    local marks = vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1, {})
+    H.assert_eq(marks[2][1], child_id, 'redo restores the original child extmark identity')
+    H.assert_eq(marks[3][1], deep_id, 'redo restores the nested child extmark identity')
+    H.assert_eq(state.expanded[nested_id].children[1].id, deep_id,
+      'the nested expansion state is restored with the original child record')
+    H.assert_eq(state.rows[deep_id].parent, nested_id,
+      'the restored child retains its original parent relationship')
+    H.assert_eq(listing:get_paths(2, 3), {
+      ws .. '/a/nested/', ws .. '/a/nested/deep.txt',
+    }, 'restored rows resolve to their original nested filesystem paths')
+
+    -- Exercise both repeated replay of the nested insertion and a full
+    -- multi-materialization rewind/replay (parent, then nested child).
+    vim.cmd('undo')
+    vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
+    vim.cmd('redo')
+    vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
+    H.assert_eq(listing:get_paths(3, 3), { ws .. '/a/nested/deep.txt' },
+      'a second nested redo cycle restores the same path identity')
+
+    vim.cmd('undo')
+    vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
+    vim.cmd('undo')
+    vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
+    H.assert_buf_eq({ 'a/', 'root.txt' }, 0,
+      'undoing both materializations removes only their view rows')
+    vim.cmd('redo')
+    vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
+    H.assert_buf_eq({ 'a/', '  nested/', 'root.txt' }, 0,
+      'the first redo restores the parent materialization only')
+    vim.cmd('redo')
+    vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
+    H.assert_buf_eq({ 'a/', '  nested/', '    deep.txt', 'root.txt' }, 0,
+      'the next redo restores the nested materialization')
+    H.assert_eq(listing:get_paths(2, 3), {
+      ws .. '/a/nested/', ws .. '/a/nested/deep.txt',
+    }, 'multi-materialization replay preserves both original paths')
+
+    local no_op_ok, no_op_err = pcall(vim.cmd, 'write')
+    H.assert_true(no_op_ok, tostring(no_op_err))
+    H.assert_eq(H.fs_snapshot(ws), {
+      'a/', 'a/nested/', 'a/nested/deep.txt', 'root.txt',
+    }, 'a no-op write accepts redone children without filesystem changes')
+
+    vim.api.nvim_buf_set_text(bufnr, 3, 0, 3, #'root.txt', { 'renamed.txt' })
+    local write_ok, write_err = pcall(vim.cmd, 'write')
+    H.assert_true(write_ok, tostring(write_err))
+    H.assert_eq(H.fs_snapshot(ws), {
+      'a/', 'a/nested/', 'a/nested/deep.txt', 'renamed.txt',
+    }, 'a root-only edit never treats redone children as root actions')
+
+    local register = require('direct.register')
+    local original_yank, yanked = register.yank, nil
+    register.yank = function(sources) yanked = vim.deepcopy(sources); return true end
+    local yank_ok, yank_err = pcall(require('direct').yank, 3, 3)
+    register.yank = original_yank
+    H.assert_true(yank_ok, tostring(yank_err))
+    H.assert_eq(yanked, { ws .. '/a/nested/deep.txt' },
+      'yank on the restored deep child uses its exact filesystem path')
+
+    listing:open('    deep.txt')
+    H.assert_true(fs.same_path(vim.api.nvim_buf_get_name(0), ws .. '/a/nested/deep.txt'),
+      'open on the restored deep child resolves the exact filesystem path')
+  end)
+
+  H.it('fails closed when redone child text is tampered before any sync effects', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkdir(ws, 'a')
+    H.mkfile(ws, 'a/inside.txt', { 'inside' })
+    H.mkfile(ws, 'root.txt', { 'root' })
+    route_write_to_test_buffer()
+    local listing = buffer.list(ws)
+    local bufnr = vim.api.nvim_get_current_buf()
+    listing:unfold(1)
+    vim.cmd('undo')
+    vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
+    vim.cmd('redo')
+    vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
+    vim.api.nvim_buf_set_lines(bufnr, 1, 2, false, { 'tampered.txt' })
+
+    local register = require('direct.register')
+    local original_yank, yank_calls = register.yank, 0
+    register.yank = function(...) yank_calls = yank_calls + 1; return original_yank(...) end
+    local yank_call_ok, yank_result = pcall(require('direct').yank, 2, 2)
+    local open_result = listing:open('  tampered.txt')
+    register.yank = original_yank
+    H.assert_true(yank_call_ok, tostring(yank_result))
+    H.assert_nil(yank_result, 'yank rejects text that no longer matches the child identity')
+    H.assert_eq(yank_calls, 0, 'tampered child text does not reach the register')
+    H.assert_nil(open_result, 'open rejects text that no longer matches the child identity')
+
+    local before_fs = H.fs_snapshot(ws)
+    local before_register = register.content()
+    local before_undo, before_redo = history_lines('undo.log'), history_lines('redo.log')
+    local classified, yanked = 0, 0
+    local classify, yank = buffer.classify, register.yank
+    buffer.classify = function(...) classified = classified + 1; return classify(...) end
+    register.yank = function(...) yanked = yanked + 1; return yank(...) end
+
+    local ok, reason = listing:sync()
+
+    buffer.classify, register.yank = classify, yank
+    H.assert_nil(ok, 'tampered redone child text is refused')
+    H.assert_true(type(reason) == 'string' and reason ~= '',
+      'refusal explains why the redone row is unsafe')
+    H.assert_eq(classified, 0, 'tampering stops before root classification')
+    H.assert_eq(yanked, 0, 'tampering stops before register effects')
+    H.assert_eq(H.fs_snapshot(ws), before_fs, 'tampering has no filesystem effects')
+    H.assert_eq(register.content(), before_register, 'tampering leaves register state unchanged')
+    H.assert_eq(history_lines('undo.log'), before_undo, 'tampering writes no undo history')
+    H.assert_eq(history_lines('redo.log'), before_redo, 'tampering writes no redo history')
+  end)
+
+  H.it('does not recover a redo against a changed directory tree snapshot', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local a = H.mkdir(ws, 'a')
+    H.mkfile(a, 'inside.txt', { 'inside' })
+    H.mkfile(ws, 'root.txt', { 'root' })
+    route_write_to_test_buffer()
+    local listing = buffer.list(ws)
+    local bufnr = vim.api.nvim_get_current_buf()
+    listing:unfold(1)
+    vim.cmd('undo')
+    vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
+    H.mkfile(a, 'added-while-undone.txt', { 'new tree state' })
+    vim.cmd('redo')
+    vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
+
+    local before_fs = H.fs_snapshot(ws)
+    local before_register = register.content()
+    local before_undo, before_redo = history_lines('undo.log'), history_lines('redo.log')
+    local classified, yanked = 0, 0
+    local classify, yank = buffer.classify, register.yank
+    buffer.classify = function(...) classified = classified + 1; return classify(...) end
+    register.yank = function(...) yanked = yanked + 1; return yank(...) end
+
+    local yank_call_ok, yank_result = pcall(require('direct').yank, 2, 2)
+    local open_result = listing:open('  inside.txt')
+    H.assert_true(yank_call_ok, tostring(yank_result))
+    H.assert_nil(yank_result, 'ambiguous redo blocks child yanking')
+    H.assert_nil(open_result, 'ambiguous redo blocks child opening')
+    H.assert_eq(yanked, 0, 'ambiguous redo has no register effect')
+
+    local ok, reason = listing:sync()
+
+    buffer.classify, register.yank = classify, yank
+    H.assert_nil(ok, 'redo with a changed directory snapshot is ambiguous and refused')
+    H.assert_true(type(reason) == 'string' and reason ~= '',
+      'the refusal explains why recovery was unsafe')
+    H.assert_eq(classified, 0, 'ambiguous recovery stops before root classification')
+    H.assert_eq(yanked, 0, 'ambiguous recovery stops before register effects')
+    H.assert_eq(H.fs_snapshot(ws), before_fs, 'ambiguous recovery has no filesystem effects')
+    H.assert_eq(register.content(), before_register, 'ambiguous recovery leaves register state unchanged')
+    H.assert_eq(history_lines('undo.log'), before_undo, 'ambiguous recovery writes no undo history')
+    H.assert_eq(history_lines('redo.log'), before_redo, 'ambiguous recovery writes no redo history')
+  end)
+
   H.it('keeps an un-undone child identity and refuses its later tampering', function()
     clean_buffers()
     local sb = H.sandbox()

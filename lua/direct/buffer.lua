@@ -112,6 +112,15 @@ local function row_id_at(bufnr, row)
   return nil
 end
 
+local function refresh_display_ids(bufnr, state)
+  local display_ids = {}
+  for row = 0, vim.api.nvim_buf_line_count(bufnr) - 1 do
+    local id = row_id_at(bufnr, row)
+    if id then display_ids[#display_ids + 1] = id end
+  end
+  state.display_ids = display_ids
+end
+
 local function row_path(root, record, line)
   if not record then return nil end
   if record.kind == 'root' then
@@ -396,6 +405,12 @@ end
 local function children_integrity(bufnr, lines)
   local state = states[bufnr]
   if not state then return lines end
+  local seq_cur = vim.fn.undotree(bufnr).seq_cur
+  for _, materialization in ipairs(state.materialization_recoveries or {}) do
+    if materialization.seq == seq_cur then
+      return nil, 'redone child materialization could not be uniquely restored'
+    end
+  end
   local expected_order, child_count = {}, 0
   for _, id in ipairs(state.display_ids or {}) do
     local rec = state.rows[id]
@@ -404,8 +419,17 @@ local function children_integrity(bufnr, lines)
       child_count = child_count + 1
     end
   end
-  if child_count == 0 then return lines end
-
+  if child_count == 0 then
+    -- Keep ordinary root-only validation semantics, but do not let an extmark
+    -- restored by :redo become an untracked root action after its snapshot was
+    -- rejected or its records were discarded.
+    for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1, {})) do
+      if not state.rows[mark[1]] then
+        return nil, 'child identity marks are invalid or duplicated'
+      end
+    end
+    return lines
+  end
   local mark_rows, seen_id, seen_row, invalid_child_ids = {}, {}, {}, {}
   for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1,
       { details = true })) do
@@ -615,12 +639,104 @@ local function children_integrity(bufnr, lines)
   return root_lines
 end
 
+local function same_lines(actual, expected)
+  if #actual ~= #expected then return false end
+  for index, line in ipairs(expected) do
+    if actual[index] ~= line then return false end
+  end
+  return true
+end
+
+-- Restore one undone view insertion only when the undo-tree sequence, parent
+-- extmark, parent path, complete list-time directory snapshot, child identities,
+-- and exact rendered rows all agree with the original materialization.
+local function restore_redone_materialization(bufnr, state, materialization, lines)
+  local parent = state.rows[materialization.parent_id]
+  if not parent or state.expanded[parent.id] then return false end
+  local parent_row
+  for row = 0, #lines - 1 do
+    if row_id_at(bufnr, row) == parent.id then
+      parent_row = row
+      break
+    end
+  end
+  if parent_row == nil or lines[parent_row + 1] ~= parent.text then return false end
+  if type(parent.path) ~= 'string'
+    or vim.fs.normalize(parent.path) ~= vim.fs.normalize(materialization.parent_path)
+    or not fs.path_identities_match(path_identity(parent.path), materialization.parent_identity) then
+    return false
+  end
+
+  local listed = M.read(parent.path,
+    M.ignore_set(parent.path, materialization.wildignore or ''))
+  if not listed or not same_lines(listed, materialization.listing_lines or {}) then
+    return false
+  end
+
+  local children = vim.deepcopy(materialization.children_snapshot or {})
+  local child_ids, expected_rows = {}, {}
+  local previous_order = 0
+  for offset, child in ipairs(children) do
+    local expected_path = M.entry_path(parent.path, child.name)
+    local expected_row = parent_row + offset
+    if child.kind ~= 'child' or child.parent ~= parent.id
+      or type(child.order) ~= 'number' or child.order <= previous_order
+      or child.depth ~= (parent.depth or 0) + 1
+      or child.path ~= expected_path
+      or child.text ~= string.rep('  ', child.depth) .. child.name
+      or lines[expected_row + 1] ~= child.text
+      or not child.identity
+      or not fs.path_identities_match(path_identity(child.path), child.identity)
+      or child_ids[child.id] then
+      return false
+    end
+    previous_order = child.order
+    child_ids[child.id] = true
+    expected_rows[child.id] = expected_row
+  end
+
+  -- The original IDs may have been removed from the namespace during undo
+  -- reconciliation. Any surviving marks must still be unique and in the exact
+  -- rows implied by this materialization; no row is adopted by spelling alone.
+  local seen_ids, seen_rows = {}, {}
+  for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1,
+      { details = true })) do
+    local id, row, details = mark[1], mark[2], mark[4] or {}
+    if seen_ids[id] then return false end
+    seen_ids[id] = true
+    if not details.invalid then
+      if seen_rows[row] then return false end
+      seen_rows[row] = id
+      if child_ids[id] and row ~= expected_rows[id] then return false end
+      if row >= parent_row + 1 and row <= parent_row + #children
+        and not child_ids[id] then return false end
+    end
+  end
+
+  for _, child in ipairs(children) do
+    child.kind, child.parent = 'child', parent.id
+    state.rows[child.id] = child
+  end
+  state.expanded[parent.id] = { children = children }
+  for _, child in ipairs(children) do
+    local ok = pcall(set_row_mark, bufnr, expected_rows[child.id], child.id)
+    if not ok then
+      state.expanded[parent.id] = nil
+      for _, restored in ipairs(children) do state.rows[restored.id] = nil end
+      return false
+    end
+  end
+  refresh_display_ids(bufnr, state)
+  return true
+end
+
 -- If undo returns exactly to the sequence that preceded a view materialization,
 -- Neovim has removed that insertion block. Reconcile only when each surviving
 -- child still has its original identity and text. Root rows may have changed;
 -- children_integrity() continues to protect any surviving materialized subtree.
 reconcile_undone_materialization = function(bufnr)
   local state = states[bufnr]
+  if not state then return false end
   local undos = state and state.materialization_undos or {}
   local undo_tree = vim.fn.undotree(bufnr)
   local seq_cur = undo_tree.seq_cur
@@ -654,6 +770,30 @@ reconcile_undone_materialization = function(bufnr)
       if entry.seq == seq_cur then current_path = true end
     end
   end
+
+  -- A redo returns to the materialization's original undo node. Its child
+  -- records were intentionally removed while the insertion was undone, so
+  -- restore them from the retained snapshot only at that exact sequence.
+  local recovery, recovery_index, recovery_count
+  recovery_count = 0
+  for index, materialization in ipairs(state.materialization_recoveries or {}) do
+    if materialization.seq == seq_cur and active[materialization.seq] then
+      recovery, recovery_index = materialization, index
+      recovery_count = recovery_count + 1
+    end
+  end
+  if recovery_count > 0 then
+    if recovery_count ~= 1 then return false end
+    local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    if not restore_redone_materialization(bufnr, state, recovery, lines) then
+      return false
+    end
+    table.remove(state.materialization_recoveries, recovery_index)
+    state.materialization_undos[#state.materialization_undos + 1] = recovery
+    state.materialization_seq = seq_cur
+    return true
+  end
+
   for index, materialization in ipairs(undos) do
     local returned_to_base = materialization.base_seq == seq_cur
     local branched_from_base = (materialization.base_seq == 0
@@ -734,7 +874,11 @@ reconcile_undone_materialization = function(bufnr)
     end
   end
   for index = #undos, prune_from, -1 do
+    local materialization = undos[index]
     forget_subtree(undos[index].parent_id)
+    state.materialization_recoveries = state.materialization_recoveries or {}
+    state.materialization_recoveries[#state.materialization_recoveries + 1] =
+      vim.deepcopy(materialization)
     undos[index] = nil
   end
 
@@ -990,6 +1134,8 @@ function Buffer:list()
     display_ids = {},
     fold_windows = old_state and old_state.fold_windows or {},
     materialization_undos = {},
+    materialization_recoveries = old_state
+      and vim.deepcopy(old_state.materialization_recoveries or {}) or {},
   }
   local roots = {}
   local used_root = {}
@@ -1113,7 +1259,7 @@ function Buffer:unfold(row)
           id = next_id(state), kind = 'child', name = child_name,
           text = string.rep('  ', (rec.depth or 0) + 1) .. child_name,
           parent = rec.id, order = order, depth = (rec.depth or 0) + 1,
-          path = child_path,
+          path = child_path, identity = path_identity(child_path),
         }
       else
         ui.notify('direct: skipping unlistable entry (' .. reason .. '): '
@@ -1165,6 +1311,11 @@ function Buffer:unfold(row)
           child_ids = child_ids,
           base_seq = base_seq,
           seq = state.materialization_seq,
+          parent_path = path,
+          parent_identity = path_identity(path),
+          listing_lines = vim.deepcopy(children),
+          wildignore = snapshot.wildignore or '',
+          children_snapshot = vim.deepcopy(materialized),
         }
         state.materialization_undos = state.materialization_undos or {}
         state.materialization_undos[#state.materialization_undos + 1] = materialization
