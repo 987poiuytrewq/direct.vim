@@ -73,8 +73,8 @@ H.describe('buffer: listing', function()
       H.assert_eq(calls, 1, 'repeat expansion does not re-read')
       H.assert_eq(vim.api.nvim_buf_line_count(0), 4, 'repeat expansion does not duplicate')
       H.assert_eq(vim.api.nvim_win_get_cursor(0)[1], 1, 'cursor stays on the directory')
-      H.assert_eq(vim.fn.undotree().seq_cur, before.seq_cur,
-        'expansion does not add an undo entry')
+      H.assert_eq(vim.fn.undotree().seq_cur, before.seq_cur + 1,
+        'expansion starts its own undo block after the prior change')
     end)
     buffer.read = read
     if not ok then error(err) end

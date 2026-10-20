@@ -135,7 +135,10 @@ before classifier actions, filesystem changes, auto-yank, register, or history
 effects. Keep child rows exactly as materialized. If text undo invalidates child
 identity marks, they are recovered only when the complete displayed subtree
 still matches its captured lines, owner, order, and count exactly; any mismatch
-or ambiguous association still refuses the save. Directory indentation is
+or ambiguous association still refuses the save. Unfolding is a separate text-
+undo block: `:undo` removes the most recent materialization without undoing an
+unrelated prior root edit. The removed child identities are discarded, and the
+next save synchronizes the surviving root rows. Directory indentation is
 presentation only; `>>` and `<<` do not enable move synchronization.
 
 A root file rename or other root-file change remains available while its child

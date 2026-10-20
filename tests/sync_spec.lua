@@ -12,6 +12,15 @@ local function clean_buffers()
   pcall(vim.cmd, '%bwipeout!')
 end
 
+-- The harness reloads direct.* after loading each spec. Make the :write command
+-- facade share this spec's captured buffer module so the command exercises the
+-- same row-state registry as the test's listing.
+local function route_write_to_test_buffer()
+  package.loaded['direct.buffer'] = buffer
+  package.loaded['direct'] = nil
+  require('direct')
+end
+
 -- history_lines(name) -> the lines of history/<name>, {} when absent.
 local function history_lines(name)
   local dir = paths.data_dir('history')
@@ -207,6 +216,408 @@ H.describe('sync: applying actions', function()
 end)
 
 H.describe('sync with unfolded children (Phase 1)', function()
+  H.it('writes a root creation after undoing an unfold without classifying children', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkdir(ws, 'sub')
+    H.mkfile(ws, 'sub/inside.txt', { 'inside' })
+    route_write_to_test_buffer()
+    local listing = buffer.list(ws)
+    listing:unfold(1)
+    vim.cmd('undo')
+    vim.api.nvim_buf_set_lines(0, -1, -1, false, { 'new.txt' })
+
+    local classified, classify = nil, buffer.classify
+    buffer.classify = function(actual, expected)
+      classified = { vim.deepcopy(actual), vim.deepcopy(expected) }
+      return classify(actual, expected)
+    end
+    local called, err = pcall(vim.cmd, 'write')
+    buffer.classify = classify
+
+    H.assert_true(called, tostring(err))
+    H.assert_eq(classified, { { 'sub/', 'new.txt' }, { 'sub/' } },
+      'the root classifier sees only root rows')
+    H.assert_eq(H.fs_snapshot(ws), { 'new.txt', 'sub/', 'sub/inside.txt' },
+      'only the new root file is created')
+    H.assert_eq(listing:get_paths(1, 2), { ws .. '/sub/', ws .. '/new.txt' },
+      'the saved listing contains roots only')
+  end)
+
+  H.it('applies root deletion after undoing an unfold only after child preflight', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkdir(ws, 'sub')
+    H.mkfile(ws, 'root.txt', { 'root' })
+    H.mkfile(ws, 'sub/inside.txt', { 'inside' })
+    route_write_to_test_buffer()
+    local listing = buffer.list(ws)
+    listing:unfold(1)
+    vim.cmd('undo')
+    vim.api.nvim_buf_set_lines(0, 1, 2, false, {})
+
+    local classified, classify = nil, buffer.classify
+    buffer.classify = function(actual, expected)
+      classified = { vim.deepcopy(actual), vim.deepcopy(expected) }
+      return classify(actual, expected)
+    end
+    local called, err = pcall(vim.cmd, 'write')
+    buffer.classify = classify
+
+    H.assert_true(called, tostring(err))
+    H.assert_eq(classified, { { 'sub/' }, { 'sub/', 'root.txt' } },
+      'the root classifier sees only root rows')
+    H.assert_eq(H.fs_snapshot(ws), { 'sub/', 'sub/inside.txt' },
+      'only the deleted root file is removed')
+    local content = register.content()
+    H.assert_not_nil(content, 'legacy root deletion auto-yanks after preflight')
+    H.assert_eq(vim.fn.readfile(content .. '/root.txt'), { 'root' },
+      'the root file is the only auto-yanked entry')
+    local undo = history_lines('undo.log')
+    H.assert_eq(#undo, 2, 'only one root deletion is recorded in history')
+    H.assert_true(undo[2]:find('rm\t' .. ws .. '/root.txt\t', 1, true) == 1,
+      'the history action is the root deletion')
+  end)
+
+  H.it('refuses child tampering on an undo branch before classifier or side effects', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkdir(ws, 'a')
+    H.mkdir(ws, 'b')
+    H.mkfile(ws, 'root.txt', { 'root' })
+    H.mkfile(ws, 'a/inside-a.txt', { 'a' })
+    H.mkfile(ws, 'b/inside-b.txt', { 'b' })
+    route_write_to_test_buffer()
+    local listing = buffer.list(ws)
+    listing:unfold(1)
+    listing:unfold(3)
+    vim.cmd('undo')
+    vim.api.nvim_buf_set_lines(0, -1, -1, false, { 'new.txt' })
+    vim.api.nvim_buf_set_lines(0, 1, 2, false, { '  tampered-a.txt' })
+    local before_fs = H.fs_snapshot(ws)
+    local before_register = register.content()
+    local before_undo = history_lines('undo.log')
+    local before_redo = history_lines('redo.log')
+    local classified, yanked = 0, 0
+    local classify, yank = buffer.classify, register.yank
+    buffer.classify = function(...) classified = classified + 1; return classify(...) end
+    register.yank = function(...) yanked = yanked + 1; return yank(...) end
+
+    local ok, reason = listing:sync()
+
+    buffer.classify, register.yank = classify, yank
+    H.assert_nil(ok, 'tampered child is refused')
+    H.assert_true(tostring(reason):find('child', 1, true) ~= nil,
+      'refusal reports child integrity')
+    H.assert_eq(classified, 0, 'child validation stops before root classification')
+    H.assert_eq(yanked, 0, 'child validation stops before auto-yank')
+    H.assert_eq(H.fs_snapshot(ws), before_fs, 'the filesystem is unchanged')
+    H.assert_eq(register.content(), before_register, 'the register is unchanged')
+    H.assert_eq(history_lines('undo.log'), before_undo, 'undo history is unchanged')
+    H.assert_eq(history_lines('redo.log'), before_redo, 'redo history is unchanged')
+  end)
+
+  H.it('refuses a lost surviving child identity on an undo branch before side effects', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkdir(ws, 'a')
+    H.mkdir(ws, 'b')
+    H.mkfile(ws, 'a/inside-a.txt', { 'a' })
+    H.mkfile(ws, 'b/inside-b.txt', { 'b' })
+    route_write_to_test_buffer()
+    local listing = buffer.list(ws)
+    listing:unfold(1)
+    listing:unfold(3)
+    vim.cmd('undo')
+    vim.api.nvim_buf_set_lines(0, -1, -1, false, { 'new.txt' })
+    local bufnr = vim.api.nvim_get_current_buf()
+    local state = buffer._state_for_test(bufnr)
+    local child_id = state.expanded[state.root_ids[1]].children[1].id
+    local namespace = vim.api.nvim_get_namespaces()['direct-listing-rows']
+    H.assert_true(vim.api.nvim_buf_del_extmark(bufnr, namespace, child_id),
+      'the surviving child identity is removed')
+    local before_fs = H.fs_snapshot(ws)
+    local before_register = register.content()
+    local before_undo = history_lines('undo.log')
+    local before_redo = history_lines('redo.log')
+    local classified, yanked = 0, 0
+    local classify, yank = buffer.classify, register.yank
+    buffer.classify = function(...) classified = classified + 1; return classify(...) end
+    register.yank = function(...) yanked = yanked + 1; return yank(...) end
+
+    local ok, reason = listing:sync()
+
+    buffer.classify, register.yank = classify, yank
+    H.assert_nil(ok, 'missing surviving child identity is refused')
+    H.assert_true(tostring(reason):find('child', 1, true) ~= nil
+      or tostring(reason):find('identity', 1, true) ~= nil, tostring(reason))
+    H.assert_eq(classified, 0, 'lost child identity stops before root classification')
+    H.assert_eq(yanked, 0, 'lost child identity stops before auto-yank')
+    H.assert_eq(H.fs_snapshot(ws), before_fs, 'the filesystem is unchanged')
+    H.assert_eq(register.content(), before_register, 'the register is unchanged')
+    H.assert_eq(history_lines('undo.log'), before_undo, 'undo history is unchanged')
+    H.assert_eq(history_lines('redo.log'), before_redo, 'redo history is unchanged')
+  end)
+
+  H.it('refuses an indented child-shaped row after undo before root classification', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkdir(ws, 'sub')
+    H.mkfile(ws, 'sub/inside.txt', { 'inside' })
+    route_write_to_test_buffer()
+    local listing = buffer.list(ws)
+    listing:unfold(1)
+    vim.cmd('undo')
+    vim.api.nvim_buf_set_lines(0, -1, -1, false, { '  child-like.txt' })
+    local before_fs = H.fs_snapshot(ws)
+    local classified, classify = 0, buffer.classify
+    buffer.classify = function(...) classified = classified + 1; return classify(...) end
+
+    local ok, reason = listing:sync()
+
+    buffer.classify = classify
+    H.assert_nil(ok, 'an indented unmarked row is not accepted as a root')
+    H.assert_true(tostring(reason):find('child', 1, true) ~= nil,
+      'refusal reports child contamination')
+    H.assert_eq(classified, 0, 'child-shaped contamination stops before classification')
+    H.assert_eq(H.fs_snapshot(ws), before_fs, 'the filesystem is unchanged')
+  end)
+
+  H.it('writes a root rename after undoing an unfold', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkdir(ws, 'sub')
+    H.mkfile(ws, 'root.txt', { 'root' })
+    H.mkfile(ws, 'sub/inside.txt', { 'inside' })
+    route_write_to_test_buffer()
+    local listing = buffer.list(ws)
+    listing:unfold(1)
+    vim.cmd('undo')
+    H.assert_buf_eq({ 'sub/', 'root.txt' }, 0,
+      'undo removes the materialized child while retaining root rows')
+    vim.api.nvim_win_set_cursor(0, { 2, 0 })
+    vim.api.nvim_feedkeys('ccrenamed.txt\27', 'xt', false)
+
+    local called, err = pcall(vim.cmd, 'write')
+
+    H.assert_true(called, tostring(err))
+    H.assert_buf_eq({ 'sub/', 'renamed.txt' }, 0,
+      'successful write keeps only the root rows')
+    H.assert_false(vim.bo.modified, 'successful write clears modified state')
+    H.assert_eq(H.fs_snapshot(ws), { 'renamed.txt', 'sub/', 'sub/inside.txt' },
+      'write applies the root rename and no child filesystem action')
+    H.assert_eq(listing:get_paths(1, 2), { ws .. '/sub/', ws .. '/renamed.txt' },
+      'the saved rows resolve as roots, not stale child rows')
+  end)
+
+  H.it('keeps an un-undone child identity and refuses its later tampering', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkdir(ws, 'a')
+    H.mkdir(ws, 'b')
+    H.mkfile(ws, 'root.txt', { 'root' })
+    H.mkfile(ws, 'a/inside-a.txt', { 'a' })
+    H.mkfile(ws, 'b/inside-b.txt', { 'b' })
+    route_write_to_test_buffer()
+    local listing = buffer.list(ws)
+    local bufnr = vim.api.nvim_get_current_buf()
+    local state = buffer._state_for_test(bufnr)
+
+    listing:unfold(1)
+    local a_id = state.expanded[state.root_ids[1]].children[1].id
+    listing:unfold(3)
+    vim.cmd('undo')
+    H.assert_buf_eq({ 'a/', '  inside-a.txt', 'b/', 'root.txt' }, 0,
+      'undo removes only the latest b materialization')
+
+    vim.api.nvim_win_set_cursor(0, { 4, 0 })
+    vim.api.nvim_feedkeys('ccrenamed.txt\27', 'xt', false)
+    vim.api.nvim_buf_set_lines(bufnr, 1, 2, false, { '  tampered.txt' })
+    local before = H.fs_snapshot(ws)
+
+    local synced, reason = listing:sync()
+
+    H.assert_nil(synced, 'tampered surviving child is refused')
+    H.assert_true(type(reason) == 'string' and reason:find('child', 1, true) ~= nil,
+      'refusal identifies child integrity as the reason')
+    H.assert_eq(state.expanded[state.root_ids[1]].children[1].id, a_id,
+      'the still-visible a child keeps its original identity')
+    H.assert_eq(H.fs_snapshot(ws), before,
+      'tampering refusal occurs before any filesystem action')
+  end)
+
+  H.it('writes only root changes when undo removes one of multiple materializations', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkdir(ws, 'a')
+    H.mkdir(ws, 'b')
+    H.mkfile(ws, 'root.txt', { 'root' })
+    H.mkfile(ws, 'a/inside-a.txt', { 'a' })
+    H.mkfile(ws, 'b/inside-b.txt', { 'b' })
+    route_write_to_test_buffer()
+    local listing = buffer.list(ws)
+    local state = buffer._state_for_test(vim.api.nvim_get_current_buf())
+
+    listing:unfold(1)
+    local a_id = state.expanded[state.root_ids[1]].children[1].id
+    listing:unfold(3)
+    vim.cmd('undo')
+    vim.api.nvim_win_set_cursor(0, { 4, 0 })
+    vim.api.nvim_feedkeys('ccrenamed.txt\27', 'xt', false)
+    H.assert_eq(state.expanded[state.root_ids[1]].children[1].id, a_id,
+      'the materialization not undone retains its child identity before save')
+
+    local called, err = pcall(vim.cmd, 'write')
+
+    H.assert_true(called, tostring(err))
+    H.assert_eq(H.fs_snapshot(ws), {
+      'a/', 'a/inside-a.txt', 'b/', 'b/inside-b.txt', 'renamed.txt',
+    }, 'write applies only the root rename and no child row as a root action')
+  end)
+
+  H.it('undo after unfolding keeps a prior root rename and write reconciles the view', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkdir(ws, 'sub')
+    H.mkfile(ws, 'root.txt', { 'root' })
+    H.mkfile(ws, 'sub/inside.txt', { 'inside' })
+    route_write_to_test_buffer()
+    local listing = buffer.list(ws)
+    local bufnr = vim.api.nvim_get_current_buf()
+    local state = buffer._state_for_test(bufnr)
+    local root_id = state.root_ids[1]
+    local before = H.fs_snapshot(ws)
+
+    vim.api.nvim_win_set_cursor(0, { 2, 0 })
+    vim.api.nvim_feedkeys('ccrenamed.txt\27', 'xt', false)
+    listing:unfold(1)
+    H.assert_buf_eq({ 'sub/', '  inside.txt', 'renamed.txt' }, 0,
+      'the unrelated directory is unfolded after the root rename')
+    H.assert_eq(H.fs_snapshot(ws), before, 'editing and unfolding are view/buffer only')
+
+    vim.cmd('undo')
+
+    H.assert_buf_eq({ 'sub/', 'renamed.txt' }, 0,
+      'undo removes only the materialized child rows, not the earlier rename')
+    H.assert_eq(H.fs_snapshot(ws), before, 'undo has no filesystem effects')
+    local called, err = pcall(vim.cmd, 'write')
+
+    H.assert_true(called, tostring(err))
+    H.assert_buf_eq({ 'sub/', 'renamed.txt' }, 0,
+      'write keeps the coherent root-only view after materialization undo')
+    H.assert_false(vim.bo.modified, 'successful write clears modified state')
+    H.assert_eq(H.fs_snapshot(ws), { 'renamed.txt', 'sub/', 'sub/inside.txt' },
+      "write applies only the user's root rename")
+    state = buffer._state_for_test(vim.api.nvim_get_current_buf())
+    H.assert_eq(listing:get_paths(1, 2), { ws .. '/sub/', ws .. '/renamed.txt' },
+      'the surviving rows resolve as roots, not stale children')
+    H.assert_nil(state.expanded[root_id], 'undone materialization is removed from saved state')
+    H.assert_eq(#state.display_ids, #state.root_ids,
+      'saved display identities contain roots only after reconciliation')
+  end)
+
+  H.it('undo without unfolding still reverses a root filename edit', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkfile(ws, 'root.txt', { 'root' })
+    local listing = buffer.list(ws)
+
+    vim.api.nvim_win_set_cursor(0, { 1, 0 })
+    vim.api.nvim_feedkeys('ccrenamed.txt\27', 'xt', false)
+    vim.cmd('undo')
+
+    H.assert_buf_eq({ 'root.txt' }, 0, 'ordinary undo restores the root filename')
+    H.assert_true(listing:sync() == true, 'write/sync remains valid after ordinary undo')
+    H.assert_fs_eq(ws, { 'root.txt' }, 'ordinary undo causes no filesystem action')
+  end)
+
+  H.it('repeated unfold and undo keeps child rows and identities coherent on write', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkdir(ws, 'sub')
+    H.mkfile(ws, 'sub/inside.txt', { 'inside' })
+    route_write_to_test_buffer()
+    local listing = buffer.list(ws)
+    local bufnr = vim.api.nvim_get_current_buf()
+    local state = buffer._state_for_test(bufnr)
+    local root_id = state.root_ids[1]
+    local first_child_id
+
+    for iteration = 1, 2 do
+      listing:unfold(1)
+      H.assert_buf_eq({ 'sub/', '  inside.txt' }, 0,
+        'each unfold materializes exactly one child row')
+      local child_id = state.expanded[root_id].children[1].id
+      if iteration == 1 then
+        first_child_id = child_id
+      else
+        H.assert_true(child_id ~= first_child_id,
+          'repeated unfolding creates a fresh child identity after undo')
+      end
+      vim.cmd('undo')
+      H.assert_buf_eq({ 'sub/' }, 0, 'undo removes that unfold independently')
+      H.assert_fs_eq(ws, { 'sub/', 'sub/inside.txt' },
+        'view undo and write do not change filesystem entries')
+    end
+
+    local ok, err = pcall(vim.cmd, 'write')
+    H.assert_true(ok, tostring(err))
+    H.assert_buf_eq({ 'sub/' }, 0, 'write keeps the root-only view coherent')
+    state = buffer._state_for_test(vim.api.nvim_get_current_buf())
+    H.assert_eq(#state.display_ids, #state.root_ids,
+      'saved identities contain roots only after undo reconciliation')
+    H.assert_fs_eq(ws, { 'sub/', 'sub/inside.txt' },
+      'writing after repeated view undo does not change filesystem entries')
+    H.assert_eq(listing:get_paths(1, 1), { ws .. '/sub/' },
+      'the remaining row retains its root path identity')
+    H.assert_nil(state.expanded[root_id], 'no abandoned expansion remains')
+  end)
+
+  H.it('undoes multiple independent materializations in order without stale child state', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkdir(ws, 'a')
+    H.mkdir(ws, 'b')
+    H.mkfile(ws, 'a/inside-a.txt', { 'a' })
+    H.mkfile(ws, 'b/inside-b.txt', { 'b' })
+    route_write_to_test_buffer()
+    local listing = buffer.list(ws)
+
+    listing:unfold(1)
+    listing:unfold(3)
+    H.assert_buf_eq({ 'a/', '  inside-a.txt', 'b/', '  inside-b.txt' }, 0,
+      'each directory has an independent materialization')
+    vim.cmd('undo')
+    H.assert_buf_eq({ 'a/', '  inside-a.txt', 'b/' }, 0,
+      'the first undo removes only the most recent directory children')
+    vim.cmd('undo')
+    H.assert_buf_eq({ 'a/', 'b/' }, 0,
+      'the next undo removes the earlier materialization')
+    H.assert_fs_eq(ws, { 'a/', 'a/inside-a.txt', 'b/', 'b/inside-b.txt' },
+      'view undo has no filesystem effects')
+
+    local called, err = pcall(vim.cmd, 'write')
+    H.assert_true(called, tostring(err))
+    H.assert_buf_eq({ 'a/', 'b/' }, 0, 'write retains the coherent root listing')
+    local state = buffer._state_for_test(vim.api.nvim_get_current_buf())
+    H.assert_eq(#state.display_ids, #state.root_ids,
+      'all undone child identities are removed from saved display state')
+    H.assert_eq(H.fs_snapshot(ws), { 'a/', 'a/inside-a.txt', 'b/', 'b/inside-b.txt' },
+      'write does not interpret view rows as filesystem edits')
+  end)
+
   H.it('syncs a root file rename while clean child baselines are loaded', function()
     clean_buffers()
     local sb = H.sandbox()

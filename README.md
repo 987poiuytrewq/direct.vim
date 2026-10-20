@@ -120,6 +120,10 @@ before classifier actions, filesystem changes, auto-yank, register, or history
 effects. Keep child rows exactly as materialized. Directory indentation is
 presentation only; `>>` and `<<` do not enable move synchronization.
 
+Unfolding has its own text-undo block. `:undo` removes the latest materialized
+child rows without undoing an unrelated earlier root edit; the next save
+synchronizes the surviving root rows.
+
 A root file rename or other root-file change remains available while its child
 rows are unfolded. A root directory with loaded descendants cannot be renamed
 or deleted in that buffer; collapsing is visual only. Close/wipe and reopen the

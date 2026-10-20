@@ -16,6 +16,7 @@ local history = require('direct.history')
 local register = require('direct.register')
 local ui = require('direct.ui')
 local highlight = require('direct.highlight')
+local reconcile_undone_materialization
 
 local Buffer = {}
 Buffer.__index = Buffer
@@ -556,6 +557,140 @@ local function children_integrity(bufnr, lines)
   return root_lines
 end
 
+-- If undo returns exactly to the sequence that preceded a view materialization,
+-- Neovim has removed that insertion block. Reconcile only when each surviving
+-- child still has its original identity and text. Root rows may have changed;
+-- children_integrity() continues to protect any surviving materialized subtree.
+reconcile_undone_materialization = function(bufnr)
+  local state = states[bufnr]
+  local undos = state and state.materialization_undos or {}
+  local undo_tree = vim.fn.undotree(bufnr)
+  local seq_cur = undo_tree.seq_cur
+  local prune_from
+
+  -- TextChanged is not guaranteed to run between `:undo` and the next edit.
+  -- When that edit creates a new branch, the materialization sequence remains
+  -- under an `alt` branch in undotree(), while the new root edit becomes the
+  -- active head.  Recognize that transition as well as the exact baseline
+  -- sequence; only consider it when the materialization's base remains on the
+  -- active path and the materialization itself is now on an alternate path.
+  local active, alternate = {}, {}
+  local function collect_alternates(entries)
+    local pending = {}
+    for _, entry in ipairs(entries or {}) do pending[#pending + 1] = entry end
+    while #pending > 0 do
+      local entry = table.remove(pending)
+      alternate[entry.seq] = true
+      for _, alt in ipairs(entry.alt or {}) do
+        pending[#pending + 1] = alt
+      end
+    end
+  end
+  local current_path = false
+  for _, entry in ipairs(undo_tree.entries or {}) do
+    if current_path then
+      collect_alternates({ entry })
+    else
+      active[entry.seq] = true
+      collect_alternates(entry.alt)
+      if entry.seq == seq_cur then current_path = true end
+    end
+  end
+  for index, materialization in ipairs(undos) do
+    local returned_to_base = materialization.base_seq == seq_cur
+    local branched_from_base = (materialization.base_seq == 0
+        or active[materialization.base_seq])
+      and not active[materialization.seq]
+      and alternate[materialization.seq]
+    if returned_to_base or branched_from_base then
+      prune_from = index
+      break
+    end
+  end
+  if not prune_from then return false end
+
+  local removed_ids = {}
+  local function mark_removed_subtree(parent_id)
+    local expansion = state.expanded[parent_id]
+    if not expansion then return end
+    for _, child in ipairs(expansion.children) do
+      if not removed_ids[child.id] then
+        removed_ids[child.id] = true
+        mark_removed_subtree(child.id)
+      end
+    end
+  end
+  for index = prune_from, #undos do
+    mark_removed_subtree(undos[index].parent_id)
+  end
+  local expected_ids = {}
+  for _, id in ipairs(state.display_ids or {}) do
+    if not removed_ids[id] then expected_ids[#expected_ids + 1] = id end
+  end
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local expected_children, found_children = {}, {}
+  for _, id in ipairs(expected_ids) do
+    local rec = state.rows[id]
+    if not rec then return false end
+    if rec.kind == 'child' then expected_children[id] = rec end
+  end
+  local marks, seen_ids, seen_rows = {}, {}, {}
+  for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1,
+      { details = true })) do
+    local id, row, details = mark[1], mark[2], mark[4] or {}
+    local rec = state.rows[id]
+    if not rec or seen_ids[id] then return false end
+    seen_ids[id] = true
+    if rec.kind == 'child' then
+      if removed_ids[id] then
+        if not details.invalid then return false end
+      elseif not expected_children[id] or details.invalid then
+        return false
+      else
+        if lines[row + 1] ~= rec.text or seen_rows[row] then return false end
+        found_children[id] = row
+        seen_rows[row] = true
+      end
+    elseif not details.invalid then
+      if seen_rows[row] then return false end
+      seen_rows[row] = true
+      marks[#marks + 1] = { row = row, id = id }
+    end
+  end
+  for id in pairs(expected_children) do
+    if found_children[id] == nil then return false end
+  end
+  local child_rows = {}
+  for id, row in pairs(found_children) do child_rows[row] = id end
+  for row, line in ipairs(lines) do
+    if not child_rows[row - 1] and line:match('^%s') then return false end
+  end
+
+  local function forget_subtree(parent_id)
+    local expansion = state.expanded[parent_id]
+    if not expansion then return end
+    state.expanded[parent_id] = nil
+    for _, child in ipairs(expansion.children) do
+      forget_subtree(child.id)
+      state.rows[child.id] = nil
+    end
+  end
+  for index = #undos, prune_from, -1 do
+    forget_subtree(undos[index].parent_id)
+    undos[index] = nil
+  end
+
+  -- Undo may leave invalid extmarks for deleted child lines. Rebuild the marks
+  -- from the verified surviving row identities so no stale child identity can
+  -- poison a later root-only sync.
+  vim.api.nvim_buf_clear_namespace(bufnr, namespace, 0, -1)
+  for _, mark in ipairs(marks) do set_row_mark(bufnr, mark.row, mark.id) end
+  for id, row in pairs(found_children) do set_row_mark(bufnr, row, id) end
+  state.display_ids = expected_ids
+  state.materialization_seq = seq_cur
+  return true
+end
+
 local function blocks_loaded_directory(bufnr, plan)
   local state = states[bufnr]
   if not state then return nil end
@@ -635,6 +770,12 @@ local function set_options(bufnr)
     buffer = bufnr,
     callback = function() install_fold_options(bufnr) end,
     desc = 'direct: configure listing folds in each window',
+  })
+  vim.api.nvim_create_autocmd('TextChanged', {
+    group = group,
+    buffer = bufnr,
+    callback = function() reconcile_undone_materialization(bufnr) end,
+    desc = 'direct: reconcile child rows when undo removes a materialization',
   })
   vim.keymap.set('n', 'zo', function() M.fold_open(false) end,
     { buffer = bufnr, silent = true, desc = 'Unfold one direct directory level' })
@@ -773,6 +914,7 @@ function Buffer:list()
     next_id = old_state and old_state.next_id or 0,
     display_ids = {},
     fold_windows = old_state and old_state.fold_windows or {},
+    materialization_undos = {},
   }
   local roots = {}
   local used_root = {}
@@ -871,6 +1013,7 @@ end
 
 function Buffer:unfold(row)
   local bufnr = vim.api.nvim_get_current_buf()
+  reconcile_undone_materialization(bufnr)
   row = row or vim.api.nvim_win_get_cursor(0)[1]
   local rec = current_row_record(bufnr, row - 1)
   local line = vim.api.nvim_buf_get_lines(bufnr, row - 1, row, false)[1]
@@ -913,9 +1056,20 @@ function Buffer:unfold(row)
         add[#add + 1] = child.text
         state.rows[child.id] = child
       end
-      -- Fold rows are presentation state. Join the insertion to the current
-      -- undo block instead of making expansion a separate user undo step.
-      pcall(vim.cmd, 'silent! undojoin')
+      -- A view insertion must not join the preceding user edit. Setting the
+      -- buffer's existing undolevels value closes the current block without
+      -- changing undo depth (Neovim :help undo-blocks); the insertion then has
+      -- its own undo sequence, while text undo remains enabled.
+      local undo_levels = vim.bo[bufnr].undolevels
+      local base_seq = vim.fn.undotree().seq_cur
+      if undo_levels == -123456 then
+        -- Neovim reports this sentinel when the buffer inherits the global
+        -- option; writing the global value to itself closes the current block
+        -- without pinning a buffer-local override.
+        vim.go.undolevels = vim.go.undolevels
+      elseif undo_levels >= 0 then
+        vim.bo[bufnr].undolevels = undo_levels
+      end
       vim.api.nvim_buf_set_lines(bufnr, insert_at, insert_at, false, add)
       for offset, child in ipairs(materialized) do
         set_row_mark(bufnr, insert_at + offset - 1, child.id)
@@ -927,6 +1081,20 @@ function Buffer:unfold(row)
       end
       highlight.render(bufnr)
       state.materialization_seq = vim.fn.undotree().seq_cur
+      if state.materialization_seq ~= base_seq then
+        local child_ids = {}
+        for _, child in ipairs(materialized) do
+          child_ids[#child_ids + 1] = child.id
+        end
+        local materialization = {
+          parent_id = rec.id,
+          child_ids = child_ids,
+          base_seq = base_seq,
+          seq = state.materialization_seq,
+        }
+        state.materialization_undos = state.materialization_undos or {}
+        state.materialization_undos[#state.materialization_undos + 1] = materialization
+      end
       vim.bo[bufnr].modified = modified
       pcall(vim.api.nvim_win_set_cursor, 0, cursor)
     end
@@ -1019,6 +1187,7 @@ end
 -- (ambiguous, an unsafe path, a refused yank, or an unreadable root).
 function Buffer:sync()
   local bufnr = vim.api.nvim_get_current_buf()
+  reconcile_undone_materialization(bufnr)
   local visible = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local actual, child_err = children_integrity(bufnr, visible)
   if not actual then
