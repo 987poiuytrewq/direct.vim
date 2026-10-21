@@ -202,18 +202,23 @@ local function list_with_snapshot(root)
   local ignored = M.ignore_set(root, wildignore)
   local visible, err = M.read(root, ignored)
   if not visible then return nil, nil, err end
-  local all, all_err = fs.read_dir_lines(root)
-  if not all then return nil, nil, all_err end
-  local function identity(line)
-    return (line:gsub('/+$', ''))
+  local scan, scan_err = vim.uv.fs_scandir(root)
+  if not scan then return nil, nil, scan_err end
+  local all_names = {}
+  while true do
+    local name = vim.uv.fs_scandir_next(scan)
+    if name == nil then break end
+    all_names[#all_names + 1] = name
   end
   local visible_set = {}
-  for _, line in ipairs(visible) do visible_set[identity(line)] = true end
+  for _, line in ipairs(visible) do
+    visible_set[line:gsub('/+$', '')] = true
+  end
   local hidden = {}
-  for _, line in ipairs(all) do
-    local name = identity(line)
+  for _, name in ipairs(all_names) do
     if not visible_set[name] then hidden[#hidden + 1] = name end
   end
+  table.sort(hidden)
   return visible, { path = root, hidden = hidden, wildignore = wildignore }
 end
 
@@ -242,15 +247,55 @@ local function path_is_ignored(path, ignored)
   return false
 end
 
-local function wildignore_matches(name, wildignore)
+local function compile_wildignore(wildignore)
+  local patterns = {}
   for pattern in (wildignore or ''):gmatch('[^,]+') do
     pattern = vim.trim(pattern)
     if pattern ~= '' then
       local ok, matched = pcall(function()
-        return vim.fn.match(name, vim.fn.glob2regpat(pattern)) >= 0
+        local directory_only = pattern:sub(-1) == '/'
+        local comparable = directory_only and pattern:gsub('/+$', '') or pattern
+        return {
+          regex = vim.fn.glob2regpat(pattern),
+          comparable_regex = vim.fn.glob2regpat(comparable),
+          directory_only = directory_only,
+          basename_only = not comparable:find('/', 1, true),
+        }
       end)
       if not ok then return nil, matched end
-      if matched then return true end
+      patterns[#patterns + 1] = matched
+    end
+  end
+  return patterns
+end
+
+local function wildignore_matches(name, relative_name, path, stat, patterns)
+  local is_directory = stat.type == 'directory'
+  if stat.type == 'link' then
+    local target = fs.stat(path)
+    is_directory = target ~= nil and target.type == 'directory'
+  end
+  for _, pattern in ipairs(patterns) do
+    if not pattern.directory_only or is_directory then
+      local candidates
+      if pattern.directory_only then
+        if pattern.basename_only then
+          candidates = { name }
+        else
+          candidates = { relative_name }
+        end
+      else
+        candidates = { name, relative_name }
+      end
+      for _, candidate in ipairs(candidates) do
+        local regex = pattern.directory_only
+          and pattern.comparable_regex or pattern.regex
+        local ok, matched = pcall(function()
+          return vim.fn.match(candidate, regex) >= 0
+        end)
+        if not ok then return nil, matched end
+        if matched then return true end
+      end
     end
   end
   return false
@@ -312,6 +357,7 @@ end
 -- an unsupported filesystem type that the display listing intentionally omits.
 local function hidden_descendant(directory, root_snapshot, state)
   local visited = {}
+  local filters = {}
   local initial_relative = relative_path(root_snapshot.path, directory)
   if initial_relative == nil then
     return nil, 'directory is outside its list-time snapshot'
@@ -324,6 +370,17 @@ local function hidden_descendant(directory, root_snapshot, state)
     local local_snapshot = get_directory_snapshot(state, path)
     local snapshot = local_snapshot or inherited_snapshot
     if local_snapshot then relative_directory = '' end
+    local filter = snapshot and filters[snapshot]
+    if not filter then
+      local wildignore = snapshot and snapshot.wildignore or ''
+      local patterns, pattern_err = compile_wildignore(wildignore)
+      if not patterns then return nil, pattern_err end
+      filter = {
+        ignored = M.ignore_set(snapshot and snapshot.path or path, wildignore),
+        patterns = patterns,
+      }
+      if snapshot then filters[snapshot] = filter end
+    end
     local names, scan_err = {}, nil
     local scan
     scan, scan_err = vim.uv.fs_scandir(path_without_marker(path))
@@ -336,28 +393,34 @@ local function hidden_descendant(directory, root_snapshot, state)
     table.sort(names)
 
     local hidden = {}
-    for _, name in ipairs(snapshot and snapshot.hidden or {}) do
-      hidden[name:gsub('/+$', '')] = true
+    if snapshot and fs.same_path(snapshot.path, path) then
+      for _, name in ipairs(snapshot.hidden or {}) do
+        hidden[name:gsub('/+$', '')] = true
+      end
     end
-    local ignored = M.ignore_set(snapshot and snapshot.path or path,
-      snapshot and snapshot.wildignore or '')
     for _, name in ipairs(names) do
       local child_path = M.entry_path(path_without_marker(path), name)
       local relative_name = relative_directory == '' and name
         or (relative_directory .. '/' .. name)
-      local matches, match_err = wildignore_matches(name,
-        snapshot and snapshot.wildignore or '')
-      if matches == false and relative_name ~= name then
-        matches, match_err = wildignore_matches(relative_name,
-          snapshot and snapshot.wildignore or '')
-      end
-      if matches == nil then return nil, match_err end
-      if hidden[name] or matches or path_is_ignored(child_path, ignored) then
+      if hidden[name] or path_is_ignored(child_path, filter.ignored) then
         return child_path
       end
 
       local child_stat, stat_err = lstat(child_path)
       if not child_stat then return nil, stat_err or ('cannot inspect ' .. child_path) end
+      local matches, match_err = wildignore_matches(name, relative_name,
+        child_path, child_stat, filter.patterns)
+      if matches == nil then return nil, match_err end
+      if matches then return child_path end
+      if child_stat.type == 'link' then
+        local target_stat = fs.stat(child_path)
+        if not target_stat
+          or (target_stat.type ~= 'file' and target_stat.type ~= 'directory') then
+          return child_path
+        end
+      elseif child_stat.type ~= 'file' and child_stat.type ~= 'directory' then
+        return child_path
+      end
       -- A directory symlink is a leaf, not permission to inspect its target.
       if child_stat.type == 'directory' then
         local found, child_err = visit(child_path, snapshot or root_snapshot,
@@ -1371,9 +1434,10 @@ local function log_applied(actions, applied)
   end
 end
 
--- Buffer:sync -> true when a classified sync was applied (the buffer was
--- re-listed and marked nomodified), nil, reason when nothing was applied
--- (ambiguous, an unsafe path, a refused yank, or an unreadable root).
+-- Buffer:sync -> true when all classified actions succeeded (the buffer was
+-- re-listed and marked nomodified), nil, reason when preflight refused the
+-- sync or any action failed. Failed action batches are still re-listed so the
+-- buffer reflects any independent actions that did succeed.
 function Buffer:sync()
   local bufnr = vim.api.nvim_get_current_buf()
   reconcile_undone_materialization(bufnr)
@@ -1507,7 +1571,7 @@ function Buffer:sync()
 
   -- Apply each action and record successful work in history, grouping dependent
   -- moves into one entry. `history.log` reports write failures without raising.
-  local failed, applied = {}, {}
+  local failed, applied, failure_reason = {}, {}, nil
   for i, act in ipairs(actions) do
     local exec_action = act
     if staging ~= nil and act.name == 'mv'
@@ -1522,6 +1586,10 @@ function Buffer:sync()
       ui.notify('Action failed - ' .. action_mod.describe_action(act),
         vim.log.levels.ERROR)
       failed[#failed + 1] = act
+      if failure_reason == nil then
+        failure_reason = (ok and aerr) or res
+          or ('action failed: ' .. action_mod.describe_action(act))
+      end
     end
   end
   log_applied(actions, applied)
@@ -1560,6 +1628,7 @@ function Buffer:sync()
     end
     ui.notify(string.format('%d action(s) failed: %s', #failed,
       table.concat(names, ', ')), vim.log.levels.ERROR)
+    return nil, failure_reason
   end
   return true
 end

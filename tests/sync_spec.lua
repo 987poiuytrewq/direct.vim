@@ -1647,6 +1647,100 @@ H.describe('sync: safety guards', function()
     H.assert_notified('hidden', vim.log.levels.ERROR)
   end)
 
+  H.it('refuses both parent moves and deletes containing nested directory-only matches', function()
+    for _, operation in ipairs({ 'move', 'delete' }) do
+      clean_buffers()
+      local sb = H.sandbox()
+      local ws = H.mkdir(sb.root, 'ws')
+      local parent = H.mkdir(ws, 'parent')
+      local hidden = H.mkdir(parent, 'cache')
+      H.mkfile(ws, 'keep.txt', { 'keep visible sibling' })
+      local listing
+      H.with_option('wildignore', 'cache/', function()
+        listing = buffer.list(ws)
+      end)
+      if operation == 'move' then
+        vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'moved/', 'keep.txt' })
+      else
+        vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'keep.txt' })
+      end
+      local before = H.fs_snapshot(ws)
+      local undo_before, redo_before = history_lines('undo.log'), history_lines('redo.log')
+
+      local ok, reason = listing:sync()
+
+      H.assert_nil(ok, operation .. ' must refuse the nested cache directory')
+      H.assert_true(tostring(reason):find('hidden', 1, true) ~= nil, tostring(reason))
+      H.assert_eq(H.fs_snapshot(ws), before, operation .. ' leaves filesystem unchanged')
+      H.assert_true(fs.taken(hidden), operation .. ' preserves the empty cache directory')
+      H.assert_eq(history_lines('undo.log'), undo_before, operation .. ' writes no undo history')
+      H.assert_eq(history_lines('redo.log'), redo_before, operation .. ' preserves redo history')
+      H.assert_true(vim.bo.modified, operation .. ' leaves the attempted edit modified')
+    end
+  end)
+
+  H.it('still refuses dangling symlinks and FIFOs hidden from the listing with empty wildignore', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local parent = H.mkdir(ws, 'parent')
+    local dangling = parent .. '/dangling'
+    H.assert_true(vim.uv.fs_symlink(parent .. '/missing-target', dangling) == true,
+      'dangling symlink created')
+    local fifo = parent .. '/pipe'
+    vim.fn.system({ 'mkfifo', fifo })
+    H.assert_eq(vim.v.shell_error, 0, 'FIFO fixture created')
+    H.mkfile(ws, 'keep.txt', { 'keep visible sibling' })
+    local listing
+    H.with_option('wildignore', '', function()
+      listing = buffer.list(ws)
+    end)
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'keep.txt' })
+    local before = H.fs_snapshot(ws)
+    local undo_before, redo_before = history_lines('undo.log'), history_lines('redo.log')
+    H.capture_messages()
+
+    local ok, reason = listing:sync()
+
+    H.assert_nil(ok, 'the raw entries omitted from listing still block parent deletion')
+    H.assert_true(tostring(reason):find('hidden', 1, true) ~= nil, tostring(reason))
+    H.assert_eq(H.fs_snapshot(ws), before, 'the parent and both raw entries remain')
+    H.assert_true(vim.uv.fs_lstat(dangling) ~= nil, 'dangling symlink remains present')
+    H.assert_eq(vim.uv.fs_lstat(fifo).type, 'fifo', 'FIFO remains present')
+    H.assert_eq(history_lines('undo.log'), undo_before, 'no undo history is written')
+    H.assert_eq(history_lines('redo.log'), redo_before, 'redo history is unchanged')
+    H.assert_true(vim.bo.modified, 'the unsynced deletion remains modified')
+  end)
+
+  H.it('does not apply a root FIFO snapshot name to an unrelated descendant', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local parent = H.mkdir(ws, 'parent')
+    H.mkfile(parent, 'pipe', { 'ordinary descendant file' })
+    local fifo = ws .. '/pipe'
+    vim.fn.system({ 'mkfifo', fifo })
+    H.assert_eq(vim.v.shell_error, 0, 'root FIFO fixture created')
+    local listing
+    H.with_option('wildignore', '', function()
+      listing = buffer.list(ws)
+    end)
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'moved/' })
+    local ok, reason = listing:sync()
+
+    H.assert_true(ok == true, 'the unrelated root FIFO must not block the move: ' .. tostring(reason))
+    H.assert_true(not fs.taken(parent), 'the original directory was moved')
+    H.assert_eq(vim.fn.readfile(ws .. '/moved/pipe'), { 'ordinary descendant file' },
+      'the ordinary descendant file moved with its parent')
+    H.assert_eq(vim.uv.fs_lstat(fifo).type, 'fifo', 'the root FIFO remains untouched')
+    H.assert_eq(history_lines('undo.log'), {
+      '#direct-history-v3',
+      'mv\t' .. ws .. '/parent/\t' .. ws .. '/moved/',
+    }, 'the successful directory move is recorded in history')
+    H.assert_eq(history_lines('redo.log'), { '#direct-history-v3' },
+      'the successful move leaves redo history empty')
+  end)
+
   H.it('uses each unfolded directory list-time filter before moving its parent', function()
     clean_buffers()
     local sb = H.sandbox()
@@ -1765,6 +1859,36 @@ H.describe('sync: safety guards', function()
     H.assert_eq(vim.fn.readfile(ws .. '/d.txt'), { 'C' })
   end)
 
+  H.it('completes a mixed real-directory and directory-symlink rename chain', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local real_dir = H.mkdir(ws, 'a')
+    H.mkfile(real_dir, 'payload.txt', { 'directory payload' })
+    local target = H.mkdir(sb.root, 'symlink-target')
+    H.mkfile(target, 'target.txt', { 'symlink target' })
+    local link = ws .. '/b'
+    H.assert_true(vim.uv.fs_symlink(target, link) == true, 'directory symlink created')
+    local listing = buffer.list(ws)
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'b/', 'c/' })
+
+    local ok, reason = listing:sync()
+
+    local completed = H.fs_snapshot(ws)
+    local expected = { 'b/', 'b/payload.txt', 'c@' }
+    H.assert_true(ok == true, 'the safe mixed chain should apply completely: ' .. tostring(reason))
+    H.assert_eq(completed, expected,
+      'successful sync completes both renames without losing either entry')
+    H.assert_eq(vim.fn.readfile(ws .. '/b/payload.txt'), { 'directory payload' },
+      'the real directory reaches b/')
+    H.assert_eq(vim.uv.fs_readlink(ws .. '/c'), target,
+      'the directory symlink reaches c without moving its target')
+    H.assert_eq(history_lines('undo.log'), {
+      '#direct-history-v3',
+      'g\t2\t' .. ws .. '/a/\t' .. ws .. '/b/\t' .. ws .. '/b\t' .. ws .. '/c',
+    }, 'group history keeps the original directory and symlink path spellings')
+  end)
+
   H.it('a failed staging rename reports the orphaned temp instead of leaving it silent', function()
     clean_buffers()
     local sb = H.sandbox()
@@ -1863,13 +1987,14 @@ H.describe('sync: safety guards', function()
       return real_touch(path)
     end)
     H.capture_messages()
-    local ok
+    local ok, reason
     H.with_cwd(ws, function()
-      ok = buf:sync()
+      ok, reason = buf:sync()
     end)
     restore()
 
-    H.assert_true(ok == true, 'the buffer is still re-listed and sync returns applied')
+    H.assert_nil(ok, 'sync reports that an action failed despite re-listing reality')
+    H.assert_eq(reason, 'boom', 'the action failure reason is returned')
     H.assert_fs_eq(ws, { 'a.txt', 'b.txt' }, 'b.txt applied, c.txt failed')
     H.assert_buf_eq({ 'a.txt', 'b.txt' }, 0, 'the buffer matches reality after partial failure')
     H.assert_notified('Action failed - Created c.txt', vim.log.levels.ERROR)

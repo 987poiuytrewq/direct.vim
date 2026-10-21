@@ -545,15 +545,18 @@ end
 -- been saved anywhere yet).
 function M.stage_moves(actions)
   actions = actions or {}
+  local function move_key(path)
+    return type(path) == 'string' and path:gsub('/+$', '') or path
+  end
   local dst_set = {}
   for _, act in ipairs(actions) do
     if act.name == 'mv' and act.dst ~= nil then
-      dst_set[act.dst] = true
+      dst_set[move_key(act.dst)] = true
     end
   end
   local needed = false
   for _, act in ipairs(actions) do
-    if act.name == 'mv' and act.src ~= nil and dst_set[act.src] then
+    if act.name == 'mv' and act.src ~= nil and dst_set[move_key(act.src)] then
       needed = true
       break
     end
@@ -563,7 +566,7 @@ function M.stage_moves(actions)
   end
   local overrides, temps = {}, {}
   for _, act in ipairs(actions) do
-    if act.name == 'mv' and act.src ~= nil and dst_set[act.src]
+    if act.name == 'mv' and act.src ~= nil and dst_set[move_key(act.src)]
       and overrides[act.src] == nil then
       local tmp = M.first_free_temp(parent_dir(act.src))
       local ok, err = M.fs.rename(act.src, tmp)
@@ -602,6 +605,9 @@ end
 -- every action index exactly once, a group of one being an independent action.
 function M.move_groups(actions)
   actions = actions or {}
+  local function move_key(path)
+    return type(path) == 'string' and path:gsub('/+$', '') or path
+  end
   local parent = {}
   for i = 1, #actions do
     parent[i] = i
@@ -624,6 +630,7 @@ function M.move_groups(actions)
     end
     if act.name == 'mv' then
       for _, path in ipairs(paths) do
+        path = move_key(path)
         local other = at_path[path]
         if other == nil then
           at_path[path] = i

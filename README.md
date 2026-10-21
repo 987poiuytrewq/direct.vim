@@ -112,7 +112,9 @@ changed, no history is written, and the buffer stays modified so you can fix it.
 listed. Changing the option does not change an existing listing's sync rules;
 re-list after changing it. Filtered entries are excluded from sync, and a sync
 is refused before filesystem or history effects if an add/rename would use an
-occupied filtered path or a directory move would carry a filtered descendant.
+occupied filtered path or a directory move would carry a filtered descendant or
+an entry the listing cannot represent, such as a dangling symlink or FIFO.
+Directory-only patterns such as `cache/` also protect matching nested directories.
 Directory symlinks are treated as leaves when renamed; their targets are not
 scanned or moved.
 
