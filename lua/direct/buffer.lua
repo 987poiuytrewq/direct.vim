@@ -1244,7 +1244,9 @@ function Buffer:unfold(row)
   local just_materialized = false
   if not state.expanded[rec.id] then
     local path = row_path(self.root, rec, line)
+    local wildignore = vim.o.wildignore or ''
     local children, err = M.read(path)
+    local snapshot = { wildignore = wildignore }
     if not children then
       ui.notify('direct: cannot unfold ' .. tostring(path) .. ': '
         .. tostring(err), vim.log.levels.ERROR)
@@ -1560,6 +1562,9 @@ end
 -- Child paths resolve from their row identities rather than their display text.
 function Buffer:open(line)
   local bufnr = vim.api.nvim_get_current_buf()
+  local safe, integrity_err = children_integrity(bufnr,
+    vim.api.nvim_buf_get_lines(bufnr, 0, -1, false))
+  if not safe then return nil, integrity_err end
   local cursor_row = vim.api.nvim_win_get_cursor(0)[1]
   local target_row
   local current = vim.api.nvim_buf_get_lines(bufnr, cursor_row - 1, cursor_row, false)[1]
@@ -1594,6 +1599,9 @@ end
 -- the inclusive 1-based range (Python's buffer slice). Used by `:DirectYank`.
 function Buffer:get_paths(firstline, lastline)
   local bufnr = vim.api.nvim_get_current_buf()
+  local safe, integrity_err = children_integrity(bufnr,
+    vim.api.nvim_buf_get_lines(bufnr, 0, -1, false))
+  if not safe then return nil, integrity_err end
   local lines = vim.api.nvim_buf_get_lines(bufnr, firstline - 1, lastline, false)
   local out = {}
   for offset, line in ipairs(lines) do

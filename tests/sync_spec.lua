@@ -512,6 +512,123 @@ H.describe('sync with unfolded children (Phase 1)', function()
       'open on the restored deep child resolves the exact filesystem path')
   end)
 
+  H.it('unfold and undo-redo preserve child paths for open', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local child = H.mkdir(ws, 'child')
+    H.mkfile(child, 'inside.txt', { 'child contents' })
+    route_write_to_test_buffer()
+    local listing = buffer.list(ws)
+    local bufnr = vim.api.nvim_get_current_buf()
+
+    H.assert_true(listing:unfold(1) == true, 'normal nonempty unfold succeeds')
+    vim.cmd('undo')
+    vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
+    vim.cmd('redo')
+    vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
+
+    local child_path = ws .. '/child/inside.txt'
+    H.assert_eq(listing:get_paths(2, 2), { child_path },
+      'redo restores the child path identity')
+    H.assert_true(listing:open('  inside.txt') == true, 'open accepts the intact redone row')
+    H.assert_true(fs.same_path(vim.api.nvim_buf_get_name(0), child_path),
+      'open consumes the restored child path')
+  end)
+
+  H.it('yank after undo-redo consumes the restored child path', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local child = H.mkdir(ws, 'child')
+    H.mkfile(child, 'inside.txt', { 'child contents' })
+    route_write_to_test_buffer()
+    local listing = buffer.list(ws)
+    local bufnr = vim.api.nvim_get_current_buf()
+    listing:unfold(1)
+    vim.cmd('undo')
+    vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
+    vim.cmd('redo')
+    vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
+
+    local register = require('direct.register')
+    local original_yank, yanked = register.yank, nil
+    register.yank = function(sources) yanked = vim.deepcopy(sources); return true end
+    require('direct').yank(2, 2)
+    register.yank = original_yank
+    H.assert_eq(yanked, { ws .. '/child/inside.txt' },
+      'yank consumes the restored child path')
+  end)
+
+  H.it('tampered redone child rows refuse open before switching buffers', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local child = H.mkdir(ws, 'child')
+    H.mkfile(child, 'inside.txt', { 'child contents' })
+    route_write_to_test_buffer()
+    local listing = buffer.list(ws)
+    local bufnr = vim.api.nvim_get_current_buf()
+    listing:unfold(1)
+    vim.cmd('undo')
+    vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
+    vim.cmd('redo')
+    vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
+
+    local child_path = ws .. '/child/inside.txt'
+    vim.api.nvim_buf_set_text(bufnr, 1, 2, 1, #'  inside.txt', { 'changed.txt' })
+    local lines_before = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    local fs_before = H.fs_snapshot(ws)
+    local opened, open_err = listing:open('  changed.txt')
+    H.assert_nil(opened, 'open refuses the stale child path')
+    H.assert_true(type(open_err) == 'string' and open_err ~= '', 'open explains the refusal')
+    H.assert_eq(vim.api.nvim_get_current_buf(), bufnr, 'refused open does not switch buffers')
+    H.assert_eq(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), lines_before,
+      'refused operations do not rewrite the listing')
+    H.assert_eq(H.fs_snapshot(ws), fs_before, 'refused operations do not change the filesystem')
+    H.assert_true(fs.stat(child_path) ~= nil, 'the original child remains available')
+  end)
+
+  H.it('tampered redone child rows refuse get_paths and yank before register effects', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local child = H.mkdir(ws, 'child')
+    H.mkfile(child, 'inside.txt', { 'child contents' })
+    route_write_to_test_buffer()
+    local listing = buffer.list(ws)
+    local bufnr = vim.api.nvim_get_current_buf()
+    listing:unfold(1)
+    vim.cmd('undo')
+    vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
+    vim.cmd('redo')
+    vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
+
+    vim.api.nvim_buf_set_text(bufnr, 1, 2, 1, #'  inside.txt', { 'changed.txt' })
+    local fs_before = H.fs_snapshot(ws)
+    local register = require('direct.register')
+    local register_before = register.content()
+    local original_yank, yank_calls = register.yank, 0
+    register.yank = function(...)
+      yank_calls = yank_calls + 1
+      return original_yank(...)
+    end
+
+    local paths, path_err = listing:get_paths(2, 2)
+    local yank_ok, yank_result = pcall(require('direct').yank, 2, 2)
+    register.yank = original_yank
+
+    H.assert_nil(paths, 'get_paths refuses text that no longer matches its child record')
+    H.assert_true(type(path_err) == 'string' and path_err ~= '', 'get_paths explains the refusal')
+    H.assert_true(yank_ok, tostring(yank_result))
+    H.assert_nil(yank_result, 'yank refuses the stale child path')
+    H.assert_eq(yank_calls, 0, 'refused child rows never reach register.yank')
+    H.assert_eq(vim.api.nvim_get_current_buf(), bufnr, 'refused yank keeps the direct buffer')
+    H.assert_eq(H.fs_snapshot(ws), fs_before, 'refused yank does not change the filesystem')
+    H.assert_eq(register.content(), register_before,
+      'refused operations do not change register state')
+  end)
+
   H.it('fails closed when redone child text is tampered before any sync effects', function()
     clean_buffers()
     local sb = H.sandbox()
