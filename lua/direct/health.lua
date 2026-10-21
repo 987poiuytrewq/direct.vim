@@ -1,6 +1,6 @@
 -- lua/direct/health.lua -- :checkhealth direct.
--- The 0.11 floor is the only hard requirement; every other line is
--- informational, so this never reports an error for anything else.
+-- The Neovim 0.12 floor is the only hard requirement; other lines are
+-- informational.
 
 local M = {}
 
@@ -10,10 +10,10 @@ function M.check()
   local version = vim.version()
   local pretty = string.format('%d.%d.%d', version.major, version.minor,
     version.patch)
-  if vim.fn.has('nvim-0.11') == 1 then
-    vim.health.ok('Neovim ' .. pretty .. ' (>= 0.11 required)')
+  if vim.fn.has('nvim-0.12') == 1 then
+    vim.health.ok('Neovim ' .. pretty .. ' (>= 0.12 required)')
   else
-    vim.health.error('Neovim ' .. pretty .. ' is too old; 0.11+ is required')
+    vim.health.error('Neovim ' .. pretty .. ' is too old; 0.12+ is required')
   end
 
   local home = require('direct.paths').data_home()
