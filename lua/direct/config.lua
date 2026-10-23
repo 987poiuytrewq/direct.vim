@@ -6,6 +6,7 @@ local M = {}
 
 local defaults = {
   map_default_keys = true,
+  show_folder_icons = false,
 }
 
 M.defaults = defaults

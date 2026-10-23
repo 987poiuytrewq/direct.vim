@@ -61,11 +61,20 @@ Plug '987poiuytrewq/direct.vim'
 ```lua
 require('direct').setup({
   map_default_keys = true, -- set false to install no default mappings
+  show_folder_icons = false, -- opt in to Nerd Font folder icons
 })
 ```
 
 It is idempotent, may be called more than once, and reports an unknown option
 name as an error instead of silently ignoring it.
+
+### Folder icons
+
+Set `show_folder_icons = true` to show inline directory glyphs; the default is
+`false`. A Nerd Font is required to render them. Collapsed directories use
+`nf-md-folder` (U+F024B), and expanded directories use `nf-md-folder_open`
+(U+F0770). Icons are virtual text, so the listing lines and filesystem behavior
+are unchanged. No icon plugin or other dependency is required.
 
 ## Navigate
 
