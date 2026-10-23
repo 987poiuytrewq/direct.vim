@@ -108,8 +108,15 @@ An edit that both adds and deletes entries, or that leaves a duplicated line,
 is reported as ambiguous, naming both sides of the comparison. Nothing is
 changed, no history is written, and the buffer stays modified so you can fix it.
 
-`&wildignore` is honoured: entries matching one of its patterns are not listed
-and are left untouched.
+`&wildignore` is honoured using the value captured when each directory is
+listed. Changing the option does not change an existing listing's sync rules;
+re-list after changing it. Filtered entries are excluded from sync, and a sync
+is refused before filesystem or history effects if an add/rename would use an
+occupied filtered path or a directory move would carry a filtered descendant or
+an entry the listing cannot represent, such as a dangling symlink or FIFO.
+Directory-only patterns such as `cache/` also protect matching nested directories.
+Directory symlinks are treated as leaves when renamed; their targets are not
+scanned or moved.
 
 ### Unfolded rows (Phase 1)
 

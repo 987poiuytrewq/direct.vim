@@ -220,6 +220,56 @@ H.describe('action', function()
     H.assert_eq(vim.fn.isdirectory(sb.root .. '/newdir'), 1, 'directory created')
   end)
 
+  H.it('creation and move actions refuse occupied destinations without overwriting', function()
+    local sb = H.sandbox()
+    H.mkfile(sb.root, 'source.txt', { 'source' })
+    H.mkfile(sb.root, 'occupied.txt', { 'do not replace' })
+    local occupied_before = vim.fn.readfile(sb.root .. '/occupied.txt', 'b')
+    local source_before = vim.fn.readfile(sb.root .. '/source.txt', 'b')
+
+    local touched, touch_err = M.Touch(sb.root .. '/occupied.txt')['do']()
+    local made, mkdir_err = M.MakeDirectory(sb.root .. '/occupied.txt')['do']()
+    local moved, move_err = M.Move(sb.root .. '/source.txt', sb.root .. '/occupied.txt')['do']()
+
+    H.assert_nil(touched, 'touch refuses an existing destination')
+    H.assert_true(tostring(touch_err):find('destination exists', 1, true) ~= nil,
+      tostring(touch_err))
+    H.assert_nil(made, 'mkdir refuses an existing destination')
+    H.assert_true(tostring(mkdir_err):find('destination exists', 1, true) ~= nil,
+      tostring(mkdir_err))
+    H.assert_nil(moved, 'move refuses an existing destination')
+    H.assert_true(tostring(move_err):find('destination exists', 1, true) ~= nil,
+      tostring(move_err))
+    H.assert_eq(vim.fn.readfile(sb.root .. '/occupied.txt', 'b'), occupied_before,
+      'the occupied destination is unchanged')
+    H.assert_eq(vim.fn.readfile(sb.root .. '/source.txt', 'b'), source_before,
+      'the move source is unchanged')
+  end)
+
+  H.it('action guards treat trailing-slash dangling symlink destinations as occupied', function()
+    local sb = H.sandbox()
+    H.mkfile(sb.root, 'source.txt', { 'source' })
+    local occupied = sb.root .. '/target.log'
+    H.assert_true(vim.uv.fs_symlink(sb.root .. '/missing', occupied) == true,
+      'dangling symlink created')
+    H.assert_true(M.fs.taken(occupied .. '/'),
+      'occupancy checks preserve the directory marker while finding the link')
+    H.assert_true(M.fs.taken('/'), 'the filesystem root remains occupied')
+
+    local made, make_err = M.MakeDirectory(occupied .. '/')['do']()
+    local moved, move_err = M.Move(sb.root .. '/source.txt', occupied .. '/')['do']()
+
+    H.assert_nil(made, 'mkdir refuses the dangling symlink destination')
+    H.assert_true(tostring(make_err):find('destination exists', 1, true) ~= nil,
+      tostring(make_err))
+    H.assert_nil(moved, 'move refuses the dangling symlink destination')
+    H.assert_true(tostring(move_err):find('destination exists', 1, true) ~= nil,
+      tostring(move_err))
+    H.assert_true(vim.uv.fs_lstat(occupied) ~= nil, 'the symlink remains in place')
+    H.assert_eq(vim.fn.readfile(sb.root .. '/source.txt'), { 'source' },
+      'the move source remains unchanged')
+  end)
+
   H.it('describe() is CWD-relative and human', function()
     local sb = H.sandbox()
     H.mkfile(sb.root, 'a.txt', { 'a' })
