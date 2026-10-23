@@ -78,6 +78,52 @@ H.describe('fs', function()
       'same_path works for directories too')
   end)
 
+  H.it('same_path falls back to normalized names when either stat fails', function()
+    local sb = H.sandbox()
+    H.mkfile(sb.root, 'one.txt', '')
+    H.mkfile(sb.root, 'two.txt', '')
+    local original_stat = vim.uv.fs_stat
+    vim.uv.fs_stat = function(path, ...)
+      local normalized = vim.fs.normalize(path)
+      if normalized == sb.root .. '/one.txt' or normalized == sb.root .. '/two.txt' then
+        return nil, 'EACCES'
+      end
+      return original_stat(path, ...)
+    end
+    local same = fs.same_path(sb.root .. '/one.txt', sb.root .. '/./one.txt')
+    local different = fs.same_path(sb.root .. '/one.txt', sb.root .. '/two.txt')
+    vim.uv.fs_stat = original_stat
+
+    H.assert_true(same, 'normalized spellings match after stat failure')
+    H.assert_false(different, 'different normalized names do not match after stat failure')
+  end)
+
+  H.it('treats missing or zero device/inode values as unknown identity', function()
+    local sb = H.sandbox()
+    H.mkfile(sb.root, 'one.txt', '')
+    H.mkfile(sb.root, 'two.txt', '')
+    local original_stat = vim.uv.fs_stat
+    vim.uv.fs_stat = function(path, ...)
+      local normalized = vim.fs.normalize(path)
+      if normalized == sb.root .. '/one.txt' then return { dev = 0, ino = 9 } end
+      if normalized == sb.root .. '/two.txt' then return { dev = 0, ino = 9 } end
+      return original_stat(path, ...)
+    end
+    local zero_values_differ = fs.same_path(sb.root .. '/one.txt', sb.root .. '/two.txt')
+    local zero_values_same = fs.same_path(sb.root .. '/one.txt', sb.root .. '/./one.txt')
+    vim.uv.fs_stat = function(path, ...)
+      local normalized = vim.fs.normalize(path)
+      if normalized == sb.root .. '/one.txt' then return { dev = 1 } end
+      return original_stat(path, ...)
+    end
+    local missing_inode_same = fs.same_path(sb.root .. '/one.txt', sb.root .. '/./one.txt')
+    vim.uv.fs_stat = original_stat
+
+    H.assert_false(zero_values_differ, 'zero device/inode does not alias different names')
+    H.assert_true(zero_values_same, 'zero device/inode uses normalized path fallback')
+    H.assert_true(missing_inode_same, 'missing inode uses normalized path fallback')
+  end)
+
   H.it('read_dir_lines resolves links, orders dirs first, omits broken links', function()
     local sb = H.sandbox()
     local root = H.mkdir(sb.root, 'listing')

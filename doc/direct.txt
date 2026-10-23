@@ -47,9 +47,9 @@ Directories and dotfiles are not highlighted by these groups, so existing
 hidden-entry styling remains unchanged. Detection uses Neovim's filename-only
 filetype matching and reads no file contents.
 
-DirectSpecialFile links to Special by default. Each DirectLang<Name> links to
-Type except the shell group, which links to `sh`. Define a group yourself before
-listing to override its default link. There is no built-in palette or color
+DirectSpecialFile links to Special by default. Each DirectLang<Name> group,
+including DirectLangShell, links to Type by default. Define a group yourself
+before listing to override its default link. There is no built-in palette or color
 configuration.
 
 Source: https://raw.githubusercontent.com/github/innovationgraph/main/data/languages.csv
@@ -142,8 +142,11 @@ identity marks, they are recovered only when the complete displayed subtree
 still matches its captured lines, owner, order, and count exactly; any mismatch
 or ambiguous association still refuses the save. Unfolding is a separate text-
 undo block: `:undo` removes the most recent materialization without undoing an
-unrelated prior root edit. The removed child identities are discarded, and the
-next save synchronizes the surviving root rows. Directory indentation is
+unrelated prior root edit. While undone, live child records are removed;
+`:redo` restores their original identities only when the same undo sequence,
+parent, and exact directory snapshot still match. Otherwise the redone rows
+remain unsafe to save, open, or yank. The next save after a valid undo
+synchronizes the surviving root rows. Directory indentation is
 presentation only; `>>` and `<<` do not enable move synchronization.
 
 A root file rename or other root-file change remains available while its child

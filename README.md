@@ -129,7 +129,10 @@ presentation only; `>>` and `<<` do not enable move synchronization.
 
 Unfolding has its own text-undo block. `:undo` removes the latest materialized
 child rows without undoing an unrelated earlier root edit; the next save
-synchronizes the surviving root rows.
+synchronizes the surviving root rows. `:redo` restores the original child
+identities only when the original undo sequence and exact directory snapshot
+still match; an ambiguous or changed snapshot remains unsafe to save, open, or
+yank.
 
 A root file rename or other root-file change remains available while its child
 rows are unfolded. A root directory with loaded descendants cannot be renamed
