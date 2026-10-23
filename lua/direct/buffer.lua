@@ -760,11 +760,40 @@ local function restore_undone_collapse(bufnr, state, snapshot)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local parent_row
   for row = 0, #lines - 1 do
-    if row_id_at(bufnr, row) == parent.id then parent_row = row; break end
+    if row_id_at(bufnr, row) == parent.id then
+      parent_row = row
+      break
+    end
   end
-  if parent_row == nil or lines[parent_row + 1] ~= snapshot.parent_text
+  if type(parent.path) ~= 'string'
     or vim.fs.normalize(parent.path) ~= vim.fs.normalize(snapshot.parent_path)
     or not fs.path_identities_match(path_identity(parent.path), snapshot.parent_identity) then
+    return false
+  end
+  local needs_parent_mark = parent_row == nil
+  if needs_parent_mark then
+    -- A re-list clears and recreates row extmarks after the collapse undo node.
+    -- Undo can invalidate that newly-created mark. Re-associate only when the
+    -- exact parent line and the complete saved child subtree identify one row;
+    -- duplicate text or another live identity remains ambiguous and fails safe.
+    local candidates = {}
+    for row = 0, #lines - 1 do
+      local candidate = lines[row + 1] == snapshot.parent_text
+      if candidate and row_id_at(bufnr, row) == nil then
+        for offset, item in ipairs(snapshot.rows or {}) do
+          if lines[row + offset + 1] ~= item.text then
+            candidate = false
+            break
+          end
+        end
+      else
+        candidate = false
+      end
+      if candidate then candidates[#candidates + 1] = row end
+    end
+    if #candidates ~= 1 then return false end
+    parent_row = candidates[1]
+  elseif lines[parent_row + 1] ~= snapshot.parent_text then
     return false
   end
   local listing = fs.read_dir_lines(parent.path,
@@ -798,14 +827,26 @@ local function restore_undone_collapse(bufnr, state, snapshot)
     end
   end
 
+  if needs_parent_mark then
+    local ok = pcall(set_row_mark, bufnr, parent_row, parent.id)
+    if not ok then return false end
+  end
   for id, rec in pairs(snapshot.rows_by_id or {}) do state.rows[id] = vim.deepcopy(rec) end
-  state.expanded[parent.id] = { children = {} }
+  state.expanded[parent.id] = {
+    children = {},
+    listing_lines = vim.deepcopy(snapshot.listing_lines or {}),
+    wildignore = snapshot.wildignore or '',
+  }
   for _, child in ipairs(snapshot.children_snapshot or {}) do
     state.expanded[parent.id].children[#state.expanded[parent.id].children + 1] =
       state.rows[child.id]
   end
   for id, expansion in pairs(snapshot.expansions or {}) do
-    local restored = { children = {} }
+    local restored = {
+      children = {},
+      listing_lines = vim.deepcopy(expansion.listing_lines or {}),
+      wildignore = expansion.wildignore or '',
+    }
     for _, child in ipairs(expansion.children or {}) do
       local rec = state.rows[child.id]
       if not rec then return false end
@@ -868,6 +909,21 @@ reconcile_undone_materialization = function(bufnr)
       if entry.seq == seq_cur then current_path = true end
     end
   end
+
+  -- Collapse snapshots include full child records. Keep them only while both
+  -- the collapse node and its base remain reachable for undo/redo; discarded
+  -- Neovim branches can no longer replay the corresponding view transition.
+  local function undo_node_reachable(seq)
+    return seq == 0 or active[seq] or alternate[seq]
+  end
+  local retained_collapses = {}
+  for _, collapse in ipairs(state.collapse_undos or {}) do
+    if collapse.seq and undo_node_reachable(collapse.seq)
+      and undo_node_reachable(collapse.base_seq) then
+      retained_collapses[#retained_collapses + 1] = collapse
+    end
+  end
+  state.collapse_undos = retained_collapses
 
   -- Collapsing is an ordinary Neovim text change, but its row records are
   -- intentionally removed while collapsed. Rebuild those records when undo
@@ -1206,6 +1262,7 @@ function Buffer:list()
   end
 
   local bufnr = vim.api.nvim_get_current_buf()
+  reconcile_undone_materialization(bufnr)
   local old_state = states[bufnr]
   local old_expanded = {}
   local old_known_children = {}

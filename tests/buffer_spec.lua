@@ -465,6 +465,39 @@ H.describe('buffer: listing', function()
       'expansion rereads current contents after an external change')
   end)
 
+  H.it('collapse undo after re-list restores child identities and remains syncable', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local sub = H.mkdir(ws, 'sub')
+    H.mkfile(sub, 'inside.txt', { 'inside' })
+    local listing = buffer.list(ws)
+    local bufnr = vim.api.nvim_get_current_buf()
+    local namespace = vim.api.nvim_get_namespaces()['direct-listing-rows']
+
+    listing:expand(1)
+    local before_marks = vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1, {})
+    listing:collapse(1)
+    listing:list()
+    H.assert_buf_eq({ 'sub/' }, bufnr, 're-list preserves the collapsed rows')
+    vim.cmd('undo')
+    vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
+
+    H.assert_buf_eq({ 'sub/', '  inside.txt' }, bufnr,
+      'undo restores the exact rows after the row namespace was rebuilt')
+    local state = buffer._state_for_test(bufnr)
+    local parent_id = state.root_ids[1]
+    H.assert_not_nil(state.expanded[parent_id], 'undo restores the expansion record')
+    H.assert_eq(vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1, {}), before_marks,
+      'undo restores the saved parent and child identities')
+    H.assert_eq(listing:get_paths(2, 2), { ws .. '/sub/inside.txt' },
+      'the restored child identity resolves to its filesystem path')
+    local ok, reason = listing:sync()
+    H.assert_true(ok == true, 'sync accepts the restored child state: ' .. tostring(reason))
+    H.assert_buf_eq({ 'sub/', '  inside.txt' }, bufnr,
+      'successful sync retains the expanded materialization')
+  end)
+
   H.it('edited child rows still block collapse after an expand undo/redo cycle', function()
     clean_buffers()
     local sb = H.sandbox()
