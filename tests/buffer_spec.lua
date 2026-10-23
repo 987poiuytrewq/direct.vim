@@ -498,6 +498,44 @@ H.describe('buffer: listing', function()
       'successful sync retains the expanded materialization')
   end)
 
+  H.it('collapse undo after re-list restores identities across expanded sibling subtrees', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    for _, root_name in ipairs({ 'a', 'b' }) do
+      local root = H.mkdir(ws, root_name)
+      local sub = H.mkdir(root, 'sub')
+      H.mkfile(sub, 'inside.txt', { root_name })
+    end
+    local listing = buffer.list(ws)
+    listing:expand(1)
+    listing:expand(2)
+    listing:expand(4)
+    listing:expand(5)
+    local expanded = {
+      'a/', '  sub/', '    inside.txt',
+      'b/', '  sub/', '    inside.txt',
+    }
+    H.assert_buf_eq(expanded, 0, 'both similarly-shaped sibling subtrees are expanded')
+    listing:collapse(1)
+    listing:list()
+    H.assert_buf_eq({ 'a/', 'b/', '  sub/', '    inside.txt' }, 0,
+      're-list keeps a collapsed and b expanded')
+    vim.cmd('undo')
+    vim.api.nvim_exec_autocmds('TextChanged', { buffer = vim.api.nvim_get_current_buf() })
+
+    H.assert_buf_eq(expanded, 0, 'undo restores rows for both sibling subtrees')
+    local state = buffer._state_for_test(vim.api.nvim_get_current_buf())
+    H.assert_not_nil(state.expanded[state.root_ids[1]], 'a expansion is restored')
+    H.assert_not_nil(state.expanded[state.root_ids[2]], 'b expansion remains restored')
+    H.assert_eq(listing:get_paths(1, 6), {
+      ws .. '/a/', ws .. '/a/sub/', ws .. '/a/sub/inside.txt',
+      ws .. '/b/', ws .. '/b/sub/', ws .. '/b/sub/inside.txt',
+    }, 'every row retains its own sibling-specific path identity')
+    local ok, reason = listing:sync()
+    H.assert_true(ok == true, 'sync accepts every restored sibling row: ' .. tostring(reason))
+  end)
+
   H.it('edited child rows still block collapse after an expand undo/redo cycle', function()
     clean_buffers()
     local sb = H.sandbox()

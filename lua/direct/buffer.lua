@@ -756,110 +756,149 @@ end
 -- and every previously-expanded directory snapshot still match the filesystem.
 local function restore_undone_collapse(bufnr, state, snapshot)
   local parent = state.rows[snapshot.parent_id]
-  if not parent or state.expanded[parent.id] then return false end
+  local display = snapshot.display_snapshot
+  if not parent or state.expanded[parent.id] or not display then return false end
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-  local parent_row
-  for row = 0, #lines - 1 do
-    if row_id_at(bufnr, row) == parent.id then
-      parent_row = row
-      break
+  if not same_lines(lines, display.lines or {}) then return false end
+
+  -- Validate a complete saved rendering before assigning any marks. A collapse
+  -- can coexist with other expanded siblings; their rows are outside the
+  -- collapsed subtree but still have to be restored after undo invalidates the
+  -- re-listed extmarks.
+  local records, expected_rows, expected_order = {}, {}, {}
+  for index, item in ipairs(display.rows or {}) do
+    local row = index - 1
+    local rec = item.record
+    local expected_text = rec and (rec.kind == 'child'
+      and recorded_row_text(rec) or rec.text)
+    if item.row ~= row or item.id == nil or records[item.id]
+      or item.text ~= lines[index] or item.text ~= expected_text
+      or not rec or rec.id ~= item.id or type(rec.path) ~= 'string'
+      or not item.identity
+      or not fs.path_identities_match(path_identity(rec.path), item.identity) then
+      return false
     end
+    if rec.kind == 'child' then
+      if not rec.identity
+        or not fs.path_identities_match(path_identity(rec.path), rec.identity) then
+        return false
+      end
+    elseif rec.kind ~= 'root' then
+      return false
+    end
+    records[item.id] = vim.deepcopy(rec)
+    expected_rows[item.id] = row
+    expected_order[#expected_order + 1] = item.id
   end
-  if type(parent.path) ~= 'string'
+  if #expected_order ~= #lines then return false end
+
+  local parent_row = expected_rows[parent.id]
+  if parent_row == nil or lines[parent_row + 1] ~= snapshot.parent_text
     or vim.fs.normalize(parent.path) ~= vim.fs.normalize(snapshot.parent_path)
     or not fs.path_identities_match(path_identity(parent.path), snapshot.parent_identity) then
     return false
   end
-  local needs_parent_mark = parent_row == nil
-  if needs_parent_mark then
-    -- A re-list clears and recreates row extmarks after the collapse undo node.
-    -- Undo can invalidate that newly-created mark. Re-associate only when the
-    -- exact parent line and the complete saved child subtree identify one row;
-    -- duplicate text or another live identity remains ambiguous and fails safe.
-    local candidates = {}
-    for row = 0, #lines - 1 do
-      local candidate = lines[row + 1] == snapshot.parent_text
-      if candidate and row_id_at(bufnr, row) == nil then
-        for offset, item in ipairs(snapshot.rows or {}) do
-          if lines[row + offset + 1] ~= item.text then
-            candidate = false
-            break
-          end
-        end
-      else
-        candidate = false
-      end
-      if candidate then candidates[#candidates + 1] = row end
-    end
-    if #candidates ~= 1 then return false end
-    parent_row = candidates[1]
-  elseif lines[parent_row + 1] ~= snapshot.parent_text then
-    return false
-  end
-  local listing = fs.read_dir_lines(parent.path,
-    M.ignore_set(parent.path, snapshot.wildignore or ''))
-  if not listing or not same_lines(listing, snapshot.listing_lines or {}) then return false end
 
-  local expected_ids, expected_rows = {}, {}
-  for offset, item in ipairs(snapshot.rows or {}) do
-    local row = parent_row + offset
-    local rec = snapshot.rows_by_id[item.id]
-    if not rec or item.row ~= row or lines[row + 1] ~= item.text
-      or item.text ~= recorded_row_text(rec)
-      or not fs.path_identities_match(path_identity(rec.path), rec.identity) then
-      return false
+  -- Verify the saved root order and every expansion edge, so duplicate or
+  -- orphaned child records cannot be adopted by their spelling alone.
+  local expansion_map = display.expansions or {}
+  local ordered, visited = {}, {}
+  local function append_children(parent_id)
+    local expansion = expansion_map[parent_id]
+    if not expansion then return true end
+    local parent_record = records[parent_id]
+    if not parent_record or not is_dir_line(parent_record.name) then return false end
+    local previous_order = 0
+    for _, child in ipairs(expansion.children or {}) do
+      local rec = records[child.id]
+      if not rec or rec.kind ~= 'child' or rec.parent ~= parent_id
+        or type(rec.order) ~= 'number' or rec.order <= previous_order
+        or rec.depth ~= (parent_record.depth or 0) + 1
+        or rec.path ~= M.entry_path(parent_record.path, rec.name)
+        or rec.text ~= recorded_row_text(rec) or child.id == parent_id
+        or visited[child.id] then
+        return false
+      end
+      previous_order = rec.order
+      visited[child.id] = true
+      ordered[#ordered + 1] = child.id
+      if not append_children(child.id) then return false end
     end
-    expected_ids[item.id], expected_rows[item.id] = true, row
+    return true
   end
-  for id, expected in pairs(snapshot.directory_snapshots or {}) do
-    local rec = snapshot.rows_by_id[id]
+  local seen_roots = {}
+  for _, root_id in ipairs(display.root_ids or {}) do
+    local rec = records[root_id]
+    if not rec or rec.kind ~= 'root' or seen_roots[root_id] then return false end
+    seen_roots[root_id] = true
+    ordered[#ordered + 1] = root_id
+    if not append_children(root_id) then return false end
+  end
+  if #ordered ~= #expected_order then return false end
+  for index, id in ipairs(ordered) do
+    if expected_order[index] ~= id then return false end
+  end
+  for id, expansion in pairs(expansion_map) do
+    local rec = records[id]
+    if not rec or not is_dir_line(rec.name) or not expansion then return false end
+  end
+
+  for id, expected in pairs(display.directory_snapshots or {}) do
+    local rec = records[id]
     if not rec then return false end
     local current = fs.read_dir_lines(rec.path,
-      M.ignore_set(rec.path, snapshot.wildignore or ''))
-    if not current or not same_lines(current, expected) then return false end
+      M.ignore_set(rec.path, expected.wildignore or ''))
+    if not current or not same_lines(current, expected.listing_lines or {}) then return false end
+  end
+
+  -- The collapsed subtree snapshot must agree with the full display snapshot.
+  for offset, item in ipairs(snapshot.rows or {}) do
+    local row = parent_row + offset
+    if item.row ~= row or expected_rows[item.id] ~= row
+      or item.text ~= lines[row + 1] then
+      return false
+    end
   end
   for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1,
       { details = true })) do
     local id, row, details = mark[1], mark[2], mark[4] or {}
-    if not details.invalid and row > parent_row
-      and row <= parent_row + #(snapshot.rows or {}) and not expected_ids[id] then
-      return false
+    if not details.invalid then
+      if expected_rows[id] ~= row then return false end
     end
   end
 
-  if needs_parent_mark then
-    local ok = pcall(set_row_mark, bufnr, parent_row, parent.id)
-    if not ok then return false end
-  end
-  for id, rec in pairs(snapshot.rows_by_id or {}) do state.rows[id] = vim.deepcopy(rec) end
-  state.expanded[parent.id] = {
-    children = {},
-    listing_lines = vim.deepcopy(snapshot.listing_lines or {}),
-    wildignore = snapshot.wildignore or '',
-  }
-  for _, child in ipairs(snapshot.children_snapshot or {}) do
-    state.expanded[parent.id].children[#state.expanded[parent.id].children + 1] =
-      state.rows[child.id]
-  end
-  for id, expansion in pairs(snapshot.expansions or {}) do
+  local restored_expanded = {}
+  for id, expansion in pairs(expansion_map) do
     local restored = {
       children = {},
       listing_lines = vim.deepcopy(expansion.listing_lines or {}),
       wildignore = expansion.wildignore or '',
     }
     for _, child in ipairs(expansion.children or {}) do
-      local rec = state.rows[child.id]
+      local rec = records[child.id]
       if not rec then return false end
       restored.children[#restored.children + 1] = rec
     end
-    state.expanded[id] = restored
+    restored_expanded[id] = restored
   end
-  for id, row in pairs(expected_rows) do
-    local ok = pcall(set_row_mark, bufnr, row, id)
-    if not ok then return false end
+  -- Matching is complete before the first identity is changed. If Neovim
+  -- rejects any mark recreation, clear the namespace rather than leave a
+  -- partially attributed display that could be mistaken for safe to sync.
+  for _, item in ipairs(display.rows) do
+    local ok = pcall(set_row_mark, bufnr, item.row, item.id)
+    if not ok then
+      vim.api.nvim_buf_clear_namespace(bufnr, namespace, 0, -1)
+      state.display_ids = {}
+      return false
+    end
   end
-  refresh_display_ids(bufnr, state)
+  state.rows = records
+  state.root_ids = vim.deepcopy(display.root_ids or {})
+  state.expanded = restored_expanded
+  state.display_ids = vim.deepcopy(expected_order)
   state.materialization_seq = vim.fn.undotree(bufnr).seq_cur
+  highlight.render(bufnr)
+  refresh_folder_icons(bufnr, state)
   return true
 end
 
@@ -1542,6 +1581,54 @@ local function collapse_snapshot(bufnr, state, parent, parent_row)
   if not visit(parent.id) then
     return nil, 'child row has unsaved edits or a missing/invalid identity mark'
   end
+  local display_snapshot
+  local display_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  if #state.display_ids == #display_lines then
+    local visible_rows, visible_records, complete = {}, {}, true
+    for row, id in ipairs(state.display_ids) do
+      local rec = state.rows[id]
+      local line = display_lines[row]
+      local expected = rec and (rec.kind == 'child'
+        and recorded_row_text(rec) or rec.text)
+      local identity = rec and rec.path and path_identity(rec.path) or nil
+      if not rec or visible_records[id] or row_id_at(bufnr, row - 1) ~= id
+        or line ~= expected or not identity
+        or (rec.kind == 'child'
+          and not fs.path_identities_match(identity, rec.identity)) then
+        complete = false
+        break
+      end
+      local saved = vim.deepcopy(rec)
+      visible_records[id] = saved
+      visible_rows[#visible_rows + 1] = {
+        id = id, row = row - 1, text = line, record = saved, identity = identity,
+      }
+    end
+    local directory_snapshots = {}
+    if complete then
+      for id, expanded in pairs(state.expanded) do
+        local rec = visible_records[id]
+        if not rec or not is_dir_line(rec.name) then
+          complete = false
+          break
+        end
+        directory_snapshots[id] = {
+          listing_lines = vim.deepcopy(expanded.listing_lines or {}),
+          wildignore = expanded.wildignore or vim.o.wildignore or '',
+        }
+      end
+    end
+    if complete then
+      display_snapshot = {
+        lines = vim.deepcopy(display_lines),
+        rows = visible_rows,
+        rows_by_id = visible_records,
+        root_ids = vim.deepcopy(state.root_ids),
+        expansions = vim.deepcopy(state.expanded),
+        directory_snapshots = directory_snapshots,
+      }
+    end
+  end
   return {
     parent_id = parent.id,
     parent_path = parent.path,
@@ -1555,6 +1642,7 @@ local function collapse_snapshot(bufnr, state, parent, parent_row)
     children_snapshot = vim.deepcopy(state.expanded[parent.id].children),
     listing_lines = vim.deepcopy(state.expanded[parent.id].listing_lines or {}),
     wildignore = vim.o.wildignore or '',
+    display_snapshot = display_snapshot,
   }
 end
 
