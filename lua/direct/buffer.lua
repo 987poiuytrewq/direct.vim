@@ -1,8 +1,8 @@
 -- lua/direct/buffer.lua -- directory buffer model, listing, sync, and open operations.
 -- Path identity uses fs.same_path. Sync validates edits, stages dependent
 -- moves, records only successful actions, and re-lists the filesystem state.
--- Unfolded child rows retain their filesystem identities; sync classifies only
--- root entries and refuses directory mutations while descendants are loaded.
+-- Expanded child rows retain their filesystem identities; sync classifies only
+-- root entries and refuses mutations of directories with known descendants.
 
 local M = {}
 
@@ -17,6 +17,8 @@ local register = require('direct.register')
 local ui = require('direct.ui')
 local highlight = require('direct.highlight')
 local reconcile_undone_materialization
+local remove_expanded_subtree
+local recorded_row_text
 
 local Buffer = {}
 Buffer.__index = Buffer
@@ -133,27 +135,6 @@ local function current_row_record(bufnr, row)
   local state = states[bufnr]
   local id = row_id_at(bufnr, row)
   return state and id and state.rows[id] or nil
-end
-
-local function install_fold_options(bufnr)
-  _G.__direct_listing_foldexpr = function(lnum) return M.foldexpr(lnum) end
-  local expr = 'v:lua.__direct_listing_foldexpr(v:lnum)'
-  local state = states[bufnr]
-  if not state then return end
-  state.fold_windows = state.fold_windows or {}
-  for _, win in ipairs(vim.api.nvim_list_wins()) do
-    if vim.api.nvim_win_get_buf(win) == bufnr and not state.fold_windows[win] then
-      pcall(vim.api.nvim_set_option_value, 'foldmethod', 'expr',
-        { win = win, scope = 'local' })
-      pcall(vim.api.nvim_set_option_value, 'foldexpr', expr,
-        { win = win, scope = 'local' })
-      pcall(vim.api.nvim_set_option_value, 'foldenable', true,
-        { win = win, scope = 'local' })
-      pcall(vim.api.nvim_set_option_value, 'foldlevel', 99,
-        { win = win, scope = 'local' })
-      state.fold_windows[win] = true
-    end
-  end
 end
 
 -- ---------------------------------------------------------------------------
@@ -717,7 +698,11 @@ local function restore_redone_materialization(bufnr, state, materialization, lin
     child.kind, child.parent = 'child', parent.id
     state.rows[child.id] = child
   end
-  state.expanded[parent.id] = { children = children }
+  state.expanded[parent.id] = {
+    children = children,
+    listing_lines = vim.deepcopy(materialization.listing_lines or {}),
+    wildignore = materialization.wildignore or '',
+  }
   for _, child in ipairs(children) do
     local ok = pcall(set_row_mark, bufnr, expected_rows[child.id], child.id)
     if not ok then
@@ -728,6 +713,83 @@ local function restore_redone_materialization(bufnr, state, materialization, lin
   end
   refresh_display_ids(bufnr, state)
   return true
+end
+
+-- Undoing a collapse restores rows through Neovim's undo tree. Reattach their
+-- saved identities and expansion records only if both the materialized text
+-- and every previously-expanded directory snapshot still match the filesystem.
+local function restore_undone_collapse(bufnr, state, snapshot)
+  local parent = state.rows[snapshot.parent_id]
+  if not parent or state.expanded[parent.id] then return false end
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local parent_row
+  for row = 0, #lines - 1 do
+    if row_id_at(bufnr, row) == parent.id then parent_row = row; break end
+  end
+  if parent_row == nil or lines[parent_row + 1] ~= snapshot.parent_text
+    or vim.fs.normalize(parent.path) ~= vim.fs.normalize(snapshot.parent_path)
+    or not fs.path_identities_match(path_identity(parent.path), snapshot.parent_identity) then
+    return false
+  end
+  local listing = fs.read_dir_lines(parent.path,
+    M.ignore_set(parent.path, snapshot.wildignore or ''))
+  if not listing or not same_lines(listing, snapshot.listing_lines or {}) then return false end
+
+  local expected_ids, expected_rows = {}, {}
+  for offset, item in ipairs(snapshot.rows or {}) do
+    local row = parent_row + offset
+    local rec = snapshot.rows_by_id[item.id]
+    if not rec or item.row ~= row or lines[row + 1] ~= item.text
+      or item.text ~= recorded_row_text(rec)
+      or not fs.path_identities_match(path_identity(rec.path), rec.identity) then
+      return false
+    end
+    expected_ids[item.id], expected_rows[item.id] = true, row
+  end
+  for id, expected in pairs(snapshot.directory_snapshots or {}) do
+    local rec = snapshot.rows_by_id[id]
+    if not rec then return false end
+    local current = fs.read_dir_lines(rec.path,
+      M.ignore_set(rec.path, snapshot.wildignore or ''))
+    if not current or not same_lines(current, expected) then return false end
+  end
+  for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1,
+      { details = true })) do
+    local id, row, details = mark[1], mark[2], mark[4] or {}
+    if not details.invalid and row > parent_row
+      and row <= parent_row + #(snapshot.rows or {}) and not expected_ids[id] then
+      return false
+    end
+  end
+
+  for id, rec in pairs(snapshot.rows_by_id or {}) do state.rows[id] = vim.deepcopy(rec) end
+  state.expanded[parent.id] = { children = {} }
+  for _, child in ipairs(snapshot.children_snapshot or {}) do
+    state.expanded[parent.id].children[#state.expanded[parent.id].children + 1] =
+      state.rows[child.id]
+  end
+  for id, expansion in pairs(snapshot.expansions or {}) do
+    local restored = { children = {} }
+    for _, child in ipairs(expansion.children or {}) do
+      local rec = state.rows[child.id]
+      if not rec then return false end
+      restored.children[#restored.children + 1] = rec
+    end
+    state.expanded[id] = restored
+  end
+  for id, row in pairs(expected_rows) do
+    local ok = pcall(set_row_mark, bufnr, row, id)
+    if not ok then return false end
+  end
+  refresh_display_ids(bufnr, state)
+  state.materialization_seq = vim.fn.undotree(bufnr).seq_cur
+  return true
+end
+
+local function forget_collapsed_state(bufnr, state, snapshot)
+  remove_expanded_subtree(bufnr, state, snapshot.parent_id)
+  refresh_display_ids(bufnr, state)
+  state.materialization_seq = vim.fn.undotree(bufnr).seq_cur
 end
 
 -- If undo returns exactly to the sequence that preceded a view materialization,
@@ -768,6 +830,23 @@ reconcile_undone_materialization = function(bufnr)
       active[entry.seq] = true
       collect_alternates(entry.alt)
       if entry.seq == seq_cur then current_path = true end
+    end
+  end
+
+  -- Collapsing is an ordinary Neovim text change, but its row records are
+  -- intentionally removed while collapsed. Rebuild those records when undo
+  -- restores the exact expanded rows, and discard them again on redo.
+  for index = #(state.collapse_undos or {}), 1, -1 do
+    local collapse = state.collapse_undos[index]
+    if collapse.status == 'collapsed' and collapse.base_seq == seq_cur then
+      if restore_undone_collapse(bufnr, state, collapse) then
+        collapse.status = 'expanded'
+        return true
+      end
+    elseif collapse.status == 'expanded' and collapse.seq == seq_cur then
+      forget_collapsed_state(bufnr, state, collapse)
+      collapse.status = 'collapsed'
+      return true
     end
   end
 
@@ -896,20 +975,21 @@ end
 local function blocks_loaded_directory(bufnr, plan)
   local state = states[bufnr]
   if not state then return nil end
-  for root_id, expansion in pairs(state.expanded or {}) do
-    if #expansion.children > 0 then
-      local root = state.rows[root_id]
-      if root and root.kind == 'root' then
-        local protected_path = M.entry_path(state.root, root.name)
-        for _, move in ipairs(plan.moves or {}) do
-          if fs.same_path(M.entry_path(state.root, move.src), protected_path) then
-            return root.name
-          end
+  for _, root_id in ipairs(state.root_ids or {}) do
+    local root = state.rows[root_id]
+    local expansion = state.expanded[root_id]
+    local known = state.known_children and state.known_children[root_id]
+    if root and root.kind == 'root' and is_dir_line(root.name)
+      and ((expansion and #expansion.children > 0) or (known and #known > 0)) then
+      local protected_path = M.entry_path(state.root, root.name)
+      for _, move in ipairs(plan.moves or {}) do
+        if fs.same_path(M.entry_path(state.root, move.src), protected_path) then
+          return root.name
         end
-        for _, removed in ipairs(plan.removed or {}) do
-          if fs.same_path(M.entry_path(state.root, removed), protected_path) then
-            return root.name
-          end
+      end
+      for _, removed in ipairs(plan.removed or {}) do
+        if fs.same_path(M.entry_path(state.root, removed), protected_path) then
+          return root.name
         end
       end
     end
@@ -967,23 +1047,18 @@ local function set_options(bufnr)
     command = 'DirectSync',
     desc = 'direct: sync the listing on :write',
   })
-  vim.api.nvim_create_autocmd('BufWinEnter', {
-    group = group,
-    buffer = bufnr,
-    callback = function() install_fold_options(bufnr) end,
-    desc = 'direct: configure listing folds in each window',
-  })
   vim.api.nvim_create_autocmd('TextChanged', {
     group = group,
     buffer = bufnr,
     callback = function() reconcile_undone_materialization(bufnr) end,
     desc = 'direct: reconcile child rows when undo removes a materialization',
   })
-  vim.keymap.set('n', 'zo', function() M.fold_open(false) end,
-    { buffer = bufnr, silent = true, desc = 'Unfold one direct directory level' })
-  vim.keymap.set('n', 'za', function() M.fold_open(true) end,
-    { buffer = bufnr, silent = true, desc = 'Toggle one direct directory fold' })
-  install_fold_options(bufnr)
+  vim.keymap.set('n', 'zo', function() M.expand() end,
+    { buffer = bufnr, silent = true, desc = 'Expand one direct directory level' })
+  vim.keymap.set('n', 'za', function() M.toggle() end,
+    { buffer = bufnr, silent = true, desc = 'Toggle direct directory expansion' })
+  vim.keymap.set('n', 'zc', function() M.collapse() end,
+    { buffer = bufnr, silent = true, desc = 'Collapse direct directory rows' })
 end
 
 -- Return the destination left by a successful create/move, or nil for removals.
@@ -1097,9 +1172,11 @@ function Buffer:list()
   local bufnr = vim.api.nvim_get_current_buf()
   local old_state = states[bufnr]
   local old_expanded = {}
+  local old_known_children = {}
   local old_index = { by_path = {}, by_inode = {}, unknown_by_path = {} }
   if old_state then
     old_expanded = old_state.expanded or {}
+    old_known_children = old_state.known_children or {}
     local old_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
     for row, line in ipairs(old_lines) do
       local id = row_id_at(bufnr, row - 1)
@@ -1129,13 +1206,17 @@ function Buffer:list()
     root = self.root,
     rows = {},
     expanded = old_expanded,
+    -- This survives collapse and re-listing so a directory previously observed
+    -- to be non-empty cannot be trashed just because its rows are hidden.
+    known_children = old_known_children,
     root_ids = {},
     next_id = old_state and old_state.next_id or 0,
     display_ids = {},
-    fold_windows = old_state and old_state.fold_windows or {},
     materialization_undos = {},
     materialization_recoveries = old_state
       and vim.deepcopy(old_state.materialization_recoveries or {}) or {},
+    collapse_undos = old_state
+      and vim.deepcopy(old_state.collapse_undos or {}) or {},
   }
   local roots = {}
   local used_root = {}
@@ -1186,6 +1267,9 @@ function Buffer:list()
   for id in pairs(state.expanded) do
     if not state.rows[id] then state.expanded[id] = nil end
   end
+  for id in pairs(state.known_children) do
+    if not state.rows[id] then state.known_children[id] = nil end
+  end
 
   local display = {}
   local display_identities = {}
@@ -1219,19 +1303,13 @@ function Buffer:list()
   return true
 end
 
--- Expr-fold levels use the stable string form supported by Neovim: a
--- directory starts a level and its immediate children occupy that level.
-function M.foldexpr(lnum)
-  local bufnr = vim.api.nvim_get_current_buf()
-  local rec = current_row_record(bufnr, lnum - 1)
-  if not rec then return '0' end
-  if is_dir_line(rec.name) then
-    return '>' .. tostring((rec.depth or 0) + 1)
-  end
-  return tostring(rec.depth or 0)
+recorded_row_text = function(rec)
+  local name = rec.name
+  if is_dir_line(name) then name = name:gsub('/+$', '') .. '/' end
+  return string.rep('  ', rec.depth or 0) .. name
 end
 
-function Buffer:unfold(row)
+function Buffer:expand(row)
   local bufnr = vim.api.nvim_get_current_buf()
   reconcile_undone_materialization(bufnr)
   row = row or vim.api.nvim_win_get_cursor(0)[1]
@@ -1248,10 +1326,14 @@ function Buffer:unfold(row)
     local children, err = M.read(path)
     local snapshot = { wildignore = wildignore }
     if not children then
-      ui.notify('direct: cannot unfold ' .. tostring(path) .. ': '
+      ui.notify('direct: cannot expand ' .. tostring(path) .. ': '
         .. tostring(err), vim.log.levels.ERROR)
       return nil, err
     end
+    -- Keep an unfiltered snapshot for destructive sync preflight. Ignored names
+    -- are hidden from the view but still make the directory non-empty.
+    local known_children = fs.read_dir_lines(path)
+    state.known_children[rec.id] = known_children or vim.deepcopy(children)
     local materialized = {}
     for order, child_name in ipairs(children) do
       local child_path = M.entry_path(path, child_name)
@@ -1268,7 +1350,11 @@ function Buffer:unfold(row)
           .. child_name, vim.log.levels.ERROR)
       end
     end
-    state.expanded[rec.id] = { children = materialized }
+    state.expanded[rec.id] = {
+      children = materialized,
+      listing_lines = vim.deepcopy(children),
+      wildignore = snapshot.wildignore,
+    }
     just_materialized = true
     if #materialized > 0 then
       local insert_at, add = row, {}
@@ -1327,21 +1413,125 @@ function Buffer:unfold(row)
     end
   end
 
-  pcall(vim.api.nvim_win_call, vim.api.nvim_get_current_win(), function()
-    if just_materialized then vim.cmd('normal! zx') end
-    if self.toggle and not just_materialized then
-      vim.cmd('normal! za')
-    elseif vim.fn.foldclosed(row) ~= -1 then
-      vim.cmd('normal! zo')
-    end
-  end)
+  if just_materialized then vim.cmd('redraw') end
   return true
 end
 
-function M.fold_open(toggle)
+local function collapse_snapshot(bufnr, state, parent, parent_row)
+  local rows, rows_by_id, expansions, directory_snapshots = {}, {}, {}, {}
+  local cursor = parent_row
+  local function visit(parent_id)
+    local expansion = state.expanded[parent_id]
+    if not expansion then return true end
+    for _, child in ipairs(expansion.children or {}) do
+      local row = cursor + 1
+      cursor = row
+      local line = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1]
+      if state.rows[child.id] ~= child or child.parent ~= parent_id
+        or row_id_at(bufnr, row) ~= child.id
+        or line ~= recorded_row_text(child) then
+        return false
+      end
+      local saved = vim.deepcopy(child)
+      rows[#rows + 1] = { id = child.id, row = row, text = line }
+      rows_by_id[child.id] = saved
+      if state.expanded[child.id] then
+        expansions[child.id] = vim.deepcopy(state.expanded[child.id])
+        directory_snapshots[child.id] = vim.deepcopy(
+          state.expanded[child.id].listing_lines or {})
+      end
+      if not visit(child.id) then return false end
+    end
+    return true
+  end
+  if not visit(parent.id) then
+    return nil, 'child row has unsaved edits or a missing/invalid identity mark'
+  end
+  return {
+    parent_id = parent.id,
+    parent_path = parent.path,
+    parent_identity = path_identity(parent.path),
+    parent_text = parent.text,
+    base_seq = vim.fn.undotree(bufnr).seq_cur,
+    rows = rows,
+    rows_by_id = rows_by_id,
+    expansions = expansions,
+    directory_snapshots = directory_snapshots,
+    children_snapshot = vim.deepcopy(state.expanded[parent.id].children),
+    listing_lines = vim.deepcopy(state.expanded[parent.id].listing_lines or {}),
+    wildignore = vim.o.wildignore or '',
+  }
+end
+
+remove_expanded_subtree = function(bufnr, state, parent_id)
+  local expansion = state.expanded[parent_id]
+  if not expansion then return end
+  state.expanded[parent_id] = nil
+  for _, child in ipairs(expansion.children or {}) do
+    remove_expanded_subtree(bufnr, state, child.id)
+    pcall(vim.api.nvim_buf_del_extmark, bufnr, namespace, child.id)
+    state.rows[child.id] = nil
+  end
+end
+
+function Buffer:collapse(row)
+  local bufnr = vim.api.nvim_get_current_buf()
+  reconcile_undone_materialization(bufnr)
+  row = row or vim.api.nvim_win_get_cursor(0)[1]
+  local parent = current_row_record(bufnr, row - 1)
+  local line = vim.api.nvim_buf_get_lines(bufnr, row - 1, row, false)[1]
+  if not parent or not line then return nil, 'row identity is unavailable' end
+  if not is_dir_line(parent.name) then return false end
+  local state = states[bufnr]
+  local expansion = state.expanded[parent.id]
+  if not expansion then return false end
+
+  local snapshot, reason = collapse_snapshot(bufnr, state, parent, row - 1)
+  if not snapshot then
+    local message = 'direct: cannot collapse ' .. parent.name .. ': ' .. reason
+    ui.notify(message, vim.log.levels.ERROR)
+    return false, reason
+  end
+  if #snapshot.rows > 0 then
+    local modified = vim.bo[bufnr].modified
+    local undo_levels = vim.bo[bufnr].undolevels
+    if undo_levels == -123456 then
+      vim.go.undolevels = vim.go.undolevels
+    elseif undo_levels >= 0 then
+      vim.bo[bufnr].undolevels = undo_levels
+    end
+    vim.api.nvim_buf_set_lines(bufnr, row, row + #snapshot.rows, false, {})
+    snapshot.seq = vim.fn.undotree().seq_cur
+    snapshot.status = 'collapsed'
+    state.collapse_undos = state.collapse_undos or {}
+    state.collapse_undos[#state.collapse_undos + 1] = snapshot
+    remove_expanded_subtree(bufnr, state, parent.id)
+    refresh_display_ids(bufnr, state)
+    highlight.render(bufnr)
+    vim.bo[bufnr].modified = modified
+  else
+    state.expanded[parent.id] = nil
+  end
+  return true
+end
+
+function M.expand()
   local buffer = M.restore()
-  buffer.toggle = toggle
-  return buffer:unfold(vim.api.nvim_win_get_cursor(0)[1])
+  return buffer:expand(vim.api.nvim_win_get_cursor(0)[1])
+end
+
+function M.collapse()
+  local buffer = M.restore()
+  return buffer:collapse(vim.api.nvim_win_get_cursor(0)[1])
+end
+
+function M.toggle()
+  local bufnr = vim.api.nvim_get_current_buf()
+  local rec = current_row_record(bufnr, vim.api.nvim_win_get_cursor(0)[1] - 1)
+  if rec and states[bufnr] and states[bufnr].expanded[rec.id] then
+    return M.collapse()
+  end
+  return M.expand()
 end
 
 -- ---------------------------------------------------------------------------
@@ -1456,7 +1646,7 @@ function Buffer:sync()
   local blocked_dir = blocks_loaded_directory(bufnr, plan)
   if blocked_dir then
     vim.bo[bufnr].modified = true
-    local reason = 'directory has unfolded descendants: ' .. blocked_dir
+    local reason = 'directory has expanded or known children: ' .. blocked_dir
     ui.notify('Refusing to sync: ' .. reason .. '; nothing was changed.',
       vim.log.levels.ERROR)
     return nil, reason

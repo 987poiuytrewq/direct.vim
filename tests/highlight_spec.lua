@@ -147,7 +147,7 @@ H.describe('listing filename highlights', function()
     H.assert_true(ns ~= vim.api.nvim_get_namespaces()['direct-listing-rows'],
       'highlight extmarks are separate from row identity extmarks')
 
-    listing:unfold(1)
+    listing:expand(1)
     H.assert_buf_eq({ 'sub/', '  child.py', 'root.js' })
     assert_row_highlight(bufnr, 1, 'DirectLangPython', 2, 10)
     assert_row_highlight(bufnr, 2, 'DirectLangJavaScript', 0, 7)

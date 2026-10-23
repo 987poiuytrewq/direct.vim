@@ -90,7 +90,7 @@ H.describe('buffer: listing', function()
     local child = H.mkdir(ws, 'child')
     H.mkfile(child, 'inside.txt', '')
     local listing = buffer.list(ws)
-    listing:unfold(1)
+    listing:expand(1)
     local ns = vim.api.nvim_get_namespaces()['direct-listing-rows']
     local before = vim.api.nvim_buf_get_extmarks(0, ns, 0, -1, {})
     local before_paths = listing:get_paths(1, 2)
@@ -275,7 +275,7 @@ H.describe('buffer: listing', function()
     H.assert_false(vim.bo.modified, 'nomodified only after a real refresh')
   end)
 
-  H.it('keeps the root flat and unfolds one directory level lazily (Phase 1)', function()
+  H.it('keeps the root flat and expands one directory level lazily', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -284,11 +284,11 @@ H.describe('buffer: listing', function()
     H.mkfile(sub, 'inside.txt', { 'inside' })
     H.mkfile(ws, 'root.txt', { 'root' })
 
-    local global_foldmethod = vim.go.foldmethod
+    local foldmethod, foldexpr = vim.wo.foldmethod, vim.wo.foldexpr
     local listing = buffer.list(ws)
     H.assert_buf_eq({ 'sub/', 'root.txt' }, 0)
-    H.assert_eq(vim.wo.foldmethod, 'expr', 'folding is configured locally for this window')
-    H.assert_eq(vim.go.foldmethod, global_foldmethod, 'global fold options are untouched')
+    H.assert_eq(vim.wo.foldmethod, foldmethod, 'listing leaves foldmethod untouched')
+    H.assert_eq(vim.wo.foldexpr, foldexpr, 'listing leaves foldexpr untouched')
     H.assert_false(vim.bo.modified, 'flat initial listing stays clean')
 
     local before = vim.fn.undotree()
@@ -299,11 +299,11 @@ H.describe('buffer: listing', function()
       return read(path)
     end
     local ok, err = pcall(function()
-      listing:unfold(1)
+      listing:expand(1)
       H.assert_buf_eq({ 'sub/', '  nested/', '  inside.txt', 'root.txt' }, 0)
       H.assert_eq(calls, 1, 'one immediate-child read')
       H.assert_false(vim.bo.modified, 'display-only expansion remains clean')
-      listing:unfold(1)
+      listing:expand(1)
       H.assert_eq(calls, 1, 'repeat expansion does not re-read')
       H.assert_eq(vim.api.nvim_buf_line_count(0), 4, 'repeat expansion does not duplicate')
       H.assert_eq(vim.api.nvim_win_get_cursor(0)[1], 1, 'cursor stays on the directory')
@@ -314,7 +314,7 @@ H.describe('buffer: listing', function()
     if not ok then error(err) end
   end)
 
-  H.it('zo and za unfold and visually collapse without unloading children', function()
+  H.it('zo, za, and zc expand and collapse by adding and removing rows', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -324,16 +324,56 @@ H.describe('buffer: listing', function()
 
     vim.api.nvim_feedkeys('zo', 'mx', false)
     H.assert_buf_eq({ 'sub/', '  inside.txt' }, 0)
-    H.assert_eq(vim.fn.foldclosed(1), -1, 'zo leaves the directory unfolded')
     vim.api.nvim_feedkeys('za', 'mx', false)
-    H.assert_eq(vim.fn.foldclosed(1), 1, 'za visually closes the directory fold')
-    H.assert_eq(vim.api.nvim_buf_line_count(0), 2,
-      'collapse does not unload materialized child rows')
+    H.assert_buf_eq({ 'sub/' }, 0, 'za removes the expanded child rows')
     vim.api.nvim_feedkeys('za', 'mx', false)
-    H.assert_eq(vim.fn.foldclosed(1), -1, 'za opens a loaded fold')
+    H.assert_buf_eq({ 'sub/', '  inside.txt' }, 0, 'za expands a collapsed directory')
+    vim.api.nvim_feedkeys('zc', 'mx', false)
+    H.assert_buf_eq({ 'sub/' }, 0, 'zc collapses an expanded directory')
   end)
 
-  H.it('preserves a manually collapsed fold when the buffer is re-entered', function()
+  H.it('collapsing a parent removes its complete expanded nested subtree', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local sub = H.mkdir(ws, 'sub')
+    local nested = H.mkdir(sub, 'nested')
+    H.mkfile(nested, 'deep.txt', { 'deep' })
+    H.mkfile(sub, 'sibling.txt', { 'sibling' })
+    local listing = buffer.list(ws)
+    listing:expand(1)
+    listing:expand(2)
+    H.assert_buf_eq({ 'sub/', '  nested/', '    deep.txt', '  sibling.txt' }, 0)
+
+    listing:collapse(1)
+
+    H.assert_buf_eq({ 'sub/' }, 0, 'all descendants disappear with the parent collapse')
+    local state = buffer._state_for_test(vim.api.nvim_get_current_buf())
+    H.assert_nil(state.expanded[state.root_ids[1]], 'parent expansion record is cleared')
+    H.assert_eq(#vim.api.nvim_buf_get_extmarks(0,
+      vim.api.nvim_get_namespaces()['direct-listing-rows'], 0, -1, {}), 1,
+      'only the parent row identity remains')
+  end)
+
+  H.it('collapse on a row hidden by a collapsed parent is a safe no-op', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local sub = H.mkdir(ws, 'sub')
+    H.mkdir(sub, 'nested')
+    local listing = buffer.list(ws)
+    listing:expand(1)
+    listing:collapse(1)
+    local before = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+
+    local ok = listing:collapse(2)
+
+    H.assert_nil(ok, 'a hidden child row has no current identity')
+    H.assert_eq(vim.api.nvim_buf_get_lines(0, 0, -1, false), before,
+      'the hidden child cannot affect the collapsed parent')
+  end)
+
+  H.it('preserves expansion state when a direct buffer is re-entered', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -342,19 +382,190 @@ H.describe('buffer: listing', function()
     buffer.list(ws)
     local bufnr = vim.api.nvim_get_current_buf()
     vim.api.nvim_feedkeys('zo', 'mx', false)
-    vim.api.nvim_feedkeys('za', 'mx', false)
-    H.assert_eq(vim.fn.foldclosed(1), 1, 'directory fold is collapsed before switching')
+    H.assert_buf_eq({ 'sub/', '  inside.txt' }, 0)
 
     vim.cmd('enew')
     vim.cmd('buffer ' .. bufnr)
 
-    H.assert_eq(vim.fn.foldclosed(1), 1,
-      'BufWinEnter preserves the user-collapsed fold')
-    H.assert_eq(vim.api.nvim_buf_line_count(bufnr), 2,
-      're-entry does not unload materialized children')
+    H.assert_buf_eq({ 'sub/', '  inside.txt' }, bufnr,
+      're-entry preserves the materialized child rows')
   end)
 
-  H.it('nested directories reveal only their immediate children when unfolded', function()
+  H.it('collapse undo restores child rows and identities once; redo collapses again', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local sub = H.mkdir(ws, 'sub')
+    H.mkfile(sub, 'inside.txt', { 'inside' })
+    local listing = buffer.list(ws)
+    listing:expand(1)
+    local bufnr = vim.api.nvim_get_current_buf()
+    local row_ns = vim.api.nvim_get_namespaces()['direct-listing-rows']
+    local before_marks = vim.api.nvim_buf_get_extmarks(bufnr, row_ns, 0, -1, {})
+    H.assert_eq(#before_marks, 2, 'parent and child identities exist before collapse')
+
+    listing:collapse(1)
+    H.assert_buf_eq({ 'sub/' }, 0, 'collapse removes child rows')
+    H.assert_eq(vim.fn.maparg('<C-r>', 'n', false, true).rhs, '<Cmd>redo<CR>',
+      'direct buffer maps redo to Neovim text redo')
+    vim.api.nvim_feedkeys('u', 'mx', false)
+    vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
+    H.assert_buf_eq({ 'sub/', '  inside.txt' }, 0, 'undo restores exact child rows')
+    H.assert_eq(vim.api.nvim_buf_get_extmarks(bufnr, row_ns, 0, -1, {}), before_marks,
+      'undo restores the exact row identity marks')
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<C-r>', true, false, true),
+      'mx', false)
+    vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
+    H.assert_buf_eq({ 'sub/' }, 0, 'redo re-collapses without duplicate rows')
+    H.assert_eq(vim.api.nvim_buf_line_count(bufnr), 1, 'redo leaves one directory row')
+  end)
+
+  H.it('a second undo still reverses expansion and redo restores it before recollapse', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local sub = H.mkdir(ws, 'sub')
+    H.mkfile(sub, 'inside.txt', { 'inside' })
+    local listing = buffer.list(ws)
+    local bufnr = vim.api.nvim_get_current_buf()
+    listing:expand(1)
+    listing:collapse(1)
+
+    vim.api.nvim_feedkeys('u', 'mx', false)
+    vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
+    H.assert_buf_eq({ 'sub/', '  inside.txt' }, 0, 'first undo restores collapsed rows')
+    vim.api.nvim_feedkeys('u', 'mx', false)
+    vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
+    H.assert_buf_eq({ 'sub/' }, 0, 'second undo removes the original expansion normally')
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<C-r>', true, false, true),
+      'mx', false)
+    vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
+    H.assert_buf_eq({ 'sub/', '  inside.txt' }, 0, 'redo restores expansion once')
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<C-r>', true, false, true),
+      'mx', false)
+    vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
+    H.assert_buf_eq({ 'sub/' }, 0, 'redo then reapplies the collapse')
+  end)
+
+  H.it('re-list preserves collapsed state and expansion rereads external changes', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local sub = H.mkdir(ws, 'sub')
+    H.mkfile(sub, 'old.txt', { 'old' })
+    local listing = buffer.list(ws)
+    listing:expand(1)
+    listing:collapse(1)
+    listing:list()
+    H.assert_buf_eq({ 'sub/' }, 0, 're-list keeps a previously collapsed directory closed')
+
+    H.mkfile(sub, 'new.txt', { 'new' })
+    listing:expand(1)
+    H.assert_buf_eq({ 'sub/', '  new.txt', '  old.txt' }, 0,
+      'expansion rereads current contents after an external change')
+  end)
+
+  H.it('edited child rows still block collapse after an expand undo/redo cycle', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local sub = H.mkdir(ws, 'sub')
+    H.mkfile(sub, 'inside.txt', { 'inside' })
+    local listing = buffer.list(ws)
+    local bufnr = vim.api.nvim_get_current_buf()
+    listing:expand(1)
+    vim.cmd('undo')
+    vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
+    vim.cmd('redo')
+    vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
+    vim.api.nvim_buf_set_lines(bufnr, 1, 2, false, { '  edited.txt' })
+    H.capture_messages()
+
+    local ok = listing:collapse(1)
+
+    H.assert_false(ok, 'restored but edited child rows still refuse collapse')
+    H.assert_buf_eq({ 'sub/', '  edited.txt' }, bufnr,
+      'refusal after redo keeps the edited row visible')
+    H.assert_notified('unsaved edits', vim.log.levels.ERROR)
+  end)
+
+  H.it('collapse and expand do not add file history or yank side effects', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local sub = H.mkdir(ws, 'sub')
+    H.mkfile(sub, 'inside.txt', { 'inside' })
+    local listing = buffer.list(ws)
+    local history = require('direct.history')
+    local register = require('direct.register')
+    local history_calls, yank_calls = 0, 0
+    local original_log, original_yank = history.log, register.yank
+    history.log = function(...) history_calls = history_calls + 1; return original_log(...) end
+    register.yank = function(...) yank_calls = yank_calls + 1; return original_yank(...) end
+    local ok, err = pcall(function()
+      listing:expand(1)
+      listing:collapse(1)
+      listing:expand(1)
+    end)
+    history.log, register.yank = original_log, original_yank
+    H.assert_true(ok, tostring(err))
+    H.assert_eq(history_calls, 0, 'view transitions do not log filesystem history')
+    H.assert_eq(yank_calls, 0, 'view transitions do not touch the yank register')
+  end)
+
+  H.it('refuses collapse atomically when a child row has unsaved text', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local sub = H.mkdir(ws, 'sub')
+    H.mkdir(sub, 'nested')
+    H.mkfile(sub, 'inside.txt', { 'inside' })
+    local listing = buffer.list(ws)
+    listing:expand(1)
+    listing:expand(2)
+    vim.api.nvim_buf_set_lines(0, 2, 3, false, { '  edited.txt' })
+    local before_lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    local namespace = vim.api.nvim_get_namespaces()['direct-listing-rows']
+    local before_marks = vim.api.nvim_buf_get_extmarks(0, namespace, 0, -1, {})
+    local state = buffer._state_for_test(vim.api.nvim_get_current_buf())
+    local before_expanded = vim.deepcopy(state.expanded)
+    H.capture_messages()
+
+    local ok, reason = listing:collapse(1)
+
+    H.assert_false(ok, 'collapse is refused')
+    H.assert_true(tostring(reason):find('unsaved', 1, true) ~= nil,
+      'reason identifies the unsaved child row')
+    H.assert_eq(vim.api.nvim_buf_get_lines(0, 0, -1, false), before_lines,
+      'refusal leaves every buffer row unchanged')
+    H.assert_eq(vim.api.nvim_buf_get_extmarks(0, namespace, 0, -1, {}), before_marks,
+      'refusal leaves every row identity unchanged')
+    H.assert_eq(state.expanded, before_expanded, 'refusal leaves expansion state unchanged')
+    H.assert_notified('collapse', vim.log.levels.ERROR)
+  end)
+
+  H.it('refuses collapse when a child row identity mark is missing', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local sub = H.mkdir(ws, 'sub')
+    H.mkfile(sub, 'inside.txt', { 'inside' })
+    local listing = buffer.list(ws)
+    listing:expand(1)
+    local ns = vim.api.nvim_get_namespaces()['direct-listing-rows']
+    local child_id = vim.api.nvim_buf_get_extmarks(0, ns, { 1, 0 }, { 1, -1 }, {})[1][1]
+    vim.api.nvim_buf_del_extmark(0, ns, child_id)
+    H.capture_messages()
+
+    local ok = listing:collapse(1)
+
+    H.assert_false(ok, 'missing child identity refuses collapse')
+    H.assert_buf_eq({ 'sub/', '  inside.txt' }, 0,
+      'refusal keeps child rows present')
+    H.assert_notified('identity', vim.log.levels.ERROR)
+  end)
+
+  H.it('nested directories reveal only their immediate children when expanded', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -364,10 +575,10 @@ H.describe('buffer: listing', function()
     H.mkfile(sub, 'nested/deep.txt', { 'deep' })
     local listing = buffer.list(ws)
 
-    listing:unfold(1)
+    listing:expand(1)
     H.assert_buf_eq({ 'sub/', '  nested/', '  sibling.txt' }, 0,
-      'the root unfold is exactly one level')
-    listing:unfold(2)
+      'the root expand is exactly one level')
+    listing:expand(2)
     H.assert_buf_eq({ 'sub/', '  nested/', '    deep.txt', '  sibling.txt' }, 0,
       'nested contents are materialized only on the nested directory')
     H.assert_eq(listing:get_paths(3, 3), { ws .. '/sub/nested/deep.txt' })
@@ -381,7 +592,7 @@ H.describe('buffer: listing', function()
     H.mkfile(ws, 'sub/inside.txt', { 'inside' })
     local direct = require('direct')
     local listing = direct.list(ws)
-    listing:unfold(1)
+    listing:expand(1)
 
     H.assert_eq(listing:get_paths(2, 2), { ws .. '/sub/inside.txt' },
       'child path comes from its baseline, not root plus indentation')
@@ -412,7 +623,7 @@ H.describe('buffer: listing', function()
     local unresolved = link .. '/workdir'
 
     local listing = buffer.list(unresolved)
-    listing:unfold(1)
+    listing:expand(1)
     H.assert_buf_eq({ 'a/', '  inside.txt' }, 0, 'initial listing is expanded')
     local bufnr = vim.api.nvim_get_current_buf()
     local namespace = vim.api.nvim_get_namespaces()['direct-listing-rows']
@@ -445,7 +656,7 @@ H.describe('buffer: listing', function()
     H.mkfile(ws, 'unrelated.txt', { 'unrelated' })
     local direct = require('direct')
     local listing = direct.list(ws)
-    listing:unfold(1)
+    listing:expand(1)
     local before = H.fs_snapshot(ws)
 
     -- Keep the extmark identity for a/ while changing its visible spelling to
@@ -477,7 +688,7 @@ H.describe('buffer: listing', function()
     H.mkfile(ws, 'unrelated.txt', { 'unrelated' })
     local direct = require('direct')
     local listing = direct.list(ws)
-    listing:unfold(1)
+    listing:expand(1)
     local before = H.fs_snapshot(ws)
 
     vim.api.nvim_buf_set_text(0, 0, 0, 0, 1, { 'b' })
@@ -545,7 +756,7 @@ H.describe('buffer: listing', function()
       H.assert_eq(vim.uv.fs_readlink(alias_b), target, 'alias-b is a native symlink')
     end
 
-    listing:unfold(1)
+    listing:expand(1)
     H.assert_buf_eq({ 'alias-a/', '  child.txt', 'alias-b/', 'unrelated.txt' }, 0,
       'one alias has a materialized child before refresh')
     local bufnr = vim.api.nvim_get_current_buf()
@@ -614,7 +825,7 @@ H.describe('buffer: listing', function()
     H.mkdir(ws, 'sub')
     H.mkfile(ws, 'sub/inside.txt', { 'inside' })
     local listing = buffer.list(ws)
-    listing:unfold(1)
+    listing:expand(1)
     local ns = vim.api.nvim_get_namespaces()['direct-listing-rows']
     local child_mark = vim.api.nvim_buf_get_extmarks(0, ns, { 1, 0 }, { 1, -1 }, {})[1]
     H.assert_not_nil(child_mark, 'child row has an identity mark')

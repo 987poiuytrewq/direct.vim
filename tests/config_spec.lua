@@ -200,10 +200,10 @@ H.describe('config', function()
     -- mapping was cleared, or never installed) while a global `u` carrying the
     -- plugin's own rhs resolves through it.
     vim.keymap.del('n', 'u', { buffer = true })
-    vim.keymap.set('n', 'u', '<Cmd>DirectUndo<CR>', { silent = true, noremap = true })
+    vim.keymap.set('n', 'u', '<Cmd>undo<CR>', { silent = true, noremap = true })
     local resolved = vim.fn.maparg('u', 'n', false, true)
     H.assert_eq(resolved.buffer, 0, 'premise: only a global u resolves here')
-    H.assert_eq(resolved.rhs, '<Cmd>DirectUndo<CR>', 'premise: it carries the plugin rhs')
+    H.assert_eq(resolved.rhs, '<Cmd>undo<CR>', 'premise: it carries the plugin rhs')
 
     config.setup({ map_default_keys = false })
 
@@ -213,7 +213,7 @@ H.describe('config', function()
     -- The global fallback is not this buffer's mapping: it must survive.
     local after = vim.fn.maparg('u', 'n', false, true)
     H.assert_eq(after.buffer, 0, 'the global u is still global')
-    H.assert_eq(after.rhs, '<Cmd>DirectUndo<CR>', 'the global u was not deleted')
+    H.assert_eq(after.rhs, '<Cmd>undo<CR>', 'the global u was not deleted')
     vim.keymap.del('n', 'u')
     pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
   end)
