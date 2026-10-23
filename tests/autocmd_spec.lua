@@ -11,6 +11,16 @@ local function count_global(event)
   return #vim.api.nvim_get_autocmds({ group = 'direct', event = event })
 end
 
+local function count_buffer_groups()
+  local count = 0
+  for _, name in ipairs(vim.fn.getcompletion('', 'augroup')) do
+    if name:match('^direct%-buffer') then
+      count = count + 1
+    end
+  end
+  return count
+end
+
 H.describe('autocmd ownership', function()
   H.it('keeps each direct write handler across re-source and isolates buffer wipes', function()
     pcall(vim.cmd, '%bwipeout!')
@@ -19,6 +29,13 @@ H.describe('autocmd ownership', function()
     local second_dir = H.mkdir(sb.root, 'second')
     H.mkfile(first_dir, 'first-existing', 'first')
     H.mkfile(second_dir, 'second-existing', 'second')
+
+    for _ = 1, 6 do
+      buffer.list(first_dir)
+      vim.api.nvim_buf_delete(vim.api.nvim_get_current_buf(), { force = true })
+    end
+    H.assert_eq(count_buffer_groups(), 1,
+      'listing and wiping buffers keeps one shared direct buffer augroup')
 
     buffer.list(first_dir)
     local first_buf = vim.api.nvim_get_current_buf()
