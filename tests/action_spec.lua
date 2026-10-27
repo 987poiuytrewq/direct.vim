@@ -30,6 +30,40 @@ H.describe('action', function()
     H.assert_false(H.exists(sb.root, 'dir1'), 'directory source gone')
   end)
 
+  H.it('Move permits a case-only rename when both spellings are the same entry', function()
+    local sb = H.sandbox()
+    local source = H.mkfile(sb.root, 'foo.txt', { 'case-only content' })
+    local alternate = sb.root .. '/Foo.txt'
+    if vim.uv.fs_lstat(alternate) == nil then
+      -- Case-sensitive filesystems have two distinct names here; this specific
+      -- action contract applies only when the alternate spelling aliases src.
+      return
+    end
+
+    local ok, err = M.Move(source, alternate)['do']()
+
+    H.assert_true(ok == true, 'same-entry destination is not an occupied collision: ' .. tostring(err))
+    H.assert_eq(vim.fn.readfile(alternate), { 'case-only content' }, 'content survives')
+    local names = {}
+    for name in vim.fs.dir(sb.root) do names[#names + 1] = name end
+    table.sort(names)
+    H.assert_eq(names, { 'Foo.txt', 'data' }, 'the directory entry uses the requested spelling')
+  end)
+
+  H.it('Move refuses a hardlink destination even when it shares the source inode', function()
+    local sb = H.sandbox()
+    local source = H.mkfile(sb.root, 'foo.txt', { 'preserve both names' })
+    local destination = sb.root .. '/Foo.txt'
+    if vim.uv.fs_link(source, destination) ~= true then return end
+
+    local ok, err = M.Move(source, destination)['do']()
+
+    H.assert_nil(ok, 'a hardlink is a distinct occupied pathname')
+    H.assert_true(tostring(err):find('destination exists', 1, true) ~= nil, tostring(err))
+    H.assert_eq(vim.fn.readfile(source), { 'preserve both names' }, 'source remains')
+    H.assert_eq(vim.fn.readfile(destination), { 'preserve both names' }, 'hardlink remains')
+  end)
+
   -- Match the resolved pathname, not inode identity: hard links are distinct
   -- names, while symlink prefixes, `..`, and trailing slashes resolve alike.
   H.describe('action: close_src_buffer pathname identity', function()

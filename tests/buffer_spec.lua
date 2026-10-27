@@ -254,6 +254,37 @@ H.describe('buffer: listing', function()
       'stat work is linear in entries and patterns, got ' .. stat_count)
   end)
 
+  H.it('snapshot filtering indexes a large ignored set instead of comparing every pair', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    for index = 1, 40 do
+      H.mkfile(ws, string.format('visible-%02d.txt', index), '')
+      H.mkfile(ws, string.format('ignored-%02d.log', index), '')
+    end
+    local listing
+    H.with_option('wildignore', '*.log', function()
+      listing = buffer.list(ws)
+    end)
+    -- Adding an entry runs apply_snapshot over the visible listing. Any
+    -- pairwise same_path comparison there scales as visible x ignored.
+    vim.api.nvim_buf_set_lines(0, -1, -1, false, { 'new.txt' })
+    local original_same_path, comparisons = fs.same_path, 0
+    fs.same_path = function(...)
+      comparisons = comparisons + 1
+      return original_same_path(...)
+    end
+    local ok, result = pcall(listing.sync, listing)
+    fs.same_path = original_same_path
+
+    H.assert_true(ok, tostring(result))
+    H.assert_true(result == true, 'filtered save succeeds')
+    H.assert_eq(comparisons, 0,
+      'apply_snapshot performs indexed lookups, not visible-by-ignored same_path comparisons')
+    H.assert_true(H.exists(ws, 'ignored-40.log'), 'ignored files remain untouched')
+    H.assert_true(H.exists(ws, 'new.txt'), 'the visible addition is saved')
+  end)
+
   H.it('dirs render first then files, each group sorted, hidden entries kept', function()
     clean_buffers()
     local sb = H.sandbox()

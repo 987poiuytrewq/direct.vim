@@ -2151,6 +2151,57 @@ H.describe('sync: safety guards', function()
     H.assert_eq(vim.fn.readfile(ws .. '/b.txt'), { 'A' }, 'b.txt received the swapped content')
   end)
 
+  H.it('case-only rename preserves content and is undoable and redoable on insensitive filesystems', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkfile(ws, 'foo.txt', { 'case-only content' })
+    if vim.uv.fs_lstat(ws .. '/FOO.TXT') == nil then
+      -- Linux and other case-sensitive filesystems correctly treat this as a
+      -- different, absent pathname; the rename behavior is platform-specific.
+      return
+    end
+
+    local _, ok, reason = list_edit_and_sync(ws, { 'Foo.txt' })
+
+    H.assert_true(ok == true, 'case-only sync succeeds: ' .. tostring(reason))
+    H.assert_eq(vim.fn.readfile(ws .. '/Foo.txt'), { 'case-only content' }, 'content is preserved')
+    H.assert_eq(history_lines('undo.log'), {
+      '#direct-history-v3', 'mv\t' .. ws .. '/foo.txt\t' .. ws .. '/Foo.txt',
+    }, 'the original and destination spellings are logged')
+    H.assert_true(history.undo() ~= nil, 'the rename can be undone')
+    H.assert_eq(vim.fn.readfile(ws .. '/foo.txt'), { 'case-only content' }, 'undo restores old spelling')
+    H.assert_true(history.redo() ~= nil, 'the rename can be redone')
+    H.assert_eq(vim.fn.readfile(ws .. '/Foo.txt'), { 'case-only content' }, 'redo restores new spelling')
+  end)
+
+  H.it('refuses a case-only-looking rename onto a different occupied entry on sensitive filesystems', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkfile(ws, 'foo.txt', { 'source' })
+    H.mkfile(ws, 'Foo.txt', { 'destination' })
+    if vim.uv.fs_lstat(ws .. '/FOO.TXT') ~= nil then
+      -- On an insensitive filesystem these names are the same directory entry.
+      return
+    end
+
+    local listing
+    H.with_option('wildignore', 'Foo.txt', function()
+      listing = buffer.list(ws)
+    end)
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'Foo.txt' })
+    local ok, reason = listing:sync()
+
+    H.assert_nil(ok, 'a different occupied destination refuses the batch')
+    H.assert_true(tostring(reason):find('destination already exists', 1, true) ~= nil,
+      'the collision is reported')
+    H.assert_eq(vim.fn.readfile(ws .. '/foo.txt'), { 'source' }, 'source is unchanged')
+    H.assert_eq(vim.fn.readfile(ws .. '/Foo.txt'), { 'destination' }, 'destination is unchanged')
+    H.assert_eq(history_lines('undo.log'), {}, 'refusal writes no history')
+    H.assert_true(vim.bo.modified, 'the unsynced change remains visible')
+  end)
+
   H.it('chain rename (a->b->c->d) completes with no leftovers', function()
     clean_buffers()
     local sb = H.sandbox()

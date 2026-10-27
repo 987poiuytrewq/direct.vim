@@ -253,6 +253,66 @@ function M.same_path(a, b)
     M.path_identity(a, M.stat(a)), M.path_identity(b, M.stat(b)))
 end
 
+local function lstat(path)
+  local ok, stat = pcall(vim.uv.fs_lstat, path)
+  if ok then return stat end
+  return nil
+end
+
+-- entry_identity(path) returns the normalized spelling and, when available,
+-- the lstat device/inode identity. Unlike path_identity, this keeps symlinks
+-- distinct from their targets, matching directory-entry semantics.
+function M.entry_identity(path)
+  if type(path) ~= 'string' then return nil end
+  local stat = lstat(path)
+  return M.path_identity(path, stat), stat
+end
+
+-- same_entry(a, b) -> whether two spellings resolve to the same directory
+-- entry, using lstat identity so symlink names remain distinct from their
+-- targets. This is used when deciding whether an occupied rename destination is
+-- merely another spelling of its source (for example a case-only rename).
+function M.same_entry(a, b)
+  if type(a) ~= 'string' or type(b) ~= 'string' then return false end
+  local function normalize(path)
+    path = path:gsub('/+$', '')
+    if path == '' then path = '/' end
+    return vim.fs.normalize(path)
+  end
+  local normalized_a, normalized_b = normalize(a), normalize(b)
+  if normalized_a == normalized_b then return true end
+  local parent_a, name_a = normalized_a:match('^(.*)/([^/]+)$')
+  local parent_b, name_b = normalized_b:match('^(.*)/([^/]+)$')
+  if not parent_a or not parent_b then return false end
+  if parent_a == '' then parent_a = '/' end
+  if parent_b == '' then parent_b = '/' end
+  if parent_a ~= parent_b and not M.same_path(parent_a, parent_b) then return false end
+  local identity_a, stat_a = M.entry_identity(normalized_a)
+  local identity_b = M.entry_identity(normalized_b)
+  if not (identity_a and identity_b and identity_a.inode
+    and identity_a.inode == identity_b.inode) then
+    return false
+  end
+  -- A hard link is the same inode but a different pathname. On a sensitive
+  -- filesystem, names differing only by case can also be hard links, so verify
+  -- that the parent contains only one actual name corresponding to these two
+  -- spellings. The source name normally comes from the directory listing.
+  local scan = vim.uv.fs_scandir(parent_a)
+  if not scan then return false end
+  local matching_entries = 0
+  while true do
+    local name = vim.uv.fs_scandir_next(scan)
+    if name == nil then break end
+    if name == name_a or name == name_b then
+      local stat = lstat(vim.fs.joinpath(parent_a, name))
+      if stat and stat.dev == stat_a.dev and stat.ino == stat_a.ino then
+        matching_entries = matching_entries + 1
+      end
+    end
+  end
+  return matching_entries == 1
+end
+
 -- ---------------------------------------------------------------------------
 -- Mutation
 -- ---------------------------------------------------------------------------

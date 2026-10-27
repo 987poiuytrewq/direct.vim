@@ -326,11 +326,39 @@ local function get_directory_snapshot(state, path)
   return nil
 end
 
-local function path_is_ignored(path, ignored)
-  for _, ignored_path in ipairs(ignored or {}) do
-    if fs.same_path(path, ignored_path) then return true end
+-- Build the same device/inode and normalized-name index used by the directory
+-- listing. The list-time snapshot can contain many ignored entries, so sync
+-- must not compare every visible row against every ignored path.
+local function ignored_identity_index(paths)
+  if not paths or #paths == 0 then return nil end
+  local index = { by_path = {}, unknown_by_path = {}, by_inode = {} }
+  for _, path in ipairs(paths) do
+    local identity = fs.path_identity(path, fs.stat(path))
+    if identity then
+      index.by_path[identity.path] = true
+      if identity.inode then
+        index.by_inode[identity.inode] = true
+      else
+        index.unknown_by_path[identity.path] = true
+      end
+    end
   end
-  return false
+  return index
+end
+
+local function identity_is_ignored(path, index)
+  if not index then return false end
+  local identity = fs.path_identity(path, fs.stat(path))
+  if not identity then return false end
+  if identity.inode then
+    return index.by_inode[identity.inode] == true
+      or index.unknown_by_path[identity.path] == true
+  end
+  return index.by_path[identity.path] == true
+end
+
+local function path_is_ignored(path, ignored_index)
+  return identity_is_ignored(path, ignored_index)
 end
 
 local function compile_wildignore(wildignore)
@@ -393,12 +421,12 @@ local function apply_snapshot(root, lines, snapshot)
   -- Retain the list-time patterns as well as names seen at list time. Reapply
   -- those patterns to the current directory so matching entries that appeared
   -- after listing cannot be mistaken for user-visible DELETE sources.
-  local ignored = M.ignore_set(root, snapshot.wildignore or '')
+  local ignored = ignored_identity_index(M.ignore_set(root, snapshot.wildignore or ''))
   local visible = {}
   for _, line in ipairs(lines) do
     local identity = line:gsub('/+$', '')
     if not hidden[identity]
-      and not path_is_ignored(M.entry_path(root, line), ignored) then
+      and not identity_is_ignored(M.entry_path(root, line), ignored) then
       visible[#visible + 1] = line
     end
   end
@@ -462,7 +490,8 @@ local function hidden_descendant(directory, root_snapshot, state)
       local patterns, pattern_err = compile_wildignore(wildignore)
       if not patterns then return nil, pattern_err end
       filter = {
-        ignored = M.ignore_set(snapshot and snapshot.path or path, wildignore),
+        ignored = ignored_identity_index(
+          M.ignore_set(snapshot and snapshot.path or path, wildignore)),
         patterns = patterns,
       }
       if snapshot then filters[snapshot] = filter end
@@ -1763,17 +1792,43 @@ function Buffer:sync()
   -- Fail the whole batch before auto-yank/history or staging when an action
   -- would land on an occupied path. Move destinations that are also move
   -- sources are safe: stage_moves vacates those paths before applying moves.
-  local move_sources = {}
+  -- Compare filesystem-entry identity as well as spelling for case-only moves.
+  local move_sources, sources_by_inode = {}, {}
+  local function move_key(path)
+    path = path:gsub('/+$', '')
+    if path == '' then path = '/' end
+    return vim.fs.normalize(path)
+  end
   for _, act in ipairs(actions) do
     if act.name == 'mv' and fs.taken(act.src) then
-      move_sources[vim.fs.normalize((act.src:gsub('/+$', '')))] = true
+      move_sources[move_key(act.src)] = true
+      local identity = fs.entry_identity(act.src)
+      if identity and identity.inode then
+        local bucket = sources_by_inode[identity.inode]
+        if not bucket then
+          bucket = {}
+          sources_by_inode[identity.inode] = bucket
+        end
+        bucket[#bucket + 1] = act.src
+      end
     end
   end
   for _, act in ipairs(actions) do
     local destination = act.dst
     if destination and fs.taken(destination) then
-      local normalized = vim.fs.normalize((destination:gsub('/+$', '')))
-      if not (act.name == 'mv' and move_sources[normalized]) then
+      local key = move_key(destination)
+      local is_move_source = act.name == 'mv' and move_sources[key] == true
+      if act.name == 'mv' and not is_move_source then
+        local identity = fs.entry_identity(destination)
+        local bucket = identity and identity.inode and sources_by_inode[identity.inode]
+        for _, source in ipairs(bucket or {}) do
+          if fs.same_entry(destination, source) then
+            is_move_source = true
+            break
+          end
+        end
+      end
+      if not is_move_source then
         vim.bo[bufnr].modified = true
         local reason = 'destination already exists: ' .. destination
         ui.notify('Refusing to sync: ' .. reason .. '; nothing was changed.',
