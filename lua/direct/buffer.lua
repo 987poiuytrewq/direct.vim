@@ -769,10 +769,8 @@ local function restore_undone_collapse(bufnr, state, snapshot)
   for index, item in ipairs(display.rows or {}) do
     local row = index - 1
     local rec = item.record
-    local expected_text = rec and (rec.kind == 'child'
-      and recorded_row_text(rec) or rec.text)
     if item.row ~= row or item.id == nil or records[item.id]
-      or item.text ~= lines[index] or item.text ~= expected_text
+      or item.text ~= lines[index]
       or not rec or rec.id ~= item.id or type(rec.path) ~= 'string'
       or not item.identity
       or not fs.path_identities_match(path_identity(rec.path), item.identity) then
@@ -884,6 +882,7 @@ local function restore_undone_collapse(bufnr, state, snapshot)
   -- Matching is complete before the first identity is changed. If Neovim
   -- rejects any mark recreation, clear the namespace rather than leave a
   -- partially attributed display that could be mistaken for safe to sync.
+  vim.api.nvim_buf_clear_namespace(bufnr, namespace, 0, -1)
   for _, item in ipairs(display.rows) do
     local ok = pcall(set_row_mark, bufnr, item.row, item.id)
     if not ok then
@@ -1588,11 +1587,9 @@ local function collapse_snapshot(bufnr, state, parent, parent_row)
     for row, id in ipairs(state.display_ids) do
       local rec = state.rows[id]
       local line = display_lines[row]
-      local expected = rec and (rec.kind == 'child'
-        and recorded_row_text(rec) or rec.text)
       local identity = rec and rec.path and path_identity(rec.path) or nil
       if not rec or visible_records[id] or row_id_at(bufnr, row - 1) ~= id
-        or line ~= expected or not identity
+        or not identity
         or (rec.kind == 'child'
           and not fs.path_identities_match(identity, rec.identity)) then
         complete = false
@@ -1629,11 +1626,14 @@ local function collapse_snapshot(bufnr, state, parent, parent_row)
       }
     end
   end
+  if not display_snapshot then
+    return nil, 'the complete display cannot be safely associated with row identities'
+  end
   return {
     parent_id = parent.id,
     parent_path = parent.path,
     parent_identity = path_identity(parent.path),
-    parent_text = parent.text,
+    parent_text = vim.api.nvim_buf_get_lines(bufnr, parent_row, parent_row + 1, false)[1],
     base_seq = vim.fn.undotree(bufnr).seq_cur,
     rows = rows,
     rows_by_id = rows_by_id,

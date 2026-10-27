@@ -536,6 +536,44 @@ H.describe('buffer: listing', function()
     H.assert_true(ok == true, 'sync accepts every restored sibling row: ' .. tostring(reason))
   end)
 
+  H.it('collapse undo after re-list preserves a pending root rename outside the subtree', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local sub = H.mkdir(ws, 'sub')
+    H.mkfile(sub, 'inside.txt', { 'inside' })
+    H.mkfile(ws, 'root.txt', { 'root' })
+    local listing = buffer.list(ws)
+    local bufnr = vim.api.nvim_get_current_buf()
+    local row_namespace = vim.api.nvim_get_namespaces()['direct-listing-rows']
+    listing:expand(1)
+    vim.api.nvim_buf_set_text(bufnr, 2, 0, 2, #'root.txt', { 'renamed.txt' })
+    local root_mark = vim.api.nvim_buf_get_extmarks(bufnr, row_namespace,
+      { 2, 0 }, { 2, -1 }, { details = true })[1]
+    H.assert_not_nil(root_mark, 'pending rename retains its root row identity')
+    H.assert_false(root_mark[4] and root_mark[4].invalid or false,
+      'pending root rename keeps a valid identity mark')
+
+    listing:collapse(1)
+    listing:list()
+    vim.cmd('undo')
+    vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
+
+    H.assert_buf_eq({ 'sub/', '  inside.txt', 'renamed.txt' }, bufnr,
+      'undo restores children while retaining the pending root rename')
+    local state = buffer._state_for_test(bufnr)
+    H.assert_not_nil(state.expanded[state.root_ids[1]], 'collapsed subtree expansion is restored')
+    local paths, path_err = listing:get_paths(1, 3)
+    H.assert_eq(paths, {
+      ws .. '/sub/', ws .. '/sub/inside.txt', ws .. '/renamed.txt',
+    }, 'all restored rows have usable paths: ' .. tostring(path_err))
+
+    local ok, reason = listing:sync()
+    H.assert_true(ok == true, 'sync applies the pending root rename: ' .. tostring(reason))
+    H.assert_fs_eq(ws, { 'renamed.txt', 'sub/', 'sub/inside.txt' },
+      'sync applies the root rename without disturbing the expanded subtree')
+  end)
+
   H.it('edited child rows still block collapse after an expand undo/redo cycle', function()
     clean_buffers()
     local sb = H.sandbox()
