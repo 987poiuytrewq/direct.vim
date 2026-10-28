@@ -541,6 +541,128 @@ H.describe('sync with unfolded children (Phase 1)', function()
       'open consumes the restored child path')
   end)
 
+  H.it('restores an unfold with its captured empty wildignore after the option changes', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local child = H.mkdir(ws, 'child')
+    H.mkfile(child, 'inside.txt', { 'child contents' })
+    route_write_to_test_buffer()
+    local listing
+    H.with_option('wildignore', '', function()
+      listing = buffer.list(ws)
+      listing:unfold(1)
+    end)
+    local bufnr = vim.api.nvim_get_current_buf()
+    local state = buffer._state_for_test(bufnr)
+    local child_id = state.expanded[state.root_ids[1]].children[1].id
+    local fs_before = H.fs_snapshot(ws)
+    local register = require('direct.register')
+    local register_before = register.content()
+
+    vim.cmd('undo')
+    vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
+    H.assert_buf_eq({ 'child/' }, 0, 'undo removes the materialized child')
+
+    H.with_option('wildignore', '*.txt', function()
+      vim.cmd('redo')
+      vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
+
+      H.assert_buf_eq({ 'child/', '  inside.txt' }, 0,
+        'redo uses the captured empty filter rather than the current filter')
+      local namespace = vim.api.nvim_get_namespaces()['direct-listing-rows']
+      local marks = vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1, {})
+      H.assert_true(marks[2] and marks[2][1] == child_id,
+        'redo restores the original child identity')
+      H.assert_eq(listing:get_paths(2, 2), { child .. '/inside.txt' },
+        'the restored child keeps its original path')
+
+      local write_ok, write_err = pcall(vim.cmd, 'write')
+      H.assert_true(write_ok, tostring(write_err))
+      H.assert_eq(H.fs_snapshot(ws), fs_before, 'a no-op write changes no filesystem entries')
+      H.assert_eq(register.content(), register_before, 'a no-op write does not change the register')
+
+      local original_yank, yanked = register.yank, nil
+      register.yank = function(sources) yanked = vim.deepcopy(sources); return true end
+      local yank_ok, yank_err = pcall(require('direct').yank, 2, 2)
+      register.yank = original_yank
+      H.assert_true(yank_ok, tostring(yank_err))
+      H.assert_eq(yanked, { child .. '/inside.txt' },
+        'yank accepts the restored child and uses its original path')
+      H.assert_eq(register.content(), register_before, 'the path spy causes no register mutation')
+
+      H.assert_true(listing:open('  inside.txt') == true,
+        'open accepts the restored child under the changed filter')
+      H.assert_true(fs.same_path(vim.api.nvim_buf_get_name(0), child .. '/inside.txt'),
+        'open uses the restored child path')
+    end)
+
+    H.assert_eq(H.fs_snapshot(ws), fs_before, 'redo/open/yank/write do not alter the directory')
+    H.assert_eq(register.content(), register_before, 'redo/open/yank/write leave register contents intact')
+  end)
+
+  H.it('uses the captured non-empty wildignore when the current filter changes to empty', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local child = H.mkdir(ws, 'child')
+    H.mkfile(child, 'inside.log', { 'hidden by the captured filter' })
+    H.mkfile(child, 'visible.txt', { 'child contents' })
+    local listing
+    H.with_option('wildignore', '*.log', function()
+      listing = buffer.list(ws)
+      listing:unfold(1)
+    end)
+    local bufnr = vim.api.nvim_get_current_buf()
+    local state = buffer._state_for_test(bufnr)
+    local child_id = state.expanded[state.root_ids[1]].children[1].id
+    H.assert_eq(state.rows[child_id].name, 'visible.txt',
+      'the original non-empty filter hides inside.log')
+
+    vim.cmd('undo')
+    vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
+    H.assert_buf_eq({ 'child/' }, 0, 'undo removes the materialized child')
+
+    H.with_option('wildignore', '', function()
+      vim.cmd('redo')
+      vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
+
+      H.assert_buf_eq({ 'child/', '  visible.txt' }, 0,
+        'redo uses the captured non-empty filter after current filtering is disabled')
+      local namespace = vim.api.nvim_get_namespaces()['direct-listing-rows']
+      local marks = vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1, {})
+      H.assert_eq(marks[2][1], child_id, 'redo restores the original child identity')
+      H.assert_eq(listing:get_paths(2, 2), { child .. '/visible.txt' },
+        'the restored child keeps its original path')
+    end)
+  end)
+
+  H.it('fails closed when the redo filter snapshot is missing', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local child = H.mkdir(ws, 'child')
+    H.mkfile(child, 'inside.txt', { 'child contents' })
+    local listing = buffer.list(ws)
+    listing:unfold(1)
+    local bufnr = vim.api.nvim_get_current_buf()
+
+    vim.cmd('undo')
+    vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
+    local state = buffer._state_for_test(bufnr)
+    H.assert_true(state.materialization_recoveries[1] ~= nil,
+      'undo retains the redo recovery record')
+    state.materialization_recoveries[1].wildignore = nil
+
+    vim.cmd('redo')
+    vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
+
+    local paths, reason = listing:get_paths(2, 2)
+    H.assert_nil(paths, 'a missing filter snapshot does not restore child identity')
+    H.assert_true(type(reason) == 'string' and #reason > 0,
+      'the unsafe redone row is refused with a reason')
+  end)
+
   H.it('yank after undo-redo consumes the restored child path', function()
     clean_buffers()
     local sb = H.sandbox()

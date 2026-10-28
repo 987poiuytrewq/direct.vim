@@ -272,9 +272,15 @@ function M.ignore_set(root, wildignore)
 end
 
 -- read(root[, ignored]) -> listing lines, or nil, err when root is not readable.
--- `ignored`, when supplied, is the exact list-time &wildignore match set.
-function M.read(root, ignored)
-  if ignored == nil then ignored = M.ignore_set(root) end
+-- An explicit `ignored` argument is the exact list-time match set; explicit nil
+-- means no entries are ignored. With no second argument, use current &wildignore.
+function M.read(root, ...)
+  local ignored
+  if select('#', ...) == 0 then
+    ignored = M.ignore_set(root)
+  else
+    ignored = select(1, ...)
+  end
   return fs.read_dir_lines(root, ignored)
 end
 
@@ -956,8 +962,12 @@ local function restore_redone_materialization(bufnr, state, materialization, lin
     return false
   end
 
-  local listed = M.read(parent.path,
-    M.ignore_set(parent.path, materialization.wildignore or ''))
+  -- An empty ignore set is a valid captured filter. Require the saved filter
+  -- snapshot, and pass its match-set explicitly so nil means unfiltered rather
+  -- than falling back to the current option.
+  if type(materialization.wildignore) ~= 'string' then return false end
+  local ignored = M.ignore_set(parent.path, materialization.wildignore)
+  local listed = M.read(parent.path, ignored)
   if not listed or not same_lines(listed, materialization.listing_lines or {}) then
     return false
   end
