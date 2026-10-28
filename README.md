@@ -14,29 +14,13 @@ display-only in Phase 1.
 
 ## Filename highlights
 
-Listing files receive user-overridable `DirectLang<Name>` highlight groups for
-the supported programming languages in GitHub Innovation Graph's 2026Q1
-programming-only top 20. The list is a static snapshot, ranked by `num_pushers`
-summed across economies; because some economy data is suppressed, this method
-is a lower bound, not a complete measure. No data is fetched at runtime.
-PLpgSQL is omitted because Neovim has no dedicated filetype for it.
+Visible directories use the syntax group `DirectDirectory` (default link
+`Directory`) at any indentation depth. Hidden directories and files retain
+their prior `Comment` defaults. Listing files receive no custom filename,
+filetype, or special-name highlights.
 
-Exact, case-sensitive matches for `Makefile`, `GNUmakefile`, `CMakeLists.txt`,
-`Rakefile`, `justfile`, `Dockerfile`, `Containerfile`, `Jenkinsfile`,
-`Vagrantfile`, `README.md`, `LICENSE`, `CODEOWNERS`, and `Gemfile` use
-`DirectSpecialFile` instead. This is a bounded conventional filename list, not a
-frequency ranking. These matches take precedence over language detection.
-Directories and dotfiles are not highlighted by these groups; existing hidden
-entry styling remains unchanged. Detection uses Neovim's filename-only filetype
-matching and reads no file contents.
-
-By default `DirectSpecialFile` links to `Special` and language groups link to
-`Type`. Define any of these groups yourself
-before listing to override its default link. There is no built-in palette or
-color configuration.
-
-Sources: [Innovation Graph language data](https://raw.githubusercontent.com/github/innovationgraph/main/data/languages.csv)
-and its [datasheet](https://github.com/github/innovationgraph/blob/main/docs/datasheet.md).
+Highlight defaults are user-overridable and are reapplied after a `ColorScheme`
+event.
 
 ## Requirements
 

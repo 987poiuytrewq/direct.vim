@@ -31,29 +31,13 @@ display-only in Phase 1.
 
 Filename highlights ~
 
-Files in a direct listing receive user-overridable DirectLang<Name> groups for
-the supported programming languages in GitHub Innovation Graph's 2026Q1
-programming-only top 20. It is a static snapshot ranked by `num_pushers` summed
-across economies; suppressed economy data makes this method a lower bound. No
-data is fetched at runtime. PLpgSQL is omitted because Neovim has no dedicated
-filetype for it.
+Visible directories use DirectDirectory (default link Directory) at any
+indentation depth. Hidden directories and files retain their prior Comment
+defaults. Listing files receive no custom filename, filetype, or special-name
+highlights.
 
-The exact, case-sensitive names `Makefile`, `GNUmakefile`, `CMakeLists.txt`,
-`Rakefile`, `justfile`, `Dockerfile`, `Containerfile`, `Jenkinsfile`,
-`Vagrantfile`, `README.md`, `LICENSE`, `CODEOWNERS`, and `Gemfile` use
-DirectSpecialFile instead. This is a conventional bounded list, not a frequency
-ranking; an exact special-name match takes precedence over language detection.
-Directories and dotfiles are not highlighted by these groups, so existing
-hidden-entry styling remains unchanged. Detection uses Neovim's filename-only
-filetype matching and reads no file contents.
-
-DirectSpecialFile links to Special by default. Each DirectLang<Name> group,
-including DirectLangShell, links to Type by default. Define a group yourself
-before listing to override its default link. There is no built-in palette or color
-configuration.
-
-Source: https://raw.githubusercontent.com/github/innovationgraph/main/data/languages.csv
-Datasheet: https://github.com/github/innovationgraph/blob/main/docs/datasheet.md
+Highlight defaults are user-overridable and are reapplied after a ColorScheme
+event.
 
 ==============================================================================
 2. Requirements                                        *direct.vim-requirements*
