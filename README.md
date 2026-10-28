@@ -2,19 +2,45 @@
 
 Edit directories in Neovim.
 
-Load a directory into a buffer with each line corresponding to a file or a
-subdirectory. You can then edit the buffer to make whatever changes you like to
-your files and directories and, when you save the buffer, your changes are
-synchronised with the filesystem.
+Load a directory into a buffer with each root-level line corresponding to a file
+or subdirectory. Edit those root rows to create, rename, or delete filesystem
+entries. Directories can also be expanded for browsing; their child rows are
+materialized in the buffer and removed when collapsed.
 
 - navigate around the filesystem easily
 - rename, create and delete files and directories
 - yank and paste files and directories
 - full undo and redo history for every change that you make to the filesystem
 
+## Filename highlights
+
+Listing files receive user-overridable `DirectLang<Name>` highlight groups for
+the supported programming languages in GitHub Innovation Graph's 2026Q1
+programming-only top 20. The list is a static snapshot, ranked by `num_pushers`
+summed across economies; because some economy data is suppressed, this method
+is a lower bound, not a complete measure. No data is fetched at runtime.
+PLpgSQL is omitted because Neovim has no dedicated filetype for it.
+
+Exact, case-sensitive matches for `Makefile`, `GNUmakefile`, `CMakeLists.txt`,
+`Rakefile`, `justfile`, `Dockerfile`, `Containerfile`, `Jenkinsfile`,
+`Vagrantfile`, `README.md`, `LICENSE`, `CODEOWNERS`, and `Gemfile` use
+`DirectSpecialFile` instead. This is a bounded conventional filename list, not a
+frequency ranking. These matches take precedence over language detection.
+Directories and dotfiles are not highlighted by these groups; existing hidden
+entry styling remains unchanged. Detection uses Neovim's filename-only filetype
+matching and reads no file contents.
+
+By default `DirectSpecialFile` links to `Special` and language groups link to
+`Type`. Define any of these groups yourself
+before listing to override its default link. There is no built-in palette or
+color configuration.
+
+Sources: [Innovation Graph language data](https://raw.githubusercontent.com/github/innovationgraph/main/data/languages.csv)
+and its [datasheet](https://github.com/github/innovationgraph/blob/main/docs/datasheet.md).
+
 ## Requirements
 
-- Neovim >= 0.11
+- Neovim >= 0.12
 - No Python: the plugin is pure Lua and needs nothing beyond the Neovim runtime.
 
 Run `:checkhealth direct` to confirm the version and the data home in use.
@@ -35,11 +61,20 @@ Plug '987poiuytrewq/direct.vim'
 ```lua
 require('direct').setup({
   map_default_keys = true, -- set false to install no default mappings
+  show_folder_icons = false, -- opt in to Nerd Font folder icons
 })
 ```
 
 It is idempotent, may be called more than once, and reports an unknown option
 name as an error instead of silently ignoring it.
+
+### Folder icons
+
+Set `show_folder_icons = true` to show inline directory glyphs; the default is
+`false`. A Nerd Font is required to render them. Collapsed directories use
+`nf-md-folder` (U+F024B), and expanded directories use `nf-md-folder_open`
+(U+F0770). Icons are virtual text, so the listing lines and filesystem behavior
+are unchanged. No icon plugin or other dependency is required.
 
 ## Navigate
 
@@ -52,12 +87,16 @@ Once a directory is listed, `-` goes up to its parent directory and `<Enter>`
 opens the entry under the cursor: a directory line opens a new listing, a file
 line opens the file.
 
+Use `zo` or `za` on a directory to expand it in place. Children are read lazily,
+one level at a time; repeating an expansion does not re-read or duplicate them.
+`za` or `zc` on an expanded directory removes its child rows; expanding again
+re-reads the directory. The initial listing remains flat.
+
 ## Edit
 
-When viewing a directory, you can edit the listing of files and directories as
-if you were editing a file, using any Vim command (`di`, `o`, `:s`, macros, and
-so on). Saving the buffer synchronises your change with the filesystem and then
-re-lists the directory.
+When viewing a directory, edit its root listing as if you were editing a file,
+using any Vim command (`di`, `o`, `:s`, macros, and so on). Saving synchronises
+root-level changes with the filesystem and then re-lists the directory.
 
 A save is classified as exactly one of *rename*, *create* or *delete*:
 
@@ -81,18 +120,44 @@ changed, no history is written, and the buffer stays modified so you can fix it.
 `&wildignore` is honoured: entries matching one of its patterns are not listed
 and are left untouched.
 
+### Expanded rows
+
+Only depth-zero/root rows participate in the legacy positional create/delete/
+rename classifier. Expanded child rows are display-only: editing, adding,
+deleting, duplicating, or losing a child's identity refuses the whole save
+before classifier actions, filesystem changes, auto-yank, register, or history
+effects. Keep child rows exactly as materialized. Directory indentation is
+presentation only; `>>` and `<<` do not enable move synchronization.
+
+Expansion and collapse are ordinary text-undo changes. `u` after a collapse
+restores the child rows and their identities; `<C-r>` re-applies the collapse.
+Undoing an expansion removes its rows, and redo restores them only when the
+original undo sequence and exact directory snapshot still match. A changed or
+ambiguous snapshot remains unsafe to save, open, or yank.
+
+A root file rename or other root-file change remains available while child rows
+are expanded. Renaming or deleting an expanded directory is refused. After
+collapsing a directory, a previously recorded non-empty child list continues to
+protect it from rename or deletion, including across re-listing; expanding it
+again re-reads current contents and refreshes that record. Empty directories
+follow normal rename/delete behavior. Child moves, subtree indentation mapping,
+and history recovery for tree edits are not supported.
+Root names beginning with whitespace and names that could escape the listed
+directory (such as `../x` or `a/b`) are refused at save time.
+
+Windows-specific component checks reject backslashes, drive prefixes, and
+reserved device names. Native Windows filesystem traversal has not been
+verified; this documentation does not claim Windows support.
+
 ### Undo / Redo
 
-In a direct buffer, `u` and `<C-r>` are mapped to `:DirectUndo` and
-`:DirectRedo`, so the keys you would use for text undo perform the
-*filesystem* undo/redo instead. That history records the actions a sync, paste,
-undo or redo performed and reverses or re-applies them; `:DirectUndo` right
-after a paste, for example, undoes the paste.
+In a direct buffer, `u` and `<C-r>` perform Neovim text undo and redo. The
+filesystem action history is separate: use `:DirectUndo` and `:DirectRedo` to
+reverse or re-apply actions a sync or paste performed; `:DirectUndo` right after
+a paste, for example, undoes the paste.
 
-The filesystem undo is separate from Neovim's text undo. `:undo` (or any other
-text-undo command) only reverses changes to the buffer's lines: it never
-renames, creates, deletes or restores anything on disk. Only `:DirectUndo`
-reverses a filesystem action.
+Text undo only reverses buffer-line changes; it never renames, creates, deletes
+or restores anything on disk. Only `:DirectUndo` reverses a filesystem action.
 
 ## Yank / Paste
 
@@ -141,19 +206,25 @@ Global (normal mode), installed when `map_default_keys` is true:
 |---|---|
 | `-` | `:DirectListBuffer` |
 
-Buffer-local, in a direct buffer, installed when `map_default_keys` is true:
+Buffer-local, in a direct buffer (standard actions follow `map_default_keys`;
+`zo`/`za`/`zc` are always installed):
 
 | Mode | Key | Action |
 |---|---|---|
 | normal | `<CR>` | open the entry under the cursor |
+| normal | `zo` | lazily expand one directory level |
+| normal | `za` | expand or collapse one directory |
+| normal | `zc` | collapse one directory |
 | normal | `-` | open `../` (the parent directory) |
-| normal | `u` | `:DirectUndo` |
-| normal | `<C-r>` | `:DirectRedo` |
+| normal | `u` | Neovim text undo |
+| normal | `<C-r>` | Neovim text redo |
 | normal | `yy`, `Y` | `:DirectYank` (current line) |
 | visual | `y` | `:DirectYank` (selected range) |
 | normal | `p`, `P` | `:DirectPaste` |
 
 The buffer-local `-` wins over the global `-` inside a direct buffer.
+`zo`, `za`, and `zc` are installed for every direct listing, independently of
+`map_default_keys`.
 
 ## Data directory
 

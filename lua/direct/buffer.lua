@@ -1,6 +1,8 @@
 -- lua/direct/buffer.lua -- directory buffer model, listing, sync, and open operations.
--- Path identity uses fs.same_path. Sync validates edits, stages dependent moves
--- records only successful actions, and re-lists to reflect the filesystem state.
+-- Path identity uses fs.same_path. Sync validates edits, stages dependent
+-- moves, records only successful actions, and re-lists the filesystem state.
+-- Expanded child rows retain their filesystem identities; sync classifies only
+-- root entries and refuses mutations of directories with known descendants.
 
 local M = {}
 
@@ -13,9 +15,131 @@ local action_mod = require('direct.action')
 local history = require('direct.history')
 local register = require('direct.register')
 local ui = require('direct.ui')
+local highlight = require('direct.highlight')
+local reconcile_undone_materialization
+local remove_expanded_subtree
+local recorded_row_text
 
 local Buffer = {}
 Buffer.__index = Buffer
+
+-- Display rows are identified by extmarks rather than their spelling.  In
+-- particular, child rows are never interpreted as root-relative filenames.
+local states = {}
+local namespace = vim.api.nvim_create_namespace('direct-listing-rows')
+local FOLDER_ICON_NAMESPACE = 'direct-listing-icons'
+local FOLDER_ICON_CLOSED = '\u{f024b}'
+local FOLDER_ICON_OPEN = '\u{f0770}'
+local folder_icon_namespace
+-- Private inspection seam for lifecycle specs; callers must not depend on the
+-- shape or contents of these records.
+M._state_for_test = function(bufnr) return states[bufnr] end
+local function next_id(state)
+  state.next_id = (state.next_id or 0) + 1
+  return state.next_id
+end
+
+local function path_identity(path)
+  return fs.path_identity(path, fs.stat(path))
+end
+
+local function add_identity(index, identity, value)
+  if not identity then return end
+  local function add(bucket, key)
+    if not key then return end
+    local entry = bucket[key]
+    if not entry then
+      entry = { count = 0 }
+      bucket[key] = entry
+    end
+    entry.count = entry.count + 1
+    if entry.count == 1 then entry.only = value end
+    if entry.count > 1 then entry.only = nil end
+  end
+  add(index.by_path, identity.path)
+  if identity.inode then
+    add(index.by_inode, identity.inode)
+  else
+    add(index.unknown_by_path, identity.path)
+  end
+end
+
+local function matching_identity_values(index, identity)
+  if not identity then return nil, 0 end
+  if not identity.inode then
+    local entry = index.by_path[identity.path]
+    return entry and entry.only, entry and entry.count or 0
+  end
+  local inode = index.by_inode[identity.inode]
+  local unknown = index.unknown_by_path[identity.path]
+  local count = (inode and inode.count or 0) + (unknown and unknown.count or 0)
+  if count == 1 then return (inode and inode.only) or (unknown and unknown.only), count end
+  return nil, count
+end
+
+local function identity_is_duplicated(identity, counts)
+  if not identity then return false end
+  if identity.inode then
+    return (counts.by_inode[identity.inode] or 0) > 1
+      or (counts.unknown_by_path[identity.path] or 0) > 0
+  end
+  return (counts.by_path[identity.path] or 0) > 1
+end
+
+local function count_identity(counts, identity)
+  if not identity then return end
+  counts.by_path[identity.path] = (counts.by_path[identity.path] or 0) + 1
+  if identity.inode then
+    counts.by_inode[identity.inode] = (counts.by_inode[identity.inode] or 0) + 1
+  else
+    counts.unknown_by_path[identity.path] =
+      (counts.unknown_by_path[identity.path] or 0) + 1
+  end
+end
+
+local function set_row_mark(bufnr, row, id)
+  vim.api.nvim_buf_set_extmark(bufnr, namespace, row, 0, {
+    id = id,
+    right_gravity = true,
+    invalidate = true,
+    undo_restore = true,
+  })
+end
+
+local function row_id_at(bufnr, row)
+  local state = states[bufnr]
+  if not state then return nil end
+  for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, namespace,
+      { row, 0 }, { row, -1 }, { details = true })) do
+    if mark[2] == row and not (mark[4] and mark[4].invalid) then
+      return mark[1]
+    end
+  end
+  return nil
+end
+
+local function refresh_display_ids(bufnr, state)
+  local display_ids = {}
+  for row = 0, vim.api.nvim_buf_line_count(bufnr) - 1 do
+    local id = row_id_at(bufnr, row)
+    if id then display_ids[#display_ids + 1] = id end
+  end
+  state.display_ids = display_ids
+end
+
+local function row_path(root, record, line)
+  if not record then return nil end
+  if record.kind == 'root' then
+    return M.entry_path(root, line)
+  end
+  return record.path
+end
+
+local function current_row_record(bufnr, row)
+  local state = states[bufnr]
+  local id = row_id_at(bufnr, row)
+  return state and id and state.rows[id] or nil
+end
 
 -- ---------------------------------------------------------------------------
 -- Small helpers
@@ -26,6 +150,38 @@ Buffer.__index = Buffer
 -- filesystem stat here.
 local function is_dir_line(line)
   return type(line) == 'string' and line:sub(-1) == '/'
+end
+
+-- Refresh display-only folder glyphs. The namespace is created only when the
+-- option is enabled; an existing namespace is cleared when disabling so the
+-- next render cannot leave stale icons behind. Buffer text and row identities
+-- are never changed here.
+local function refresh_folder_icons(bufnr, state)
+  local enabled = require('direct.config').options.show_folder_icons == true
+  if not enabled then
+    local existing = folder_icon_namespace
+      or vim.api.nvim_get_namespaces()[FOLDER_ICON_NAMESPACE]
+    if existing then vim.api.nvim_buf_clear_namespace(bufnr, existing, 0, -1) end
+    return
+  end
+  if not folder_icon_namespace then
+    folder_icon_namespace = vim.api.nvim_create_namespace(FOLDER_ICON_NAMESPACE)
+  end
+  vim.api.nvim_set_hl(0, 'DirectFolderIcon', { default = true, link = 'Directory' })
+  vim.api.nvim_buf_clear_namespace(bufnr, folder_icon_namespace, 0, -1)
+  for row = 0, vim.api.nvim_buf_line_count(bufnr) - 1 do
+    local id = row_id_at(bufnr, row)
+    local rec = id and state.rows[id]
+    if rec and is_dir_line(rec.name) then
+      local glyph = state.expanded[id] and FOLDER_ICON_OPEN or FOLDER_ICON_CLOSED
+      vim.api.nvim_buf_set_extmark(bufnr, folder_icon_namespace, row,
+        (rec.depth or 0) * 2, {
+          virt_text = { { glyph .. ' ', 'DirectFolderIcon' } },
+          virt_text_pos = 'inline',
+          hl_mode = 'combine',
+        })
+    end
+  end
 end
 
 -- dirs_then_name(lines) -> a copy ordered directories first, each group sorted
@@ -89,11 +245,11 @@ end
 -- trimmed, non-empty `&wildignore` patterns, or nil when there are none. The
 -- four glob arguments are {expr}, {nosuf}, {list}, {alllinks}: `nosuf` must be
 -- passed or 'suffixes'/'wildmenu' would fabricate matches, `{list}` makes the
--- result an array, and `{alllinks}` follows symlinks while globbing. The
--- comparison itself is `same_path` (hardening), which is correct for
--- every root spelling.
-function M.ignore_set(root)
-  local wildignore = vim.o.wildignore or ''
+-- result an array, and `{alllinks}` follows symlinks while globbing. Matching
+-- uses indexed device/inode identity with normalized-name fallback, preserving
+-- same_path semantics for every root spelling.
+function M.ignore_set(root, wildignore)
+  if wildignore == nil then wildignore = vim.o.wildignore or '' end
   if wildignore == '' then
     return nil
   end
@@ -210,15 +366,762 @@ local function unsafe_path_reason(path)
   return action_mod.path_reason(path)
 end
 
+local function component_reason(line, path_style)
+  if type(line) ~= 'string' then return 'invalid component' end
+  local control_reason = action_mod.path_reason(line)
+  if control_reason then return control_reason end
+  if line:find('\0', 1, true) then return 'contains NUL' end
+  if line:match('^%s') then return 'root names may not begin with whitespace' end
+  local component = line
+  if is_dir_line(component) then component = component:sub(1, -2) end
+  if component == '' or component == '.' or component == '..'
+    or component:find('/', 1, true) then
+    return 'invalid path component'
+  end
+  local windows = path_style == 'win32'
+    or (path_style == nil and package.config:sub(1, 1) == '\\')
+  if windows then
+    if component:find('\\', 1, true) or component:match('^%a:') then
+      return 'invalid Windows path component'
+    end
+    if component:match('[%. ]$') then
+      return 'Windows path components may not end in a dot or space'
+    end
+    local device = component:match('^([^%.]+)') or component
+    device = device:gsub('[%. ]+$', '')
+    device = device:upper()
+    if device == 'CON' or device == 'PRN' or device == 'AUX' or device == 'NUL'
+      or device:match('^COM[1-9]$') or device:match('^LPT[1-9]$') then
+      return 'reserved Windows device name'
+    end
+  end
+  return nil
+end
+
+-- Kept visible for platform-independent unit coverage of Win32 component rules.
+M._component_reason = component_reason
+
 -- first_unsafe(root, lines) -> { path, reason } for the first line whose path
 -- is unrepresentable, else nil. Both the edited lines and the on-disk listing
 -- are checked: either side can be an OS-chosen name.
 local function first_unsafe(root, lines)
   for _, line in ipairs(lines) do
+    local component_error = component_reason(line)
+    if component_error then
+      return { path = line, reason = component_error }
+    end
     local path = M.entry_path(root, line)
     local reason = unsafe_path_reason(path)
     if reason ~= nil then
       return { path = path, reason = reason }
+    end
+  end
+  return nil
+end
+
+local function children_integrity(bufnr, lines)
+  local state = states[bufnr]
+  if not state then return lines end
+  local seq_cur = vim.fn.undotree(bufnr).seq_cur
+  for _, materialization in ipairs(state.materialization_recoveries or {}) do
+    if materialization.seq == seq_cur then
+      return nil, 'redone child materialization could not be uniquely restored'
+    end
+  end
+  local expected_order, child_count = {}, 0
+  for _, id in ipairs(state.display_ids or {}) do
+    local rec = state.rows[id]
+    if rec and rec.kind == 'child' then
+      expected_order[#expected_order + 1] = rec
+      child_count = child_count + 1
+    end
+  end
+  if child_count == 0 then
+    -- Keep ordinary root-only validation semantics, but do not let an extmark
+    -- restored by :redo become an untracked root action after its snapshot was
+    -- rejected or its records were discarded.
+    for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1, {})) do
+      if not state.rows[mark[1]] then
+        return nil, 'child identity marks are invalid or duplicated'
+      end
+    end
+    return lines
+  end
+  local mark_rows, seen_id, seen_row, invalid_child_ids = {}, {}, {}, {}
+  for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1,
+      { details = true })) do
+    local id, row, details = mark[1], mark[2], mark[4] or {}
+    local rec = state.rows[id]
+    if not rec then
+      return nil, 'child identity marks are invalid or duplicated'
+    end
+    if details.invalid then
+      if rec.kind == 'child' then
+        if invalid_child_ids[id] then
+          return nil, 'child identity marks are invalid or duplicated'
+        end
+        invalid_child_ids[id] = true
+      end
+      -- Root identities may be invalidated by deletion or rename. Keep that
+      -- intent for root-only classification below; loaded-directory mutations
+      -- are refused by blocks_loaded_directory before any side effects.
+    else
+      local other_id = seen_row[row]
+      local other = other_id and state.rows[other_id]
+      if seen_id[id] or (other_id and (rec.kind == 'child'
+          or other and other.kind == 'child')) then
+        return nil, 'child identity marks are invalid or duplicated'
+      end
+      seen_id[id], seen_row[row] = true, id
+      mark_rows[id] = row
+    end
+  end
+
+  local recovered_rows = {}
+  local missing_children = 0
+  for _, rec in ipairs(expected_order) do
+    if mark_rows[rec.id] == nil then
+      if not invalid_child_ids[rec.id] then
+        return nil, 'child identity marks are invalid or duplicated'
+      end
+      missing_children = missing_children + 1
+    end
+  end
+  if missing_children > 0 then
+    if vim.fn.undotree().seq_cur ~= state.materialization_seq then
+      return nil, 'child identity marks were lost outside an undo to their materialization baseline'
+    end
+    -- Undo can invalidate child extmarks even when the restored lines are still
+    -- exactly the rows that were materialized. Reattach only against each
+    -- expanded root's live identity and its complete, ordered subtree baseline.
+    -- No filename/basename search is used: parent, sibling order, depth, count,
+    -- and the exact rendered line all participate in attribution.
+    local root_rows = {}
+    local previous_root_row = -1
+    for _, root_id in ipairs(state.root_ids or {}) do
+      local row = mark_rows[root_id]
+      if row == nil or row <= previous_root_row then
+        return nil, 'child rows cannot be uniquely associated with their root identity'
+      end
+      root_rows[root_id] = row
+      previous_root_row = row
+    end
+
+    local expected_child_ids = {}
+    local function append_subtree(parent_id, parent_depth, out)
+      local expansion = state.expanded[parent_id]
+      if not expansion then return true end
+      local previous_order = 0
+      for _, child in ipairs(expansion.children) do
+        if child.kind ~= 'child' or child.parent ~= parent_id
+          or state.rows[child.id] ~= child or child.order <= previous_order
+          or child.depth ~= parent_depth + 1
+          or child.text ~= string.rep('  ', child.depth) .. child.name then
+          return false
+        end
+        previous_order = child.order
+        expected_child_ids[child.id] = true
+        out[#out + 1] = child
+        if not append_subtree(child.id, child.depth, out) then return false end
+      end
+      return true
+    end
+
+    for _, root_id in ipairs(state.root_ids or {}) do
+      local root = state.rows[root_id]
+      local expansion = state.expanded[root_id]
+      if root and expansion and #expansion.children > 0 then
+        local subtree = {}
+        if not append_subtree(root_id, root.depth or 0, subtree) then
+          return nil, 'child materialization baseline is inconsistent'
+        end
+        local parent_row = root_rows[root_id]
+        for offset, child in ipairs(subtree) do
+          local row = parent_row + offset
+          if lines[row + 1] ~= child.text then
+            return nil, 'child row text differs from its materialization baseline'
+          end
+          local occupied_by_root = false
+          for _, other_root_id in ipairs(state.root_ids or {}) do
+            if root_rows[other_root_id] == row then
+              occupied_by_root = true
+              break
+            end
+          end
+          if occupied_by_root then
+            return nil, 'child order no longer follows its owning root row'
+          end
+          local existing_row = mark_rows[child.id]
+          if existing_row ~= nil and existing_row ~= row then
+            return nil, 'child row identity moved from its materialization baseline'
+          end
+          if existing_row == nil and not invalid_child_ids[child.id] then
+            return nil, 'child identity marks are invalid or duplicated'
+          end
+          if existing_row == nil then recovered_rows[child.id] = row end
+          mark_rows[child.id] = row
+        end
+      end
+    end
+    for id in pairs(invalid_child_ids) do
+      if not expected_child_ids[id] then
+        return nil, 'child identity marks are invalid or duplicated'
+      end
+    end
+    for _, rec in ipairs(expected_order) do
+      if mark_rows[rec.id] == nil then
+        return nil, 'child rows were added, deleted, reordered, or lost identity'
+      end
+    end
+  end
+
+  local previous_row = -1
+  for _, rec in ipairs(expected_order) do
+    local row = mark_rows[rec.id]
+    if row == nil or row <= previous_row then
+      return nil, 'child rows were added, deleted, reordered, or lost identity'
+    end
+    if lines[row + 1] ~= rec.text then
+      return nil, 'child row text differs from its materialization baseline'
+    end
+    previous_row = row
+  end
+
+  -- Every expanded parent with children must retain its identity.  For each
+  -- subtree, unmarked inserted lines between the parent and its last child are
+  -- not root entries and may never reach the positional classifier.
+  local protected = {}
+  for parent_id, expansion in pairs(state.expanded or {}) do
+    if #expansion.children > 0 then
+      local parent_row = mark_rows[parent_id]
+      -- A missing expanded parent can be a deleted or renamed root directory;
+      -- its independently marked descendants stay excluded from classification.
+      if parent_row ~= nil then
+        local last = parent_row
+        for _, rec in ipairs(expected_order) do
+          local ancestor = rec.parent
+          while ancestor do
+            if ancestor == parent_id then
+              local child_row = mark_rows[rec.id]
+              if child_row == nil or child_row <= parent_row then
+                return nil, 'child order no longer follows its parent'
+              end
+              last = math.max(last, child_row)
+              break
+            end
+            local ancestor_rec = state.rows[ancestor]
+            ancestor = ancestor_rec and ancestor_rec.parent or nil
+          end
+        end
+        for row = parent_row + 1, last do protected[row] = true end
+      end
+    end
+  end
+
+  local row_ids = {}
+  for id, row in pairs(mark_rows) do
+    if row_ids[row] ~= nil then
+      return nil, 'child identity marks are invalid or duplicated'
+    end
+    row_ids[row] = id
+  end
+  local actual_children = 0
+  for row, line in ipairs(lines) do
+    local id = row_ids[row - 1]
+    local rec = id and state.rows[id]
+    if rec and rec.kind == 'child' then
+      actual_children = actual_children + 1
+    elseif protected[row - 1] or (not rec and line:match('^%s')) then
+      return nil, 'unidentified child row is present'
+    end
+  end
+  if actual_children ~= child_count then
+    return nil, 'child row count differs from its materialization baseline'
+  end
+
+  local root_lines = {}
+  for row, line in ipairs(lines) do
+    local id = row_ids[row - 1]
+    local rec = id and state.rows[id]
+    if not rec or rec.kind ~= 'child' then
+      root_lines[#root_lines + 1] = line
+    end
+  end
+  for id, row in pairs(recovered_rows) do
+    local ok = pcall(set_row_mark, bufnr, row, id)
+    if not ok then
+      return nil, 'child identity marks could not be restored safely'
+    end
+  end
+  return root_lines
+end
+
+local function same_lines(actual, expected)
+  if #actual ~= #expected then return false end
+  for index, line in ipairs(expected) do
+    if actual[index] ~= line then return false end
+  end
+  return true
+end
+
+-- Restore one undone view insertion only when the undo-tree sequence, parent
+-- extmark, parent path, complete list-time directory snapshot, child identities,
+-- and exact rendered rows all agree with the original materialization.
+local function restore_redone_materialization(bufnr, state, materialization, lines)
+  local parent = state.rows[materialization.parent_id]
+  if not parent or state.expanded[parent.id] then return false end
+  local parent_row
+  for row = 0, #lines - 1 do
+    if row_id_at(bufnr, row) == parent.id then
+      parent_row = row
+      break
+    end
+  end
+  if parent_row == nil or lines[parent_row + 1] ~= parent.text then return false end
+  if type(parent.path) ~= 'string'
+    or vim.fs.normalize(parent.path) ~= vim.fs.normalize(materialization.parent_path)
+    or not fs.path_identities_match(path_identity(parent.path), materialization.parent_identity) then
+    return false
+  end
+
+  local listed = M.read(parent.path,
+    M.ignore_set(parent.path, materialization.wildignore or ''))
+  if not listed or not same_lines(listed, materialization.listing_lines or {}) then
+    return false
+  end
+
+  local children = vim.deepcopy(materialization.children_snapshot or {})
+  local child_ids, expected_rows = {}, {}
+  local previous_order = 0
+  for offset, child in ipairs(children) do
+    local expected_path = M.entry_path(parent.path, child.name)
+    local expected_row = parent_row + offset
+    if child.kind ~= 'child' or child.parent ~= parent.id
+      or type(child.order) ~= 'number' or child.order <= previous_order
+      or child.depth ~= (parent.depth or 0) + 1
+      or child.path ~= expected_path
+      or child.text ~= string.rep('  ', child.depth) .. child.name
+      or lines[expected_row + 1] ~= child.text
+      or not child.identity
+      or not fs.path_identities_match(path_identity(child.path), child.identity)
+      or child_ids[child.id] then
+      return false
+    end
+    previous_order = child.order
+    child_ids[child.id] = true
+    expected_rows[child.id] = expected_row
+  end
+
+  -- The original IDs may have been removed from the namespace during undo
+  -- reconciliation. Any surviving marks must still be unique and in the exact
+  -- rows implied by this materialization; no row is adopted by spelling alone.
+  local seen_ids, seen_rows = {}, {}
+  for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1,
+      { details = true })) do
+    local id, row, details = mark[1], mark[2], mark[4] or {}
+    if seen_ids[id] then return false end
+    seen_ids[id] = true
+    if not details.invalid then
+      if seen_rows[row] then return false end
+      seen_rows[row] = id
+      if child_ids[id] and row ~= expected_rows[id] then return false end
+      if row >= parent_row + 1 and row <= parent_row + #children
+        and not child_ids[id] then return false end
+    end
+  end
+
+  for _, child in ipairs(children) do
+    child.kind, child.parent = 'child', parent.id
+    state.rows[child.id] = child
+  end
+  state.expanded[parent.id] = {
+    children = children,
+    listing_lines = vim.deepcopy(materialization.listing_lines or {}),
+    wildignore = materialization.wildignore or '',
+  }
+  for _, child in ipairs(children) do
+    local ok = pcall(set_row_mark, bufnr, expected_rows[child.id], child.id)
+    if not ok then
+      state.expanded[parent.id] = nil
+      for _, restored in ipairs(children) do state.rows[restored.id] = nil end
+      return false
+    end
+  end
+  refresh_display_ids(bufnr, state)
+  return true
+end
+
+-- Undoing a collapse restores rows through Neovim's undo tree. Reattach their
+-- saved identities and expansion records only if both the materialized text
+-- and every previously-expanded directory snapshot still match the filesystem.
+local function restore_undone_collapse(bufnr, state, snapshot)
+  local parent = state.rows[snapshot.parent_id]
+  local display = snapshot.display_snapshot
+  if not parent or state.expanded[parent.id] or not display then return false end
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  if not same_lines(lines, display.lines or {}) then return false end
+
+  -- Validate a complete saved rendering before assigning any marks. A collapse
+  -- can coexist with other expanded siblings; their rows are outside the
+  -- collapsed subtree but still have to be restored after undo invalidates the
+  -- re-listed extmarks.
+  local records, expected_rows, expected_order = {}, {}, {}
+  for index, item in ipairs(display.rows or {}) do
+    local row = index - 1
+    local rec = item.record
+    if item.row ~= row or item.id == nil or records[item.id]
+      or item.text ~= lines[index]
+      or not rec or rec.id ~= item.id or type(rec.path) ~= 'string'
+      or not item.identity
+      or not fs.path_identities_match(path_identity(rec.path), item.identity) then
+      return false
+    end
+    if rec.kind == 'child' then
+      if not rec.identity
+        or not fs.path_identities_match(path_identity(rec.path), rec.identity) then
+        return false
+      end
+    elseif rec.kind ~= 'root' then
+      return false
+    end
+    records[item.id] = vim.deepcopy(rec)
+    expected_rows[item.id] = row
+    expected_order[#expected_order + 1] = item.id
+  end
+  if #expected_order ~= #lines then return false end
+
+  local parent_row = expected_rows[parent.id]
+  if parent_row == nil or lines[parent_row + 1] ~= snapshot.parent_text
+    or vim.fs.normalize(parent.path) ~= vim.fs.normalize(snapshot.parent_path)
+    or not fs.path_identities_match(path_identity(parent.path), snapshot.parent_identity) then
+    return false
+  end
+
+  -- Verify the saved root order and every expansion edge, so duplicate or
+  -- orphaned child records cannot be adopted by their spelling alone.
+  local expansion_map = display.expansions or {}
+  local ordered, visited = {}, {}
+  local function append_children(parent_id)
+    local expansion = expansion_map[parent_id]
+    if not expansion then return true end
+    local parent_record = records[parent_id]
+    if not parent_record or not is_dir_line(parent_record.name) then return false end
+    local previous_order = 0
+    for _, child in ipairs(expansion.children or {}) do
+      local rec = records[child.id]
+      if not rec or rec.kind ~= 'child' or rec.parent ~= parent_id
+        or type(rec.order) ~= 'number' or rec.order <= previous_order
+        or rec.depth ~= (parent_record.depth or 0) + 1
+        or rec.path ~= M.entry_path(parent_record.path, rec.name)
+        or rec.text ~= recorded_row_text(rec) or child.id == parent_id
+        or visited[child.id] then
+        return false
+      end
+      previous_order = rec.order
+      visited[child.id] = true
+      ordered[#ordered + 1] = child.id
+      if not append_children(child.id) then return false end
+    end
+    return true
+  end
+  local seen_roots = {}
+  for _, root_id in ipairs(display.root_ids or {}) do
+    local rec = records[root_id]
+    if not rec or rec.kind ~= 'root' or seen_roots[root_id] then return false end
+    seen_roots[root_id] = true
+    ordered[#ordered + 1] = root_id
+    if not append_children(root_id) then return false end
+  end
+  if #ordered ~= #expected_order then return false end
+  for index, id in ipairs(ordered) do
+    if expected_order[index] ~= id then return false end
+  end
+  for id, expansion in pairs(expansion_map) do
+    local rec = records[id]
+    if not rec or not is_dir_line(rec.name) or not expansion then return false end
+  end
+
+  for id, expected in pairs(display.directory_snapshots or {}) do
+    local rec = records[id]
+    if not rec then return false end
+    local current = fs.read_dir_lines(rec.path,
+      M.ignore_set(rec.path, expected.wildignore or ''))
+    if not current or not same_lines(current, expected.listing_lines or {}) then return false end
+  end
+
+  -- The collapsed subtree snapshot must agree with the full display snapshot.
+  for offset, item in ipairs(snapshot.rows or {}) do
+    local row = parent_row + offset
+    if item.row ~= row or expected_rows[item.id] ~= row
+      or item.text ~= lines[row + 1] then
+      return false
+    end
+  end
+  for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1,
+      { details = true })) do
+    local id, row, details = mark[1], mark[2], mark[4] or {}
+    if not details.invalid then
+      if expected_rows[id] ~= row then return false end
+    end
+  end
+
+  local restored_expanded = {}
+  for id, expansion in pairs(expansion_map) do
+    local restored = {
+      children = {},
+      listing_lines = vim.deepcopy(expansion.listing_lines or {}),
+      wildignore = expansion.wildignore or '',
+    }
+    for _, child in ipairs(expansion.children or {}) do
+      local rec = records[child.id]
+      if not rec then return false end
+      restored.children[#restored.children + 1] = rec
+    end
+    restored_expanded[id] = restored
+  end
+  -- Matching is complete before the first identity is changed. If Neovim
+  -- rejects any mark recreation, clear the namespace rather than leave a
+  -- partially attributed display that could be mistaken for safe to sync.
+  vim.api.nvim_buf_clear_namespace(bufnr, namespace, 0, -1)
+  for _, item in ipairs(display.rows) do
+    local ok = pcall(set_row_mark, bufnr, item.row, item.id)
+    if not ok then
+      vim.api.nvim_buf_clear_namespace(bufnr, namespace, 0, -1)
+      state.display_ids = {}
+      return false
+    end
+  end
+  state.rows = records
+  state.root_ids = vim.deepcopy(display.root_ids or {})
+  state.expanded = restored_expanded
+  state.display_ids = vim.deepcopy(expected_order)
+  state.materialization_seq = vim.fn.undotree(bufnr).seq_cur
+  highlight.render(bufnr)
+  refresh_folder_icons(bufnr, state)
+  return true
+end
+
+local function forget_collapsed_state(bufnr, state, snapshot)
+  remove_expanded_subtree(bufnr, state, snapshot.parent_id)
+  refresh_display_ids(bufnr, state)
+  state.materialization_seq = vim.fn.undotree(bufnr).seq_cur
+end
+
+-- If undo returns exactly to the sequence that preceded a view materialization,
+-- Neovim has removed that insertion block. Reconcile only when each surviving
+-- child still has its original identity and text. Root rows may have changed;
+-- children_integrity() continues to protect any surviving materialized subtree.
+reconcile_undone_materialization = function(bufnr)
+  local state = states[bufnr]
+  if not state then return false end
+  local undos = state and state.materialization_undos or {}
+  local undo_tree = vim.fn.undotree(bufnr)
+  local seq_cur = undo_tree.seq_cur
+  local prune_from
+
+  -- TextChanged is not guaranteed to run between `:undo` and the next edit.
+  -- When that edit creates a new branch, the materialization sequence remains
+  -- under an `alt` branch in undotree(), while the new root edit becomes the
+  -- active head.  Recognize that transition as well as the exact baseline
+  -- sequence; only consider it when the materialization's base remains on the
+  -- active path and the materialization itself is now on an alternate path.
+  local active, alternate = {}, {}
+  local function collect_alternates(entries)
+    local pending = {}
+    for _, entry in ipairs(entries or {}) do pending[#pending + 1] = entry end
+    while #pending > 0 do
+      local entry = table.remove(pending)
+      alternate[entry.seq] = true
+      for _, alt in ipairs(entry.alt or {}) do
+        pending[#pending + 1] = alt
+      end
+    end
+  end
+  local current_path = false
+  for _, entry in ipairs(undo_tree.entries or {}) do
+    if current_path then
+      collect_alternates({ entry })
+    else
+      active[entry.seq] = true
+      collect_alternates(entry.alt)
+      if entry.seq == seq_cur then current_path = true end
+    end
+  end
+
+  -- Collapse snapshots include full child records. Keep them only while both
+  -- the collapse node and its base remain reachable for undo/redo; discarded
+  -- Neovim branches can no longer replay the corresponding view transition.
+  local function undo_node_reachable(seq)
+    return seq == 0 or active[seq] or alternate[seq]
+  end
+  local retained_collapses = {}
+  for _, collapse in ipairs(state.collapse_undos or {}) do
+    if collapse.seq and undo_node_reachable(collapse.seq)
+      and undo_node_reachable(collapse.base_seq) then
+      retained_collapses[#retained_collapses + 1] = collapse
+    end
+  end
+  state.collapse_undos = retained_collapses
+
+  -- Collapsing is an ordinary Neovim text change, but its row records are
+  -- intentionally removed while collapsed. Rebuild those records when undo
+  -- restores the exact expanded rows, and discard them again on redo.
+  for index = #(state.collapse_undos or {}), 1, -1 do
+    local collapse = state.collapse_undos[index]
+    if collapse.status == 'collapsed' and collapse.base_seq == seq_cur then
+      if restore_undone_collapse(bufnr, state, collapse) then
+        collapse.status = 'expanded'
+        return true
+      end
+    elseif collapse.status == 'expanded' and collapse.seq == seq_cur then
+      forget_collapsed_state(bufnr, state, collapse)
+      collapse.status = 'collapsed'
+      return true
+    end
+  end
+
+  -- A redo returns to the materialization's original undo node. Its child
+  -- records were intentionally removed while the insertion was undone, so
+  -- restore them from the retained snapshot only at that exact sequence.
+  local recovery, recovery_index, recovery_count
+  recovery_count = 0
+  for index, materialization in ipairs(state.materialization_recoveries or {}) do
+    if materialization.seq == seq_cur and active[materialization.seq] then
+      recovery, recovery_index = materialization, index
+      recovery_count = recovery_count + 1
+    end
+  end
+  if recovery_count > 0 then
+    if recovery_count ~= 1 then return false end
+    local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    if not restore_redone_materialization(bufnr, state, recovery, lines) then
+      return false
+    end
+    table.remove(state.materialization_recoveries, recovery_index)
+    state.materialization_undos[#state.materialization_undos + 1] = recovery
+    state.materialization_seq = seq_cur
+    return true
+  end
+
+  for index, materialization in ipairs(undos) do
+    local returned_to_base = materialization.base_seq == seq_cur
+    local branched_from_base = (materialization.base_seq == 0
+        or active[materialization.base_seq])
+      and not active[materialization.seq]
+      and alternate[materialization.seq]
+    if returned_to_base or branched_from_base then
+      prune_from = index
+      break
+    end
+  end
+  if not prune_from then return false end
+
+  local removed_ids = {}
+  local function mark_removed_subtree(parent_id)
+    local expansion = state.expanded[parent_id]
+    if not expansion then return end
+    for _, child in ipairs(expansion.children) do
+      if not removed_ids[child.id] then
+        removed_ids[child.id] = true
+        mark_removed_subtree(child.id)
+      end
+    end
+  end
+  for index = prune_from, #undos do
+    mark_removed_subtree(undos[index].parent_id)
+  end
+  local expected_ids = {}
+  for _, id in ipairs(state.display_ids or {}) do
+    if not removed_ids[id] then expected_ids[#expected_ids + 1] = id end
+  end
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local expected_children, found_children = {}, {}
+  for _, id in ipairs(expected_ids) do
+    local rec = state.rows[id]
+    if not rec then return false end
+    if rec.kind == 'child' then expected_children[id] = rec end
+  end
+  local marks, seen_ids, seen_rows = {}, {}, {}
+  for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1,
+      { details = true })) do
+    local id, row, details = mark[1], mark[2], mark[4] or {}
+    local rec = state.rows[id]
+    if not rec or seen_ids[id] then return false end
+    seen_ids[id] = true
+    if rec.kind == 'child' then
+      if removed_ids[id] then
+        if not details.invalid then return false end
+      elseif not expected_children[id] or details.invalid then
+        return false
+      else
+        if lines[row + 1] ~= rec.text or seen_rows[row] then return false end
+        found_children[id] = row
+        seen_rows[row] = true
+      end
+    elseif not details.invalid then
+      if seen_rows[row] then return false end
+      seen_rows[row] = true
+      marks[#marks + 1] = { row = row, id = id }
+    end
+  end
+  for id in pairs(expected_children) do
+    if found_children[id] == nil then return false end
+  end
+  local child_rows = {}
+  for id, row in pairs(found_children) do child_rows[row] = id end
+  for row, line in ipairs(lines) do
+    if not child_rows[row - 1] and line:match('^%s') then return false end
+  end
+
+  local function forget_subtree(parent_id)
+    local expansion = state.expanded[parent_id]
+    if not expansion then return end
+    state.expanded[parent_id] = nil
+    for _, child in ipairs(expansion.children) do
+      forget_subtree(child.id)
+      state.rows[child.id] = nil
+    end
+  end
+  for index = #undos, prune_from, -1 do
+    local materialization = undos[index]
+    forget_subtree(undos[index].parent_id)
+    state.materialization_recoveries = state.materialization_recoveries or {}
+    state.materialization_recoveries[#state.materialization_recoveries + 1] =
+      vim.deepcopy(materialization)
+    undos[index] = nil
+  end
+
+  -- Undo may leave invalid extmarks for deleted child lines. Rebuild the marks
+  -- from the verified surviving row identities so no stale child identity can
+  -- poison a later root-only sync.
+  vim.api.nvim_buf_clear_namespace(bufnr, namespace, 0, -1)
+  for _, mark in ipairs(marks) do set_row_mark(bufnr, mark.row, mark.id) end
+  for id, row in pairs(found_children) do set_row_mark(bufnr, row, id) end
+  state.display_ids = expected_ids
+  state.materialization_seq = seq_cur
+  return true
+end
+
+local function blocks_loaded_directory(bufnr, plan)
+  local state = states[bufnr]
+  if not state then return nil end
+  for _, root_id in ipairs(state.root_ids or {}) do
+    local root = state.rows[root_id]
+    local expansion = state.expanded[root_id]
+    local known = state.known_children and state.known_children[root_id]
+    if root and root.kind == 'root' and is_dir_line(root.name)
+      and ((expansion and #expansion.children > 0) or (known and #known > 0)) then
+      local protected_path = M.entry_path(state.root, root.name)
+      for _, move in ipairs(plan.moves or {}) do
+        if fs.same_path(M.entry_path(state.root, move.src), protected_path) then
+          return root.name
+        end
+      end
+      for _, removed in ipairs(plan.removed or {}) do
+        if fs.same_path(M.entry_path(state.root, removed), protected_path) then
+          return root.name
+        end
+      end
     end
   end
   return nil
@@ -263,12 +1166,30 @@ local function set_options(bufnr)
   -- previous handler so relisting cannot stack handlers.
   local group = vim.api.nvim_create_augroup('direct-buffer', { clear = false })
   pcall(vim.api.nvim_clear_autocmds, { group = group, buffer = bufnr })
+  vim.api.nvim_create_autocmd('BufWipeout', {
+    group = group,
+    buffer = bufnr,
+    callback = function() states[bufnr] = nil end,
+    desc = 'direct: release listing row state when the buffer is wiped',
+  })
   vim.api.nvim_create_autocmd('BufWriteCmd', {
     group = group,
     buffer = bufnr,
     command = 'DirectSync',
     desc = 'direct: sync the listing on :write',
   })
+  vim.api.nvim_create_autocmd('TextChanged', {
+    group = group,
+    buffer = bufnr,
+    callback = function() reconcile_undone_materialization(bufnr) end,
+    desc = 'direct: reconcile child rows when undo removes a materialization',
+  })
+  vim.keymap.set('n', 'zo', function() M.expand() end,
+    { buffer = bufnr, silent = true, desc = 'Expand one direct directory level' })
+  vim.keymap.set('n', 'za', function() M.toggle() end,
+    { buffer = bufnr, silent = true, desc = 'Toggle direct directory expansion' })
+  vim.keymap.set('n', 'zc', function() M.collapse() end,
+    { buffer = bufnr, silent = true, desc = 'Collapse direct directory rows' })
 end
 
 -- Return the destination left by a successful create/move, or nil for removals.
@@ -328,12 +1249,22 @@ end
 
 -- Restore the cursor to the pre-attach entry; leave it unchanged if that entry
 -- no longer exists. Reset the column on a match.
-function Buffer:place_cursor(lines)
+function Buffer:place_cursor(lines, row_identities, entry_identity)
   if self.current_entry == nil then
     return
   end
+  local bufnr = vim.api.nvim_get_current_buf()
   for index, line in ipairs(lines) do
-    if fs.same_path(M.entry_path(self.root, line), self.current_entry) then
+    local matches
+    if row_identities and entry_identity then
+      matches = fs.path_identities_match(row_identities[index], entry_identity)
+    else
+      local record = current_row_record(bufnr, index - 1)
+      local path = row_path(self.root, record, line)
+        or M.entry_path(self.root, line)
+      matches = fs.same_path(path, self.current_entry)
+    end
+    if matches then
       pcall(vim.api.nvim_win_set_cursor, 0, { index, 0 })
       return
     end
@@ -370,16 +1301,422 @@ function Buffer:list()
   end
 
   local bufnr = vim.api.nvim_get_current_buf()
-  local ok, seterr = pcall(vim.api.nvim_buf_set_lines, bufnr, 0, -1, false, safe)
+  reconcile_undone_materialization(bufnr)
+  local old_state = states[bufnr]
+  local old_expanded = {}
+  local old_known_children = {}
+  local old_index = { by_path = {}, by_inode = {}, unknown_by_path = {} }
+  if old_state then
+    old_expanded = old_state.expanded or {}
+    old_known_children = old_state.known_children or {}
+    local old_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    for row, line in ipairs(old_lines) do
+      local id = row_id_at(bufnr, row - 1)
+      local rec = id and old_state.rows[id]
+      -- Reuse a root only while its extmark still identifies the unchanged
+      -- row. `rec.path` is assigned from this row's entry path on every list;
+      -- checking it against the same path again was redundant. Edited text may
+      -- happen to equal another root's name; that is not an identity change.
+      if rec and rec.kind == 'root' and line == rec.text and line == rec.name
+        and rec.path then
+        local candidate = { record = rec, identity = path_identity(rec.path) }
+        add_identity(old_index, candidate.identity, candidate)
+      end
+    end
+  end
+
+  local new_identities, new_counts = {}, {
+    by_path = {}, by_inode = {}, unknown_by_path = {},
+  }
+  for index, line in ipairs(safe) do
+    local identity = path_identity(M.entry_path(self.root, line))
+    new_identities[index] = identity
+    count_identity(new_counts, identity)
+  end
+
+  local state = {
+    root = self.root,
+    rows = {},
+    expanded = old_expanded,
+    -- This survives collapse and re-listing so a directory previously observed
+    -- to be non-empty cannot be trashed just because its rows are hidden.
+    known_children = old_known_children,
+    root_ids = {},
+    next_id = old_state and old_state.next_id or 0,
+    display_ids = {},
+    materialization_undos = {},
+    materialization_recoveries = old_state
+      and vim.deepcopy(old_state.materialization_recoveries or {}) or {},
+    collapse_undos = old_state
+      and vim.deepcopy(old_state.collapse_undos or {}) or {},
+  }
+  local roots = {}
+  local used_root = {}
+  for line_index, line in ipairs(safe) do
+    local path = M.entry_path(self.root, line)
+    local identity = new_identities[line_index]
+    local candidate, candidate_count = matching_identity_values(old_index, identity)
+    local rec = candidate_count == 1 and candidate and candidate.record or nil
+    -- Equivalent spellings may occur more than once (for example two symlink
+    -- aliases). Reuse only a unique prior identity for a unique new row.
+    if rec and not identity_is_duplicated(identity, new_counts) and not used_root[rec.id] then
+      used_root[rec.id] = true
+    else
+      rec = { id = next_id(state), kind = 'root' }
+    end
+    rec.kind, rec.name, rec.text, rec.depth = 'root', line, line, 0
+    rec.path = M.entry_path(self.root, line)
+    state.rows[rec.id] = rec
+    state.root_ids[#state.root_ids + 1] = rec.id
+    roots[#roots + 1] = rec
+  end
+
+  local rendered = {}
+  local function render_children(parent_id, parent_path, depth)
+    local expansion = state.expanded[parent_id]
+    if not expansion then return end
+    for _, child in ipairs(expansion.children) do
+      child.kind, child.parent, child.depth = 'child', parent_id, depth
+      child.path = M.entry_path(parent_path, child.name)
+      child.text = string.rep('  ', depth) .. child.name
+      state.rows[child.id] = child
+      rendered[#rendered + 1] = {
+        text = child.text, id = child.id, identity = path_identity(child.path),
+      }
+      state.display_ids[#state.display_ids + 1] = child.id
+      render_children(child.id, child.path, depth + 1)
+    end
+  end
+  for root_index, rec in ipairs(roots) do
+    rendered[#rendered + 1] = {
+      text = rec.text, id = rec.id, identity = new_identities[root_index],
+    }
+    state.display_ids[#state.display_ids + 1] = rec.id
+    if is_dir_line(rec.name) then
+      render_children(rec.id, rec.path, 1)
+    end
+  end
+  for id in pairs(state.expanded) do
+    if not state.rows[id] then state.expanded[id] = nil end
+  end
+  for id in pairs(state.known_children) do
+    if not state.rows[id] then state.known_children[id] = nil end
+  end
+
+  local display = {}
+  local display_identities = {}
+  for index, row in ipairs(rendered) do
+    display[index] = row.text
+    display_identities[index] = row.identity
+  end
+  local cursor = vim.api.nvim_win_get_cursor(0)
+  vim.api.nvim_buf_clear_namespace(bufnr, namespace, 0, -1)
+  local ok, seterr = pcall(vim.api.nvim_buf_set_lines, bufnr, 0, -1, false, display)
   if not ok then
     ui.notify('direct: cannot list ' .. tostring(self.root) .. ': '
       .. tostring(seterr), vim.log.levels.ERROR)
     return nil, seterr
   end
+  states[bufnr] = state
+  for row, item in ipairs(rendered) do
+    set_row_mark(bufnr, row - 1, item.id)
+  end
+  highlight.render(bufnr)
+  refresh_folder_icons(bufnr, state)
+  state.materialization_seq = vim.fn.undotree().seq_cur
   set_options(bufnr)
-  self:place_cursor(safe)
+  self:place_cursor(display, display_identities,
+    self.current_entry and path_identity(self.current_entry) or nil)
+  if self.current_entry == nil then
+    pcall(vim.api.nvim_win_set_cursor, 0, {
+      math.max(1, math.min(cursor[1], #display)), cursor[2],
+    })
+  end
   vim.bo[bufnr].modified = false
   return true
+end
+
+recorded_row_text = function(rec)
+  local name = rec.name
+  if is_dir_line(name) then name = name:gsub('/+$', '') .. '/' end
+  return string.rep('  ', rec.depth or 0) .. name
+end
+
+function Buffer:expand(row)
+  local bufnr = vim.api.nvim_get_current_buf()
+  reconcile_undone_materialization(bufnr)
+  row = row or vim.api.nvim_win_get_cursor(0)[1]
+  local rec = current_row_record(bufnr, row - 1)
+  local line = vim.api.nvim_buf_get_lines(bufnr, row - 1, row, false)[1]
+  if not rec or not line then return nil, 'row identity is unavailable' end
+  if not is_dir_line(rec.name) then return false end
+
+  local state = states[bufnr]
+  local just_materialized = false
+  if not state.expanded[rec.id] then
+    local path = row_path(self.root, rec, line)
+    local wildignore = vim.o.wildignore or ''
+    local children, err = M.read(path)
+    local snapshot = { wildignore = wildignore }
+    if not children then
+      ui.notify('direct: cannot expand ' .. tostring(path) .. ': '
+        .. tostring(err), vim.log.levels.ERROR)
+      return nil, err
+    end
+    -- Keep an unfiltered snapshot for destructive sync preflight. Ignored names
+    -- are hidden from the view but still make the directory non-empty.
+    local known_children = fs.read_dir_lines(path)
+    state.known_children[rec.id] = known_children or vim.deepcopy(children)
+    local materialized = {}
+    for order, child_name in ipairs(children) do
+      local child_path = M.entry_path(path, child_name)
+      local reason = action_mod.path_reason(child_path)
+      if not reason then
+        materialized[#materialized + 1] = {
+          id = next_id(state), kind = 'child', name = child_name,
+          text = string.rep('  ', (rec.depth or 0) + 1) .. child_name,
+          parent = rec.id, order = order, depth = (rec.depth or 0) + 1,
+          path = child_path, identity = path_identity(child_path),
+        }
+      else
+        ui.notify('direct: skipping unlistable entry (' .. reason .. '): '
+          .. child_name, vim.log.levels.ERROR)
+      end
+    end
+    state.expanded[rec.id] = {
+      children = materialized,
+      listing_lines = vim.deepcopy(children),
+      wildignore = snapshot.wildignore,
+    }
+    just_materialized = true
+    if #materialized > 0 then
+      local insert_at, add = row, {}
+      local modified = vim.bo[bufnr].modified
+      local cursor = vim.api.nvim_win_get_cursor(0)
+      for _, child in ipairs(materialized) do
+        add[#add + 1] = child.text
+        state.rows[child.id] = child
+      end
+      -- A view insertion must not join the preceding user edit. Setting the
+      -- buffer's existing undolevels value closes the current block without
+      -- changing undo depth (Neovim :help undo-blocks); the insertion then has
+      -- its own undo sequence, while text undo remains enabled.
+      local undo_levels = vim.bo[bufnr].undolevels
+      local base_seq = vim.fn.undotree().seq_cur
+      if undo_levels == -123456 then
+        -- Neovim reports this sentinel when the buffer inherits the global
+        -- option; writing the global value to itself closes the current block
+        -- without pinning a buffer-local override.
+        vim.go.undolevels = vim.go.undolevels
+      elseif undo_levels >= 0 then
+        vim.bo[bufnr].undolevels = undo_levels
+      end
+      vim.api.nvim_buf_set_lines(bufnr, insert_at, insert_at, false, add)
+      for offset, child in ipairs(materialized) do
+        set_row_mark(bufnr, insert_at + offset - 1, child.id)
+      end
+      state.display_ids = {}
+      for display_row = 0, vim.api.nvim_buf_line_count(bufnr) - 1 do
+        local id = row_id_at(bufnr, display_row)
+        if id then state.display_ids[#state.display_ids + 1] = id end
+      end
+      highlight.render(bufnr)
+      state.materialization_seq = vim.fn.undotree().seq_cur
+      if state.materialization_seq ~= base_seq then
+        local child_ids = {}
+        for _, child in ipairs(materialized) do
+          child_ids[#child_ids + 1] = child.id
+        end
+        local materialization = {
+          parent_id = rec.id,
+          child_ids = child_ids,
+          base_seq = base_seq,
+          seq = state.materialization_seq,
+          parent_path = path,
+          parent_identity = path_identity(path),
+          listing_lines = vim.deepcopy(children),
+          wildignore = snapshot.wildignore or '',
+          children_snapshot = vim.deepcopy(materialized),
+        }
+        state.materialization_undos = state.materialization_undos or {}
+        state.materialization_undos[#state.materialization_undos + 1] = materialization
+      end
+      vim.bo[bufnr].modified = modified
+      pcall(vim.api.nvim_win_set_cursor, 0, cursor)
+    end
+  end
+
+  if just_materialized then vim.cmd('redraw') end
+  refresh_folder_icons(bufnr, state)
+  return true
+end
+
+local function collapse_snapshot(bufnr, state, parent, parent_row)
+  local rows, rows_by_id, expansions, directory_snapshots = {}, {}, {}, {}
+  local cursor = parent_row
+  local function visit(parent_id)
+    local expansion = state.expanded[parent_id]
+    if not expansion then return true end
+    for _, child in ipairs(expansion.children or {}) do
+      local row = cursor + 1
+      cursor = row
+      local line = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1]
+      if state.rows[child.id] ~= child or child.parent ~= parent_id
+        or row_id_at(bufnr, row) ~= child.id
+        or line ~= recorded_row_text(child) then
+        return false
+      end
+      local saved = vim.deepcopy(child)
+      rows[#rows + 1] = { id = child.id, row = row, text = line }
+      rows_by_id[child.id] = saved
+      if state.expanded[child.id] then
+        expansions[child.id] = vim.deepcopy(state.expanded[child.id])
+        directory_snapshots[child.id] = vim.deepcopy(
+          state.expanded[child.id].listing_lines or {})
+      end
+      if not visit(child.id) then return false end
+    end
+    return true
+  end
+  if not visit(parent.id) then
+    return nil, 'child row has unsaved edits or a missing/invalid identity mark'
+  end
+  local display_snapshot
+  local display_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  if #state.display_ids == #display_lines then
+    local visible_rows, visible_records, complete = {}, {}, true
+    for row, id in ipairs(state.display_ids) do
+      local rec = state.rows[id]
+      local line = display_lines[row]
+      local identity = rec and rec.path and path_identity(rec.path) or nil
+      if not rec or visible_records[id] or row_id_at(bufnr, row - 1) ~= id
+        or not identity
+        or (rec.kind == 'child'
+          and not fs.path_identities_match(identity, rec.identity)) then
+        complete = false
+        break
+      end
+      local saved = vim.deepcopy(rec)
+      visible_records[id] = saved
+      visible_rows[#visible_rows + 1] = {
+        id = id, row = row - 1, text = line, record = saved, identity = identity,
+      }
+    end
+    local directory_snapshots = {}
+    if complete then
+      for id, expanded in pairs(state.expanded) do
+        local rec = visible_records[id]
+        if not rec or not is_dir_line(rec.name) then
+          complete = false
+          break
+        end
+        directory_snapshots[id] = {
+          listing_lines = vim.deepcopy(expanded.listing_lines or {}),
+          wildignore = expanded.wildignore or vim.o.wildignore or '',
+        }
+      end
+    end
+    if complete then
+      display_snapshot = {
+        lines = vim.deepcopy(display_lines),
+        rows = visible_rows,
+        rows_by_id = visible_records,
+        root_ids = vim.deepcopy(state.root_ids),
+        expansions = vim.deepcopy(state.expanded),
+        directory_snapshots = directory_snapshots,
+      }
+    end
+  end
+  if not display_snapshot then
+    return nil, 'the complete display cannot be safely associated with row identities'
+  end
+  return {
+    parent_id = parent.id,
+    parent_path = parent.path,
+    parent_identity = path_identity(parent.path),
+    parent_text = vim.api.nvim_buf_get_lines(bufnr, parent_row, parent_row + 1, false)[1],
+    base_seq = vim.fn.undotree(bufnr).seq_cur,
+    rows = rows,
+    rows_by_id = rows_by_id,
+    expansions = expansions,
+    directory_snapshots = directory_snapshots,
+    children_snapshot = vim.deepcopy(state.expanded[parent.id].children),
+    listing_lines = vim.deepcopy(state.expanded[parent.id].listing_lines or {}),
+    wildignore = vim.o.wildignore or '',
+    display_snapshot = display_snapshot,
+  }
+end
+
+remove_expanded_subtree = function(bufnr, state, parent_id)
+  local expansion = state.expanded[parent_id]
+  if not expansion then return end
+  state.expanded[parent_id] = nil
+  for _, child in ipairs(expansion.children or {}) do
+    remove_expanded_subtree(bufnr, state, child.id)
+    pcall(vim.api.nvim_buf_del_extmark, bufnr, namespace, child.id)
+    state.rows[child.id] = nil
+  end
+end
+
+function Buffer:collapse(row)
+  local bufnr = vim.api.nvim_get_current_buf()
+  reconcile_undone_materialization(bufnr)
+  row = row or vim.api.nvim_win_get_cursor(0)[1]
+  local parent = current_row_record(bufnr, row - 1)
+  local line = vim.api.nvim_buf_get_lines(bufnr, row - 1, row, false)[1]
+  if not parent or not line then return nil, 'row identity is unavailable' end
+  if not is_dir_line(parent.name) then return false end
+  local state = states[bufnr]
+  local expansion = state.expanded[parent.id]
+  if not expansion then return false end
+
+  local snapshot, reason = collapse_snapshot(bufnr, state, parent, row - 1)
+  if not snapshot then
+    local message = 'direct: cannot collapse ' .. parent.name .. ': ' .. reason
+    ui.notify(message, vim.log.levels.ERROR)
+    return false, reason
+  end
+  if #snapshot.rows > 0 then
+    local modified = vim.bo[bufnr].modified
+    local undo_levels = vim.bo[bufnr].undolevels
+    if undo_levels == -123456 then
+      vim.go.undolevels = vim.go.undolevels
+    elseif undo_levels >= 0 then
+      vim.bo[bufnr].undolevels = undo_levels
+    end
+    vim.api.nvim_buf_set_lines(bufnr, row, row + #snapshot.rows, false, {})
+    snapshot.seq = vim.fn.undotree().seq_cur
+    snapshot.status = 'collapsed'
+    state.collapse_undos = state.collapse_undos or {}
+    state.collapse_undos[#state.collapse_undos + 1] = snapshot
+    remove_expanded_subtree(bufnr, state, parent.id)
+    refresh_display_ids(bufnr, state)
+    highlight.render(bufnr)
+    vim.bo[bufnr].modified = modified
+  else
+    state.expanded[parent.id] = nil
+  end
+  refresh_folder_icons(bufnr, state)
+  return true
+end
+
+function M.expand()
+  local buffer = M.restore()
+  return buffer:expand(vim.api.nvim_win_get_cursor(0)[1])
+end
+
+function M.collapse()
+  local buffer = M.restore()
+  return buffer:collapse(vim.api.nvim_win_get_cursor(0)[1])
+end
+
+function M.toggle()
+  local bufnr = vim.api.nvim_get_current_buf()
+  local rec = current_row_record(bufnr, vim.api.nvim_win_get_cursor(0)[1] - 1)
+  if rec and states[bufnr] and states[bufnr].expanded[rec.id] then
+    return M.collapse()
+  end
+  return M.expand()
 end
 
 -- ---------------------------------------------------------------------------
@@ -451,7 +1788,21 @@ end
 -- re-listed and marked nomodified), nil, reason when nothing was applied
 -- (ambiguous, an unsafe path, a refused yank, or an unreadable root).
 function Buffer:sync()
-  local actual = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+  local bufnr = vim.api.nvim_get_current_buf()
+  reconcile_undone_materialization(bufnr)
+  local visible = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local actual, child_err = children_integrity(bufnr, visible)
+  if not actual then
+    vim.bo[bufnr].modified = true
+    ui.notify('Refusing to sync: ' .. tostring(child_err)
+      .. '; nothing was changed.', vim.log.levels.ERROR)
+    return nil, child_err
+  end
+  -- Neovim represents an empty buffer with one empty string.  A clean empty
+  -- direct listing denotes zero root entries, not an empty filename.
+  if #actual == 1 and actual[1] == '' and not vim.bo[bufnr].modified then
+    actual = {}
+  end
   local expected, read_err = M.read(self.root)
   if not expected then
     ui.notify('direct: cannot read ' .. tostring(self.root) .. ': '
@@ -463,6 +1814,7 @@ function Buffer:sync()
   -- action or history write. The buffer is not re-listed and stays modified.
   local unsafe = first_unsafe(self.root, actual) or first_unsafe(self.root, expected)
   if unsafe ~= nil then
+    vim.bo[bufnr].modified = true
     ui.notify('Unsafe entry in the buffer (' .. unsafe.reason
       .. '); nothing was changed: ' .. unsafe.path, vim.log.levels.ERROR)
     return nil, unsafe.reason
@@ -474,6 +1826,15 @@ function Buffer:sync()
     -- leave the buffer modified so the unsaved intent is not discarded.
     ui.notify(ambiguous_message(plan, actual, expected), vim.log.levels.ERROR)
     return nil, plan.reason
+  end
+
+  local blocked_dir = blocks_loaded_directory(bufnr, plan)
+  if blocked_dir then
+    vim.bo[bufnr].modified = true
+    local reason = 'directory has expanded or known children: ' .. blocked_dir
+    ui.notify('Refusing to sync: ' .. reason .. '; nothing was changed.',
+      vim.log.levels.ERROR)
+    return nil, reason
   end
 
   local actions, yanks = build_actions(self.root, plan)
@@ -573,10 +1934,31 @@ end
 -- Open directories with a direct listing and files with `:edit`. Pass paths
 -- through fnameescape so special characters cannot become Ex syntax. Remove
 -- the old direct buffer only after another buffer is current.
+-- Child paths resolve from their row identities rather than their display text.
 function Buffer:open(line)
-  local path = M.entry_path(self.root, line)
+  local bufnr = vim.api.nvim_get_current_buf()
+  local safe, integrity_err = children_integrity(bufnr,
+    vim.api.nvim_buf_get_lines(bufnr, 0, -1, false))
+  if not safe then return nil, integrity_err end
+  local cursor_row = vim.api.nvim_win_get_cursor(0)[1]
+  local target_row
+  local current = vim.api.nvim_buf_get_lines(bufnr, cursor_row - 1, cursor_row, false)[1]
+  if current == line then
+    target_row = cursor_row
+  else
+    local all = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    for row, candidate in ipairs(all) do
+      if candidate == line then target_row = row; break end
+    end
+  end
+  local record = target_row and current_row_record(bufnr, target_row - 1)
+  local path = row_path(self.root, record, line)
+  if not path and type(line) == 'string' and not line:match('^%s') then
+    path = M.entry_path(self.root, line)
+  end
+  if not path then return nil, 'row identity is unavailable' end
   local direct_buf = vim.api.nvim_get_current_buf()
-  if is_dir_line(line) then
+  if is_dir_line(record and record.name or line) then
     M.list(path)
   else
     vim.cmd('edit ' .. vim.fn.fnameescape(path))
@@ -591,10 +1973,24 @@ end
 -- Buffer:get_paths(firstline, lastline) -> the absolute path of every line in
 -- the inclusive 1-based range (Python's buffer slice). Used by `:DirectYank`.
 function Buffer:get_paths(firstline, lastline)
-  local lines = vim.api.nvim_buf_get_lines(0, firstline - 1, lastline, false)
+  local bufnr = vim.api.nvim_get_current_buf()
+  local safe, integrity_err = children_integrity(bufnr,
+    vim.api.nvim_buf_get_lines(bufnr, 0, -1, false))
+  if not safe then return nil, integrity_err end
+  local lines = vim.api.nvim_buf_get_lines(bufnr, firstline - 1, lastline, false)
   local out = {}
-  for _, line in ipairs(lines) do
-    out[#out + 1] = M.entry_path(self.root, line)
+  for offset, line in ipairs(lines) do
+    local row = firstline + offset - 2
+    local record = current_row_record(bufnr, row)
+    if record and record.kind == 'child' then
+      out[#out + 1] = record.path
+    elseif record and record.kind == 'root' then
+      out[#out + 1] = M.entry_path(self.root, line)
+    elseif line:match('^%s') then
+      return nil, 'row has no valid identity'
+    else
+      out[#out + 1] = M.entry_path(self.root, line)
+    end
   end
   return out
 end

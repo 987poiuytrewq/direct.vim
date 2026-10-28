@@ -15,7 +15,8 @@ H.describe('health: :checkhealth direct', function()
 
     local text = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), '\n')
     H.assert_true(text:find('Neovim', 1, true) ~= nil, 'the report names Neovim')
-    H.assert_true(text:find('0.11', 1, true) ~= nil, 'the report states the 0.11 floor')
+    H.assert_true(text:find('(>= 0.12 required)', 1, true) ~= nil,
+      'the report states the 0.12 floor')
     H.assert_true(text:find('OK', 1, true) ~= nil, 'the version check is OK on this runtime')
     H.assert_true(text:find('data directory: ' .. paths.data_home(), 1, true) ~= nil,
       'the report names the resolved data directory')

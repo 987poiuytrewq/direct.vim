@@ -136,16 +136,50 @@ function M.list_dir(path)
   return names
 end
 
-local function ignored(path, ignore_set)
-  if not ignore_set then
-    return false
+-- A path identity captures the same semantics as same_path without retaining
+-- a path-to-path comparison loop. Missing/zero device or inode values are
+-- deliberately treated as unknown and use the normalized-name fallback.
+function M.path_identity(path, st)
+  if type(path) ~= 'string' then return nil end
+  local identity = { path = vim.fs.normalize(path) }
+  if st and st.dev ~= nil and st.ino ~= nil and st.dev ~= 0 and st.ino ~= 0 then
+    identity.inode = tostring(st.dev) .. ':' .. tostring(st.ino)
   end
-  for _, ignored_path in ipairs(ignore_set) do
-    if M.same_path(path, ignored_path) then
-      return true
+  return identity
+end
+
+function M.path_identities_match(a, b)
+  if not a or not b then return false end
+  if a.inode and b.inode then return a.inode == b.inode end
+  return a.path == b.path
+end
+
+local function index_identities(paths)
+  if not paths or #paths == 0 then return nil end
+  local index = { by_path = {}, unknown_by_path = {}, by_inode = {} }
+  for _, path in ipairs(paths) do
+    local identity = M.path_identity(path, M.stat(path))
+    if identity then
+      index.by_path[identity.path] = true
+      if identity.inode then
+        index.by_inode[identity.inode] = true
+      else
+        index.unknown_by_path[identity.path] = true
+      end
     end
   end
-  return false
+  return index
+end
+
+local function ignored(path, st, index)
+  if not index then return false end
+  local identity = M.path_identity(path, st)
+  if not identity then return false end
+  if identity.inode then
+    return index.by_inode[identity.inode] == true
+      or index.unknown_by_path[identity.path] == true
+  end
+  return index.by_path[identity.path] == true
 end
 
 -- read_dir_lines(root, ignore_set) -> the listing pipeline as a string array
@@ -153,22 +187,26 @@ end
 -- ascending. Symlinks are resolved with a following stat; entries whose
 -- stat fails (broken symlink) or whose target is neither a file nor a directory
 -- (fifo, socket, device) are omitted, matching Python where isdir and isfile are
--- both false. `ignore_set` is a list of paths (the glob results of &wildignore
---); an entry is ignored when fs.same_path matches any member.
+-- both false. `ignore_set` is a list of paths (the glob results of &wildignore);
+-- entries are compared to its stat-indexed filesystem identities.
 function M.read_dir_lines(root, ignore_set)
   if not M.is_dir(root) then
     return nil, 'not a directory: ' .. tostring(root)
   end
+  local ignored_index = index_identities(ignore_set)
   local dirs, files = {}, {}
   for name, typ in M.iter_dir(root) do
     local path = M.join(root, name)
+    local st, did_stat
     if typ == 'link' then
-      local st = M.stat(path)
+      st = M.stat(path)
+      did_stat = true
       if st then
         typ = st.type
       end
     end
-    if not ignored(path, ignore_set) then
+    if ignored_index and not did_stat then st = M.stat(path) end
+    if not ignored(path, st, ignored_index) then
       if typ == 'directory' then
         dirs[#dirs + 1] = name
       elseif typ == 'file' then
@@ -200,12 +238,8 @@ function M.same_path(a, b)
   if type(a) ~= 'string' or type(b) ~= 'string' then
     return nil, 'invalid path'
   end
-  local sa = M.stat(a)
-  local sb = M.stat(b)
-  if sa and sb then
-    return sa.ino == sb.ino and sa.dev == sb.dev
-  end
-  return vim.fs.normalize(a) == vim.fs.normalize(b)
+  return M.path_identities_match(
+    M.path_identity(a, M.stat(a)), M.path_identity(b, M.stat(b)))
 end
 
 -- ---------------------------------------------------------------------------
