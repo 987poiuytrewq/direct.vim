@@ -32,24 +32,34 @@ H.describe('listing filename highlights', function()
     vim.bo[bufnr].syntax = 'direct'
     vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
       '.root-dir/', '.root-file', '  .child-dir/', '    .deep-file',
-      'visible-dir/', 'visible-file',
+      'visible-dir/', 'visible-file', '  child-dir/', 'sample.js', 'Dockerfile',
+      'Makefile', 'README.md',
     })
 
     H.assert_eq(syntax_group(1, 1), 'DirectHiddenDirectory', 'root hidden directory')
     H.assert_eq(syntax_group(2, 1), 'DirectHiddenFile', 'root hidden file')
     H.assert_eq(syntax_group(3, 3), 'DirectHiddenDirectory', 'indented hidden directory')
     H.assert_eq(syntax_group(4, 5), 'DirectHiddenFile', 'deeply indented hidden file')
-    H.assert_true(syntax_group(5, 1) ~= 'DirectDirectory', 'visible directory has no Direct group')
+    H.assert_eq(syntax_group(5, 1), 'DirectDirectory', 'visible directory')
     H.assert_true(syntax_group(6, 1) ~= 'DirectFile', 'visible file has no Direct group')
-    H.assert_eq(vim.api.nvim_get_hl(0, { name = 'DirectDirectory', link = true }), {},
-      'visible directory group is not defined')
+    H.assert_eq(syntax_group(7, 3), 'DirectDirectory', 'indented visible directory')
+    for _, case in ipairs({
+      { 6, 'visible-file' }, { 8, 'sample.js' }, { 9, 'Dockerfile' },
+      { 10, 'Makefile' }, { 11, 'README.md' },
+    }) do
+      H.assert_eq(syntax_group(case[1], 1), '', case[2] .. ' has no filename syntax highlight')
+    end
+    H.assert_eq(vim.api.nvim_get_hl(0, { name = 'DirectDirectory', link = true }), {
+      link = 'Directory',
+    }, 'visible directory group links to Directory by default')
     H.assert_eq(vim.api.nvim_get_hl(0, { name = 'DirectFile', link = true }), {},
       'visible file group is not defined')
   end)
 
-  H.it('default-links hidden groups to NonText and Comment and reapplies after ColorScheme', function()
+  H.it('default-links visible directories to Directory and hidden entries to Comment after ColorScheme', function()
     local expected = {
-      DirectHiddenDirectory = 'NonText',
+      DirectDirectory = 'Directory',
+      DirectHiddenDirectory = 'Comment',
       DirectHiddenFile = 'Comment',
     }
     local function assert_defaults()
@@ -65,25 +75,31 @@ H.describe('listing filename highlights', function()
       group = 'direct_hidden_highlight_defaults', event = 'ColorScheme',
     }), 1, 'one ColorScheme autocmd owns default reapplication')
 
+    vim.cmd('highlight clear DirectDirectory')
     vim.cmd('highlight clear DirectHiddenDirectory')
     vim.cmd('highlight clear DirectHiddenFile')
     vim.api.nvim_exec_autocmds('ColorScheme', {})
     assert_defaults()
   end)
 
-  H.it('preserves user-defined hidden highlights over defaults', function()
+  H.it('preserves user-defined highlights over defaults', function()
+    vim.api.nvim_set_hl(0, 'DirectDirectory', { fg = 0x234567 })
     vim.api.nvim_set_hl(0, 'DirectHiddenDirectory', { fg = 0x123456 })
     vim.api.nvim_set_hl(0, 'DirectHiddenFile', { fg = 0x654321 })
 
     vim.api.nvim_exec_autocmds('ColorScheme', {})
+    H.assert_eq(vim.api.nvim_get_hl(0, { name = 'DirectDirectory', link = true }),
+      { fg = 0x234567 }, 'default directory link does not overwrite a user highlight')
     H.assert_eq(vim.api.nvim_get_hl(0, { name = 'DirectHiddenDirectory', link = true }),
       { fg = 0x123456 }, 'default directory link does not overwrite a user highlight')
     H.assert_eq(vim.api.nvim_get_hl(0, { name = 'DirectHiddenFile', link = true }),
       { fg = 0x654321 }, 'default file link does not overwrite a user highlight')
 
+    vim.api.nvim_set_hl(0, 'DirectDirectory', {})
     vim.api.nvim_set_hl(0, 'DirectHiddenDirectory', {})
     vim.api.nvim_set_hl(0, 'DirectHiddenFile', {})
-    vim.cmd('highlight default link DirectHiddenDirectory NonText')
+    vim.cmd('highlight default link DirectDirectory Directory')
+    vim.cmd('highlight default link DirectHiddenDirectory Comment')
     vim.cmd('highlight default link DirectHiddenFile Comment')
   end)
 
@@ -120,7 +136,8 @@ H.describe('listing filename highlights', function()
       H.assert_nil(row_mark(0, by_name[name]), name .. ' has no filename-derived highlight')
     end
     H.assert_nil(row_mark(0, by_name['.hidden.js']), 'dotfiles remain deferred to existing styling')
-    H.assert_nil(row_mark(0, by_name['directory.py/']), 'directories are not highlighted')
+    H.assert_nil(row_mark(0, by_name['directory.py/']),
+      'directories have no filename-derived extmark')
     H.assert_eq(vim.api.nvim_get_hl(0, { name = 'DirectSpecialFile', link = true }), {},
       'listing does not define a special-file highlight group')
 

@@ -14,15 +14,13 @@ display-only in Phase 1.
 
 ## Filename highlights
 
-Listing filenames do not receive custom highlights, regardless of exact name
-or detected filetype. Hidden entries use the syntax groups
-`DirectHiddenDirectory` (default link `NonText`) and
-`DirectHiddenFile` (default link `Comment`) at any indentation depth.
-The fixed `NonText` target is not guaranteed to be darker than `Directory` in
-every colorscheme.
+Visible directories use the syntax group `DirectDirectory` (default link
+`Directory`) at any indentation depth. Hidden directories and files retain
+their prior `Comment` defaults. Listing files receive no custom filename,
+filetype, or special-name highlights.
 
-Hidden-entry defaults are user-overridable and are restored after a
-`ColorScheme` event.
+Highlight defaults are user-overridable and are reapplied after a `ColorScheme`
+event.
 
 ## Requirements
 

@@ -4,11 +4,14 @@ endif
 
 syntax match DirectHiddenDirectory "^\s*\..*/$"
 syntax match DirectHiddenFile "^\s*\..*[^/]$"
-highlight default link DirectHiddenDirectory NonText
+syntax match DirectDirectory "^\s*[^.[:space:]].*/$"
+highlight default link DirectDirectory Directory
+highlight default link DirectHiddenDirectory Comment
 highlight default link DirectHiddenFile Comment
 
 function! s:DefineHiddenHighlightDefaults() abort
-  highlight default link DirectHiddenDirectory NonText
+  highlight default link DirectDirectory Directory
+  highlight default link DirectHiddenDirectory Comment
   highlight default link DirectHiddenFile Comment
 endfunction
 
