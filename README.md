@@ -4,8 +4,8 @@ Edit directories in Neovim.
 
 Load a directory into a buffer with each root-level line corresponding to a file
 or subdirectory. Edit those root rows to create, rename, or delete filesystem
-entries. Directories can also be unfolded for browsing; their child rows are
-display-only in Phase 1.
+entries. Directories can also be expanded for browsing; their child rows are
+materialized in the buffer and removed when collapsed.
 
 - navigate around the filesystem easily
 - rename, create and delete files and directories
@@ -45,11 +45,20 @@ Plug '987poiuytrewq/direct.vim'
 ```lua
 require('direct').setup({
   map_default_keys = true, -- set false to install no default mappings
+  show_folder_icons = false, -- opt in to Nerd Font folder icons
 })
 ```
 
 It is idempotent, may be called more than once, and reports an unknown option
 name as an error instead of silently ignoring it.
+
+### Folder icons
+
+Set `show_folder_icons = true` to show inline directory glyphs; the default is
+`false`. A Nerd Font is required to render them. Collapsed directories use
+`nf-md-folder` (U+F024B), and expanded directories use `nf-md-folder_open`
+(U+F0770). Icons are virtual text, so the listing lines and filesystem behavior
+are unchanged. No icon plugin or other dependency is required.
 
 ## Navigate
 
@@ -62,10 +71,10 @@ Once a directory is listed, `-` goes up to its parent directory and `<Enter>`
 opens the entry under the cursor: a directory line opens a new listing, a file
 line opens the file.
 
-Use `zo` or `za` on a directory to unfold it in place. Children are read lazily,
-one level at a time; repeating an unfold does not re-read or duplicate them, and
-collapsing only hides the already-loaded rows. The initial listing remains flat.
-This is available in every direct listing and has no configuration toggle.
+Use `zo` or `za` on a directory to expand it in place. Children are read lazily,
+one level at a time; repeating an expansion does not re-read or duplicate them.
+`za` or `zc` on an expanded directory removes its child rows; expanding again
+re-reads the directory. The initial listing remains flat.
 
 ## Edit
 
@@ -102,27 +111,28 @@ Directory-only patterns such as `cache/` also protect matching nested directorie
 Directory symlinks are treated as leaves when renamed; their targets are not
 scanned or moved.
 
-### Unfolded rows (Phase 1)
+### Expanded rows
 
 Only depth-zero/root rows participate in the legacy positional create/delete/
-rename classifier. Unfolded child rows are display-only: editing, adding,
+rename classifier. Expanded child rows are display-only: editing, adding,
 deleting, duplicating, or losing a child's identity refuses the whole save
 before classifier actions, filesystem changes, auto-yank, register, or history
 effects. Keep child rows exactly as materialized. Directory indentation is
 presentation only; `>>` and `<<` do not enable move synchronization.
 
-Unfolding has its own text-undo block. `:undo` removes the latest materialized
-child rows without undoing an unrelated earlier root edit; the next save
-synchronizes the surviving root rows. `:redo` restores the original child
-identities only when the original undo sequence and exact directory snapshot
-still match; an ambiguous or changed snapshot remains unsafe to save, open, or
-yank.
+Expansion and collapse are ordinary text-undo changes. `u` after a collapse
+restores the child rows and their identities; `<C-r>` re-applies the collapse.
+Undoing an expansion removes its rows, and redo restores them only when the
+original undo sequence and exact directory snapshot still match. A changed or
+ambiguous snapshot remains unsafe to save, open, or yank.
 
-A root file rename or other root-file change remains available while its child
-rows are unfolded. A root directory with loaded descendants cannot be renamed
-or deleted in that buffer; collapsing is visual only. Close/wipe and reopen the
-parent listing to start without those loaded descendants. Phase 1 does not ship
-child moves, subtree indentation mapping, or history recovery for tree edits.
+A root file rename or other root-file change remains available while child rows
+are expanded. Renaming or deleting an expanded directory is refused. After
+collapsing a directory, a previously recorded non-empty child list continues to
+protect it from rename or deletion, including across re-listing; expanding it
+again re-reads current contents and refreshes that record. Empty directories
+follow normal rename/delete behavior. Child moves, subtree indentation mapping,
+and history recovery for tree edits are not supported.
 Root names beginning with whitespace and names that could escape the listed
 directory (such as `../x` or `a/b`) are refused at save time.
 
@@ -132,16 +142,13 @@ verified; this documentation does not claim Windows support.
 
 ### Undo / Redo
 
-In a direct buffer, `u` and `<C-r>` are mapped to `:DirectUndo` and
-`:DirectRedo`, so the keys you would use for text undo perform the
-*filesystem* undo/redo instead. That history records the actions a sync, paste,
-undo or redo performed and reverses or re-applies them; `:DirectUndo` right
-after a paste, for example, undoes the paste.
+In a direct buffer, `u` and `<C-r>` perform Neovim text undo and redo. The
+filesystem action history is separate: use `:DirectUndo` and `:DirectRedo` to
+reverse or re-apply actions a sync or paste performed; `:DirectUndo` right after
+a paste, for example, undoes the paste.
 
-The filesystem undo is separate from Neovim's text undo. `:undo` (or any other
-text-undo command) only reverses changes to the buffer's lines: it never
-renames, creates, deletes or restores anything on disk. Only `:DirectUndo`
-reverses a filesystem action.
+Text undo only reverses buffer-line changes; it never renames, creates, deletes
+or restores anything on disk. Only `:DirectUndo` reverses a filesystem action.
 
 ## Yank / Paste
 
@@ -191,22 +198,23 @@ Global (normal mode), installed when `map_default_keys` is true:
 | `-` | `:DirectListBuffer` |
 
 Buffer-local, in a direct buffer (standard actions follow `map_default_keys`;
-`zo`/`za` are always installed):
+`zo`/`za`/`zc` are always installed):
 
 | Mode | Key | Action |
 |---|---|---|
 | normal | `<CR>` | open the entry under the cursor |
-| normal | `zo` | lazily unfold one directory level |
-| normal | `za` | lazily unfold or visually collapse one directory |
+| normal | `zo` | lazily expand one directory level |
+| normal | `za` | expand or collapse one directory |
+| normal | `zc` | collapse one directory |
 | normal | `-` | open `../` (the parent directory) |
-| normal | `u` | `:DirectUndo` |
-| normal | `<C-r>` | `:DirectRedo` |
+| normal | `u` | Neovim text undo |
+| normal | `<C-r>` | Neovim text redo |
 | normal | `yy`, `Y` | `:DirectYank` (current line) |
 | visual | `y` | `:DirectYank` (selected range) |
 | normal | `p`, `P` | `:DirectPaste` |
 
 The buffer-local `-` wins over the global `-` inside a direct buffer.
-`zo` and `za` are installed for every direct listing, independently of
+`zo`, `za`, and `zc` are installed for every direct listing, independently of
 `map_default_keys`.
 
 ## Data directory
