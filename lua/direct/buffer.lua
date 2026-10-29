@@ -2621,11 +2621,6 @@ function Buffer:sync()
     end
     actual = subtree_edit.root_lines
   end
-  -- Neovim represents an empty buffer with one empty string.  A clean empty
-  -- direct listing denotes zero root entries, not an empty filename.
-  if #actual == 1 and actual[1] == '' and not vim.bo[bufnr].modified then
-    actual = {}
-  end
   local expected, read_err = fs.read_dir_lines(self.root)
   if not expected then
     ui.notify('direct: cannot read ' .. tostring(self.root) .. ': '
@@ -2633,6 +2628,15 @@ function Buffer:sync()
     return nil, read_err
   end
   expected = apply_snapshot(self.root, expected, snapshot)
+  -- Neovim represents an empty buffer with one empty string. An empty listing
+  -- denotes zero root entries, not an empty filename: this applies both to a
+  -- clean listing of an empty directory and to deleting its final visible row.
+  -- Keep rejecting a modified blank row when there were no visible entries to
+  -- delete, since that would otherwise turn an invalid filename into a no-op.
+  if #actual == 1 and actual[1] == ''
+    and (not vim.bo[bufnr].modified or #expected > 0) then
+    actual = {}
+  end
 
   -- refuse a path the history framing cannot represent, before any
   -- action or history write. The buffer is not re-listed and stays modified.
