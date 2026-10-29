@@ -663,15 +663,10 @@ end
 -- the sync-boundary framing guard
 -- ---------------------------------------------------------------------------
 
--- unsafe_path_reason(path) -> the shared `action.path_reason`: nil
--- when `path` can round-trip through the `NAME\tfield...` history framing, else
--- a short reason. A tab IS the field separator, so it would split one path into
--- two fields; any other control character (a newline included) cannot survive
--- `vim.fn.writefile`'s line handling either. A space is legal here: only the
--- `p`/`up` name lists use the ' ' ENTRY_SEPARATOR, and the sync classification
--- never builds those. This boundary keeps its own early refusal for the user
--- `action.serialize` applies the SAME shared guard to every emitted field, so a
--- path outside the sync path can never bypass it.
+-- unsafe_path_reason(path) -> the shared `action.path_reason`, which rejects
+-- invalid UTF-8 and controls before any sync side effect. This boundary keeps
+-- its early, user-facing refusal; action serialization applies the same guard
+-- to every emitted record.
 local function unsafe_path_reason(path)
   return action_mod.path_reason(path)
 end
@@ -2878,6 +2873,26 @@ function Buffer:sync()
           vim.log.levels.ERROR)
         return nil, reason
       end
+    end
+  end
+
+  -- Classify both raw history stacks only after the complete sync plan has
+  -- passed its read-only checks, but before auto-yank or filesystem mutation.
+  if #actions > 0 or #yanks > 0 then
+    local inputs = {}
+    for _, act in ipairs(actions) do
+      if type(act.src) == 'string' then inputs[#inputs + 1] = act.src end
+      if type(act.dst) == 'string' then inputs[#inputs + 1] = act.dst end
+      for _, member in ipairs(act.actions or {}) do
+        if type(member.src) == 'string' then inputs[#inputs + 1] = member.src end
+        if type(member.dst) == 'string' then inputs[#inputs + 1] = member.dst end
+      end
+    end
+    for _, path in ipairs(yanks) do inputs[#inputs + 1] = path end
+    local preflight, preflight_err = history.preflight(inputs)
+    if not preflight then
+      vim.bo[bufnr].modified = true
+      return nil, preflight_err
     end
   end
 

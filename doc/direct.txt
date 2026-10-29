@@ -293,20 +293,40 @@ Run `:checkhealth direct` to print the resolved data home. Inside it:
     trash/      removed entries, kept so an undo can restore them
     register/   the most recent yank, and its content pointer
 
+    Undo and redo use JSONL. Each stack begins with the exact header
+    {"format":"direct-history","version":1}, followed by one canonical JSON
+    action record per line. Paste/unpaste names are JSON arrays. Before reading
+    the register or changing the filesystem, direct validates path inputs and
+    classifies both history files from raw bytes. Invalid UTF-8, control
+    characters, malformed JSON, and unknown history formats are refused without
+    changing history, the register, or the filesystem.
+
+    Recognized Python-era tab logs and Lua v2/v3 logs are reset to empty
+    current-format history with a warning. They are never replayed or migrated,
+    and no backup is created. Unknown, future, malformed, unreadable, and
+    pre-2018 space-framed logs are preserved byte-for-byte and block the
+    triggering operation.
+
+    Each history-file rewrite uses an exclusive same-directory temporary file,
+    flushes and closes it, then atomically renames it over the owned log. This
+    does not make the full pop -> filesystem action -> append sequence atomic:
+    a crash between those steps can leave the log and filesystem out of sync.
+    There is no multi-operation journal or inter-process lock.
+
 ==============================================================================
 11. Upgrading from the Python version                       *direct.vim-upgrade*
 
-The Lua rewrite uses a new on-disk format and does not carry the Python-era
-data over:
+The Lua rewrite uses a new on-disk format and does not migrate the Python-era
+data:
 
-    - History: the Lua logs are version-tagged, and a log without the tag is
-      never executed: it is renamed aside to `<name>.legacy` (or
-      `<name>.legacy.<n>` if that name is already taken) and a warning
-      (`Ignoring history written by an older version`) is shown. *Undo history
-      does not survive the upgrade.*
-    - Register: entries written by the Python version are still listed, but a
-      name the Lua version cannot round-trip (a space, a tab or another control
-      character) is skipped with an error.
+    - History: recognized Python-era tab logs and Lua v2/v3 logs are discarded
+      and reset to empty JSONL history with a warning and no backup. They are
+      never replayed or migrated, so their undo history does not survive. Old
+      space-framed Python logs and any unknown, malformed, or unreadable log are
+      preserved byte-for-byte and block the triggering operation.
+    - Register: entries written by the Python version are still listed. Names
+      with spaces are supported by the JSONL format; names with control
+      characters or invalid UTF-8 are skipped with an error.
     - Trash: Python-era trash entries are still read, so an entry removed
       before the upgrade can still be restored.
 

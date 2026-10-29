@@ -7,22 +7,24 @@
 -- UI edits produce swaps, rotations, and open chains. These are exactly the
 -- connected move sets where one destination is another move's source; a
 -- one-at-a-time reversal would collide. Independent moves stay separate.
--- The group is PERSISTED as one log entry (`g<TAB><count><TAB>src<TAB>dst...`),
+-- The group is PERSISTED as one JSONL log entry,
 -- not grouped in memory: the critical test below performs the swap in THIS
 -- process and undoes it in a real second `nvim --headless -l` process.
 --
--- The format marker is bumped because v2 records a swap as two independent
--- moves; replaying those under grouped undo could overwrite data again. Old
--- logs are quarantined without executing any entries.
+-- Legacy logs are reset only when their framing is recognized; unknown and
+-- malformed logs are preserved without executing entries.
 
 local H = require('tests.support.harness')
+local fixtures = require('tests.support.history_fixtures')
 
 -- Resolve the repository root from this test file for the fresh-session script.
 local SPEC_FILE = debug.getinfo(1, 'S').source:gsub('^@', '')
 local REPO_ROOT = vim.fs.dirname(vim.fs.dirname(vim.fn.fnamemodify(SPEC_FILE, ':p')))
 
-local MARKER = '#direct-history-v3'
+local MARKER = fixtures.header
 local V2_MARKER = '#direct-history-v2'
+local move_record = fixtures.move
+local group_record = fixtures.group
 
 local function clean_buffers()
   pcall(vim.cmd, '%bwipeout!')
@@ -50,9 +52,11 @@ H.describe('grouped move undo', function()
 
   -- swap_line(ws) -> the exact on-disk record of a `a.txt <-> b.txt` swap: the
   -- two interlinked moves in the order the sync applied them.
-  local function swap_line(ws)
-    return 'g\t2\t' .. ws .. '/a.txt\t' .. ws .. '/b.txt\t'
-      .. ws .. '/b.txt\t' .. ws .. '/a.txt'
+local function swap_line(ws)
+  return group_record({
+    { ws .. '/a.txt', ws .. '/b.txt' },
+    { ws .. '/b.txt', ws .. '/a.txt' },
+  })
   end
 
   -- swap_through_sync(ws) -> lists ws, swaps the two lines and :writes, i.e.
@@ -190,7 +194,7 @@ H.describe('grouped move undo', function()
       'the directories swapped')
     H.assert_eq(vim.fn.readfile(ws .. '/d2/inner.txt'), { 'INNER-1' },
       'the directories swapped')
-    H.assert_true(history_lines('undo.log')[2]:sub(1, 1) == 'g',
+    H.assert_eq(vim.json.decode(history_lines('undo.log')[2]).op, 'g',
       'a directory swap is a group entry too')
 
     H.assert_true(history.undo() ~= nil, 'undo succeeds')
@@ -222,8 +226,8 @@ H.describe('grouped move undo', function()
     H.assert_eq(vim.fn.readfile(ws .. '/y.txt'), { 'CONTENT-B' })
     H.assert_eq(history_lines('undo.log'), {
       MARKER,
-      'mv\t' .. ws .. '/a.txt\t' .. ws .. '/x.txt',
-      'mv\t' .. ws .. '/b.txt\t' .. ws .. '/y.txt',
+      move_record(ws .. '/a.txt', ws .. '/x.txt'),
+      move_record(ws .. '/b.txt', ws .. '/y.txt'),
     }, 'moves that share no name are two entries, never a group')
 
     H.assert_true(history.undo() ~= nil, 'the first undo reverses only the last move')
@@ -255,9 +259,11 @@ H.describe('grouped move undo', function()
     H.assert_eq(vim.fn.readfile(ws .. '/c.txt'), { 'CONTENT-B' }, 'c<-b')
     H.assert_eq(history_lines('undo.log'), {
       MARKER,
-      'g\t3\t' .. ws .. '/a.txt\t' .. ws .. '/b.txt\t'
-        .. ws .. '/b.txt\t' .. ws .. '/c.txt\t'
-        .. ws .. '/c.txt\t' .. ws .. '/a.txt',
+      group_record({
+        { ws .. '/a.txt', ws .. '/b.txt' },
+        { ws .. '/b.txt', ws .. '/c.txt' },
+        { ws .. '/c.txt', ws .. '/a.txt' },
+      }),
     }, 'the whole 3-cycle is one group entry')
 
     H.assert_true(history.undo() ~= nil, 'undo succeeds')
@@ -275,7 +281,7 @@ H.describe('grouped move undo', function()
     H.assert_eq(vim.fn.readfile(ws .. '/c.txt'), { 'CONTENT-B' })
   end)
 
-  H.it('a superseded #direct-history-v2 log is never replayed', function()
+  H.it('a recognized superseded #direct-history-v2 log resets without replay or backup', function()
     local _, history, fs = modules()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -291,7 +297,7 @@ H.describe('grouped move undo', function()
 
     H.capture_messages()
     H.assert_nil(history.undo(), 'a superseded log yields no undo step')
-    H.assert_notified('Ignoring history written by an older version')
+    H.assert_notified('resetting legacy or empty undo history')
 
     -- Nothing was half-applied and no content was destroyed.
     H.assert_eq(vim.fn.readfile(ws .. '/a.txt'), { 'CONTENT-B' },
@@ -299,17 +305,13 @@ H.describe('grouped move undo', function()
     H.assert_eq(vim.fn.readfile(ws .. '/b.txt'), { 'CONTENT-A' },
       'the superseded log was not executed')
 
-    -- Quarantined aside verbatim, so the data survives but is inert.
     local undo_path = vim.fs.joinpath(sb.data_home, 'direct/history/undo.log')
-    H.assert_false(fs.exists(undo_path), 'the superseded log was moved aside')
-    H.assert_eq(vim.fn.readfile(undo_path .. '.legacy'), {
-      V2_MARKER,
-      'mv\t' .. ws .. '/a.txt\t' .. ws .. '/b.txt',
-      'mv\t' .. ws .. '/b.txt\t' .. ws .. '/a.txt',
-    }, 'the superseded log is preserved verbatim as <name>.legacy')
+    H.assert_eq(vim.fn.readfile(undo_path), { MARKER },
+      'the recognized v2 log is reset to header-only current JSONL')
+    H.assert_false(fs.exists(undo_path .. '.legacy'), 'no backup is created')
 
     H.capture_messages()
-    H.assert_nil(history.undo(), 'the quarantined log is gone')
+    H.assert_nil(history.undo(), 'the reset log has no records')
     H.assert_notified('Nothing to undo')
   end)
 
@@ -476,7 +478,7 @@ H.describe('grouped move undo', function()
       'no staged symlink remains')
     H.assert_eq(history_lines('undo.log'), {
       MARKER,
-      'g\t2\t' .. link .. '\t' .. ws .. '/b.txt\t' .. ws .. '/b.txt\t' .. link,
+      group_record({ { link, ws .. '/b.txt' }, { ws .. '/b.txt', link } }),
     }, 'the group remains available for retry')
     H.assert_true(history.undo() ~= nil,
       'retry succeeds after the staging fault clears')
@@ -544,7 +546,8 @@ H.describe('grouped move undo', function()
       'a stranded staged entry is not presented as automatically retryable')
     H.assert_eq(history_lines('undo.log'), {
       MARKER,
-      'g\t2\t' .. ws .. '/b.txt\t' .. ws .. '/a.txt\t' .. ws .. '/a.txt\t' .. ws .. '/b.txt',
+      group_record({ { ws .. '/b.txt', ws .. '/a.txt' },
+        { ws .. '/a.txt', ws .. '/b.txt' } }),
     }, 'the group remains in history after rollback itself fails')
   end)
 
@@ -655,25 +658,26 @@ H.describe('grouped move undo', function()
     }), { { 1 }, { 2, 3 }, { 4 } }, 'a non-move action is its own singleton')
   end)
 
-  H.it('a malformed group line is refused and kept, never executed', function()
+  H.it('a malformed JSON group record is refused and preserved, never executed', function()
     local _, history, fs = modules()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
     H.mkfile(ws, 'a.txt', { 'CONTENT-A' })
     H.mkfile(ws, 'b.txt', { 'CONTENT-B' })
-    -- The count says three members; only one src/dst pair follows.
-    local bad = 'g\t3\t' .. ws .. '/a.txt\t' .. ws .. '/b.txt'
+    -- A group has fewer than the required two move pairs.
+    local bad = '{"op":"g","moves":[{"src":' .. vim.json.encode(ws .. '/a.txt')
+      .. ',"dst":' .. vim.json.encode(ws .. '/b.txt') .. '}]}'
     H.mkfile(sb.data_home, 'direct/history/undo.log', { MARKER, bad })
 
     H.capture_messages()
-    H.assert_nil(history.undo(), 'the malformed group is not executed')
-    H.assert_notified('Failed to undo action')
+    H.assert_nil(history.undo(), 'malformed history refuses undo')
+    H.assert_notified('history was preserved')
     H.assert_eq(vim.fn.readfile(ws .. '/a.txt'), { 'CONTENT-A' },
       'nothing was moved')
     H.assert_eq(vim.fn.readfile(ws .. '/b.txt'), { 'CONTENT-B' },
       'nothing was moved')
     H.assert_false(fs.exists(ws .. '/.direct-tmp-1'), 'no staging happened')
     H.assert_eq(history_lines('undo.log'), { MARKER, bad },
-      'the unparseable line is pushed back, never lost')
+      'the malformed record is preserved exactly')
   end)
 end)
