@@ -197,6 +197,27 @@ H.describe('sync: applying actions', function()
       'the entry content survived the delete/paste round trip')
   end)
 
+  H.it(':write on a clean listing reloads external filesystem changes', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkfile(ws, 'existing.txt', { 'existing' })
+    route_write_to_test_buffer()
+    local listing = buffer.list(ws)
+    H.mkfile(ws, 'external.txt', { 'external' })
+
+    vim.cmd('write')
+
+    H.assert_fs_eq(ws, { 'existing.txt', 'external.txt' },
+      'writing an unchanged buffer does not delete an external entry')
+    H.assert_buf_eq({ 'existing.txt', 'external.txt' }, 0,
+      ':write reloads rows from the current filesystem contents')
+    H.assert_false(vim.bo.modified, ':write leaves the reloaded listing clean')
+    H.assert_eq(listing:get_paths(1, 2), {
+      ws .. '/existing.txt', ws .. '/external.txt',
+    }, 'row paths match the reloaded entries')
+  end)
+
   H.it('RENAME (file): moves it and logs one mv action', function()
     clean_buffers()
     local sb = H.sandbox()

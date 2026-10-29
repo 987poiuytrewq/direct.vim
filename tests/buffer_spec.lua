@@ -103,6 +103,26 @@ H.describe('buffer: listing', function()
     H.assert_eq(listing:get_paths(1, 2), before_paths, 'child paths remain associated')
   end)
 
+  H.it(':e reloads the current directory contents in a direct buffer', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local old_path = H.mkfile(ws, 'old.txt', { 'old' })
+    local listing = buffer.list(ws)
+    H.assert_buf_eq({ 'old.txt' }, 0, 'initial listing reflects the directory')
+
+    H.assert_true(vim.uv.fs_unlink(old_path), 'remove the old entry outside the buffer')
+    H.mkfile(ws, 'new.txt', { 'new' })
+
+    vim.cmd('edit')
+
+    H.assert_buf_eq({ 'new.txt' }, 0, ':e replaces stale rows with current directory entries')
+    H.assert_eq(vim.bo.filetype, 'direct', ':e keeps the direct buffer filetype')
+    H.assert_false(vim.bo.modified, ':e leaves the refreshed listing unmodified')
+    H.assert_eq(listing:get_paths(1, 1), { ws .. '/new.txt' },
+      'row paths match the reloaded directory contents')
+  end)
+
   H.it('reuses identity when a filesystem entry is replaced at the same path', function()
     clean_buffers()
     local sb = H.sandbox()
