@@ -1919,11 +1919,11 @@ local function set_options(bufnr)
   vim.bo[bufnr].buflisted = true
   vim.bo[bufnr].swapfile = false
   vim.bo[bufnr].filetype = constants.FILETYPE
-  -- BufWriteCmd <buffer> DirectSync: a `:write` in a direct
-  -- buffer routes to the sync instead of writing a file. Each buffer owns a
-  -- shared group outside `direct` so re-sourcing plugin/direct.lua can clear
-  -- its global handlers without removing this one. Clear only this buffer's
-  -- previous handler so relisting cannot stack handlers.
+  -- BufWriteCmd <buffer>: modified listings sync, while a clean `:write`
+  -- refreshes from disk instead of interpreting external changes as deletions.
+  -- Each buffer owns a shared group outside `direct` so re-sourcing
+  -- plugin/direct.lua can clear its global handlers without removing this one.
+  -- Clear only this buffer's previous handler so relisting cannot stack handlers.
   local group = vim.api.nvim_create_augroup('direct-buffer', { clear = false })
   pcall(vim.api.nvim_clear_autocmds, { group = group, buffer = bufnr })
   vim.api.nvim_create_autocmd('BufWipeout', {
@@ -1935,8 +1935,24 @@ local function set_options(bufnr)
   vim.api.nvim_create_autocmd('BufWriteCmd', {
     group = group,
     buffer = bufnr,
-    command = 'DirectSync',
+    callback = function(args)
+      vim.api.nvim_set_current_buf(args.buf)
+      if vim.bo[args.buf].modified then
+        vim.cmd('DirectSync')
+      else
+        M.restore():list()
+      end
+    end,
     desc = 'direct: sync the listing on :write',
+  })
+  vim.api.nvim_create_autocmd('BufReadCmd', {
+    group = group,
+    buffer = bufnr,
+    callback = function(args)
+      vim.api.nvim_set_current_buf(args.buf)
+      M.restore():list()
+    end,
+    desc = 'direct: refresh the listing on :edit',
   })
   vim.api.nvim_create_autocmd('TextChanged', {
     group = group,
