@@ -27,10 +27,11 @@ Buffer.__index = Buffer
 -- particular, child rows are never interpreted as root-relative filenames.
 local states = {}
 local namespace = vim.api.nvim_create_namespace('direct-listing-rows')
-local FOLDER_ICON_NAMESPACE = 'direct-listing-icons'
+local ICON_NAMESPACE = 'direct-listing-icons'
 local FOLDER_ICON_CLOSED = '\u{f024b}'
 local FOLDER_ICON_OPEN = '\u{f0770}'
-local folder_icon_namespace
+local FILE_ICON = '\u{f0214}'
+local icon_namespace
 -- Private inspection seam for lifecycle specs; callers must not depend on the
 -- shape or contents of these records.
 M._state_for_test = function(bufnr) return states[bufnr] end
@@ -169,31 +170,43 @@ local function is_dir_line(line)
   return type(line) == 'string' and line:sub(-1) == '/'
 end
 
--- Refresh display-only folder glyphs. The namespace is created only when the
--- option is enabled; an existing namespace is cleared when disabling so the
--- next render cannot leave stale icons behind. Buffer text and row identities
--- are never changed here.
-local function refresh_folder_icons(bufnr, state)
-  local enabled = require('direct.config').options.show_folder_icons == true
-  if not enabled then
-    local existing = folder_icon_namespace
-      or vim.api.nvim_get_namespaces()[FOLDER_ICON_NAMESPACE]
+-- Refresh display-only icons. When either kind is enabled, every row gets an
+-- icon slot: rows whose icon is disabled receive a two-cell spacer so names
+-- remain aligned. Buffer text and row identities are never changed here.
+local function refresh_icons(bufnr, state)
+  local options = require('direct.config').options
+  local show_folders = options.show_folder_icons == true
+  local show_files = options.show_file_icons == true
+  if not show_folders and not show_files then
+    local existing = icon_namespace
+      or vim.api.nvim_get_namespaces()[ICON_NAMESPACE]
     if existing then vim.api.nvim_buf_clear_namespace(bufnr, existing, 0, -1) end
     return
   end
-  if not folder_icon_namespace then
-    folder_icon_namespace = vim.api.nvim_create_namespace(FOLDER_ICON_NAMESPACE)
+  if not icon_namespace then
+    icon_namespace = vim.api.nvim_create_namespace(ICON_NAMESPACE)
   end
   vim.api.nvim_set_hl(0, 'DirectFolderIcon', { default = true, link = 'Directory' })
-  vim.api.nvim_buf_clear_namespace(bufnr, folder_icon_namespace, 0, -1)
+  vim.api.nvim_set_hl(0, 'DirectFileIcon', { default = true, link = 'Normal' })
+  vim.api.nvim_buf_clear_namespace(bufnr, icon_namespace, 0, -1)
   for row = 0, vim.api.nvim_buf_line_count(bufnr) - 1 do
     local id = row_id_at(bufnr, row)
     local rec = id and state.rows[id]
-    if rec and is_dir_line(rec.name) then
-      local glyph = state.expanded[id] and FOLDER_ICON_OPEN or FOLDER_ICON_CLOSED
-      vim.api.nvim_buf_set_extmark(bufnr, folder_icon_namespace, row,
+    if rec then
+      local is_folder = is_dir_line(rec.name)
+      local enabled = is_folder and show_folders or (not is_folder and show_files)
+      local glyph = '  '
+      local group = 'Normal'
+      if enabled and is_folder then
+        glyph = state.expanded[id] and FOLDER_ICON_OPEN or FOLDER_ICON_CLOSED
+        group = 'DirectFolderIcon'
+      elseif enabled then
+        glyph = FILE_ICON
+        group = 'DirectFileIcon'
+      end
+      vim.api.nvim_buf_set_extmark(bufnr, icon_namespace, row,
         (rec.depth or 0) * 2, {
-          virt_text = { { glyph .. ' ', 'DirectFolderIcon' } },
+          virt_text = { { glyph .. (enabled and ' ' or ''), group } },
           virt_text_pos = 'inline',
           hl_mode = 'combine',
         })
@@ -1668,7 +1681,7 @@ local function restore_undone_collapse(bufnr, state, snapshot)
   state.display_ids = vim.deepcopy(expected_order)
   state.materialization_seq = vim.fn.undotree(bufnr).seq_cur
   highlight.render(bufnr)
-  refresh_folder_icons(bufnr, state)
+  refresh_icons(bufnr, state)
   return true
 end
 
@@ -2171,7 +2184,7 @@ function Buffer:list()
     set_row_mark(bufnr, row - 1, item.id)
   end
   highlight.render(bufnr)
-  refresh_folder_icons(bufnr, state)
+  refresh_icons(bufnr, state)
   state.materialization_seq = vim.fn.undotree().seq_cur
   set_options(bufnr)
   self:place_cursor(display, display_identities,
@@ -2295,7 +2308,7 @@ function Buffer:expand(row)
   end
 
   if just_materialized then vim.cmd('redraw') end
-  refresh_folder_icons(bufnr, state)
+  refresh_icons(bufnr, state)
   return true
 end
 
@@ -2444,7 +2457,7 @@ function Buffer:collapse(row)
   else
     state.expanded[parent.id] = nil
   end
-  refresh_folder_icons(bufnr, state)
+  refresh_icons(bufnr, state)
   return true
 end
 

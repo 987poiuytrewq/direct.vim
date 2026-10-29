@@ -46,19 +46,23 @@ Plug '987poiuytrewq/direct.vim'
 require('direct').setup({
   map_default_keys = true, -- set false to install no default mappings
   show_folder_icons = false, -- opt in to Nerd Font folder icons
+  show_file_icons = false, -- opt in to a generic Nerd Font file icon
 })
 ```
 
 It is idempotent, may be called more than once, and reports an unknown option
 name as an error instead of silently ignoring it.
 
-### Folder icons
+### File and folder icons
 
-Set `show_folder_icons = true` to show inline directory glyphs; the default is
-`false`. A Nerd Font is required to render them. Collapsed directories use
-`nf-md-folder` (U+F024B), and expanded directories use `nf-md-folder_open`
-(U+F0770). Icons are virtual text, so the listing lines and filesystem behavior
-are unchanged. No icon plugin or other dependency is required.
+Set `show_folder_icons = true` to show inline directory glyphs, and
+`show_file_icons = true` to show one generic icon for every file; both default
+to `false`. A Nerd Font is required to render them. Collapsed directories use
+`nf-md-folder` (U+F024B), expanded directories use `nf-md-folder_open` (U+F0770),
+and files use `nf-md-file` (U+F0214), regardless of filetype. When only one kind
+of icon is enabled, the other kind reserves a blank icon slot so entry names
+stay aligned. Icons are virtual text, so the listing lines and filesystem
+behavior are unchanged. No icon plugin or other dependency is required.
 
 ## Navigate
 

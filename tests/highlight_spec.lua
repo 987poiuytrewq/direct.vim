@@ -3,6 +3,7 @@
 local H = require('tests.support.harness')
 local buffer = require('direct.buffer')
 local highlight = require('direct.highlight')
+local FILE_ICON = '\u{f0214}'
 
 local function clean_buffers()
   pcall(vim.cmd, '%bwipeout!')
@@ -24,23 +25,36 @@ local function syntax_group(row, col)
   return vim.fn.synIDattr(vim.fn.synID(row, col, true), 'name')
 end
 
-local function folder_icon_marks(bufnr)
+local function listing_icon_marks(bufnr)
   local ns = vim.api.nvim_get_namespaces()['direct-listing-icons']
   if not ns then return {} end
   return vim.api.nvim_buf_get_extmarks(bufnr or 0, ns, 0, -1, { details = true })
 end
 
-local function assert_folder_icon(bufnr, row, column, glyph)
-  local found
-  for _, mark in ipairs(folder_icon_marks(bufnr)) do
-    if mark[2] == row then found = mark; break end
+local function icon_mark(bufnr, row)
+  for _, mark in ipairs(listing_icon_marks(bufnr)) do
+    if mark[2] == row then return mark end
   end
+end
+
+local function assert_folder_icon(bufnr, row, column, glyph)
+  local found = icon_mark(bufnr, row)
   H.assert_not_nil(found, 'directory row ' .. row .. ' has a folder icon')
   if found then
     H.assert_eq(found[3], column, 'icon is placed at the indentation column')
     H.assert_eq(found[4].virt_text, { { glyph .. ' ', 'DirectFolderIcon' } },
       'icon glyph and highlight group')
     H.assert_eq(found[4].virt_text_pos, 'inline', 'icon is inline virtual text')
+  end
+end
+
+local function assert_icon_spacer(bufnr, row, column)
+  local found = icon_mark(bufnr, row)
+  H.assert_not_nil(found, 'row ' .. row .. ' reserves an icon slot')
+  if found then
+    H.assert_eq(found[3], column, 'spacer is placed at the indentation column')
+    H.assert_eq(found[4].virt_text, { { '  ', 'Normal' } },
+      'disabled icon kind gets a two-cell spacer')
   end
 end
 
@@ -91,7 +105,7 @@ H.describe('listing filename highlights', function()
     H.assert_eq(H.buf_lines(), { 'directory/', 'file.txt' })
     H.assert_nil(vim.api.nvim_get_namespaces()['direct-listing-icons'],
       'listing with the option off still creates no icon namespace')
-    H.assert_eq(folder_icon_marks(0), {}, 'there are no icon extmarks')
+    H.assert_eq(listing_icon_marks(0), {}, 'there are no icon extmarks')
     H.assert_eq(listing:get_paths(1, 2), { ws .. '/directory/', ws .. '/file.txt' })
   end)
 
@@ -114,18 +128,21 @@ H.describe('listing filename highlights', function()
     H.assert_eq(vim.api.nvim_buf_get_lines(0, 0, -1, false), plain_lines,
       'icons do not alter buffer text')
     local closed, opened = '\u{f024b}', '\u{f0770}'
-    H.assert_eq(#folder_icon_marks(0), 2, 'initial render marks both directories once')
+    H.assert_eq(#listing_icon_marks(0), 3, 'initial render reserves an icon slot on every row')
     assert_folder_icon(0, 0, 0, closed)
     assert_folder_icon(0, 1, 0, closed)
+    assert_icon_spacer(0, 2, 0)
     H.assert_eq(vim.api.nvim_get_hl(0, { name = 'DirectFolderIcon', link = true }),
       { default = true, link = 'Directory' }, 'icon group links to Directory by default')
 
     listing:expand(2)
     local expanded_lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
     H.assert_eq(expanded_lines, { 'empty/', 'sub/', '  nested/', '  inside.txt', 'file.txt' })
-    H.assert_eq(#folder_icon_marks(0), 3, 'expanded view has one icon per directory row')
+    H.assert_eq(#listing_icon_marks(0), 5, 'expanded view reserves an icon slot on every row')
     assert_folder_icon(0, 1, 0, opened)
     assert_folder_icon(0, 2, 2, closed)
+    assert_icon_spacer(0, 3, 2)
+    assert_icon_spacer(0, 4, 0)
     H.assert_eq(vim.api.nvim_buf_get_lines(0, 0, -1, false), expanded_lines,
       'virt_text leaves expanded lines unchanged')
     H.assert_eq(listing:get_paths(3, 4), {
@@ -135,22 +152,22 @@ H.describe('listing filename highlights', function()
     listing:collapse(2)
     H.assert_eq(vim.api.nvim_buf_get_lines(0, 0, -1, false), plain_lines,
       'collapse removes rows without icon text entering the buffer')
-    H.assert_eq(#folder_icon_marks(0), 2, 'collapse clears stale nested icons')
+    H.assert_eq(#listing_icon_marks(0), 3, 'collapse clears stale nested icons')
     assert_folder_icon(0, 1, 0, closed)
     listing:list()
-    H.assert_eq(#folder_icon_marks(0), 2, 'repeated list does not duplicate icons')
+    H.assert_eq(#listing_icon_marks(0), 3, 'repeated list does not duplicate icon slots')
 
     config.setup({ show_folder_icons = false })
     listing:list()
     H.assert_eq(vim.api.nvim_buf_get_lines(0, 0, -1, false), plain_lines,
       'disabling icons leaves line data unchanged')
-    H.assert_eq(folder_icon_marks(0), {}, 'next disabled refresh clears existing icons')
+    H.assert_eq(listing_icon_marks(0), {}, 'next disabled refresh clears existing icons')
     config.setup({ show_folder_icons = true })
     listing:list()
-    H.assert_eq(#folder_icon_marks(0), 2, 're-enabling icons refreshes exactly once')
+    H.assert_eq(#listing_icon_marks(0), 3, 're-enabling icons refreshes exactly once')
     config.setup({ show_folder_icons = 1 })
     listing:list()
-    H.assert_eq(folder_icon_marks(0), {}, 'non-boolean truthy values do not enable icons')
+    H.assert_eq(listing_icon_marks(0), {}, 'non-boolean truthy values do not enable icons')
     config.setup({ show_folder_icons = true })
     listing:list()
     local before_sync = H.fs_snapshot(ws)
@@ -160,7 +177,7 @@ H.describe('listing filename highlights', function()
       'sync keeps the same line data when icons are enabled')
   end)
 
-  H.it('marks an empty expanded directory open and leaves file-only buffers icon-free', function()
+  H.it('marks an empty expanded directory open and reserves slots on file rows', function()
     clean_buffers()
     local config = require('direct.config')
     config.setup({ show_folder_icons = true })
@@ -180,7 +197,54 @@ H.describe('listing filename highlights', function()
     H.mkfile(files_only, 'only.txt', '')
     buffer.list(files_only)
     H.assert_eq(vim.api.nvim_buf_get_lines(0, 0, -1, false), { 'only.txt' })
-    H.assert_eq(folder_icon_marks(0), {}, 'file-only buffer has no folder icons')
+    H.assert_eq(#listing_icon_marks(0), 1, 'file-only row reserves the folder icon slot')
+    assert_icon_spacer(0, 0, 0)
+  end)
+
+  H.it('renders generic file icons and aligns rows for file-only and combined settings', function()
+    clean_buffers()
+    local config = require('direct.config')
+    config.setup({ show_folder_icons = false, show_file_icons = true })
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkdir(ws, 'folder')
+    H.mkfile(ws, 'alpha.txt', '')
+    H.mkfile(ws, 'script.lua', '')
+    local listing = buffer.list(ws)
+    local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+
+    H.assert_eq(lines, { 'folder/', 'alpha.txt', 'script.lua' })
+    H.assert_eq(#listing_icon_marks(0), 3, 'every row has an icon slot')
+    assert_icon_spacer(0, 0, 0)
+    for row = 1, 2 do
+      local mark = icon_mark(0, row)
+      H.assert_not_nil(mark, 'file row has a generic icon')
+      if mark then
+        H.assert_eq(mark[3], 0, 'file icon starts at its indentation column')
+        H.assert_eq(mark[4].virt_text, { { FILE_ICON .. ' ', 'DirectFileIcon' } },
+          'all filetypes use the same generic file icon')
+      end
+    end
+    H.assert_eq(vim.api.nvim_get_hl(0, { name = 'DirectFileIcon', link = true }),
+      { default = true, link = 'Normal' }, 'file icon group links to Normal by default')
+
+    config.setup({ show_folder_icons = true, show_file_icons = true })
+    listing:list()
+    assert_folder_icon(0, 0, 0, '\u{f024b}')
+    for row = 1, 2 do
+      H.assert_eq(icon_mark(0, row)[4].virt_text,
+        { { FILE_ICON .. ' ', 'DirectFileIcon' } }, 'combined settings show file icons')
+    end
+
+    H.assert_eq(vim.api.nvim_buf_get_lines(0, 0, -1, false), lines,
+      'icons never alter listing buffer text')
+    H.assert_eq(listing:get_paths(1, 3), {
+      ws .. '/folder/', ws .. '/alpha.txt', ws .. '/script.lua',
+    }, 'icons leave row paths unchanged')
+
+    config.setup({ show_folder_icons = false, show_file_icons = false })
+    listing:list()
+    H.assert_eq(listing_icon_marks(0), {}, 'disabling both kinds clears all icon slots')
   end)
 
 

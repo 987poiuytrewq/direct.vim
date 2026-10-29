@@ -36,16 +36,24 @@ H.describe('config', function()
     config.clear_mappings()
   end)
 
-  H.it('show_folder_icons defaults off and accepts true without weakening typo errors', function()
+  H.it('file and folder icon options default off and reject typos', function()
     local config = fresh_config()
     config.clear_mappings()
     H.assert_false(config.defaults.show_folder_icons == true,
       'folder icons are off by default')
-    local options = config.setup({ show_folder_icons = true })
+    H.assert_false(config.defaults.show_file_icons == true,
+      'file icons are off by default')
+    local options = config.setup({ show_folder_icons = true, show_file_icons = true })
     H.assert_true(options.show_folder_icons, 'the documented icon option is accepted')
+    H.assert_true(options.show_file_icons, 'the documented file icon option is accepted')
     H.capture_messages()
-    options = config.setup({ show_folder_icons = true, show_folder_icon = true })
+    options = config.setup({
+      show_folder_icons = true,
+      show_file_icons = true,
+      show_folder_icon = true,
+    })
     H.assert_true(options.show_folder_icons, 'known option remains applied')
+    H.assert_true(options.show_file_icons, 'known file option remains applied')
     H.assert_nil(options.show_folder_icon, 'misspelled option is not stored')
     H.assert_notified('show_folder_icon', vim.log.levels.ERROR)
     config.clear_mappings()
