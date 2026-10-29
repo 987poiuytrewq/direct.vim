@@ -1,10 +1,16 @@
 NVIM ?= nvim
 LUAROCKS ?= luarocks
+APT_GET ?= apt-get
+SUDO ?= sudo
 LUACOV_VERSION ?= 0.17.0
 LUACOV_REPORTERS_VERSION ?= 0.1.0
 NEOVIM_VERSION ?= local
 
-.PHONY: install test coverage coverage-summary check-nvim check-luarocks
+.PHONY: ci-deps install test coverage coverage-summary check-nvim check-luarocks
+
+ci-deps:
+	$(SUDO) $(APT_GET) update
+	$(SUDO) $(APT_GET) install --no-install-recommends --yes lua5.1 luarocks
 
 install: check-nvim check-luarocks
 	$(LUAROCKS) --lua-version=5.1 --tree=.rocks install luacov $(LUACOV_VERSION)

@@ -47,9 +47,7 @@ jobs:
         run: nvim --version | head -n 1
 
       - name: Install LuaRocks
-        run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends --yes lua5.1 luarocks
+        run: make ci-deps
 
       - name: Run tests and generate coverage
         run: make coverage
