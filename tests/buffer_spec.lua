@@ -383,6 +383,76 @@ H.describe('buffer: listing', function()
     H.assert_buf_eq({ 'sub/' }, 0, 'zc collapses an expanded directory')
   end)
 
+  H.it('zO, zA, zC, zR, and zM handle recursive and all-directory expansion', function()
+    clean_buffers()
+    local config = require('direct.config')
+    config.setup({ max_recursive_expand_depth = false })
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local nested = H.mkdir(ws, 'a/b/c')
+    H.mkfile(nested, 'deep.txt', { 'deep' })
+    local other = H.mkdir(ws, 'other/child')
+    H.mkfile(other, 'file.txt', { 'other' })
+    buffer.list(ws)
+
+    vim.api.nvim_feedkeys('zO', 'mx', false)
+    H.assert_buf_eq({ 'a/', '  b/', '    c/', '      deep.txt', 'other/' }, 0,
+      'zO recursively expands the directory under the cursor')
+
+    vim.api.nvim_feedkeys('zA', 'mx', false)
+    H.assert_buf_eq({ 'a/', 'other/' }, 0, 'zA recursively collapses an open directory')
+    vim.api.nvim_feedkeys('zA', 'mx', false)
+    H.assert_buf_eq({ 'a/', '  b/', '    c/', '      deep.txt', 'other/' }, 0,
+      'zA recursively expands a closed directory')
+    vim.api.nvim_feedkeys('zC', 'mx', false)
+    H.assert_buf_eq({ 'a/', 'other/' }, 0, 'zC recursively collapses the directory')
+
+    vim.api.nvim_feedkeys('zR', 'mx', false)
+    H.assert_buf_eq({
+      'a/', '  b/', '    c/', '      deep.txt',
+      'other/', '  child/', '    file.txt',
+    }, 0, 'zR recursively expands every root directory')
+    vim.api.nvim_feedkeys('zM', 'mx', false)
+    H.assert_buf_eq({ 'a/', 'other/' }, 0, 'zM collapses every root directory')
+    config.setup({ max_recursive_expand_depth = false })
+  end)
+
+  H.it('recursive all-expansion respects the configured depth limit', function()
+    clean_buffers()
+    local config = require('direct.config')
+    config.setup({ max_recursive_expand_depth = 2 })
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local deepest = H.mkdir(ws, 'a/b/c')
+    H.mkfile(deepest, 'deep.txt', { 'deep' })
+    buffer.list(ws)
+
+    vim.api.nvim_feedkeys('zR', 'mx', false)
+
+    H.assert_buf_eq({ 'a/', '  b/', '    c/' }, 0,
+      'depth two opens a and b but leaves c closed')
+    vim.api.nvim_win_set_cursor(0, { 3, 0 })
+    vim.api.nvim_feedkeys('zo', 'mx', false)
+    H.assert_buf_eq({ 'a/', '  b/', '    c/', '      deep.txt' }, 0,
+      'the recursive limit does not restrict ordinary one-level browsing')
+    config.setup({ max_recursive_expand_depth = false })
+  end)
+
+  H.it('unlimited recursive expansion stops at a symlink cycle', function()
+    clean_buffers()
+    require('direct.config').setup({ max_recursive_expand_depth = false })
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local sub = H.mkdir(ws, 'sub')
+    H.assert_true(make_symlink(ws, sub .. '/loop'), 'create a symlink to an ancestor')
+    buffer.list(ws)
+
+    vim.api.nvim_feedkeys('zO', 'mx', false)
+
+    H.assert_buf_eq({ 'sub/', '  loop/', '    sub/' }, 0,
+      'the repeated directory identity is shown but not expanded again')
+  end)
+
   H.it('collapsing a parent removes its complete expanded nested subtree', function()
     clean_buffers()
     local sb = H.sandbox()

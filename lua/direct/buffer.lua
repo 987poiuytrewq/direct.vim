@@ -17,6 +17,7 @@ local register = require('direct.register')
 local ui = require('direct.ui')
 local highlight = require('direct.highlight')
 local constants = require('direct.constants')
+local folding = require('direct.folding')
 local reconcile_undone_materialization
 local remove_expanded_subtree
 local recorded_row_text
@@ -1960,12 +1961,7 @@ local function set_options(bufnr)
     callback = function() reconcile_undone_materialization(bufnr) end,
     desc = 'direct: reconcile child rows when undo removes a materialization',
   })
-  vim.keymap.set('n', 'zo', function() M.expand() end,
-    { buffer = bufnr, silent = true, desc = 'Expand one direct directory level' })
-  vim.keymap.set('n', 'za', function() M.toggle() end,
-    { buffer = bufnr, silent = true, desc = 'Toggle direct directory expansion' })
-  vim.keymap.set('n', 'zc', function() M.collapse() end,
-    { buffer = bufnr, silent = true, desc = 'Collapse direct directory rows' })
+  folding.install_mappings(bufnr, M)
 end
 
 -- Return the destination left by a successful create/move, or nil for removals.
@@ -2495,6 +2491,61 @@ function M.toggle()
     return M.collapse()
   end
   return M.expand()
+end
+
+local function visible_row_for_id(bufnr, state, id)
+  local mark = vim.api.nvim_buf_get_extmark_by_id(bufnr, namespace, id, {})
+  if #mark == 0 then return nil end
+  local row = mark[1] + 1
+  return state.display_ids[row] == id and row or nil
+end
+
+local function record_identity(rec)
+  if not rec then return nil end
+  return rec.identity or path_identity(rec.path)
+end
+
+-- Internal adapter for the folding command module. Keep row marks and state
+-- owned by this buffer model; folding.lua only receives these narrow accessors.
+function M._folding_context(bufnr)
+  local state = states[bufnr]
+  if not state then return nil end
+  return {
+    get_row_record = function(row) return current_row_record(bufnr, row - 1) end,
+    get_record = function(id) return state.rows[id] end,
+    visible_row_for_id = function(id) return visible_row_for_id(bufnr, state, id) end,
+    is_directory = function(rec) return rec ~= nil and is_dir_line(rec.name) end,
+    identity_for_record = record_identity,
+    is_expanded = function(id) return state.expanded[id] ~= nil end,
+    get_expanded_children = function(id)
+      local expansion = state.expanded[id]
+      return expansion and expansion.children or {}
+    end,
+    get_root_directory_ids = function()
+      local ids = {}
+      for _, id in ipairs(state.root_ids or {}) do
+        local rec = state.rows[id]
+        if rec and is_dir_line(rec.name) then ids[#ids + 1] = id end
+      end
+      return ids
+    end,
+  }
+end
+
+function M.expand_recursive()
+  return folding.expand_recursive(M)
+end
+
+function M.toggle_recursive()
+  return folding.toggle_recursive(M)
+end
+
+function M.expand_all()
+  return folding.expand_all(M)
+end
+
+function M.collapse_all()
+  return folding.collapse_all(M)
 end
 
 -- ---------------------------------------------------------------------------

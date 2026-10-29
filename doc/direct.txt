@@ -1,0 +1,337 @@
+direct.txt  Edit directories in Neovim.                          *direct.txt*
+
+
+CONTENTS                                      *direct.vim-contents* *direct.vim*
+
+    1. Intro ............................................... |direct.vim-intro|
+    2. Requirements ................................. |direct.vim-requirements|
+    3. Setup ............................................... |direct.vim-setup|
+    4. Navigate ......................................... |direct.vim-navigate|
+    5. Edit ................................................. |direct.vim-edit|
+    6. Undo / Redo ......................................... |direct.vim-undo|
+    7. Yank / Paste ........................................ |direct.vim-yank|
+    8. Commands ......................................... |direct.vim-commands|
+    9. Mappings ......................................... |direct.vim-mappings|
+   10. Data directory ..................................... |direct.vim-data|
+   11. Upgrading from the Python version ................. |direct.vim-upgrade|
+   12. Licence ........................................... |direct.vim-licence|
+
+==============================================================================
+1. Intro                                                      *direct.vim-intro*
+
+Load a directory into a buffer with each root-level line corresponding to a file
+or subdirectory. Edit those root rows to create, rename, or delete filesystem
+entries. Directories can also be expanded for browsing; their child rows are
+materialized in the buffer and removed when collapsed.
+
+    - navigate around the filesystem easily
+    - rename, create and delete files and directories
+    - yank and paste files and directories
+    - full undo and redo history for every filesystem change
+
+Filename highlights ~
+
+Visible directories use DirectDirectory (default link Directory) at any
+indentation depth. Hidden directories and files retain their prior Comment
+defaults. Listing files receive no custom filename, filetype, or special-name
+highlights.
+
+Highlight defaults are user-overridable and are reapplied after a ColorScheme
+event.
+
+==============================================================================
+2. Requirements                                        *direct.vim-requirements*
+
+    - Neovim >= 0.12
+    - No Python: the plugin is pure Lua and needs nothing beyond the Neovim
+      runtime.
+
+Run `:checkhealth direct` to confirm the version and the data home in use:
+
+    :checkhealth direct
+
+==============================================================================
+3. Setup                                                    *direct.vim-setup*
+
+`setup()` is optional; the defaults apply when it is never called.
+
+    require('direct').setup({
+      map_default_keys = true, -- set false to install no default mappings
+      show_folder_icons = false, -- opt in to Nerd Font folder icons
+      show_file_icons = false, -- opt in to a generic Nerd Font file icon
+      max_recursive_expand_depth = false, -- false means unlimited
+    })
+
+`setup()` is idempotent, may be called more than once, and reports an unknown
+option name as an error instead of silently ignoring it. See
+|direct.vim-mappings| for `map_default_keys`.
+
+`max_recursive_expand_depth` defaults to `false` (unlimited). Set it to a
+positive integer to cap the directory levels opened by recursive commands
+`zO`, `zA`, and `zR`. The cap does not restrict one-level `zo`/`za` browsing.
+
+File and folder icons ~
+
+Set `show_folder_icons = true` to display inline directory glyphs, and
+`show_file_icons = true` to display one generic icon for every file; both options
+default to `false`. A Nerd Font is required. Collapsed directories use
+`nf-md-folder` (U+F024B), expanded directories use `nf-md-folder_open` (U+F0770),
+and files use `nf-md-file` (U+F0214), regardless of filetype. When only one kind
+of icon is enabled, the other kind reserves a blank icon slot so entry names
+stay aligned. Icons are virtual text, so buffer lines and filesystem behavior
+are unchanged. No icon plugin or other dependency is required.
+
+==============================================================================
+4. Navigate                                              *direct.vim-navigate*
+
+In normal mode, `-` lists the directory of the current file, or the working
+directory when the buffer is not tied to one (a buffer with no file name, or a
+non-empty `&buftype` such as a direct listing). You can also open a directory
+with `:edit foo/`, or by starting Neovim on it.
+
+Once a directory is listed, `-` goes up to its parent directory and `<Enter>`
+opens the entry under the cursor: a directory line opens a new listing, a file
+line opens the file. This is enough to move around the filesystem without
+remembering any extra command.
+
+Use `zo` or `za` on a directory to expand it in place. Children are read lazily,
+one level at a time; repeating an expansion does not re-read or duplicate them.
+`zO` or `zA` recursively expands a directory, and `zC` recursively collapses
+it. `zR` expands all root directories and `zM` collapses them all. Recursive
+opening respects |direct.vim-setup|'s `max_recursive_expand_depth`; the initial
+listing remains flat.
+
+==============================================================================
+5. Edit                                                      *direct.vim-edit*
+
+When viewing a directory, edit its listing as if you were editing a file, using
+any Vim command (`di`, `o`, `:s`, macros, and so on). Saving synchronises the
+changes with the filesystem and then re-lists the directory.
+
+At the root level, a save is classified as exactly one of rename, create or
+delete:
+
+    - Rename: edit the line of the file or directory you want to rename, and
+      save.
+    - Create: add new lines at any location, and save.
+    - Delete: delete the lines for the entries you want to remove, and save.
+      Deleted entries are yanked automatically, so you can paste them back.
+
+The trailing-slash rule ~
+
+A directory must always be written with a trailing slash, and a file must never
+have one: the line, not the filesystem, decides what will be created or
+renamed. Renaming `foo/` to `foo` therefore replaces the directory `foo` with a
+file, and adding a line `bar` creates a file while `bar/` creates a directory.
+
+At the root level, an edit that both adds and deletes entries, or that leaves a
+duplicated line, is reported as ambiguous, naming both sides of the comparison.
+Nothing is changed, no history is written, and the buffer stays modified so you
+can fix it.
+
+`&wildignore` is honoured using the value captured when each directory is
+listed. Changing the option does not change an existing listing's sync rules;
+re-list after changing it. Filtered entries are excluded from sync, and a sync
+is refused before filesystem or history effects if an add/rename would use an
+occupied filtered path or a directory move would carry a filtered descendant.
+Directory symlinks are treated as leaves when renamed; their targets are not
+scanned or moved.
+
+Expanded rows ~
+
+Every expanded directory is an independent edit scope. Edit, add, or delete its
+children just as at the root. Directory lines end in `/`; files do not. Changes
+in multiple expanded directories are combined during one sync, and deleted
+entries are auto-yanked before removal.
+
+Indentation defines parentage: root rows have no leading spaces, direct children
+have two spaces, and each additional level adds two more. A child must be under a
+directory. Change a row's indentation or move it beneath another expanded
+directory to move it; the entry and its contents are preserved. New rows may be
+nested under a directory created in the same edit. Directory renames and moves
+carry their contents and retain visible expansions when possible.
+
+Before syncing an edited subtree, direct verifies that its directory contents
+have not changed on disk since expansion. Invalid indentation, missing parents,
+duplicate destinations, lost identities, or a stale snapshot refuse the whole
+sync before auto-yank, filesystem, or history effects. A whole-line replacement
+whose identity is lost is paired as a rename only when sibling identities make
+that pairing unambiguous; otherwise the save is refused. Root-level edits retain
+the existing rename/create/delete classifier and ambiguity rules.
+
+Deleting a directory row removes and auto-yanks its whole tree, including
+materialized descendants, unless you reindent surviving rows under another
+directory in the same edit to move them out first. Moving or renaming a directory
+together with separate edits to its descendants must be saved in separate syncs
+when their filesystem action order would otherwise be ambiguous. Expansion and
+collapse remain ordinary text-undo changes. `u` after collapse restores child
+rows and identities; `<C-r>` re-applies the collapse. Redo restores materialized
+identities only when the original undo sequence and exact directory snapshot
+still match. A changed or ambiguous snapshot remains unsafe to save, open, or yank.
+Entry names beginning with whitespace and names that could escape the listed
+directory (such as `../x` or `a/b`) are refused at save time.
+
+Windows-specific component checks reject backslashes, drive prefixes, reserved
+device names (including extension aliases), and trailing dots or spaces that
+Win32 would normalize. Native Windows filesystem traversal has not been
+verified; this documentation does not claim Windows support.
+
+==============================================================================
+6. Undo / Redo                                                 *direct.vim-undo*
+
+In a direct buffer, `u` and `<C-r>` perform Neovim text undo and redo. The
+filesystem action history is separate: use `:DirectUndo` and `:DirectRedo` to
+reverse or re-apply actions a sync or paste performed. `:DirectUndo` right
+after a paste, for example, undoes the paste.
+
+Text undo only reverses changes to buffer lines; it never renames, creates,
+deletes or restores anything on disk. Only `:DirectUndo` reverses a filesystem
+action.
+
+==============================================================================
+7. Yank / Paste                                                *direct.vim-yank*
+
+`yy` and `Y` yank the file or directory on the current line, and a visual `y`
+yanks the selected range. `p` and `P` paste the yanked entries into the current
+directory. Directories are yanked recursively, so you can copy directory trees
+around the filesystem.
+
+If an entry with the same name already exists, you are prompted
+(`File already exists. Paste as: `, or `Directory ...`) and can paste it under
+another name. An empty answer skips that entry and leaves the original
+untouched.
+
+Yank, paste, undo and redo all work on the filesystem through the same history,
+so `:DirectUndo` reverses a paste as well.
+
+==============================================================================
+8. Commands                                                *direct.vim-commands*
+
+    :DirectList {dir}
+        List {dir} in a direct buffer. {dir} completes as a directory.
+
+    :DirectListBuffer
+        List the directory of the current file, or the working directory when
+        the buffer is not tied to one (no file name, or a non-empty
+        `&buftype`).
+
+    :DirectListCwd
+        List the current working directory.
+
+    :DirectSync
+        Classify and apply the edits in the current buffer. Also runs on
+        `:write` (`BufWriteCmd`).
+
+    :DirectUndo
+        Undo the last filesystem action.
+
+    :DirectRedo
+        Redo the last undone action.
+
+    :DirectYank
+        Yank the selected entries (a range; the default is the current line).
+
+    :DirectPaste [dir]
+        With no argument, paste into the current buffer's directory and re-list
+        it. With {dir}, paste into {dir} and leave the current buffer untouched.
+
+    :DirectPasteAs {name}
+        Paste into the current buffer's directory as {name}.
+
+`:DirectSync`, `open()` (the public API used by the entry mappings),
+`:DirectUndo`, `:DirectRedo`, `:DirectYank`, `:DirectPaste` (no argument) and
+`:DirectPasteAs` report an error and do nothing when the current buffer is not a
+direct buffer. The listing commands `:DirectList`, `:DirectListBuffer` and
+`:DirectListCwd` remain available from ordinary buffers; they list a directory
+without operating on the current buffer's listing. `:DirectPaste {dir}` is also
+available from an ordinary buffer: it pastes into the explicitly named
+directory and never touches the current buffer.
+
+==============================================================================
+9. Mappings                                                *direct.vim-mappings*
+
+Global (normal mode), installed when `map_default_keys` is true:
+
+    -           :DirectListBuffer~
+
+Buffer-local, in a direct buffer (standard actions follow `map_default_keys`;
+fold commands are always installed):
+
+    Mode        Key         Action ~
+    normal      <CR>        open the entry under the cursor
+    normal      zo          lazily expand one directory level
+    normal      za          expand or collapse one directory
+    normal      zc          collapse one directory
+    normal      zO          recursively expand a directory
+    normal      zA          recursively expand or collapse a directory
+    normal      zC          recursively collapse a directory
+    normal      zR          recursively expand all root directories
+    normal      zM          collapse all root directories
+    normal      -           open ../ (the parent directory)
+    normal      u           Neovim text undo
+    normal      <C-r>       Neovim text redo
+    normal      yy, Y       :DirectYank (current line)
+    visual      y           :DirectYank (selected range)
+    normal      p, P        :DirectPaste
+
+The buffer-local `-` wins over the global `-` inside a direct buffer.
+Fold commands are installed for every direct listing, independently of
+`map_default_keys`.
+
+==============================================================================
+10. Data directory                                          *direct.vim-data*
+
+State has no cache and is resolved on every use:
+
+    1. $XDG_DATA_HOME/direct when $XDG_DATA_HOME is set and non-empty;
+    2. otherwise $HOME/.local/share/direct (falling back to Neovim's standard
+       data directory, with a warning, when neither variable is set).
+
+Run `:checkhealth direct` to print the resolved data home. Inside it:
+
+    history/    undo.log and redo.log, the filesystem undo/redo history
+    trash/      removed entries, kept so an undo can restore them
+    register/   the most recent yank, and its content pointer
+
+==============================================================================
+11. Upgrading from the Python version                       *direct.vim-upgrade*
+
+The Lua rewrite uses a new on-disk format and does not carry the Python-era
+data over:
+
+    - History: the Lua logs are version-tagged, and a log without the tag is
+      never executed: it is renamed aside to `<name>.legacy` (or
+      `<name>.legacy.<n>` if that name is already taken) and a warning
+      (`Ignoring history written by an older version`) is shown. *Undo history
+      does not survive the upgrade.*
+    - Register: entries written by the Python version are still listed, but a
+      name the Lua version cannot round-trip (a space, a tab or another control
+      character) is skipped with an error.
+    - Trash: Python-era trash entries are still read, so an entry removed
+      before the upgrade can still be restored.
+
+==============================================================================
+12. Licence                                                 *direct.vim-licence*
+
+Copyright (c) 2017-2026 Duncan Williams
+
+Released under the MIT licence; see the `LICENSE` file in the repository.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+vim:ft=help
