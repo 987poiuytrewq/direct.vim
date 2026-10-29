@@ -216,7 +216,7 @@ function M._reverse(which)
     return nil, rev_err
   end
 
-  local ok, result, do_err = pcall(rev['do'])
+  local ok, result, do_err = pcall(M.action.execute, rev)
   if ok and result ~= nil then
     -- The reversal is recorded on the destination log. `append_entry` keeps the
     -- marker first and refuses to append to a foreign file.

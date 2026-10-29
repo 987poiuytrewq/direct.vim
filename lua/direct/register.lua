@@ -11,6 +11,7 @@ M.fs = require('direct.fs')
 M.paths = require('direct.paths')
 M.action = require('direct.action')
 M.history = require('direct.history')
+M.log = require('direct.log')
 M.ui = require('direct.ui')
 
 -- Called after a successful no-argument paste; the `{dir}` form never re-lists.
@@ -86,9 +87,9 @@ function M.yank(sources)
         .. ' that cannot be copied: ' .. src, vim.log.levels.WARN)
     end
   end
-  local ok, werr = pcall(vim.fn.writefile, { dst }, M.paths.join(dir, 'content'))
+  local ok, werr = M.log.write(M.paths.join(dir, 'content'), { dst })
   if not ok then
-    return nil, tostring(werr)
+    return nil, werr
   end
   return true
 end
@@ -216,7 +217,7 @@ function M.paste(dst, relist_flag, name)
     M.ui.notify('direct: ' .. msg, vim.log.levels.ERROR)
     return nil, msg
   end
-  local ok, result = pcall(paste_action['do'])
+  local ok, result = pcall(M.action.execute, paste_action)
   if not ok or result == nil then
     local why = ok and 'action returned nil' or tostring(result)
     M.ui.notify('Failed to paste: ' .. tostring(why), vim.log.levels.ERROR)

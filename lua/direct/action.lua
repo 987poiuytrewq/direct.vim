@@ -187,8 +187,8 @@ end
 -- ---------------------------------------------------------------------------
 
 function M.Move(src, dst)
-  local self = { name = 'mv', src = src, dst = dst }
-  self['do'] = function()
+  local self = { name = 'mv', _kind = 'mv', src = src, dst = dst }
+  self._execute = function()
     if M.fs.taken(self.dst) and not M.fs.same_entry(self.src, self.dst) then
       return nil, 'destination exists: ' .. tostring(self.dst)
     end
@@ -198,6 +198,7 @@ function M.Move(src, dst)
     end
     return M.fs.rename(self.src, self.dst)
   end
+  self['do'] = function() return M.execute(self) end
   function self.describe()
     return 'Moved ' .. M.rel(self.src) .. ' to ' .. M.rel(self.dst)
   end
@@ -211,7 +212,7 @@ end
 -- resolution failure is deferred to `do`, which returns nil, err (
 -- consumers branch, nothing raises).
 function M.Remove(src, dst)
-  local self = { name = 'rm', src = src }
+  local self = { name = 'rm', _kind = 'rm', src = src }
   if dst ~= nil then
     self.dst = dst
   else
@@ -220,7 +221,7 @@ function M.Remove(src, dst)
       self.dst = M.first_free_trash(trash, src)
     end
   end
-  self['do'] = function()
+  self._execute = function()
     if not self.dst then
       local trash, err = M.paths.data_dir('trash')
       if not trash then
@@ -234,6 +235,7 @@ function M.Remove(src, dst)
     end
     return M.fs.rename(self.src, self.dst)
   end
+  self['do'] = function() return M.execute(self) end
   function self.describe()
     return 'Removed ' .. M.rel(self.src)
   end
@@ -241,7 +243,7 @@ function M.Remove(src, dst)
 end
 
 function M.RemoveDirectory(src, dst)
-  local self = { name = 'rmdir', src = src }
+  local self = { name = 'rmdir', _kind = 'rmdir', src = src }
   if dst ~= nil then
     self.dst = dst
   else
@@ -250,7 +252,7 @@ function M.RemoveDirectory(src, dst)
       self.dst = M.first_free_trash(trash, src)
     end
   end
-  self['do'] = function()
+  self._execute = function()
     if not self.dst then
       local trash, err = M.paths.data_dir('trash')
       if not trash then
@@ -264,6 +266,7 @@ function M.RemoveDirectory(src, dst)
     end
     return M.fs.rename(self.src, self.dst)
   end
+  self['do'] = function() return M.execute(self) end
   function self.describe()
     return 'Removed ' .. M.rel(self.src)
   end
@@ -271,8 +274,8 @@ function M.RemoveDirectory(src, dst)
 end
 
 function M.Restore(src, dst)
-  local self = { name = 'rs', src = src, dst = dst }
-  self['do'] = function()
+  local self = { name = 'rs', _kind = 'rs', src = src, dst = dst }
+  self._execute = function()
     local ok, err = M.close_src_buffer(self.src)
     if not ok then
       return nil, err
@@ -288,6 +291,7 @@ function M.Restore(src, dst)
     end
     return res, rerr
   end
+  self['do'] = function() return M.execute(self) end
   function self.describe()
     return 'Restored ' .. M.rel(self.dst)
   end
@@ -295,8 +299,8 @@ function M.Restore(src, dst)
 end
 
 function M.RestoreDirectory(src, dst)
-  local self = { name = 'rsdir', src = src, dst = dst }
-  self['do'] = function()
+  local self = { name = 'rsdir', _kind = 'rsdir', src = src, dst = dst }
+  self._execute = function()
     local ok, err = M.close_src_buffer(self.src)
     if not ok then
       return nil, err
@@ -309,6 +313,7 @@ function M.RestoreDirectory(src, dst)
     end
     return res, rerr
   end
+  self['do'] = function() return M.execute(self) end
   function self.describe()
     return 'Restored ' .. M.rel(self.dst)
   end
@@ -316,13 +321,14 @@ function M.RestoreDirectory(src, dst)
 end
 
 function M.Touch(dst)
-  local self = { name = 'touch', dst = dst }
-  self['do'] = function()
+  local self = { name = 'touch', _kind = 'touch', dst = dst }
+  self._execute = function()
     if M.fs.taken(self.dst) then
       return nil, 'destination exists: ' .. tostring(self.dst)
     end
     return M.fs.touch(self.dst)
   end
+  self['do'] = function() return M.execute(self) end
   function self.describe()
     return 'Created ' .. M.rel(self.dst)
   end
@@ -330,13 +336,14 @@ function M.Touch(dst)
 end
 
 function M.MakeDirectory(dst)
-  local self = { name = 'mkdir', dst = dst }
-  self['do'] = function()
+  local self = { name = 'mkdir', _kind = 'mkdir', dst = dst }
+  self._execute = function()
     if M.fs.taken(self.dst) then
       return nil, 'destination exists: ' .. tostring(self.dst)
     end
     return M.fs.mkdirp(self.dst)
   end
+  self['do'] = function() return M.execute(self) end
   function self.describe()
     return 'Created ' .. M.rel(self.dst)
   end
@@ -366,11 +373,12 @@ end
 function M.Paste(src, dst, src_names, dst_names)
   local self = {
     name = 'p',
+    _kind = 'p',
     src = src,
     dst = dst,
     renames = zipped(src_names, dst_names),
   }
-  self['do'] = function()
+  self._execute = function()
     local last = nil
     -- accumulate only the pairs actually written so `renames` (and its
     -- serialized form) never names a skipped entry; Unpaste then reverses
@@ -452,6 +460,7 @@ function M.Paste(src, dst, src_names, dst_names)
     self.renames = copied
     return last or true
   end
+  self['do'] = function() return M.execute(self) end
   function self.describe()
     return 'Pasted into ' .. M.rel(self.dst) .. '/'
   end
@@ -464,11 +473,12 @@ end
 function M.Unpaste(src, dst, src_names, dst_names)
   local self = {
     name = 'up',
+    _kind = 'up',
     src = src,
     dst = dst,
     renames = zipped(src_names, dst_names),
   }
-  self['do'] = function()
+  self._execute = function()
     for _, pair in ipairs(self.renames) do
       local full = M.fs.join(self.src, pair.src)
       local st = M.fs.stat(full)
@@ -488,6 +498,7 @@ function M.Unpaste(src, dst, src_names, dst_names)
     end
     return true
   end
+  self['do'] = function() return M.execute(self) end
   function self.describe()
     return 'Reversed paste into ' .. M.rel(self.src) .. '/'
   end
@@ -702,7 +713,7 @@ end
 -- starts with the name of a single-entry action. `describe` joins the member
 -- descriptions, so `summarize` still emits ONE summary per undo press.
 function M.Group(actions)
-  local self = { name = 'g', actions = actions }
+  local self = { name = 'g', _kind = 'g', actions = actions }
   local function report_temps(staging)
     for _, tmp in ipairs(staging ~= nil and staging.temps or {}) do
       if M.fs.taken(tmp) then
@@ -711,7 +722,7 @@ function M.Group(actions)
       end
     end
   end
-  self['do'] = function()
+  self._execute = function()
     local members = self.actions or {}
     local staging, stage_err, stage_temps, stage_overrides =
       M.stage_moves(members)
@@ -748,7 +759,7 @@ function M.Group(actions)
         and staging.overrides[act.src] ~= nil then
         exec = M.Move(staging.overrides[act.src], act.dst)
       end
-      local ok, res, err = pcall(exec['do'])
+      local ok, res, err = pcall(M.execute, exec)
       if not ok then
         report_temps(staging)
         return nil, tostring(res)
@@ -760,6 +771,7 @@ function M.Group(actions)
     end
     return true
   end
+  self['do'] = function() return M.execute(self) end
   function self.describe()
     local parts = {}
     for _, member in ipairs(self.actions or {}) do
@@ -815,6 +827,128 @@ function M.serialize_group(action)
   return checked_line(words)
 end
 
+-- Every action kind declares its serialized fields, parser, and reversal in one
+-- place. Factories keep the behavior on each action instance; execute dispatch
+-- uses this table so callers do not need to know that implementation detail.
+local KINDS = {
+  mv = {
+    fields = { 'src', 'dst' },
+    deserialize = function(words) return M.Move(words[2], words[3]) end,
+    reverse = function(action) return M.Move(action.dst, action.src) end,
+  },
+  rm = {
+    fields = { 'src', 'dst' },
+    deserialize = function(words) return M.Remove(words[2], words[3]) end,
+    reverse = function(action) return M.Restore(action.dst, action.src) end,
+  },
+  rmdir = {
+    fields = { 'src', 'dst' },
+    deserialize = function(words) return M.RemoveDirectory(words[2], words[3]) end,
+    reverse = function(action) return M.RestoreDirectory(action.dst, action.src) end,
+  },
+  rs = {
+    fields = { 'src', 'dst' },
+    deserialize = function(words) return M.Restore(words[2], words[3]) end,
+    reverse = function(action) return M.Remove(action.dst) end,
+  },
+  rsdir = {
+    fields = { 'src', 'dst' },
+    deserialize = function(words) return M.RestoreDirectory(words[2], words[3]) end,
+    reverse = function(action) return M.RemoveDirectory(action.dst) end,
+  },
+  touch = {
+    fields = { 'dst' },
+    deserialize = function(words) return M.Touch(words[2]) end,
+    reverse = function(action) return M.Remove(action.dst) end,
+  },
+  mkdir = {
+    fields = { 'dst' },
+    deserialize = function(words) return M.MakeDirectory(words[2]) end,
+    reverse = function(action) return M.RemoveDirectory(action.dst) end,
+  },
+  p = {
+    fields = { 'src', 'dst' },
+    name_lists = true,
+    deserialize = function(words)
+      return M.Paste(words[2], words[3], M.split_names(words[4]), M.split_names(words[5]))
+    end,
+    reverse = function(action)
+      local src_names, dst_names = M.split_pairs(action.renames)
+      return M.Unpaste(action.dst, action.src, dst_names, src_names)
+    end,
+  },
+  up = {
+    fields = { 'src', 'dst' },
+    name_lists = true,
+    deserialize = function(words)
+      return M.Unpaste(words[2], words[3], M.split_names(words[4]), M.split_names(words[5]))
+    end,
+    reverse = function(action)
+      local src_names, dst_names = M.split_pairs(action.renames)
+      return M.Paste(action.dst, action.src, dst_names, src_names)
+    end,
+  },
+  g = {
+    fields = { 'actions' },
+    serialize = M.serialize_group,
+    deserialize = function(words)
+      local count = words[2]
+      if type(count) ~= 'string' or count:match('^%d+$') == nil then
+        return nil, 'invalid group line: bad member count'
+      end
+      count = tonumber(count)
+      if count < 2 or #words ~= 2 + 2 * count then
+        return nil, string.format('invalid group line: %d field(s) for %d move(s)',
+          #words - 2, count)
+      end
+      local members = {}
+      for i = 1, count do
+        members[#members + 1] = M.Move(words[1 + 2 * i], words[2 + 2 * i])
+      end
+      return M.Group(members)
+    end,
+    reverse = function(action)
+      local members = {}
+      for i = #(action.actions or {}), 1, -1 do
+        local rev, err = M.reverse_action(action.actions[i])
+        if not rev then
+          return nil, err
+        end
+        members[#members + 1] = rev
+      end
+      if #members < 2 then
+        return nil, 'no reversal for group: fewer than two actions'
+      end
+      return M.Group(members)
+    end,
+  },
+}
+
+for name, kind in pairs(KINDS) do
+  local expected = name
+  kind.execute = function(action)
+    if action._kind ~= expected then
+      return nil, 'action kind mismatch: expected ' .. expected
+        .. ', got ' .. tostring(action._kind)
+    end
+    if type(action._execute) ~= 'function' then
+      return nil, 'action has no executor: ' .. expected
+    end
+    return action._execute()
+  end
+end
+
+function M.execute(action)
+  if type(action) ~= 'table' then
+    return nil, 'invalid action'
+  end
+  local kind = KINDS[action.name]
+  if kind == nil then
+    return nil, 'no executor for action: ' .. tostring(action.name)
+  end
+  return kind.execute(action)
+end
+
 -- serialize(action) -> `NAME\tfield...` | nil, err. The field order follows the
 -- Python version verbatim: src then dst (each present on the action), then for
 -- `p`/`up` the ' '-joined src_names and dst_names lists.
@@ -831,17 +965,20 @@ function M.serialize(action)
   if type(action) ~= 'table' or type(action.name) ~= 'string' then
     return nil, 'cannot serialize action'
   end
-  if action.name == 'g' then
-    return M.serialize_group(action)
+  local kind = KINDS[action.name]
+  if kind == nil then
+    return nil, 'cannot serialize action'
+  end
+  if kind.serialize ~= nil then
+    return kind.serialize(action)
   end
   local words = { action.name }
-  if action.src ~= nil then
-    words[#words + 1] = action.src
+  for _, field in ipairs(kind.fields) do
+    if action[field] ~= nil then
+      words[#words + 1] = action[field]
+    end
   end
-  if action.dst ~= nil then
-    words[#words + 1] = action.dst
-  end
-  if action.name == 'p' or action.name == 'up' then
+  if kind.name_lists then
     local src_names, dst_names = M.split_pairs(action.renames)
     words[#words + 1] = table.concat(src_names, ' ')
     words[#words + 1] = table.concat(dst_names, ' ')
@@ -864,41 +1001,9 @@ function M.deserialize(line)
   end
   local words = vim.split(line, FIELD_SEPARATOR, { plain = true })
   local name = words[1]
-  if name == 'mv' then
-    return M.Move(words[2], words[3])
-  elseif name == 'rm' then
-    return M.Remove(words[2], words[3])
-  elseif name == 'rmdir' then
-    return M.RemoveDirectory(words[2], words[3])
-  elseif name == 'rs' then
-    return M.Restore(words[2], words[3])
-  elseif name == 'rsdir' then
-    return M.RestoreDirectory(words[2], words[3])
-  elseif name == 'touch' then
-    return M.Touch(words[2])
-  elseif name == 'mkdir' then
-    return M.MakeDirectory(words[2])
-  elseif name == 'p' then
-    return M.Paste(words[2], words[3],
-      M.split_names(words[4]), M.split_names(words[5]))
-  elseif name == 'up' then
-    return M.Unpaste(words[2], words[3],
-      M.split_names(words[4]), M.split_names(words[5]))
-  elseif name == 'g' then
-    local count = words[2]
-    if type(count) ~= 'string' or count:match('^%d+$') == nil then
-      return nil, 'invalid group line: bad member count'
-    end
-    count = tonumber(count)
-    if count < 2 or #words ~= 2 + 2 * count then
-      return nil, string.format('invalid group line: %d field(s) for %d move(s)',
-        #words - 2, count)
-    end
-    local members = {}
-    for i = 1, count do
-      members[#members + 1] = M.Move(words[1 + 2 * i], words[2 + 2 * i])
-    end
-    return M.Group(members)
+  local kind = KINDS[name]
+  if kind ~= nil then
+    return kind.deserialize(words)
   end
   return nil, 'unknown action name: ' .. tostring(name)
 end
@@ -923,39 +1028,9 @@ function M.reverse_action(action)
   if type(action) ~= 'table' then
     return nil, 'invalid action'
   end
-  if action.name == 'mv' then
-    return M.Move(action.dst, action.src)
-  elseif action.name == 'rm' then
-    return M.Restore(action.dst, action.src)
-  elseif action.name == 'rmdir' then
-    return M.RestoreDirectory(action.dst, action.src)
-  elseif action.name == 'rs' then
-    return M.Remove(action.dst)
-  elseif action.name == 'rsdir' then
-    return M.RemoveDirectory(action.dst)
-  elseif action.name == 'touch' then
-    return M.Remove(action.dst)
-  elseif action.name == 'mkdir' then
-    return M.RemoveDirectory(action.dst)
-  elseif action.name == 'p' then
-    local src_names, dst_names = M.split_pairs(action.renames)
-    return M.Unpaste(action.dst, action.src, dst_names, src_names)
-  elseif action.name == 'up' then
-    local src_names, dst_names = M.split_pairs(action.renames)
-    return M.Paste(action.dst, action.src, dst_names, src_names)
-  elseif action.name == 'g' then
-    local members = {}
-    for i = #(action.actions or {}), 1, -1 do
-      local rev, err = M.reverse_action(action.actions[i])
-      if not rev then
-        return nil, err
-      end
-      members[#members + 1] = rev
-    end
-    if #members < 2 then
-      return nil, 'no reversal for group: fewer than two actions'
-    end
-    return M.Group(members)
+  local kind = KINDS[action.name]
+  if kind ~= nil then
+    return kind.reverse(action)
   end
   return nil, 'no reversal for action: ' .. tostring(action.name)
 end
