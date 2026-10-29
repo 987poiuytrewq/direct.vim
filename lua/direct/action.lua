@@ -189,6 +189,9 @@ end
 function M.Move(src, dst)
   local self = { name = 'mv', src = src, dst = dst }
   self['do'] = function()
+    if M.fs.taken(self.dst) and not M.fs.same_entry(self.src, self.dst) then
+      return nil, 'destination exists: ' .. tostring(self.dst)
+    end
     local ok, err = M.close_src_buffer(self.src)
     if not ok then
       return nil, err
@@ -315,6 +318,9 @@ end
 function M.Touch(dst)
   local self = { name = 'touch', dst = dst }
   self['do'] = function()
+    if M.fs.taken(self.dst) then
+      return nil, 'destination exists: ' .. tostring(self.dst)
+    end
     return M.fs.touch(self.dst)
   end
   function self.describe()
@@ -326,6 +332,9 @@ end
 function M.MakeDirectory(dst)
   local self = { name = 'mkdir', dst = dst }
   self['do'] = function()
+    if M.fs.taken(self.dst) then
+      return nil, 'destination exists: ' .. tostring(self.dst)
+    end
     return M.fs.mkdirp(self.dst)
   end
   function self.describe()
@@ -534,17 +543,40 @@ end
 -- been saved anywhere yet).
 function M.stage_moves(actions)
   actions = actions or {}
-  local dst_set = {}
+  local function move_key(path)
+    return type(path) == 'string' and path:gsub('/+$', '') or path
+  end
+  local destinations, destinations_by_inode = {}, {}
   for _, act in ipairs(actions) do
     if act.name == 'mv' and act.dst ~= nil then
-      dst_set[act.dst] = true
+      local destination = move_key(act.dst)
+      destinations[destination] = true
+      local identity = M.fs.entry_identity(destination)
+      if identity and identity.inode then
+        local bucket = destinations_by_inode[identity.inode]
+        if not bucket then
+          bucket = {}
+          destinations_by_inode[identity.inode] = bucket
+        end
+        bucket[#bucket + 1] = destination
+      end
     end
   end
-  local needed = false
+  local function shares_destination(path)
+    path = move_key(path)
+    if destinations[path] then return true end
+    local identity = M.fs.entry_identity(path)
+    local bucket = identity and identity.inode and destinations_by_inode[identity.inode]
+    for _, destination in ipairs(bucket or {}) do
+      if M.fs.same_entry(path, destination) then return true end
+    end
+    return false
+  end
+  local stage_sources, needed = {}, false
   for _, act in ipairs(actions) do
-    if act.name == 'mv' and act.src ~= nil and dst_set[act.src] then
+    if act.name == 'mv' and act.src ~= nil and shares_destination(act.src) then
+      stage_sources[move_key(act.src)] = true
       needed = true
-      break
     end
   end
   if not needed then
@@ -552,7 +584,7 @@ function M.stage_moves(actions)
   end
   local overrides, temps = {}, {}
   for _, act in ipairs(actions) do
-    if act.name == 'mv' and act.src ~= nil and dst_set[act.src]
+    if act.name == 'mv' and act.src ~= nil and stage_sources[move_key(act.src)]
       and overrides[act.src] == nil then
       local tmp = M.first_free_temp(parent_dir(act.src))
       local ok, err = M.fs.rename(act.src, tmp)
@@ -591,6 +623,9 @@ end
 -- every action index exactly once, a group of one being an independent action.
 function M.move_groups(actions)
   actions = actions or {}
+  local function move_key(path)
+    return type(path) == 'string' and path:gsub('/+$', '') or path
+  end
   local parent = {}
   for i = 1, #actions do
     parent[i] = i
@@ -602,7 +637,7 @@ function M.move_groups(actions)
     end
     return i
   end
-  local at_path = {}
+  local at_path, at_inode = {}, {}
   for i, act in ipairs(actions) do
     local paths = {}
     if type(act.src) == 'string' then
@@ -613,14 +648,32 @@ function M.move_groups(actions)
     end
     if act.name == 'mv' then
       for _, path in ipairs(paths) do
-        local other = at_path[path]
-        if other == nil then
-          at_path[path] = i
-        else
-          local a, b = root(other), root(i)
-          if a ~= b then
-            parent[b] = a
+        path = move_key(path)
+        local exact = at_path[path]
+        for _, previous in ipairs(exact or {}) do
+          local a, b = root(previous), root(i)
+          if a ~= b then parent[b] = a end
+        end
+        local identity = M.fs.entry_identity(path)
+        local bucket = identity and identity.inode and at_inode[identity.inode]
+        for _, previous in ipairs(bucket or {}) do
+          if M.fs.same_entry(path, previous.path) then
+            local a, b = root(previous.index), root(i)
+            if a ~= b then parent[b] = a end
           end
+        end
+        if not exact then
+          exact = {}
+          at_path[path] = exact
+        end
+        exact[#exact + 1] = i
+        if identity and identity.inode then
+          local inode_entries = at_inode[identity.inode]
+          if not inode_entries then
+            inode_entries = {}
+            at_inode[identity.inode] = inode_entries
+          end
+          inode_entries[#inode_entries + 1] = { path = path, index = i }
         end
       end
     end

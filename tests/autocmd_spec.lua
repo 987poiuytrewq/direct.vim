@@ -24,6 +24,9 @@ end
 H.describe('autocmd ownership', function()
   H.it('keeps each direct write handler across re-source and isolates buffer wipes', function()
     pcall(vim.cmd, '%bwipeout!')
+    -- The harness re-sources modules at file boundaries; use the same buffer
+    -- module instance that the DirectSync command will resolve below.
+    buffer = require('direct.buffer')
     local sb = H.sandbox()
     local first_dir = H.mkdir(sb.root, 'first')
     local second_dir = H.mkdir(sb.root, 'second')
