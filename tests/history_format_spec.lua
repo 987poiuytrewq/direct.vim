@@ -2,6 +2,7 @@
 -- are reset; malformed and unknown content must stay byte-identical.
 local H = require('tests.support.harness')
 local format = require('direct.history_format')
+local fixtures = require('tests.support.history_fixtures')
 
 local function bytes(lines)
   return table.concat(lines, '\n') .. '\n'
@@ -93,11 +94,12 @@ H.describe('history format classifier', function()
   end)
 
   H.it('current JSONL accepts canonical records and preserves malformed records', function()
-    local good = bytes({ format.HEADER, '{"op":"mv","src":"/a","dst":"/b"}' })
+    H.assert_eq(format.HEADER, fixtures.header, 'the current header is an exact fixture')
+    local good = bytes({ fixtures.header, '{"op":"mv","src":"/a","dst":"/b"}' })
     H.assert_eq(format.classify(good, true).state, 'current', 'canonical JSONL')
-    local bad = bytes({ format.HEADER, '{"op":"mv","src":"/a"}' })
+    local bad = bytes({ fixtures.header, '{"op":"mv","src":"/a"}' })
     assert_preserved(bad, 'JSONL with a missing key')
-    local noncanonical = bytes({ format.HEADER, '{ "op":"touch","dst":"/t"}' })
+    local noncanonical = bytes({ fixtures.header, '{ "op":"touch","dst":"/t"}' })
     assert_preserved(noncanonical, 'non-canonical JSONL record')
   end)
 end)

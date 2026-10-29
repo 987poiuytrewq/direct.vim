@@ -14,6 +14,7 @@ local fs = require('direct.fs')
 local history = require('direct.history')
 -- The attempt cap lets this test fail instead of hanging if the prompt loops.
 local action = require('direct.action')
+local fixtures = require('tests.support.history_fixtures')
 
 H.describe('register', function()
   local function register_dir(sb)
@@ -134,9 +135,9 @@ H.describe('register', function()
     local undo_path = vim.fs.joinpath(sb.data_home, 'direct/history/undo.log')
     local redo_path = vim.fs.joinpath(sb.data_home, 'direct/history/redo.log')
     H.assert_eq(vim.fn.readfile(undo_path),
-      { history.HEADER, action.serialize(action.Paste(src, ws, { 'f.txt' }, { 'f.txt' })) },
+      { fixtures.header, fixtures.paste('p', src, ws, { 'f.txt' }, { 'f.txt' }) },
       'the header plus canonical paste record is recorded')
-    H.assert_eq(vim.fn.readfile(redo_path), { history.HEADER },
+    H.assert_eq(vim.fn.readfile(redo_path), { fixtures.header },
       'log() reset the redo log to its header')
   end)
 
@@ -609,7 +610,7 @@ H.describe('register', function()
     H.assert_eq(H.ls(dst), {}, 'nothing was copied into the destination')
     -- Preflight ran before the path refusal, but no action record was written.
     H.assert_eq(vim.fn.readfile(vim.fs.joinpath(sb.data_home,
-      'direct/history/undo.log')), { history.HEADER }, 'the undo stack stays empty')
+      'direct/history/undo.log')), { fixtures.header }, 'the undo stack stays empty')
   end)
 
   H.it('a mixed yank with a space-named entry round-trips both names', function()
@@ -639,7 +640,7 @@ H.describe('register', function()
     H.assert_false(H.messages():find('Pasted into ', 1, true) ~= nil,
       'no summary was emitted')
     H.assert_eq(vim.fn.readfile(vim.fs.joinpath(sb.data_home,
-      'direct/history/undo.log')), { history.HEADER },
+      'direct/history/undo.log')), { fixtures.header },
       'preflight initialized an empty stack without writing an action')
   end)
 
@@ -723,7 +724,7 @@ H.describe('register', function()
     H.assert_nil(err, 'the failure is reported through the notification')
     H.assert_notified('Failed to paste')
     H.assert_eq(vim.fn.readfile(vim.fs.joinpath(sb.data_home,
-      'direct/history/undo.log')), { history.HEADER },
+      'direct/history/undo.log')), { fixtures.header },
       'a failed paste leaves preflight history header-only')
   end)
 

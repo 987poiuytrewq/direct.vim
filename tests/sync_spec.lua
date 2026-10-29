@@ -7,8 +7,8 @@ local fs = require('direct.fs')
 local paths = require('direct.paths')
 local history = require('direct.history')
 local register = require('direct.register')
-local action = require('direct.action')
-local HEADER = history.HEADER
+local fixtures = require('tests.support.history_fixtures')
+local HEADER = fixtures.header
 
 local function decode_record(lines, index)
   return vim.json.decode(lines[index])
@@ -82,7 +82,7 @@ H.describe('sync: applying actions', function()
     H.assert_fs_eq(ws, { 'a.txt', 'b.txt' })
     H.assert_false(vim.bo.modified, 're-listed and nomodified')
     H.assert_eq(history_lines('undo.log'),
-      { HEADER, action.serialize(action.Touch(ws .. '/b.txt')) }, 'exactly one touch record')
+      { HEADER, fixtures.touch(ws .. '/b.txt') }, 'exactly one touch record')
     H.assert_eq(history_lines('redo.log'), { HEADER },
       'a new action resets the redo branch to its header')
   end)
@@ -99,9 +99,9 @@ H.describe('sync: applying actions', function()
     H.assert_fs_eq(ws, { 'adir/', 'zdir/', 'afile.txt', 'keep.txt' })
     H.assert_eq(history_lines('undo.log'), {
       HEADER,
-      action.serialize(action.MakeDirectory(ws .. '/adir/')),
-      action.serialize(action.MakeDirectory(ws .. '/zdir/')),
-      action.serialize(action.Touch(ws .. '/afile.txt')),
+      fixtures.mkdir(ws .. '/adir/'),
+      fixtures.mkdir(ws .. '/zdir/'),
+      fixtures.touch(ws .. '/afile.txt'),
     }, 'directories first, then files, each sorted')
   end)
 
@@ -237,7 +237,7 @@ H.describe('sync: applying actions', function()
     H.assert_fs_eq(ws, { 'b.txt' })
     H.assert_eq(vim.fn.readfile(ws .. '/b.txt'), { 'a' }, 'content survived the move')
     H.assert_eq(history_lines('undo.log'),
-      { HEADER, action.serialize(action.Move(ws .. '/a.txt', ws .. '/b.txt')) })
+      { HEADER, fixtures.move(ws .. '/a.txt', ws .. '/b.txt') })
   end)
 
   H.it('RENAME (directory): moves the tree with trailing slashes on both ends', function()
@@ -252,7 +252,7 @@ H.describe('sync: applying actions', function()
     H.assert_true(ok == true, 'sync applied')
     H.assert_fs_eq(ws, { 'new/', 'new/inner.txt' })
     H.assert_eq(history_lines('undo.log'),
-      { HEADER, action.serialize(action.Move(ws .. '/old/', ws .. '/new/')) })
+      { HEADER, fixtures.move(ws .. '/old/', ws .. '/new/') })
   end)
 
   H.it('notifies a single joined summary of the applied actions', function()
@@ -2559,7 +2559,7 @@ H.describe('sync: safety guards', function()
     H.assert_eq(vim.uv.fs_lstat(fifo).type, 'fifo', 'the root FIFO remains untouched')
     H.assert_eq(history_lines('undo.log'), {
       HEADER,
-      action.serialize(action.Move(ws .. '/parent/', ws .. '/moved/')),
+      fixtures.move(ws .. '/parent/', ws .. '/moved/'),
     }, 'the successful directory move is recorded in history')
     H.assert_eq(history_lines('redo.log'), { HEADER },
       'the successful move leaves redo history empty')
@@ -2620,7 +2620,7 @@ H.describe('sync: safety guards', function()
       'the symlink target remains untouched')
     H.assert_eq(history_lines('undo.log'), {
       HEADER,
-      action.serialize(action.Move(link, ws .. '/renamed-link')),
+      fixtures.move(link, ws .. '/renamed-link'),
     }, 'exactly one symlink rename is recorded')
   end)
 
@@ -2682,7 +2682,7 @@ H.describe('sync: safety guards', function()
     H.assert_true(ok == true, 'case-only sync succeeds: ' .. tostring(reason))
     H.assert_eq(vim.fn.readfile(ws .. '/Foo.txt'), { 'case-only content' }, 'content is preserved')
     H.assert_eq(history_lines('undo.log'), {
-      HEADER, action.serialize(action.Move(ws .. '/foo.txt', ws .. '/Foo.txt')),
+      HEADER, fixtures.move(ws .. '/foo.txt', ws .. '/Foo.txt'),
     }, 'the original and destination spellings are logged')
     H.assert_true(history.undo() ~= nil, 'the rename can be undone')
     H.assert_eq(vim.fn.readfile(ws .. '/foo.txt'), { 'case-only content' }, 'undo restores old spelling')
@@ -2760,10 +2760,10 @@ H.describe('sync: safety guards', function()
       'the directory symlink reaches c without moving its target')
     H.assert_eq(history_lines('undo.log'), {
       HEADER,
-      action.serialize(action.Group({
-        action.Move(ws .. '/a/', ws .. '/b/'),
-        action.Move(ws .. '/b', ws .. '/c'),
-      })),
+      fixtures.group({
+        { ws .. '/a/', ws .. '/b/' },
+        { ws .. '/b', ws .. '/c' },
+      }),
     }, 'group history keeps the original directory and symlink path spellings')
   end)
 
@@ -2879,7 +2879,7 @@ H.describe('sync: safety guards', function()
     H.assert_notified('Action failed - Created c.txt', vim.log.levels.ERROR)
     H.assert_notified('1 action(s) failed', vim.log.levels.ERROR)
     H.assert_eq(history_lines('undo.log'),
-      { HEADER, action.serialize(action.Touch(ws .. '/b.txt')) },
+      { HEADER, fixtures.touch(ws .. '/b.txt') },
       'only the successful action reached history')
 
     H.assert_true(history.undo() ~= nil, 'the logged success is undoable')

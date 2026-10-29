@@ -2,11 +2,11 @@
 local H = require('tests.support.harness')
 local history = require('direct.history')
 local register = require('direct.register')
-local action = require('direct.action')
 local log = require('direct.log')
 local buffer = require('direct.buffer')
 local paths = require('direct.paths')
 local fs = require('direct.fs')
+local fixtures = require('tests.support.history_fixtures')
 
 local function history_dir(sb)
   return vim.fs.joinpath(sb.data_home, 'direct/history')
@@ -139,8 +139,8 @@ H.describe('history preflight', function()
     vim.fn.mkdir(history_dir(sb), 'p')
     local undo_path = vim.fs.joinpath(history_dir(sb), 'undo.log')
     local redo_path = vim.fs.joinpath(history_dir(sb), 'redo.log')
-    local valid = action.serialize(action.Move(ws .. '/a.txt', ws .. '/b.txt'))
-    H.assert_true(log.write(undo_path, { history.HEADER, valid }) == true,
+    local valid = fixtures.move(ws .. '/a.txt', ws .. '/b.txt')
+    H.assert_true(log.write(undo_path, { fixtures.header, valid }) == true,
       'valid undo fixture')
     local unknown = '#direct-history-v100\nkeep me\n'
     H.assert_true(log.write_raw_atomic(redo_path, unknown) == true,
@@ -151,7 +151,7 @@ H.describe('history preflight', function()
 
     H.assert_eq(vim.fn.readfile(ws .. '/a.txt'), { 'A' }, 'filesystem is untouched')
     H.assert_nil(vim.uv.fs_stat(ws .. '/b.txt'), 'the reversal did not run')
-    H.assert_eq(log.read_raw(undo_path), history.HEADER .. '\n' .. valid .. '\n',
+    H.assert_eq(log.read_raw(undo_path), fixtures.header .. '\n' .. valid .. '\n',
       'undo bytes are not popped')
     H.assert_eq(log.read_raw(redo_path), unknown, 'unknown redo bytes remain exact')
   end)

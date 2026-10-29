@@ -15,27 +15,16 @@
 -- malformed logs are preserved without executing entries.
 
 local H = require('tests.support.harness')
+local fixtures = require('tests.support.history_fixtures')
 
 -- Resolve the repository root from this test file for the fresh-session script.
 local SPEC_FILE = debug.getinfo(1, 'S').source:gsub('^@', '')
 local REPO_ROOT = vim.fs.dirname(vim.fs.dirname(vim.fn.fnamemodify(SPEC_FILE, ':p')))
 
-local MARKER = '{"format":"direct-history","version":1}'
+local MARKER = fixtures.header
 local V2_MARKER = '#direct-history-v2'
-
-local function move_record(src, dst)
-  return '{"op":"mv","src":' .. vim.json.encode(src)
-    .. ',"dst":' .. vim.json.encode(dst) .. '}'
-end
-
-local function group_record(moves)
-  local records = {}
-  for i, move in ipairs(moves) do
-    records[i] = '{"src":' .. vim.json.encode(move[1])
-      .. ',"dst":' .. vim.json.encode(move[2]) .. '}'
-  end
-  return '{"op":"g","moves":[' .. table.concat(records, ',') .. ']}'
-end
+local move_record = fixtures.move
+local group_record = fixtures.group
 
 local function clean_buffers()
   pcall(vim.cmd, '%bwipeout!')

@@ -7,8 +7,9 @@ local action = require('direct.action')
 local fs = require('direct.fs')
 local log = require('direct.log')
 local paths = require('direct.paths')
+local fixtures = require('tests.support.history_fixtures')
 
-local MARKER = history.HEADER
+local MARKER = fixtures.header
 
 H.describe('history', function()
   local function history_dir(sb)
@@ -222,7 +223,7 @@ H.describe('history', function()
 
     local undo_path = vim.fs.joinpath(history_dir(sb), 'undo.log')
     local redo_path = vim.fs.joinpath(history_dir(sb), 'redo.log')
-    local record = action.serialize(move)
+    local record = fixtures.move(sb.root .. '/a.txt', sb.root .. '/b.txt')
     H.assert_eq(vim.fn.readfile(undo_path), { MARKER, record },
       'the JSONL header plus one canonical record is recorded')
 
@@ -252,7 +253,7 @@ H.describe('history', function()
     H.assert_eq(vim.fn.readfile(undo_path), { MARKER },
       'undo.log drained back to the header')
     H.assert_eq(vim.fn.readfile(redo_path),
-      { MARKER, action.serialize(action.Move(sb.root .. '/b.txt', sb.root .. '/a.txt')) },
+      { MARKER, fixtures.move(sb.root .. '/b.txt', sb.root .. '/a.txt') },
       'the inverse record was appended to redo.log')
   end)
 
