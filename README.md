@@ -43,13 +43,17 @@ for Lua 5.1, as used by Neovim's LuaJIT) and run:
 ```sh
 make install
 make coverage
+make coverage-summary
 ```
 
 `make install` checks for Neovim >= 0.12 and installs LuaCov into the ignored
 `.rocks/` directory. Coverage reports are written to `coverage/index.html` and
-`coverage/summary.out`. The normal `make test` run does not need LuaRocks or
-LuaCov. CI runs `make coverage` for each Neovim version and publishes each HTML
-report as a downloadable artifact on the workflow run.
+`coverage/summary.out`. Run `make coverage-summary` after `make coverage` to
+generate `coverage/summary.md`; when run in GitHub Actions, it also appends the
+table to the Actions run summary. The normal `make test` run does not need
+LuaRocks or LuaCov. CI runs `make coverage` for each Neovim version, publishes
+each HTML report as a downloadable artifact, and displays the Markdown coverage
+table directly in the run summary.
 
 ## Install
 

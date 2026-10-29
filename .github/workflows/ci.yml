@@ -55,34 +55,8 @@ jobs:
         run: make coverage
 
       - name: Add coverage to the run summary
-        if: always()
-        run: |
-          {
-            echo "## Coverage (Neovim ${{ matrix.neovim-version }})"
-            echo
-            if [ ! -s coverage/summary.out ]; then
-              echo "Coverage summary was not generated."
-            else
-              echo "| File | Hit lines | Missed lines | Coverage |"
-              echo "|---|---:|---:|---:|"
-              awk '
-                /^Summary$/ { in_summary = 1; next }
-                !in_summary { next }
-                /^File[[:space:]]/ { next }
-                /^[[:space:]-]+$/ { next }
-                NF >= 4 {
-                  file = $1
-                  if (file == "Total") {
-                    file = "**Total**"
-                  } else {
-                    sub(/^.*\/lua\/direct\//, "lua/direct/", file)
-                    file = "`" file "`"
-                  }
-                  printf "| %s | %s | %s | %s |\n", file, $2, $3, $4
-                }
-              ' coverage/summary.out
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
+        if: always() && hashFiles('coverage/summary.out') != ''
+        run: make coverage-summary
 
       - name: Publish coverage report
         if: always()
