@@ -54,6 +54,36 @@ jobs:
       - name: Run tests and generate coverage
         run: make coverage
 
+      - name: Add coverage to the run summary
+        if: always()
+        run: |
+          {
+            echo "## Coverage (Neovim ${{ matrix.neovim-version }})"
+            echo
+            if [ ! -s coverage/summary.out ]; then
+              echo "Coverage summary was not generated."
+            else
+              echo "| File | Hit lines | Missed lines | Coverage |"
+              echo "|---|---:|---:|---:|"
+              awk '
+                /^Summary$/ { in_summary = 1; next }
+                !in_summary { next }
+                /^File[[:space:]]/ { next }
+                /^[[:space:]-]+$/ { next }
+                NF >= 4 {
+                  file = $1
+                  if (file == "Total") {
+                    file = "**Total**"
+                  } else {
+                    sub(/^.*\/lua\/direct\//, "lua/direct/", file)
+                    file = "`" file "`"
+                  }
+                  printf "| %s | %s | %s | %s |\n", file, $2, $3, $4
+                }
+              ' coverage/summary.out
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Publish coverage report
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
