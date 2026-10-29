@@ -47,6 +47,7 @@ require('direct').setup({
   map_default_keys = true, -- set false to install no default mappings
   show_folder_icons = false, -- opt in to Nerd Font folder icons
   show_file_icons = false, -- opt in to a generic Nerd Font file icon
+  max_recursive_expand_depth = false, -- false means unlimited
 })
 ```
 
@@ -77,8 +78,13 @@ line opens the file.
 
 Use `zo` or `za` on a directory to expand it in place. Children are read lazily,
 one level at a time; repeating an expansion does not re-read or duplicate them.
-`za` or `zc` on an expanded directory removes its child rows; expanding again
-re-reads the directory. The initial listing remains flat.
+`zO` and `zA` recursively expand a directory, while `zC` recursively collapses
+it. `zR` expands all root directories and `zM` collapses them all. Recursive
+expansion is unlimited by default; set `max_recursive_expand_depth` to a positive
+integer to cap how many directory levels those recursive-open commands expand.
+The limit does not affect one-level `zo`/`za` browsing. `za` or `zc` on an
+expanded directory removes its child rows; expanding again re-reads the
+directory. The initial listing remains flat.
 
 ## Edit
 

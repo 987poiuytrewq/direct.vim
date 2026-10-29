@@ -59,11 +59,16 @@ Run `:checkhealth direct` to confirm the version and the data home in use:
       map_default_keys = true, -- set false to install no default mappings
       show_folder_icons = false, -- opt in to Nerd Font folder icons
       show_file_icons = false, -- opt in to a generic Nerd Font file icon
+      max_recursive_expand_depth = false, -- false means unlimited
     })
 
 `setup()` is idempotent, may be called more than once, and reports an unknown
 option name as an error instead of silently ignoring it. See
 |direct.vim-mappings| for `map_default_keys`.
+
+`max_recursive_expand_depth` defaults to `false` (unlimited). Set it to a
+positive integer to cap the directory levels opened by recursive commands
+`zO`, `zA`, and `zR`. The cap does not restrict one-level `zo`/`za` browsing.
 
 File and folder icons ~
 
@@ -91,8 +96,10 @@ remembering any extra command.
 
 Use `zo` or `za` on a directory to expand it in place. Children are read lazily,
 one level at a time; repeating an expansion does not re-read or duplicate them.
-`za` or `zc` on an expanded directory removes its child rows; expanding again
-re-reads the directory. The initial listing remains flat.
+`zO` or `zA` recursively expands a directory, and `zC` recursively collapses
+it. `zR` expands all root directories and `zM` collapses them all. Recursive
+opening respects |direct.vim-setup|'s `max_recursive_expand_depth`; the initial
+listing remains flat.
 
 ==============================================================================
 5. Edit                                                      *direct.vim-edit*
@@ -248,13 +255,18 @@ Global (normal mode), installed when `map_default_keys` is true:
     -           :DirectListBuffer~
 
 Buffer-local, in a direct buffer (standard actions follow `map_default_keys`;
-`zo`/`za`/`zc` are always installed):
+fold commands are always installed):
 
     Mode        Key         Action ~
     normal      <CR>        open the entry under the cursor
     normal      zo          lazily expand one directory level
     normal      za          expand or collapse one directory
     normal      zc          collapse one directory
+    normal      zO          recursively expand a directory
+    normal      zA          recursively expand or collapse a directory
+    normal      zC          recursively collapse a directory
+    normal      zR          recursively expand all root directories
+    normal      zM          collapse all root directories
     normal      -           open ../ (the parent directory)
     normal      u           Neovim text undo
     normal      <C-r>       Neovim text redo
@@ -263,7 +275,7 @@ Buffer-local, in a direct buffer (standard actions follow `map_default_keys`;
     normal      p, P        :DirectPaste
 
 The buffer-local `-` wins over the global `-` inside a direct buffer.
-`zo`, `za`, and `zc` are installed for every direct listing, independently of
+Fold commands are installed for every direct listing, independently of
 `map_default_keys`.
 
 ==============================================================================

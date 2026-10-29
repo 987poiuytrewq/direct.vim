@@ -8,6 +8,7 @@ local defaults = {
   map_default_keys = true,
   show_folder_icons = false,
   show_file_icons = false,
+  max_recursive_expand_depth = false,
 }
 
 M.defaults = defaults
@@ -168,6 +169,12 @@ function M.setup(opts)
     if defaults[key] == nil then
       require('direct.ui').notify(
         string.format("direct: unknown option '%s'", tostring(key)),
+        vim.log.levels.ERROR)
+    elseif key == 'max_recursive_expand_depth'
+      and value ~= false
+      and (type(value) ~= 'number' or value < 1 or value % 1 ~= 0) then
+      require('direct.ui').notify(
+        'direct: max_recursive_expand_depth must be false or a positive integer',
         vim.log.levels.ERROR)
     else
       next_options[key] = value

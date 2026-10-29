@@ -59,6 +59,24 @@ H.describe('config', function()
     config.clear_mappings()
   end)
 
+  H.it('recursive expansion depth defaults to unlimited and accepts only positive integers', function()
+    local config = fresh_config()
+    config.clear_mappings()
+    H.assert_false(config.defaults.max_recursive_expand_depth,
+      'recursive expansion is unlimited by default')
+
+    local options = config.setup({ max_recursive_expand_depth = 3 })
+    H.assert_eq(options.max_recursive_expand_depth, 3,
+      'a positive integer depth limit is accepted')
+
+    H.capture_messages()
+    options = config.setup({ max_recursive_expand_depth = 0 })
+    H.assert_false(options.max_recursive_expand_depth,
+      'invalid depth limits leave the unlimited default in place')
+    H.assert_notified('max_recursive_expand_depth', vim.log.levels.ERROR)
+    config.clear_mappings()
+  end)
+
   H.it('setup() rejects an unknown key with an ERROR notification', function()
     local config = fresh_config()
     config.clear_mappings()
