@@ -6,6 +6,7 @@ local M = {}
 
 local defaults = {
   map_default_keys = true,
+  show_folder_icons = false,
 }
 
 M.defaults = defaults
@@ -43,8 +44,8 @@ M.BUFFER_MAPS = {
     rhs = '<Cmd>lua require("direct").open()<CR>' },
   { mode = 'n', lhs = '-',
     rhs = '<Cmd>lua require("direct").open("../")<CR>' },
-  { mode = 'n', lhs = 'u', rhs = '<Cmd>DirectUndo<CR>' },
-  { mode = 'n', lhs = '<C-r>', rhs = '<Cmd>DirectRedo<CR>' },
+  { mode = 'n', lhs = 'u', rhs = '<Cmd>undo<CR>' },
+  { mode = 'n', lhs = '<C-r>', rhs = '<Cmd>redo<CR>' },
   { mode = 'n', lhs = 'yy', rhs = '<Cmd>DirectYank<CR>' },
   { mode = 'n', lhs = 'Y', rhs = '<Cmd>DirectYank<CR>' },
   -- Visual `y`: a ranged command (`:<C-U>'<,'>DirectYank<CR>`) raises E20 and

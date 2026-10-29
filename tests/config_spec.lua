@@ -36,6 +36,21 @@ H.describe('config', function()
     config.clear_mappings()
   end)
 
+  H.it('show_folder_icons defaults off and accepts true without weakening typo errors', function()
+    local config = fresh_config()
+    config.clear_mappings()
+    H.assert_false(config.defaults.show_folder_icons == true,
+      'folder icons are off by default')
+    local options = config.setup({ show_folder_icons = true })
+    H.assert_true(options.show_folder_icons, 'the documented icon option is accepted')
+    H.capture_messages()
+    options = config.setup({ show_folder_icons = true, show_folder_icon = true })
+    H.assert_true(options.show_folder_icons, 'known option remains applied')
+    H.assert_nil(options.show_folder_icon, 'misspelled option is not stored')
+    H.assert_notified('show_folder_icon', vim.log.levels.ERROR)
+    config.clear_mappings()
+  end)
+
   H.it('setup() rejects an unknown key with an ERROR notification', function()
     local config = fresh_config()
     config.clear_mappings()
@@ -200,10 +215,10 @@ H.describe('config', function()
     -- mapping was cleared, or never installed) while a global `u` carrying the
     -- plugin's own rhs resolves through it.
     vim.keymap.del('n', 'u', { buffer = true })
-    vim.keymap.set('n', 'u', '<Cmd>DirectUndo<CR>', { silent = true, noremap = true })
+    vim.keymap.set('n', 'u', '<Cmd>undo<CR>', { silent = true, noremap = true })
     local resolved = vim.fn.maparg('u', 'n', false, true)
     H.assert_eq(resolved.buffer, 0, 'premise: only a global u resolves here')
-    H.assert_eq(resolved.rhs, '<Cmd>DirectUndo<CR>', 'premise: it carries the plugin rhs')
+    H.assert_eq(resolved.rhs, '<Cmd>undo<CR>', 'premise: it carries the plugin rhs')
 
     config.setup({ map_default_keys = false })
 
@@ -213,7 +228,7 @@ H.describe('config', function()
     -- The global fallback is not this buffer's mapping: it must survive.
     local after = vim.fn.maparg('u', 'n', false, true)
     H.assert_eq(after.buffer, 0, 'the global u is still global')
-    H.assert_eq(after.rhs, '<Cmd>DirectUndo<CR>', 'the global u was not deleted')
+    H.assert_eq(after.rhs, '<Cmd>undo<CR>', 'the global u was not deleted')
     vim.keymap.del('n', 'u')
     pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
   end)

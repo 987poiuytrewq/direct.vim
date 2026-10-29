@@ -45,8 +45,8 @@ end
 local EXPECTED_N = {
   ['<CR>'] = '<Cmd>lua require("direct").open()<CR>',
   ['-'] = '<Cmd>lua require("direct").open("../")<CR>',
-  ['u'] = '<Cmd>DirectUndo<CR>',
-  ['<C-R>'] = '<Cmd>DirectRedo<CR>',
+  ['u'] = '<Cmd>undo<CR>',
+  ['<C-R>'] = '<Cmd>redo<CR>',
   ['yy'] = '<Cmd>DirectYank<CR>',
   ['Y'] = '<Cmd>DirectYank<CR>',
   ['p'] = '<Cmd>DirectPaste<CR>',
