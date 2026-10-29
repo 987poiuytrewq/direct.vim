@@ -53,8 +53,4 @@ function M.write(path, lines)
   return true
 end
 
-function M.clear(path)
-  return M.write(path, {})
-end
-
 return M

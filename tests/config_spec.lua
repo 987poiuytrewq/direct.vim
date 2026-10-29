@@ -285,6 +285,35 @@ H.describe('config', function()
     pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
   end)
 
+  H.it('ftplugin undo removes only its maps and preserves the previous hook', function()
+    local config = fresh_config()
+    config.clear_mappings()
+    local bufnr = vim.api.nvim_create_buf(true, false)
+    vim.api.nvim_set_current_buf(bufnr)
+    vim.bo[bufnr].filetype = 'direct'
+    -- An already-loaded ftplugin may have populated this buffer variable; add
+    -- another hook to exercise composition when this ftplugin is sourced again.
+    vim.b[bufnr].undo_ftplugin = 'let b:previous_ftplugin_undo_ran = 1'
+    vim.cmd('runtime ftplugin/direct.lua')
+    H.assert_true(buf_map_rhs('<CR>', 'n') ~= nil,
+      'the direct ftplugin installed its buffer mappings')
+    H.assert_true(type(vim.b[bufnr].undo_ftplugin) == 'string'
+      and vim.b[bufnr].undo_ftplugin:find('previous_ftplugin_undo_ran', 1, true) ~= nil,
+      'the previous undo hook was retained')
+
+    vim.keymap.set('n', '<CR>', ':echo "user map"<CR>', { buffer = bufnr })
+    vim.api.nvim_buf_call(bufnr, function()
+      vim.cmd('execute b:undo_ftplugin')
+    end)
+
+    H.assert_eq(vim.b[bufnr].previous_ftplugin_undo_ran, 1,
+      'the previous undo hook ran')
+    H.assert_eq(buf_map_rhs('<CR>', 'n'), ':echo "user map"<CR>',
+      'the same-lhs user mapping survives')
+    H.assert_nil(buf_map_rhs('p', 'n'), 'the plugin mapping was removed')
+    pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+  end)
+
   -- A buffer can be unloaded between the
   -- snapshot taken by clear_buffer_mappings and the nvim_buf_call that reads
   -- its maps, and nvim_buf_call raises on an invalid handle. The window itself
