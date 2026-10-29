@@ -17,6 +17,7 @@ local register = require('direct.register')
 local ui = require('direct.ui')
 local highlight = require('direct.highlight')
 local constants = require('direct.constants')
+local folding = require('direct.folding')
 local reconcile_undone_materialization
 local remove_expanded_subtree
 local recorded_row_text
@@ -1944,22 +1945,7 @@ local function set_options(bufnr)
     callback = function() reconcile_undone_materialization(bufnr) end,
     desc = 'direct: reconcile child rows when undo removes a materialization',
   })
-  vim.keymap.set('n', 'zo', function() M.expand() end,
-    { buffer = bufnr, silent = true, desc = 'Expand one direct directory level' })
-  vim.keymap.set('n', 'za', function() M.toggle() end,
-    { buffer = bufnr, silent = true, desc = 'Toggle direct directory expansion' })
-  vim.keymap.set('n', 'zc', function() M.collapse() end,
-    { buffer = bufnr, silent = true, desc = 'Collapse direct directory rows' })
-  vim.keymap.set('n', 'zO', function() M.expand_recursive() end,
-    { buffer = bufnr, silent = true, desc = 'Recursively expand direct directories' })
-  vim.keymap.set('n', 'zA', function() M.toggle_recursive() end,
-    { buffer = bufnr, silent = true, desc = 'Recursively toggle direct directories' })
-  vim.keymap.set('n', 'zC', function() M.collapse() end,
-    { buffer = bufnr, silent = true, desc = 'Recursively collapse direct directories' })
-  vim.keymap.set('n', 'zR', function() M.expand_all() end,
-    { buffer = bufnr, silent = true, desc = 'Expand all direct directories' })
-  vim.keymap.set('n', 'zM', function() M.collapse_all() end,
-    { buffer = bufnr, silent = true, desc = 'Collapse all direct directories' })
+  folding.install_mappings(bufnr, M)
 end
 
 -- Return the destination left by a successful create/move, or nil for removals.
@@ -2503,117 +2489,47 @@ local function record_identity(rec)
   return rec.identity or path_identity(rec.path)
 end
 
--- expand_recursively expands directory rows in depth-first order. Identity
--- tracking along the active ancestry prevents a symlink back to an ancestor
--- from making the default (unlimited) walk infinite.
-local function expand_recursively(buffer, start_ids)
-  local bufnr = vim.api.nvim_get_current_buf()
+-- Internal adapter for the folding command module. Keep row marks and state
+-- owned by this buffer model; folding.lua only receives these narrow accessors.
+function M._folding_context(bufnr)
   local state = states[bufnr]
-  if not state then return nil, 'directory state is unavailable' end
-  local configured_depth = require('direct.config').options.max_recursive_expand_depth
-  local max_depth = configured_depth == false and math.huge or configured_depth
-  local stack, ancestors = {}, {}
-  for index = #start_ids, 1, -1 do
-    stack[#stack + 1] = { id = start_ids[index], depth = 1 }
-  end
-
-  while #stack > 0 do
-    local task = table.remove(stack)
-    if task.exit then
-      ancestors[task.key] = nil
-    else
-      local rec = state.rows[task.id]
-      if rec and is_dir_line(rec.name) then
-        local identity = record_identity(rec)
-        local key = identity and (identity.inode and ('inode:' .. identity.inode)
-          or ('path:' .. identity.path)) or ('id:' .. tostring(rec.id))
-        if not ancestors[key] then
-          ancestors[key] = true
-          local row = visible_row_for_id(bufnr, state, task.id)
-          if row then
-            local ok, err = buffer:expand(row)
-            if ok == nil then return nil, err end
-            local expansion = state.expanded[task.id]
-            if expansion and task.depth < max_depth then
-              stack[#stack + 1] = { exit = true, key = key }
-              for index = #(expansion.children or {}), 1, -1 do
-                local child = expansion.children[index]
-                if is_dir_line(child.name) then
-                  stack[#stack + 1] = { id = child.id, depth = task.depth + 1 }
-                end
-              end
-            else
-              ancestors[key] = nil
-            end
-          else
-            ancestors[key] = nil
-          end
-        end
+  if not state then return nil end
+  return {
+    get_row_record = function(row) return current_row_record(bufnr, row - 1) end,
+    get_record = function(id) return state.rows[id] end,
+    visible_row_for_id = function(id) return visible_row_for_id(bufnr, state, id) end,
+    is_directory = function(rec) return rec ~= nil and is_dir_line(rec.name) end,
+    identity_for_record = record_identity,
+    is_expanded = function(id) return state.expanded[id] ~= nil end,
+    get_expanded_children = function(id)
+      local expansion = state.expanded[id]
+      return expansion and expansion.children or {}
+    end,
+    get_root_directory_ids = function()
+      local ids = {}
+      for _, id in ipairs(state.root_ids or {}) do
+        local rec = state.rows[id]
+        if rec and is_dir_line(rec.name) then ids[#ids + 1] = id end
       end
-    end
-  end
-  return true
-end
-
-function Buffer:expand_recursive(row)
-  local bufnr = vim.api.nvim_get_current_buf()
-  row = row or vim.api.nvim_win_get_cursor(0)[1]
-  local rec = current_row_record(bufnr, row - 1)
-  if not rec then return nil, 'row identity is unavailable' end
-  if not is_dir_line(rec.name) then return false end
-  return expand_recursively(self, { rec.id })
-end
-
-function Buffer:expand_all()
-  local bufnr = vim.api.nvim_get_current_buf()
-  local state = states[bufnr]
-  if not state then return nil, 'directory state is unavailable' end
-  local starts = {}
-  for _, id in ipairs(state.root_ids or {}) do
-    local rec = state.rows[id]
-    if rec and is_dir_line(rec.name) then starts[#starts + 1] = id end
-  end
-  return expand_recursively(self, starts)
-end
-
-function Buffer:collapse_all()
-  local bufnr = vim.api.nvim_get_current_buf()
-  local state = states[bufnr]
-  if not state then return nil, 'directory state is unavailable' end
-  local first_error
-  for _, id in ipairs(vim.deepcopy(state.root_ids or {})) do
-    if state.expanded[id] then
-      local row = visible_row_for_id(bufnr, state, id)
-      if row then
-        local ok, err = self:collapse(row)
-        if not ok and first_error == nil then first_error = err end
-      end
-    end
-  end
-  if first_error then return false, first_error end
-  return true
+      return ids
+    end,
+  }
 end
 
 function M.expand_recursive()
-  local buffer = M.restore()
-  return buffer:expand_recursive(vim.api.nvim_win_get_cursor(0)[1])
+  return folding.expand_recursive(M)
 end
 
 function M.toggle_recursive()
-  local bufnr = vim.api.nvim_get_current_buf()
-  local rec = current_row_record(bufnr, vim.api.nvim_win_get_cursor(0)[1] - 1)
-  if rec and states[bufnr] and states[bufnr].expanded[rec.id] then
-    return M.collapse()
-  end
-  return M.expand_recursive()
+  return folding.toggle_recursive(M)
 end
 
 function M.expand_all()
-  return M.restore():expand_all()
+  return folding.expand_all(M)
 end
 
 function M.collapse_all()
-  return M.restore():collapse_all()
+  return folding.collapse_all(M)
 end
 
 -- ---------------------------------------------------------------------------
