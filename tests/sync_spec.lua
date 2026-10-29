@@ -122,6 +122,30 @@ H.describe('sync: applying actions', function()
     H.assert_true(undo[2]:find(ws .. '/b.txt\t', 1, true) ~= nil, 'the rm line names the source')
   end)
 
+  H.it('DELETE (last file): leaves the directory empty and records the deletion', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkfile(ws, 'only.txt', { 'only entry' })
+
+    local listing = buffer.list(ws)
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, {})
+    local ok, reason = listing:sync()
+
+    H.assert_true(ok == true, tostring(reason))
+    H.assert_fs_eq(ws, {}, 'the last file is removed')
+    H.assert_buf_eq({ '' }, 0, 'an empty directory is represented by the buffer empty line')
+    H.assert_false(vim.bo.modified, 'successful sync clears modified state')
+    local content = register.content()
+    H.assert_not_nil(content, 'the deleted file was auto-yanked')
+    H.assert_eq(vim.fn.readfile(content .. '/only.txt'), { 'only entry' },
+      'the deleted file is preserved in the register')
+    local undo = history_lines('undo.log')
+    H.assert_eq(undo[1], '#direct-history-v3', 'the log is version-marked')
+    H.assert_true(undo[2]:find('rm\t' .. ws .. '/only.txt\t', 1, true) == 1,
+      'the final deletion is recorded for undo')
+  end)
+
   H.it('DELETE (directory): trashes the tree and yanks it with its trailing slash', function()
     clean_buffers()
     local sb = H.sandbox()
