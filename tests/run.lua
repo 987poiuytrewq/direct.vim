@@ -68,13 +68,14 @@ local H = require('tests.support.harness')
 local verbose = false
 local print_tmp = false
 local filters = {}
+local argument_error
 for _, value in ipairs(arg or {}) do
   if value == '--verbose' or value == '-v' then
     verbose = true
   elseif value == '--print-tmp' then
     print_tmp = true
   elseif value:sub(1, 2) == '--' then
-    -- Unknown flag: ignored so future options do not break older invocations.
+    argument_error = 'unknown option: ' .. value
   else
     filters[#filters + 1] = value
   end
@@ -105,6 +106,16 @@ table.sort(specs, function(a, b) return a.name < b.name end)
 -- ---------------------------------------------------------------------------
 
 local function main()
+  if argument_error then
+    io.stderr:write(argument_error .. '\n')
+    return false
+  end
+
+  if #specs == 0 then
+    io.stderr:write('no specs matched the requested filter(s)\n')
+    return false
+  end
+
   -- Capture the pristine post-boot option/autocmd baseline now that the runtime
   -- files are sourced and `filetype plugin on` has run. Inside main() so a
   -- baseline failure still runs the temp-root cleanup below.
@@ -115,10 +126,6 @@ local function main()
     -- Keep random temp paths out of default output so runs remain comparable.
     io.write(string.format('tmp:  %s\n', base))
   end
-  if #specs == 0 then
-    io.write('no specs matched\n')
-  end
-
   local total_specs, total_passed, total_failed = 0, 0, 0
   for _, spec in ipairs(specs) do
     H.reset_registry()
