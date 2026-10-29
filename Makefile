@@ -1,11 +1,14 @@
 NVIM ?= nvim
 LUAROCKS ?= luarocks
 LUACOV_VERSION ?= 0.17.0
+LUACOV_REPORTERS_VERSION ?= 0.1.0
+NEOVIM_VERSION ?= local
 
 .PHONY: install test coverage coverage-summary check-nvim check-luarocks
 
 install: check-nvim check-luarocks
 	$(LUAROCKS) --lua-version=5.1 --tree=.rocks install luacov $(LUACOV_VERSION)
+	$(LUAROCKS) --lua-version=5.1 --tree=.rocks install luacov-reporters-$(LUACOV_REPORTERS_VERSION)-1.rockspec
 	@assets=$$(find .rocks/lib/luarocks/rocks-5.1/luacov -path '*/src/luacov/reporter/html/static' -type d -print -quit); \
 	  test -n "$$assets" || { echo 'LuaCov HTML assets were not installed' >&2; exit 1; }; \
 	  mkdir -p .rocks/share/lua/5.1/src/luacov/reporter/html; \
@@ -30,7 +33,10 @@ coverage: install
 
 coverage-summary:
 	@test -s coverage/luacov.stats.out || { echo 'Run make coverage before make coverage-summary' >&2; exit 1; }
-	@$(NVIM) --headless -l tests/coverage_summary.lua
+	@printf '## Coverage (Neovim %s)\n\n' '$(NEOVIM_VERSION)' > coverage/summary.md
+	@printf '```text\n' >> coverage/summary.md
+	@cat coverage/summary.out >> coverage/summary.md
+	@printf '```\n' >> coverage/summary.md
 	@if test -n "$$GITHUB_STEP_SUMMARY"; then cat coverage/summary.md >> "$$GITHUB_STEP_SUMMARY"; else cat coverage/summary.md; fi
 
 check-nvim:

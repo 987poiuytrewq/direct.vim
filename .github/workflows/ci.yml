@@ -56,7 +56,7 @@ jobs:
 
       - name: Add coverage to the run summary
         if: always() && hashFiles('coverage/summary.out') != ''
-        run: make coverage-summary
+        run: make coverage-summary NEOVIM_VERSION='${{ matrix.neovim-version }}'
 
       - name: Publish coverage report
         if: always()
