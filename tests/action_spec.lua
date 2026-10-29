@@ -254,6 +254,29 @@ H.describe('action', function()
     H.assert_eq(vim.fn.isdirectory(sb.root .. '/newdir'), 1, 'directory created')
   end)
 
+  H.it('execute dispatches by action kind and the legacy do method delegates to it', function()
+    local sb = H.sandbox()
+    local dispatched = M.Touch(sb.root .. '/via-execute.txt')
+    H.assert_true(M.execute(dispatched) == true, 'the kind executor creates the file')
+    H.assert_true(H.exists(sb.root, 'via-execute.txt'), 'the dispatched action ran')
+
+    local legacy = M.Touch(sb.root .. '/via-do.txt')
+    H.assert_true(legacy['do']() == true, 'the compatibility method uses execute dispatch')
+    H.assert_true(H.exists(sb.root, 'via-do.txt'), 'the compatibility action ran')
+
+    local ok, err = M.execute({ name = 'unknown' })
+    H.assert_nil(ok, 'an unknown action has no executor')
+    H.assert_true(tostring(err):find('no executor', 1, true) ~= nil, tostring(err))
+
+    local mismatch = M.Touch(sb.root .. '/must-not-run.txt')
+    mismatch.name = 'mkdir'
+    ok, err = M.execute(mismatch)
+    H.assert_nil(ok, 'an action cannot dispatch through another kind')
+    H.assert_true(tostring(err):find('kind mismatch', 1, true) ~= nil, tostring(err))
+    H.assert_false(H.exists(sb.root, 'must-not-run.txt'),
+      'a mismatched action did not run its original executor')
+  end)
+
   H.it('creation and move actions refuse occupied destinations without overwriting', function()
     local sb = H.sandbox()
     H.mkfile(sb.root, 'source.txt', { 'source' })

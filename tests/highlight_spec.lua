@@ -67,7 +67,7 @@ H.describe('listing filename highlights', function()
     vim.bo[bufnr].syntax = 'direct'
     vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
       '.root-dir/', '.root-file', '  .child-dir/', '    .deep-file',
-      'visible-dir/', 'visible-file', '  child-dir/', 'sample.js', 'Dockerfile',
+      '.d/', '.f', 'a/', 'visible-dir/', 'visible-file', '  child-dir/', 'sample.js', 'Dockerfile',
       'Makefile', 'README.md',
     })
 
@@ -75,12 +75,15 @@ H.describe('listing filename highlights', function()
     H.assert_eq(syntax_group(2, 1), 'DirectHiddenFile', 'root hidden file')
     H.assert_eq(syntax_group(3, 3), 'DirectHiddenDirectory', 'indented hidden directory')
     H.assert_eq(syntax_group(4, 5), 'DirectHiddenFile', 'deeply indented hidden file')
-    H.assert_eq(syntax_group(5, 1), 'DirectDirectory', 'visible directory')
-    H.assert_true(syntax_group(6, 1) ~= 'DirectFile', 'visible file has no Direct group')
-    H.assert_eq(syntax_group(7, 3), 'DirectDirectory', 'indented visible directory')
+    H.assert_eq(syntax_group(5, 1), 'DirectHiddenDirectory', 'one-character hidden directory')
+    H.assert_eq(syntax_group(6, 1), 'DirectHiddenFile', 'one-character hidden file')
+    H.assert_eq(syntax_group(7, 1), 'DirectDirectory', 'one-character visible directory')
+    H.assert_eq(syntax_group(8, 1), 'DirectDirectory', 'visible directory')
+    H.assert_true(syntax_group(9, 1) ~= 'DirectFile', 'visible file has no Direct group')
+    H.assert_eq(syntax_group(10, 3), 'DirectDirectory', 'indented visible directory')
     for _, case in ipairs({
-      { 6, 'visible-file' }, { 8, 'sample.js' }, { 9, 'Dockerfile' },
-      { 10, 'Makefile' }, { 11, 'README.md' },
+      { 9, 'visible-file' }, { 11, 'sample.js' }, { 12, 'Dockerfile' },
+      { 13, 'Makefile' }, { 14, 'README.md' },
     }) do
       H.assert_eq(syntax_group(case[1], 1), '', case[2] .. ' has no filename syntax highlight')
     end
@@ -89,6 +92,8 @@ H.describe('listing filename highlights', function()
     }, 'visible directory group links to Directory by default')
     H.assert_eq(vim.api.nvim_get_hl(0, { name = 'DirectFile', link = true }), {},
       'visible file group is not defined')
+    H.assert_eq(vim.b[bufnr].current_syntax, 'direct',
+      'the syntax file marks the buffer as loaded')
   end)
 
   H.it('leaves the icon namespace uncreated when folder icons are disabled', function()

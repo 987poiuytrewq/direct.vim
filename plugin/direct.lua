@@ -5,6 +5,7 @@
 -- Direct-buffer `BufWriteCmd` autocmds live in this augroup, created by
 -- `direct.buffer`; do not reference the legacy Vimscript entry points.
 local group = vim.api.nvim_create_augroup('direct', { clear = true })
+local constants = require('direct.constants')
 
 -- netrw neutralisation runs at three points: clear the `FileExplorer` group at
 -- load (pcall, when it already exists), again synchronously on `VimEnter`, and
@@ -39,7 +40,7 @@ vim.api.nvim_create_autocmd('BufEnter', {
     if name == '' then
       return
     end
-    if vim.bo[args.buf].filetype == 'direct' then
+    if vim.bo[args.buf].filetype == constants.FILETYPE then
       return
     end
     if require('direct.fs').is_dir(name) then

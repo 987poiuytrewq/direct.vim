@@ -5,6 +5,7 @@
 local M = {}
 
 local fs = require('direct.fs')
+local constants = require('direct.constants')
 
 -- normalize does not absolutise, so abspath follows it; the result is not symlink-resolved (fs.same_path covers that).
 function M.root(input)
@@ -32,7 +33,7 @@ end
 
 -- Callers must branch on nil, err rather than assume the directory exists.
 function M.data_dir(name)
-  local dir = M.join(M.data_home(), 'direct', name)
+  local dir = M.join(M.data_home(), constants.DATA_DIRECTORY, name)
   local ok, err = fs.mkdirp(dir)
   if not ok then
     return nil, err
