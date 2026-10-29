@@ -29,6 +29,28 @@ event.
 
 Run `:checkhealth direct` to confirm the version and the data home in use.
 
+## Development and coverage
+
+The test suite uses Neovim's embedded Lua and has no runtime test dependencies:
+
+```sh
+make test
+```
+
+To install the optional coverage tooling locally, install LuaRocks (configured
+for Lua 5.1, as used by Neovim's LuaJIT) and run:
+
+```sh
+make install
+make coverage
+```
+
+`make install` checks for Neovim >= 0.12 and installs LuaCov into the ignored
+`.rocks/` directory. Coverage reports are written to `coverage/index.html` and
+`coverage/summary.out`. The normal `make test` run does not need LuaRocks or
+LuaCov. CI runs `make coverage` for each Neovim version and publishes each HTML
+report as a downloadable artifact on the workflow run.
+
 ## Install
 
 Install with your favourite package manager. For example, with

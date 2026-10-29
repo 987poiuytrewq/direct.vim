@@ -28,6 +28,19 @@ local this_abs = vim.fn.fnamemodify(this_file, ':p')
 local tests_dir = vim.fs.dirname(this_abs)
 local root = vim.fs.dirname(tests_dir)
 
+-- Coverage is opt-in so the normal test run remains zero-dependency. LuaCov is
+-- installed into the project-local .rocks tree by `make install`.
+local coverage = vim.env.DIRECT_COVERAGE == '1'
+if coverage then
+  local rocks_lua = vim.fs.joinpath(root, '.rocks', 'share', 'lua', '5.1')
+  package.path = table.concat({
+    rocks_lua .. '/?.lua',
+    rocks_lua .. '/?/init.lua',
+    package.path,
+  }, ';')
+  require('luacov')
+end
+
 -- Boot step 1: prepend the repo root.
 vim.opt.runtimepath:prepend(root)
 

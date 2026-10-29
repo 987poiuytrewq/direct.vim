@@ -46,5 +46,20 @@ jobs:
       - name: Show the resolved Neovim version
         run: nvim --version | head -n 1
 
-      - name: Run the test suite
-        run: nvim --headless -l tests/run.lua
+      - name: Install LuaRocks
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes lua5.1 luarocks
+
+      - name: Run tests and generate coverage
+        run: make coverage
+
+      - name: Publish coverage report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-${{ matrix.neovim-version }}
+          path: |
+            coverage/index.html
+            coverage/summary.out
+          if-no-files-found: warn
