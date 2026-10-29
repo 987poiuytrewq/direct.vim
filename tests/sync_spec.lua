@@ -7,6 +7,12 @@ local fs = require('direct.fs')
 local paths = require('direct.paths')
 local history = require('direct.history')
 local register = require('direct.register')
+local action = require('direct.action')
+local HEADER = history.HEADER
+
+local function decode_record(lines, index)
+  return vim.json.decode(lines[index])
+end
 
 local function clean_buffers()
   pcall(vim.cmd, '%bwipeout!')
@@ -76,9 +82,9 @@ H.describe('sync: applying actions', function()
     H.assert_fs_eq(ws, { 'a.txt', 'b.txt' })
     H.assert_false(vim.bo.modified, 're-listed and nomodified')
     H.assert_eq(history_lines('undo.log'),
-      { '#direct-history-v3', 'touch\t' .. ws .. '/b.txt' }, 'exactly one touch line')
-    H.assert_eq(history_lines('redo.log'), { '#direct-history-v3' },
-      'a new action resets the redo branch to its marker')
+      { HEADER, action.serialize(action.Touch(ws .. '/b.txt')) }, 'exactly one touch record')
+    H.assert_eq(history_lines('redo.log'), { HEADER },
+      'a new action resets the redo branch to its header')
   end)
 
   H.it('ADD (directory + dirs-then-name ordering): mkdir lines are logged first', function()
@@ -92,10 +98,10 @@ H.describe('sync: applying actions', function()
     H.assert_true(ok == true, 'sync applied')
     H.assert_fs_eq(ws, { 'adir/', 'zdir/', 'afile.txt', 'keep.txt' })
     H.assert_eq(history_lines('undo.log'), {
-      '#direct-history-v3',
-      'mkdir\t' .. ws .. '/adir/',
-      'mkdir\t' .. ws .. '/zdir/',
-      'touch\t' .. ws .. '/afile.txt',
+      HEADER,
+      action.serialize(action.MakeDirectory(ws .. '/adir/')),
+      action.serialize(action.MakeDirectory(ws .. '/zdir/')),
+      action.serialize(action.Touch(ws .. '/afile.txt')),
     }, 'directories first, then files, each sorted')
   end)
 
@@ -117,9 +123,10 @@ H.describe('sync: applying actions', function()
       'the deleted file was copied into the register before removal')
     H.assert_notified('Yanked ' .. ws .. '/b.txt', vim.log.levels.INFO)
     local undo = history_lines('undo.log')
-    H.assert_eq(undo[1], '#direct-history-v3', 'the log is version-marked')
-    H.assert_true(undo[2]:sub(1, 3) == 'rm\t', 'an rm line was logged')
-    H.assert_true(undo[2]:find(ws .. '/b.txt\t', 1, true) ~= nil, 'the rm line names the source')
+    H.assert_eq(undo[1], HEADER, 'the JSONL header is first')
+    local record = decode_record(undo, 2)
+    H.assert_eq(record.op, 'rm', 'an rm record was logged')
+    H.assert_eq(record.src, ws .. '/b.txt', 'the rm record names the source')
   end)
 
   H.it('DELETE (last file): leaves the directory empty and records the deletion', function()
@@ -141,8 +148,8 @@ H.describe('sync: applying actions', function()
     H.assert_eq(vim.fn.readfile(content .. '/only.txt'), { 'only entry' },
       'the deleted file is preserved in the register')
     local undo = history_lines('undo.log')
-    H.assert_eq(undo[1], '#direct-history-v3', 'the log is version-marked')
-    H.assert_true(undo[2]:find('rm\t' .. ws .. '/only.txt\t', 1, true) == 1,
+    H.assert_eq(undo[1], HEADER, 'the JSONL header is first')
+    H.assert_eq(decode_record(undo, 2).src, ws .. '/only.txt',
       'the final deletion is recorded for undo')
   end)
 
@@ -165,7 +172,7 @@ H.describe('sync: applying actions', function()
       'the yanked directory keeps its contents')
     H.assert_notified('Yanked ' .. ws .. '/sub/', vim.log.levels.INFO)
     local undo = history_lines('undo.log')
-    H.assert_true(undo[2]:sub(1, 6) == 'rmdir\t', 'an rmdir line was logged')
+    H.assert_eq(decode_record(undo, 2).op, 'rmdir', 'an rmdir record was logged')
   end)
 
   -- Exercise both halves end to end: delete through `:write`, then paste the
@@ -230,7 +237,7 @@ H.describe('sync: applying actions', function()
     H.assert_fs_eq(ws, { 'b.txt' })
     H.assert_eq(vim.fn.readfile(ws .. '/b.txt'), { 'a' }, 'content survived the move')
     H.assert_eq(history_lines('undo.log'),
-      { '#direct-history-v3', 'mv\t' .. ws .. '/a.txt\t' .. ws .. '/b.txt' })
+      { HEADER, action.serialize(action.Move(ws .. '/a.txt', ws .. '/b.txt')) })
   end)
 
   H.it('RENAME (directory): moves the tree with trailing slashes on both ends', function()
@@ -245,7 +252,7 @@ H.describe('sync: applying actions', function()
     H.assert_true(ok == true, 'sync applied')
     H.assert_fs_eq(ws, { 'new/', 'new/inner.txt' })
     H.assert_eq(history_lines('undo.log'),
-      { '#direct-history-v3', 'mv\t' .. ws .. '/old/\t' .. ws .. '/new/' })
+      { HEADER, action.serialize(action.Move(ws .. '/old/', ws .. '/new/')) })
   end)
 
   H.it('notifies a single joined summary of the applied actions', function()
@@ -658,8 +665,8 @@ H.describe('sync with expanded children', function()
       'the root file is the only auto-yanked entry')
     local undo = history_lines('undo.log')
     H.assert_eq(#undo, 2, 'only one root deletion is recorded in history')
-    H.assert_true(undo[2]:find('rm\t' .. ws .. '/root.txt\t', 1, true) == 1,
-      'the history action is the root deletion')
+    H.assert_eq(decode_record(undo, 2).src, ws .. '/root.txt',
+      'the history record is the root deletion')
   end)
 
   H.it('syncs visible subtree edits without deleting rows hidden by undo', function()
@@ -1874,7 +1881,7 @@ H.describe('sync with expanded children', function()
     H.assert_fs_eq(ws, { 'root.txt' }, 'one directory removal covers its children')
     local undo = history_lines('undo.log')
     H.assert_eq(#undo, 2, 'one rmdir action is recorded, not duplicate child removals')
-    H.assert_true(undo[2]:find('rmdir\t' .. ws .. '/sub/\t', 1, true) == 1,
+    H.assert_eq(decode_record(undo, 2).src, ws .. '/sub/',
       'history contains the directory-tree removal')
   end)
 
@@ -2551,10 +2558,10 @@ H.describe('sync: safety guards', function()
       'the ordinary descendant file moved with its parent')
     H.assert_eq(vim.uv.fs_lstat(fifo).type, 'fifo', 'the root FIFO remains untouched')
     H.assert_eq(history_lines('undo.log'), {
-      '#direct-history-v3',
-      'mv\t' .. ws .. '/parent/\t' .. ws .. '/moved/',
+      HEADER,
+      action.serialize(action.Move(ws .. '/parent/', ws .. '/moved/')),
     }, 'the successful directory move is recorded in history')
-    H.assert_eq(history_lines('redo.log'), { '#direct-history-v3' },
+    H.assert_eq(history_lines('redo.log'), { HEADER },
       'the successful move leaves redo history empty')
   end)
 
@@ -2612,8 +2619,8 @@ H.describe('sync: safety guards', function()
     H.assert_eq(vim.fn.readfile(target .. '/hidden.log', 'b'), { 'target stays untouched', '' },
       'the symlink target remains untouched')
     H.assert_eq(history_lines('undo.log'), {
-      '#direct-history-v3',
-      'mv\t' .. link .. '\t' .. ws .. '/renamed-link',
+      HEADER,
+      action.serialize(action.Move(link, ws .. '/renamed-link')),
     }, 'exactly one symlink rename is recorded')
   end)
 
@@ -2675,7 +2682,7 @@ H.describe('sync: safety guards', function()
     H.assert_true(ok == true, 'case-only sync succeeds: ' .. tostring(reason))
     H.assert_eq(vim.fn.readfile(ws .. '/Foo.txt'), { 'case-only content' }, 'content is preserved')
     H.assert_eq(history_lines('undo.log'), {
-      '#direct-history-v3', 'mv\t' .. ws .. '/foo.txt\t' .. ws .. '/Foo.txt',
+      HEADER, action.serialize(action.Move(ws .. '/foo.txt', ws .. '/Foo.txt')),
     }, 'the original and destination spellings are logged')
     H.assert_true(history.undo() ~= nil, 'the rename can be undone')
     H.assert_eq(vim.fn.readfile(ws .. '/foo.txt'), { 'case-only content' }, 'undo restores old spelling')
@@ -2752,8 +2759,11 @@ H.describe('sync: safety guards', function()
     H.assert_eq(vim.uv.fs_readlink(ws .. '/c'), target,
       'the directory symlink reaches c without moving its target')
     H.assert_eq(history_lines('undo.log'), {
-      '#direct-history-v3',
-      'g\t2\t' .. ws .. '/a/\t' .. ws .. '/b/\t' .. ws .. '/b\t' .. ws .. '/c',
+      HEADER,
+      action.serialize(action.Group({
+        action.Move(ws .. '/a/', ws .. '/b/'),
+        action.Move(ws .. '/b', ws .. '/c'),
+      })),
     }, 'group history keeps the original directory and symlink path spellings')
   end)
 
@@ -2794,21 +2804,22 @@ H.describe('sync: safety guards', function()
     H.assert_notified(tmp, 'the orphaned staged path is named, never silent')
     H.assert_eq(vim.fn.readfile(tmp), { 'A' },
       'the orphaned temp still holds the entry moved out of a.txt')
-    -- No action ran after the failed staging and no history line was written.
+    -- No action ran after the failed staging. Preflight may have initialized the
+    -- empty stack, but no history record was written.
     H.assert_eq(vim.fn.readfile(ws .. '/b.txt'), { 'B' },
       'b.txt is untouched (its staging rename failed before it moved)')
-    H.assert_eq(history_lines('undo.log'), {}, 'no history was written')
+    H.assert_eq(history_lines('undo.log'), { HEADER }, 'no history record was written')
     H.assert_true(vim.bo.modified, 'the refused sync leaves the buffer modified')
   end)
 
-  H.it('a path the history framing cannot represent is refused before any change', function()
+  H.it('a control-character path is refused before any change', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
     H.mkfile(ws, 'a.txt', { 'a' })
 
     local buf = buffer.list(ws)
-    -- A tab would break the `NAME\tfield...` line framing of the history log.
+    -- Control bytes are invalid JSONL path strings and must be refused early.
     vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'a.txt', 'we\tird' })
     H.capture_messages()
     local ok, reason = buf:sync()
@@ -2868,7 +2879,7 @@ H.describe('sync: safety guards', function()
     H.assert_notified('Action failed - Created c.txt', vim.log.levels.ERROR)
     H.assert_notified('1 action(s) failed', vim.log.levels.ERROR)
     H.assert_eq(history_lines('undo.log'),
-      { '#direct-history-v3', 'touch\t' .. ws .. '/b.txt' },
+      { HEADER, action.serialize(action.Touch(ws .. '/b.txt')) },
       'only the successful action reached history')
 
     H.assert_true(history.undo() ~= nil, 'the logged success is undoable')

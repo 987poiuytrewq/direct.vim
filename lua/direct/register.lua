@@ -4,9 +4,6 @@
 
 local M = {}
 
--- Names containing a space or tab cannot round-trip through serialized p/up
--- lists, so reject them both when yanking and when answering a paste prompt.
-
 M.fs = require('direct.fs')
 M.paths = require('direct.paths')
 M.action = require('direct.action')
@@ -21,10 +18,7 @@ M.relist = nil
 -- yanked entry directory), or nil when no yank has happened, or nil, err when
 -- the register data dir cannot be resolved.
 function M.content()
-  local dir, err = M.paths.data_dir('register')
-  if not dir then
-    return nil, err
-  end
+  local dir = M.paths.data_dir_path('register')
   local content_path = M.paths.join(dir, 'content')
   if vim.fn.filereadable(content_path) ~= 1 then
     return nil
@@ -41,18 +35,20 @@ function M.yank(sources)
   if type(sources) ~= 'table' then
     return nil, 'register.yank: a list of sources is required'
   end
-  local dir, err = M.paths.data_dir('register')
-  if not dir then
-    M.ui.notify('direct: register unavailable: ' .. tostring(err),
-      vim.log.levels.ERROR)
-    return nil, err
-  end
-  -- Validate every name and source before creating the digest directory, so a
-  -- refused yank leaves no partial register entry.
+  -- Validate all user paths, source existence, and basename components before
+  -- classifying logs: a refused yank must not reset recognized legacy history.
   for _, src in ipairs(sources) do
+    local valid, path_err = M.paths.validate_canonical_path(src)
+    if not valid then
+      local message = 'cannot yank: ' .. tostring(path_err)
+      M.ui.notify('direct: ' .. message, vim.log.levels.ERROR)
+      return nil, message
+    end
     local st = M.fs.stat(src)
     if not st then
-      return nil, 'cannot yank: ' .. tostring(src)
+      local message = 'cannot yank: ' .. tostring(src)
+      M.ui.notify('direct: ' .. message, vim.log.levels.ERROR)
+      return nil, message
     end
     local name = M.fs.basename(M.fs.abspath(src))
     local reason = M.action.entry_name_reason(name)
@@ -61,6 +57,14 @@ function M.yank(sources)
       M.ui.notify('direct: ' .. msg, vim.log.levels.ERROR)
       return nil, msg
     end
+  end
+  local preflight, preflight_err = M.history.preflight(sources)
+  if not preflight then return nil, preflight_err end
+  local dir, err = M.paths.ensure_data_dir('register')
+  if not dir then
+    M.ui.notify('direct: register unavailable: ' .. tostring(err),
+      vim.log.levels.ERROR)
+    return nil, err
   end
   local sorted = vim.deepcopy(sources)
   table.sort(sorted)
@@ -145,6 +149,22 @@ end
 -- existing call shapes (`paste(dst)`, `paste(dst, true)`, `paste(dst, false)`)
 -- are unchanged.
 function M.paste(dst, relist_flag, name)
+  local valid, path_err = M.paths.validate_path(dst)
+  if not valid then
+    M.ui.notify('direct: cannot paste: ' .. tostring(path_err), vim.log.levels.ERROR)
+    return nil, path_err
+  end
+  if name ~= nil and name ~= '' then
+    local name_err = M.action.entry_name_reason(name)
+    if name_err then
+      local message = 'cannot paste: entry name ' .. name_err .. ': ' .. tostring(name)
+      M.ui.notify('direct: ' .. message, vim.log.levels.ERROR)
+      return nil, message
+    end
+  end
+  dst = M.paths.root(dst)
+  local preflight, preflight_err = M.history.preflight({ dst })
+  if not preflight then return nil, preflight_err end
   local src, cerr = M.content()
   if src == nil then
     if cerr ~= nil then
@@ -161,16 +181,8 @@ function M.paste(dst, relist_flag, name)
       vim.log.levels.ERROR)
     return nil, 'cannot read register'
   end
-  -- the register dir is PERSISTED, untrusted data. The Python
-  -- predecessor wrote entry names here with no validation into the SAME dir
-  -- (the Python-era register module), so a legacy name carrying the ' '
-  -- ENTRY_SEPARATOR (or a control char) exists on disk even though Lua refuses
-  -- to WRITE one. Feeding such a name to action.Paste would enter it in
-  -- `renames` and serialize a ' '-joined undo line that splits into two names
-  -- on reload, so Unpaste would delete an unrelated file in the paste
-  -- destination. Validate every name BEFORE the Paste is built: keep only the
-  -- separator-free names that can actually round-trip, and notify on each
-  -- dropped one.
+  -- The persisted register is untrusted. Validate each entry as one basename
+  -- component before building the JSONL record or copying it.
   local pasteable = {}
   for _, name in ipairs(names) do
     local reason = M.action.entry_name_reason(name)
@@ -187,10 +199,8 @@ function M.paste(dst, relist_flag, name)
     M.ui.notify('Nothing to paste', vim.log.levels.WARN)
     return nil
   end
-  -- `:DirectPasteAs {name}` renames the first pasted entry (the
-  -- smallest source name, which is the first pair Paste's sorted `renames`
-  -- walks). The name must be representable for the same reason a yanked name
-  -- must: a space splits the destination list and a tab breaks the history line.
+  -- `:DirectPasteAs {name}` renames the first pasted entry (the smallest source
+  -- name, which is the first pair Paste's sorted `renames` walks).
   local dst_names = vim.deepcopy(pasteable)
   if name ~= nil and name ~= '' then
     local name_reason = M.action.entry_name_reason(name)
@@ -203,14 +213,8 @@ function M.paste(dst, relist_flag, name)
     dst_names[1] = name
   end
   local paste_action = M.action.Paste(src, dst, pasteable, dst_names)
-  -- this is the SECOND ingress into the `NAME\tfield...` framing.
-  -- The register entry NAMES above are validated, but the destination `dst` is
-  -- not: a destination such as `de<TAB>st` would serialize into a corrupted
-  -- line, `deserialize` would split it into extra fields, the reversal would
-  -- target a nonexistent path (a silent no-op whose message still claimed
-  -- success) and a second undo would desync differently. Refuse through the
-  -- SAME `action.serialize` guard the persisted undo line will itself pass
-  -- BEFORE any copy: nothing is written and no history line is produced.
+  -- Validate the exact record before copying; a malformed path must not create
+  -- a destination that cannot be undone.
   local _, unsafe = M.action.serialize(paste_action)
   if unsafe ~= nil then
     local msg = 'cannot paste: unrepresentable path: ' .. tostring(unsafe)

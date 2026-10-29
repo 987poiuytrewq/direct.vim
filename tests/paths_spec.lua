@@ -101,6 +101,24 @@ H.describe('paths', function()
     H.assert_eq(vim.fn.isdirectory(dir), 1, 'data_dir is created on demand')
   end)
 
+  H.it('data_dir_path() is pure and ensure_data_dir() creates its result', function()
+    local sb = H.sandbox()
+    local expected = vim.fs.joinpath(sb.data_home, 'direct', 'history')
+    local resolved = paths.data_dir_path('history')
+    H.assert_eq(resolved, expected, 'pure resolver returns the expected path')
+    H.assert_eq(vim.fn.isdirectory(vim.fs.dirname(resolved)), 0,
+      'pure resolution did not create the data directory')
+    H.assert_eq(paths.ensure_data_dir('history'), expected,
+      'creating resolver returns the resolved path')
+    H.assert_eq(vim.fn.isdirectory(expected), 1, 'creating resolver created it')
+  end)
+
+  H.it('valid_utf8 rejects malformed sequences and accepts Unicode', function()
+    H.assert_true(paths.valid_utf8('naïve/猫'), 'valid multibyte text')
+    H.assert_false(paths.valid_utf8('bad\255path'), 'invalid lead byte')
+    H.assert_false(paths.valid_utf8('bad\192\128'), 'overlong sequence')
+  end)
+
   H.it('data_dir() returns nil, err when <data_home>/direct is a file', function()
     local sb = H.sandbox()
     H.mkfile(sb.data_home, 'direct', { 'i am a file' })

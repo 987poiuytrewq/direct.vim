@@ -5,9 +5,10 @@ local H = require('tests.support.harness')
 local history = require('direct.history')
 local action = require('direct.action')
 local fs = require('direct.fs')
+local log = require('direct.log')
 local paths = require('direct.paths')
 
-local MARKER = '#direct-history-v3'
+local MARKER = history.HEADER
 
 H.describe('history', function()
   local function history_dir(sb)
@@ -221,10 +222,9 @@ H.describe('history', function()
 
     local undo_path = vim.fs.joinpath(history_dir(sb), 'undo.log')
     local redo_path = vim.fs.joinpath(history_dir(sb), 'redo.log')
-    H.assert_eq(vim.fn.readfile(undo_path),
-      { '#direct-history-v3',
-        'mv\t' .. sb.root .. '/a.txt\t' .. sb.root .. '/b.txt' },
-      'the version marker plus one undo line is recorded')
+    local record = action.serialize(move)
+    H.assert_eq(vim.fn.readfile(undo_path), { MARKER, record },
+      'the JSONL header plus one canonical record is recorded')
 
     -- The reversal of the move is Move(b -> a); make fs.rename fail so the
     -- undo cannot execute. cwd is the workspace so the failure message is
@@ -240,23 +240,20 @@ H.describe('history', function()
     restore()
 
     H.assert_notified('Failed to undo action - Moved b.txt to a.txt')
-    H.assert_eq(vim.fn.readfile(undo_path),
-      { '#direct-history-v3',
-        'mv\t' .. sb.root .. '/a.txt\t' .. sb.root .. '/b.txt' },
-      'the original line was pushed back onto undo.log')
-    H.assert_eq(vim.fn.readfile(redo_path), { '#direct-history-v3' },
-      'nothing was pushed to the redo log; it holds only the marker')
+    H.assert_eq(vim.fn.readfile(undo_path), { MARKER, record },
+      'the original JSON record was restored to undo.log')
+    H.assert_eq(vim.fn.readfile(redo_path), { MARKER },
+      'nothing was pushed to redo.log')
 
     -- With the stub restored the same undo succeeds and re-logs the reversal.
     H.assert_true(history.undo() ~= nil, 'undo succeeds after the stub is restored')
     H.assert_true(fs.exists(sb.root .. '/a.txt'), 'file restored')
     H.assert_false(fs.exists(sb.root .. '/b.txt'), 'renamed name gone')
-    H.assert_eq(vim.fn.readfile(undo_path), { '#direct-history-v3' },
-      'undo.log drained back to the marker')
+    H.assert_eq(vim.fn.readfile(undo_path), { MARKER },
+      'undo.log drained back to the header')
     H.assert_eq(vim.fn.readfile(redo_path),
-      { '#direct-history-v3',
-        'mv\t' .. sb.root .. '/b.txt\t' .. sb.root .. '/a.txt' },
-      'the reversal was pushed to redo.log after the marker')
+      { MARKER, action.serialize(action.Move(sb.root .. '/b.txt', sb.root .. '/a.txt')) },
+      'the inverse record was appended to redo.log')
   end)
 
   H.it('log() after an undo clears the redo log', function()
@@ -274,23 +271,17 @@ H.describe('history', function()
     local touch = action.Touch(sb.root .. '/c.txt')
     touch['do']()
     history.log(touch)
-    H.assert_eq(vim.fn.readfile(redo_path), { '#direct-history-v3' },
-      'log() reset the redo log to its marker')
+    H.assert_eq(vim.fn.readfile(redo_path), { MARKER },
+      'log() resets redo to its header')
 
     H.capture_messages()
     H.assert_nil(history.redo(), 'redo is now a no-op')
     H.assert_notified('Nothing to redo')
   end)
 
-  -- The Python predecessor wrote undo.log/redo.log in this same
-  -- directory with a format whose separator information is destroyed when the
-  -- line is written, so no name-level guard can make a legacy line safe to
-  -- replay. The Lua history therefore version-marks its logs and refuses to
-  -- execute a log it did not write. This is the OBSERVABLE oracle: the foreign
-  -- `p` line names `my file.txt`, which splits into `my` + `file.txt` on reload;
-  -- before the gate, undo replayed it as an Unpaste and permanently deleted the
-  -- unrelated ws/my and ws/file.txt.
-  H.it('a foreign (Python-era) log is quarantined, never executed', function()
+  -- Recognized predecessor logs are discarded with a warning, never replayed.
+  -- Unknown or malformed files instead remain byte-identical and block actions.
+  H.it('a recognized markerless Python log is reset, never executed or backed up', function()
     local sb = H.sandbox()
     local hist = history_dir(sb)
     local ws = H.mkdir(sb.root, 'ws')
@@ -305,7 +296,7 @@ H.describe('history', function()
     H.capture_messages()
     local res = history.undo()
     H.assert_nil(res, 'a foreign log yields no undo action')
-    H.assert_notified('Ignoring history written by an older version')
+    H.assert_notified('resetting legacy or empty undo history')
 
     -- The deleted-file oracle: these readfile calls raise E484 if the foreign
     -- line is ever executed.
@@ -314,11 +305,10 @@ H.describe('history', function()
     H.assert_eq(vim.fn.readfile(ws .. '/file.txt'), { 'UNRELATED-B' },
       'the unrelated ws/file.txt survives with its content')
 
-    -- Quarantined aside verbatim: the data survives but is inert.
     local undo_path = vim.fs.joinpath(history_dir(sb), 'undo.log')
-    H.assert_false(fs.exists(undo_path), 'the foreign undo.log was moved aside')
-    H.assert_eq(vim.fn.readfile(undo_path .. '.legacy'), { legacy_line },
-      'the foreign log is preserved verbatim as <name>.legacy')
+    H.assert_eq(vim.fn.readfile(undo_path), { MARKER },
+      'the recognized legacy log was reset to a header-only JSONL file')
+    H.assert_false(fs.exists(undo_path .. '.legacy'), 'no backup file was created')
 
     -- With the foreign log gone, a second undo sees empty history.
     H.capture_messages()
@@ -326,60 +316,57 @@ H.describe('history', function()
     H.assert_notified('Nothing to undo')
   end)
 
-  H.it('a foreign log with existing .legacy names is quarantined to .legacy.<n>', function()
+  H.it('an unknown log is preserved even when legacy backup names exist', function()
     local sb = H.sandbox()
     local hist = history_dir(sb)
     local undo_path = vim.fs.joinpath(hist, 'undo.log')
-    H.mkfile(hist, 'undo.log', { 'legacy-current' })
+    H.mkfile(hist, 'undo.log', { '#direct-history-v99' })
     H.mkfile(hist, 'undo.log.legacy', { 'legacy-older' })
     H.mkfile(hist, 'undo.log.legacy.1', { 'legacy-even-older' })
 
     H.capture_messages()
-    H.assert_nil(history.undo(), 'a foreign log yields no action')
-    H.assert_notified('Ignoring history written by an older version')
-    H.assert_false(fs.exists(undo_path), 'the foreign log was moved aside')
+    H.assert_nil(history.undo(), 'an unknown log yields no action')
+    H.assert_notified('history was preserved')
+    H.assert_eq(log.read_raw(undo_path), '#direct-history-v99\n',
+      'unknown bytes are unchanged')
     H.assert_eq(vim.fn.readfile(undo_path .. '.legacy'), { 'legacy-older' },
-      'the pre-existing .legacy is not overwritten')
+      'an unrelated pre-existing .legacy file is untouched')
     H.assert_eq(vim.fn.readfile(undo_path .. '.legacy.1'), { 'legacy-even-older' },
-      'the pre-existing .legacy.1 is not overwritten')
-    H.assert_eq(vim.fn.readfile(undo_path .. '.legacy.2'), { 'legacy-current' },
-      'the foreign log lands on the first free suffix')
+      'an unrelated pre-existing .legacy.1 file is untouched')
   end)
 
-  H.it('an unquarantinable foreign log is left untouched and never appended to', function()
+  H.it('a malformed log is left untouched and never appended to', function()
     local sb = H.sandbox()
     local hist = history_dir(sb)
     local undo_path = vim.fs.joinpath(hist, 'undo.log')
-    H.mkfile(hist, 'undo.log', { 'foreign\tline' })
+    H.mkfile(hist, 'undo.log', { '#direct-history-v3', 'mv\t/a' })
     local before = vim.fn.readfile(undo_path)
 
     H.capture_messages()
-    local restore = H.stub(fs, 'rename', function() return nil, 'forced failure' end)
     H.assert_nil(history.undo(), 'an unquarantinable foreign log yields no action')
-    H.assert_notified('Ignoring history written by an older version')
-    H.assert_eq(vim.fn.readfile(undo_path), before,
-      'the foreign log is left byte-for-byte untouched')
+    H.assert_notified('history was preserved')
+    H.assert_eq(log.read_raw(undo_path), before[1] .. '\n' .. before[2] .. '\n',
+      'malformed bytes remain byte-for-byte untouched')
 
     -- A new action must not append to the foreign file either.
     local touch = action.Touch(sb.root .. '/c.txt')
     touch['do']()
     local ok, err = history.log(touch)
-    restore()
     H.assert_nil(ok, 'log() refuses while the foreign log cannot be quarantined')
     H.assert_true(type(err) == 'string' and #err > 0, 'log() carries an err')
-    H.assert_eq(vim.fn.readfile(undo_path), before,
-      'log() never appended to the unquarantinable foreign log')
+    H.assert_eq(log.read_raw(undo_path), before[1] .. '\n' .. before[2] .. '\n',
+      'log() never appends to malformed bytes')
   end)
 
   H.it('a marker-only log is empty history', function()
     local sb = H.sandbox()
     local hist = history_dir(sb)
-    H.mkfile(hist, 'undo.log', { '#direct-history-v3' })
+    H.mkfile(hist, 'undo.log', { MARKER })
     H.capture_messages()
     H.assert_nil(history.undo(), 'a marker-only undo log has nothing to undo')
     H.assert_notified('Nothing to undo')
 
-    H.mkfile(hist, 'redo.log', { '#direct-history-v3' })
+    H.mkfile(hist, 'redo.log', { MARKER })
     H.capture_messages()
     H.assert_nil(history.redo(), 'a marker-only redo log has nothing to redo')
     H.assert_notified('Nothing to redo')
@@ -401,8 +388,8 @@ H.describe('history', function()
       H.assert_true(h.log(move) == true, 'process A logged the move')
     end)
 
-    H.assert_eq(vim.fn.readfile(undo_path)[1], '#direct-history-v3',
-      'the on-disk log carries the version marker')
+    H.assert_eq(vim.fn.readfile(undo_path)[1], MARKER,
+      'the on-disk log carries the JSONL header')
     H.assert_true(H.exists(sb.root, 'b.txt'), 'process A left the moved file')
 
     local undone = false
@@ -443,12 +430,12 @@ H.describe('history', function()
     local ok, err = history.log(action.Touch(sb.root .. '/t.txt'))
     H.assert_nil(ok, 'log() reports the failure')
     H.assert_true(type(err) == 'string' and #err > 0, 'log() carries an err')
-    H.assert_notified('history unavailable')
+    H.assert_notified('history was preserved')
 
     H.capture_messages()
     local res = history.undo()
     H.assert_nil(res, 'undo() reports the failure')
-    H.assert_notified('history unavailable')
+    H.assert_notified('history was preserved')
     H.assert_false(H.messages():find('Nothing to undo', 1, true) ~= nil,
       'the data-dir failure is not reported as an empty log')
   end)
