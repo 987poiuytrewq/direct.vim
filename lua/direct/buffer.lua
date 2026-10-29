@@ -16,6 +16,7 @@ local history = require('direct.history')
 local register = require('direct.register')
 local ui = require('direct.ui')
 local highlight = require('direct.highlight')
+local constants = require('direct.constants')
 local reconcile_undone_materialization
 local remove_expanded_subtree
 local recorded_row_text
@@ -1917,7 +1918,7 @@ local function set_options(bufnr)
   vim.bo[bufnr].buftype = 'acwrite'
   vim.bo[bufnr].buflisted = true
   vim.bo[bufnr].swapfile = false
-  vim.bo[bufnr].filetype = 'direct'
+  vim.bo[bufnr].filetype = constants.FILETYPE
   -- BufWriteCmd <buffer> DirectSync: a `:write` in a direct
   -- buffer routes to the sync instead of writing a file. Each buffer owns a
   -- shared group outside `direct` so re-sourcing plugin/direct.lua can clear
@@ -2986,7 +2987,7 @@ function Buffer:sync()
       and staging.overrides[act.src] ~= nil then
       exec_action = action_mod.Move(staging.overrides[act.src], act.dst)
     end
-    local ok, res, aerr = pcall(exec_action['do'])
+    local ok, res, aerr = pcall(action_mod.execute, exec_action)
     if ok and res then
       applied[i] = true
       self.current_entry = result_entry(act)

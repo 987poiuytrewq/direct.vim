@@ -19,3 +19,5 @@ augroup direct_hidden_highlight_defaults
   autocmd!
   autocmd ColorScheme * call <SID>DefineHiddenHighlightDefaults()
 augroup END
+
+let b:current_syntax = "direct"
