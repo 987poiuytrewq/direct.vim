@@ -220,7 +220,281 @@ H.describe('sync: applying actions', function()
   end)
 end)
 
-H.describe('sync with expanded children (Phase 1)', function()
+H.describe('sync: editable expanded subtrees', function()
+  H.it('syncs mixed create, rename, and delete edits within one expanded directory', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local sub = H.mkdir(ws, 'sub')
+    H.mkfile(sub, 'keep.txt', { 'keep' })
+    H.mkfile(sub, 'remove.txt', { 'remove' })
+    H.mkfile(ws, 'root.txt', { 'root' })
+    local listing = buffer.list(ws)
+    listing:expand(1)
+    H.assert_buf_eq({ 'sub/', '  keep.txt', '  remove.txt', 'root.txt' }, 0,
+      'expanded directory children are materialized')
+
+    vim.api.nvim_buf_set_text(0, 1, 2, 1, 2 + #'keep.txt', { 'renamed.txt' })
+    vim.api.nvim_buf_set_lines(0, 2, 3, false, {})
+    vim.api.nvim_buf_set_lines(0, 2, 2, false, { '  new.txt' })
+
+    local ok, reason = listing:sync()
+
+    H.assert_true(ok == true, tostring(reason))
+    H.assert_fs_eq(ws, {
+      'root.txt', 'sub/', 'sub/new.txt', 'sub/renamed.txt',
+    }, 'the subtree edit applies without touching root entries')
+    H.assert_eq(vim.fn.readfile(sub .. '/renamed.txt'), { 'keep' },
+      'renaming a child preserves its contents')
+    H.assert_eq(listing:get_paths(2, 3), {
+      sub .. '/new.txt', sub .. '/renamed.txt',
+    }, 'the refreshed subtree resolves child paths')
+    H.assert_false(vim.bo.modified, 'successful subtree sync clears modified state')
+  end)
+
+  H.it('moves a file between expanded sibling directories with its contents intact', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local top = H.mkdir(ws, 'top')
+    local a = H.mkdir(top, 'a')
+    local b = H.mkdir(top, 'b')
+    H.mkfile(a, 'from.txt', { 'preserve me' })
+    H.mkfile(b, 'stay.txt', { 'stay' })
+    local listing = buffer.list(ws)
+    listing:expand(1)
+    listing:expand(2)
+    listing:expand(4)
+    H.assert_buf_eq({
+      'top/', '  a/', '    from.txt', '  b/', '    stay.txt',
+    }, 0, 'both sibling directories are expanded')
+
+    -- Move the existing line, rather than replacing it, so its extmark identity
+    -- follows it to the new parent and the sync can distinguish a move from a
+    -- delete/create pair.
+    vim.cmd('3move 5')
+    H.assert_buf_eq({
+      'top/', '  a/', '  b/', '    stay.txt', '    from.txt',
+    }, 0, 'the row now belongs to b/')
+
+    local ok, reason = listing:sync()
+
+    H.assert_true(ok == true, tostring(reason))
+    H.assert_fs_eq(ws, {
+      'top/', 'top/a/', 'top/b/', 'top/b/from.txt', 'top/b/stay.txt',
+    }, 'the filesystem move is applied across the two subtree scopes')
+    H.assert_eq(vim.fn.readfile(b .. '/from.txt'), { 'preserve me' },
+      'the moved file keeps its contents')
+    H.assert_false(fs.exists(a .. '/from.txt'), 'the source is no longer present')
+    H.assert_eq(listing:get_paths(4, 5), {
+      b .. '/from.txt', b .. '/stay.txt',
+    }, 'the refreshed destination subtree resolves its files')
+
+    require('direct').undo()
+    H.assert_true(fs.exists(a .. '/from.txt'), 'filesystem undo restores the source path')
+    H.assert_false(fs.exists(b .. '/from.txt'), 'filesystem undo clears the destination')
+    require('direct').redo()
+    H.assert_true(fs.exists(b .. '/from.txt'), 'filesystem redo reapplies the subtree move')
+  end)
+
+  H.it('moves an expanded directory with its whole subtree to another parent', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local top = H.mkdir(ws, 'top')
+    local a = H.mkdir(top, 'a')
+    local b = H.mkdir(top, 'b')
+    local branch = H.mkdir(a, 'branch')
+    H.mkfile(branch, 'deep.txt', { 'deep' })
+    local listing = buffer.list(ws)
+    listing:expand(1)
+    listing:expand(2)
+    listing:expand(3)
+    listing:expand(5)
+    H.assert_buf_eq({
+      'top/', '  a/', '    branch/', '      deep.txt', '  b/',
+    }, 0, 'the source tree and destination are expanded')
+
+    vim.cmd('3,4move 5')
+
+    local ok, reason = listing:sync()
+
+    H.assert_true(ok == true, tostring(reason))
+    H.assert_fs_eq(ws, {
+      'top/', 'top/a/', 'top/b/', 'top/b/branch/', 'top/b/branch/deep.txt',
+    }, 'the directory move carries its full tree')
+    H.assert_eq(listing:get_paths(5, 5), { b .. '/branch/deep.txt' },
+      'the moved expansion is restored at its new parent')
+  end)
+
+  H.it('moves a root file into an expanded subtree without a create/delete pair', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local top = H.mkdir(ws, 'top')
+    local sub = H.mkdir(top, 'sub')
+    H.mkfile(sub, 'stay.txt', { 'stay' })
+    H.mkfile(ws, 'from-root.txt', { 'preserve me' })
+    local listing = buffer.list(ws)
+    listing:expand(1)
+    listing:expand(2)
+    H.assert_buf_eq({ 'top/', '  sub/', '    stay.txt', 'from-root.txt' }, 0,
+      'nested destination is materialized')
+
+    vim.api.nvim_buf_set_text(0, 3, 0, 3, 0, { '    ' })
+
+    local ok, reason = listing:sync()
+
+    H.assert_true(ok == true, tostring(reason))
+    H.assert_fs_eq(ws, {
+      'top/', 'top/sub/', 'top/sub/from-root.txt', 'top/sub/stay.txt',
+    }, 'the existing root file is moved into the subtree')
+    H.assert_eq(vim.fn.readfile(sub .. '/from-root.txt'), { 'preserve me' },
+      'the root file contents are preserved')
+    H.assert_eq(listing:get_paths(3, 4), {
+      sub .. '/from-root.txt', sub .. '/stay.txt',
+    }, 'the refreshed expanded directory shows the moved file')
+  end)
+
+  H.it('moves a child file back to the root listing by reducing its indentation', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local sub = H.mkdir(ws, 'sub')
+    H.mkfile(sub, 'from-child.txt', { 'preserve me' })
+    H.mkfile(ws, 'stay.txt', { 'stay' })
+    local listing = buffer.list(ws)
+    listing:expand(1)
+    H.assert_buf_eq({ 'sub/', '  from-child.txt', 'stay.txt' }, 0,
+      'the source child is materialized')
+
+    vim.api.nvim_buf_set_text(0, 1, 0, 1, 2, { '' })
+
+    local ok, reason = listing:sync()
+
+    H.assert_true(ok == true, tostring(reason))
+    H.assert_fs_eq(ws, { 'from-child.txt', 'stay.txt', 'sub/' },
+      'the child is moved into the root listing')
+    H.assert_eq(vim.fn.readfile(ws .. '/from-child.txt'), { 'preserve me' },
+      'the moved file contents are preserved')
+  end)
+
+  H.it('renames an expanded child directory and restores its nested expansion', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local sub = H.mkdir(ws, 'sub')
+    local nested = H.mkdir(sub, 'nested')
+    H.mkfile(nested, 'deep.txt', { 'deep' })
+    local listing = buffer.list(ws)
+    listing:expand(1)
+    listing:expand(2)
+    H.assert_buf_eq({ 'sub/', '  nested/', '    deep.txt' }, 0,
+      'the nested directory is expanded')
+
+    vim.api.nvim_buf_set_text(0, 1, 2, 1, #'  nested/', { 'renamed/' })
+
+    local ok, reason = listing:sync()
+
+    H.assert_true(ok == true, tostring(reason))
+    H.assert_fs_eq(ws, {
+      'sub/', 'sub/renamed/', 'sub/renamed/deep.txt',
+    }, 'the directory and its contents move together')
+    H.assert_eq(listing:get_paths(3, 3), { sub .. '/renamed/deep.txt' },
+      'the nested expansion is restored at the renamed path')
+  end)
+
+  H.it('uses a same-slot whole-line replacement as a child rename', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local sub = H.mkdir(ws, 'sub')
+    H.mkfile(sub, 'anchor.txt', { 'anchor' })
+    H.mkfile(sub, 'old.txt', { 'preserve me' })
+    local listing = buffer.list(ws)
+    listing:expand(1)
+    H.assert_buf_eq({ 'sub/', '  anchor.txt', '  old.txt' }, 0,
+      'both original identities are materialized')
+
+    vim.api.nvim_buf_set_lines(0, 2, 3, false, { '  renamed.txt' })
+
+    local ok, reason = listing:sync()
+
+    H.assert_true(ok == true, tostring(reason))
+    H.assert_fs_eq(ws, { 'sub/', 'sub/anchor.txt', 'sub/renamed.txt' },
+      'the replacement is interpreted as a rename, not delete/create')
+    H.assert_eq(vim.fn.readfile(sub .. '/renamed.txt'), { 'preserve me' },
+      'whole-line rename preserves the original contents')
+  end)
+
+  H.it('accepts sibling row reordering as presentation-only', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local sub = H.mkdir(ws, 'sub')
+    H.mkfile(sub, 'a.txt', { 'a' })
+    H.mkfile(sub, 'b.txt', { 'b' })
+    local listing = buffer.list(ws)
+    listing:expand(1)
+    local before = H.fs_snapshot(ws)
+
+    vim.cmd('2move 3')
+
+    local ok, reason = listing:sync()
+
+    H.assert_true(ok == true, tostring(reason))
+    H.assert_eq(H.fs_snapshot(ws), before, 'row order does not move filesystem entries')
+    H.assert_buf_eq({ 'sub/', '  a.txt', '  b.txt' }, 0,
+      'the refreshed directory returns to its sorted order')
+    H.assert_eq(history_lines('undo.log'), {}, 'a presentation-only reorder writes no history')
+  end)
+
+  H.it('refuses an edited subtree whose disk snapshot changed after expansion', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local sub = H.mkdir(ws, 'sub')
+    H.mkfile(sub, 'old.txt', { 'old' })
+    local listing = buffer.list(ws)
+    listing:expand(1)
+    H.mkfile(sub, 'external.txt', { 'external' })
+    vim.api.nvim_buf_set_text(0, 1, 2, 1, 2 + #'old.txt', { 'renamed.txt' })
+    local before = H.fs_snapshot(ws)
+    local yanked, classified = 0, 0
+    local classify, yank = buffer.classify, register.yank
+    buffer.classify = function(...) classified = classified + 1; return classify(...) end
+    register.yank = function(...) yanked = yanked + 1; return yank(...) end
+
+    local ok, reason = listing:sync()
+
+    buffer.classify, register.yank = classify, yank
+    H.assert_nil(ok, 'stale subtree snapshot is refused')
+    H.assert_true(tostring(reason):find('changed on disk', 1, true) ~= nil,
+      tostring(reason))
+    H.assert_eq(classified, 0, 'stale subtree stops before root classification')
+    H.assert_eq(yanked, 0, 'stale subtree stops before auto-yank')
+    H.assert_eq(H.fs_snapshot(ws), before, 'only the external change remains on disk')
+    H.assert_true(vim.bo.modified, 'the refused edit remains in the buffer')
+  end)
+
+  H.it('creates a nested subtree beneath a directory added in the same edit', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local listing = buffer.list(ws)
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, {
+      'new/', '  nested/', '    file.txt',
+    })
+
+    local ok, reason = listing:sync()
+
+    H.assert_true(ok == true, tostring(reason))
+    H.assert_fs_eq(ws, { 'new/', 'new/nested/', 'new/nested/file.txt' },
+      'parent directories are created before nested entries')
+  end)
+end)
+
+H.describe('sync with expanded children', function()
   H.it('writing after collapse leaves the filesystem unchanged', function()
     clean_buffers()
     local sb = H.sandbox()
@@ -240,7 +514,7 @@ H.describe('sync with expanded children (Phase 1)', function()
     H.assert_buf_eq({ 'sub/' }, 0, 'sync preserves the collapsed view')
   end)
 
-  H.it('refuses deleting a collapsed directory with known non-empty contents', function()
+  H.it('deletes a collapsed non-empty directory as one tree action', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -251,18 +525,14 @@ H.describe('sync with expanded children (Phase 1)', function()
     listing:expand(1)
     listing:collapse(1)
     vim.api.nvim_buf_set_lines(0, 0, 1, false, {})
-    local before = H.fs_snapshot(ws)
-    local before_register = register.content()
-    H.capture_messages()
-
     local ok, reason = listing:sync()
 
-    H.assert_nil(ok, 'collapsed non-empty directory deletion is refused')
-    H.assert_true(tostring(reason):find('known children', 1, true) ~= nil,
-      'reason identifies the preserved child snapshot')
-    H.assert_eq(H.fs_snapshot(ws), before, 'refusal leaves the tree untouched')
-    H.assert_eq(register.content(), before_register, 'refusal does not auto-yank')
-    H.assert_notified('nothing was changed', vim.log.levels.ERROR)
+    H.assert_true(ok == true, tostring(reason))
+    H.assert_fs_eq(ws, { 'keep.txt' }, 'the directory tree is removed')
+    local content = register.content()
+    H.assert_not_nil(content, 'the removed tree is auto-yanked')
+    H.assert_eq(vim.fn.readfile(content .. '/sub/inside.txt'), { 'inside' },
+      'the auto-yank contains the collapsed directory contents')
   end)
 
   H.it('allows deleting an empty collapsed directory', function()
@@ -347,7 +617,7 @@ H.describe('sync with expanded children (Phase 1)', function()
       'the history action is the root deletion')
   end)
 
-  H.it('refuses child tampering on an undo branch before classifier or side effects', function()
+  H.it('syncs visible subtree edits without deleting rows hidden by undo', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -362,28 +632,15 @@ H.describe('sync with expanded children (Phase 1)', function()
     listing:expand(3)
     vim.cmd('undo')
     vim.api.nvim_buf_set_lines(0, -1, -1, false, { 'new.txt' })
-    vim.api.nvim_buf_set_lines(0, 1, 2, false, { '  tampered-a.txt' })
-    local before_fs = H.fs_snapshot(ws)
-    local before_register = register.content()
-    local before_undo = history_lines('undo.log')
-    local before_redo = history_lines('redo.log')
-    local classified, yanked = 0, 0
-    local classify, yank = buffer.classify, register.yank
-    buffer.classify = function(...) classified = classified + 1; return classify(...) end
-    register.yank = function(...) yanked = yanked + 1; return yank(...) end
-
+    vim.api.nvim_buf_set_text(0, 1, 2, 1, 2 + #'inside-a.txt', { 'tampered-a.txt' })
     local ok, reason = listing:sync()
 
-    buffer.classify, register.yank = classify, yank
-    H.assert_nil(ok, 'tampered child is refused')
-    H.assert_true(tostring(reason):find('child', 1, true) ~= nil,
-      'refusal reports child integrity')
-    H.assert_eq(classified, 0, 'child validation stops before root classification')
-    H.assert_eq(yanked, 0, 'child validation stops before auto-yank')
-    H.assert_eq(H.fs_snapshot(ws), before_fs, 'the filesystem is unchanged')
-    H.assert_eq(register.content(), before_register, 'the register is unchanged')
-    H.assert_eq(history_lines('undo.log'), before_undo, 'undo history is unchanged')
-    H.assert_eq(history_lines('redo.log'), before_redo, 'redo history is unchanged')
+    H.assert_true(ok == true, tostring(reason))
+    H.assert_eq(H.fs_snapshot(ws), {
+      'a/', 'a/tampered-a.txt', 'b/', 'b/inside-b.txt', 'new.txt', 'root.txt',
+    }, 'only the visible a-subtree edit and root creation are applied')
+    H.assert_true(fs.exists(ws .. '/b/inside-b.txt'),
+      'undoing b expansion is not interpreted as deleting its child')
   end)
 
   H.it('refuses a lost surviving child identity on an undo branch before side effects', function()
@@ -913,7 +1170,7 @@ H.describe('sync with expanded children (Phase 1)', function()
     H.assert_eq(history_lines('redo.log'), before_redo, 'ambiguous recovery writes no redo history')
   end)
 
-  H.it('keeps an un-undone child identity and refuses its later tampering', function()
+  H.it('keeps an un-undone child identity and syncs its later edit', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -936,18 +1193,17 @@ H.describe('sync with expanded children (Phase 1)', function()
 
     vim.api.nvim_win_set_cursor(0, { 4, 0 })
     vim.api.nvim_feedkeys('ccrenamed.txt\27', 'xt', false)
-    vim.api.nvim_buf_set_lines(bufnr, 1, 2, false, { '  tampered.txt' })
-    local before = H.fs_snapshot(ws)
-
+    vim.api.nvim_buf_set_text(bufnr, 1, 2, 1, 2 + #'inside-a.txt', { 'tampered.txt' })
     local synced, reason = listing:sync()
 
-    H.assert_nil(synced, 'tampered surviving child is refused')
-    H.assert_true(type(reason) == 'string' and reason:find('child', 1, true) ~= nil,
-      'refusal identifies child integrity as the reason')
-    H.assert_eq(state.expanded[state.root_ids[1]].children[1].id, a_id,
-      'the still-visible a child keeps its original identity')
-    H.assert_eq(H.fs_snapshot(ws), before,
-      'tampering refusal occurs before any filesystem action')
+    H.assert_true(synced == true, tostring(reason))
+    H.assert_eq(H.fs_snapshot(ws), {
+      'a/', 'a/tampered.txt', 'b/', 'b/inside-b.txt', 'renamed.txt',
+    }, 'the visible subtree edit and root rename both apply')
+    H.assert_true(fs.exists(ws .. '/a/tampered.txt'),
+      'the changed child is present at its new path')
+    H.assert_true(fs.exists(ws .. '/b/inside-b.txt'),
+      'the hidden b subtree remains untouched')
   end)
 
   H.it('writes only root changes when undo removes one of multiple materializations', function()
@@ -1317,7 +1573,7 @@ H.describe('sync with expanded children (Phase 1)', function()
       'sub/nested/deep.txt', 'sub/sibling.txt' }, 'the root rename applied')
     H.assert_buf_eq({
       'sub/', '  nested/', '    deep.txt', '  sibling.txt', 'renamed.txt',
-    }, 0, 'child rows remain display-only and unchanged')
+    }, 0, 'unchanged child rows remain expanded and intact')
     H.assert_eq(listing:get_paths(3, 3), { ws .. '/sub/nested/deep.txt' },
       'nested child identity still resolves to its parent path')
   end)
@@ -1385,7 +1641,7 @@ H.describe('sync with expanded children (Phase 1)', function()
       'POSIX backslashes remain literal')
   end)
 
-  H.it('refuses classifier-proposed root directory rename and delete before side effects', function()
+  H.it('renames and deletes a root directory while descendants are expanded', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -1420,18 +1676,21 @@ H.describe('sync with expanded children (Phase 1)', function()
     end
     vim.api.nvim_buf_set_text(0, 0, 0, 0, #('sub/'), { 'other/' })
     local renamed, rename_err = listing:sync()
+    H.assert_true(renamed == true, tostring(rename_err))
+    H.assert_true(fs.exists(ws .. '/other'), 'the directory rename is applied')
+    H.assert_buf_eq({ 'other/', '  inside.txt', 'root.txt' }, 0,
+      'the renamed directory remains expanded after sync')
+    H.assert_eq(listing:get_paths(2, 2), { ws .. '/other/inside.txt' },
+      'the retained child identity resolves through the renamed directory')
 
     -- Restore the spelling, then delete the marked root row while retaining its
-    -- materialized child. The root identity is invalidated, but child identities
-    -- must remain available for root-only classification.
+    -- materialized child. Its row identity still protects the subtree from root
+    -- classification, while deleting the directory owns the entire tree.
     vim.api.nvim_buf_set_text(0, 0, 0, 0, #('other/'), { 'sub/' })
     vim.api.nvim_buf_set_lines(0, 0, 1, false, {})
     local deleted, delete_err = listing:sync()
     buffer.classify, register.yank = classify, yank
     for _, name in ipairs(mutation_names) do fs[name] = original_fs[name] end
-    H.assert_nil(renamed, 'loaded descendant blocks a root-directory rename')
-    H.assert_true(tostring(rename_err):find('expanded or known children', 1, true) ~= nil,
-      tostring(rename_err))
     H.assert_eq(classified[1].actual, { 'other/', 'root.txt' },
       'rename classification receives root rows only')
     H.assert_eq(classified[1].expected, { 'sub/', 'root.txt' },
@@ -1439,40 +1698,32 @@ H.describe('sync with expanded children (Phase 1)', function()
     H.assert_eq(classified[1].plan.kind, 'RENAME', 'classifier proposes the rename')
     H.assert_eq(classified[1].plan.moves,
       { { src = 'sub/', dst = 'other/' } }, 'classified root rename')
-    H.assert_true(fs.exists(ws .. '/sub'), 'rename changed no filesystem entry')
-    H.assert_false(fs.exists(ws .. '/other'), 'no renamed directory was created')
-    H.assert_nil(deleted, 'loaded descendant blocks a classifier-proposed delete')
-    H.assert_true(tostring(delete_err):find('expanded or known children', 1, true) ~= nil,
-      tostring(delete_err))
+    H.assert_false(fs.exists(ws .. '/other'), 'the selected directory was removed')
+    H.assert_true(deleted == true, tostring(delete_err))
     H.assert_eq(classified[2].actual, { 'root.txt' },
       'deletion classification excludes loaded children and deleted root')
-    H.assert_eq(classified[2].expected, { 'sub/', 'root.txt' },
+    H.assert_eq(classified[2].expected, { 'other/', 'root.txt' },
       'delete classification compares the root listing')
     H.assert_eq(classified[2].plan.kind, 'DELETE', 'classifier proposes the delete')
-    H.assert_eq(classified[2].plan.removed, { 'sub/' }, 'classified root deletion')
-    H.assert_eq(register_calls, 0, 'blocked batches do not auto-yank')
-    H.assert_eq(fs_mutations, 0, 'blocked batches make no filesystem mutation calls')
+    H.assert_eq(classified[2].plan.removed, { 'other/' }, 'classified root deletion')
+    H.assert_eq(register_calls, 1, 'the tree deletion is auto-yanked once')
+    H.assert_true(fs_mutations > 0, 'the directory rename and delete mutate the filesystem')
     H.assert_eq(register.content(), register_before, 'blocked batches preserve register state')
-    H.assert_fs_eq(ws, { 'root.txt', 'sub/', 'sub/inside.txt' },
-      'blocked batches preserve files')
-    H.assert_true(vim.bo.modified, 'blocked intent remains modified')
-    H.assert_eq(history_lines('undo.log'), undo_before, 'blocked batches preserve undo history')
-    H.assert_eq(history_lines('redo.log'), redo_before, 'blocked batches preserve redo history')
+    H.assert_fs_eq(ws, { 'root.txt' }, 'the expanded tree is deleted')
+    H.assert_false(vim.bo.modified, 'successful sync clears modified state')
+    H.assert_true(#history_lines('undo.log') > #undo_before,
+      'the rename and directory removal are recorded in history')
+    H.assert_true(#history_lines('redo.log') >= #redo_before,
+      'history redo state remains well-formed')
   end)
 
-  H.it('child text/add/delete/duplicate/identity damage refuses before classification', function()
+  H.it('malformed child structure and damaged identities refuse before classification', function()
     local cases = {
-      { name = 'changed text', edit = function()
-        vim.api.nvim_buf_set_text(0, 1, 2, 1, #('  inside.txt'), { 'changed.txt' })
-      end },
-      { name = 'added child', edit = function()
-        vim.api.nvim_buf_set_lines(0, 1, 1, false, { '  extra.txt' })
-      end },
-      { name = 'deleted child', edit = function()
-        vim.api.nvim_buf_set_lines(0, 1, 2, false, {})
-      end },
       { name = 'duplicate child', edit = function()
         vim.api.nvim_buf_set_lines(0, 2, 2, false, { '  inside.txt' })
+      end },
+      { name = 'odd indentation', edit = function()
+        vim.api.nvim_buf_set_lines(0, 2, 2, false, { '   malformed.txt' })
       end },
       { name = 'lost identity', edit = function()
         local ns = vim.api.nvim_get_namespaces()['direct-listing-rows']
@@ -1512,7 +1763,7 @@ H.describe('sync with expanded children (Phase 1)', function()
     end
   end)
 
-  H.it('blocked mixed root delete has no auto-yank, history, or filesystem effects', function()
+  H.it('deleting an expanded root directory removes and auto-yanks its whole tree', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -1521,9 +1772,8 @@ H.describe('sync with expanded children (Phase 1)', function()
     H.mkfile(ws, 'root.txt', { 'root' })
     local listing = buffer.list(ws)
     listing:expand(1)
-    -- Deleting the loaded root row invalidates its extmark while preserving its
-    -- child identity. It must reach the root classifier, then fail the loaded-
-    -- descendants guard before auto-yank or any other side effect.
+    -- Removing only the directory row means the directory action owns its
+    -- materialized descendants; no child rows are classified as root entries.
     vim.api.nvim_buf_set_lines(0, 0, 1, false, {})
     local yanked, classified = 0, 0
     local classified_actual, classified_expected, plan
@@ -1538,19 +1788,49 @@ H.describe('sync with expanded children (Phase 1)', function()
     local ok = listing:sync()
     buffer.classify, register.yank = classify, yank
 
-    H.assert_nil(ok, 'mixed delete is blocked')
+    H.assert_true(ok == true, 'expanded directory deletion succeeds')
     H.assert_eq(classified, 1, 'root deletion is classified after root identity loss')
     H.assert_eq(classified_actual, { 'root.txt' }, 'only root rows reach classifier')
     H.assert_eq(classified_expected, { 'sub/', 'root.txt' }, 'expected root rows only')
     H.assert_eq(plan.kind, 'DELETE', 'classifier proposes deleting loaded directory')
     H.assert_eq(plan.removed, { 'sub/' }, 'classifier identifies deleted root directory')
-    H.assert_eq(yanked, 0, 'no auto-yank is attempted')
-    H.assert_fs_eq(ws, { 'root.txt', 'sub/', 'sub/inside.txt' },
-      'no filesystem action is applied')
-    H.assert_nil(register.content(), 'register pointer remains unchanged')
-    H.assert_eq(history_lines('undo.log'), {}, 'no undo history is written')
-    H.assert_eq(history_lines('redo.log'), {}, 'no redo history is changed')
-    H.assert_true(vim.bo.modified, 'blocked batch remains modified')
+    H.assert_eq(yanked, 1, 'directory deletion is auto-yanked once')
+    H.assert_fs_eq(ws, { 'root.txt' }, 'only the selected directory tree is removed')
+    H.assert_nil(register.content(), 'the stub yank leaves the register pointer untouched')
+    H.assert_true(#history_lines('undo.log') > 0, 'the directory removal is undoable')
+    H.assert_true(#history_lines('redo.log') > 0, 'redo history remains initialized')
+    H.assert_false(vim.bo.modified, 'successful sync clears modified state')
+  end)
+
+  H.it('deleting all materialized rows of a directory emits one tree removal', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local sub = H.mkdir(ws, 'sub')
+    H.mkfile(sub, 'inside.txt', { 'inside' })
+    H.mkfile(ws, 'root.txt', { 'root' })
+    local listing = buffer.list(ws)
+    listing:expand(1)
+    vim.api.nvim_buf_set_lines(0, 0, 2, false, {})
+    local yank_calls, yanked = 0, nil
+    local yank = register.yank
+    register.yank = function(paths)
+      yank_calls = yank_calls + 1
+      yanked = vim.deepcopy(paths)
+      return true
+    end
+
+    local ok, reason = listing:sync()
+
+    register.yank = yank
+    H.assert_true(ok == true, tostring(reason))
+    H.assert_eq(yank_calls, 1, 'the whole tree is yanked once')
+    H.assert_eq(yanked, { ws .. '/sub/' }, 'only the directory root is auto-yanked')
+    H.assert_fs_eq(ws, { 'root.txt' }, 'one directory removal covers its children')
+    local undo = history_lines('undo.log')
+    H.assert_eq(#undo, 2, 'one rmdir action is recorded, not duplicate child removals')
+    H.assert_true(undo[2]:find('rmdir\t' .. ws .. '/sub/\t', 1, true) == 1,
+      'history contains the directory-tree removal')
   end)
 
   H.it('root deletion followed by same-text reinsertion does not revive its identity', function()

@@ -4,8 +4,8 @@ Edit directories in Neovim.
 
 Load a directory into a buffer with each root-level line corresponding to a file
 or subdirectory. Edit those root rows to create, rename, or delete filesystem
-entries. Directories can also be expanded for browsing; their child rows are
-materialized in the buffer and removed when collapsed.
+entries. Directories can also be expanded for browsing and editing; their child
+rows are materialized in the buffer and removed when collapsed.
 
 - navigate around the filesystem easily
 - rename, create and delete files and directories
@@ -78,11 +78,12 @@ re-reads the directory. The initial listing remains flat.
 
 ## Edit
 
-When viewing a directory, edit its root listing as if you were editing a file,
-using any Vim command (`di`, `o`, `:s`, macros, and so on). Saving synchronises
-root-level changes with the filesystem and then re-lists the directory.
+When viewing a directory, edit its listing as if you were editing a file, using
+any Vim command (`di`, `o`, `:s`, macros, and so on). Saving synchronises the
+changes with the filesystem and then re-lists the directory.
 
-A save is classified as exactly one of *rename*, *create* or *delete*:
+At the root level, a save is classified as exactly one of *rename*, *create* or
+*delete*:
 
 - **Rename** — edit the line of the file or directory you want to rename, and
   save.
@@ -97,9 +98,10 @@ have one: the line, not the filesystem, decides what will be created or
 renamed. Renaming `foo/` to `foo` therefore replaces the directory `foo` with a
 file, and adding a line `bar` creates a file while `bar/` creates a directory.
 
-An edit that both adds and deletes entries, or that leaves a duplicated line,
-is reported as ambiguous, naming both sides of the comparison. Nothing is
-changed, no history is written, and the buffer stays modified so you can fix it.
+At the root level, an edit that both adds and deletes entries, or that leaves a
+duplicated line, is reported as ambiguous, naming both sides of the comparison.
+Nothing is changed, no history is written, and the buffer stays modified so you
+can fix it.
 
 `&wildignore` is honoured using the value captured when each directory is
 listed. Changing the option does not change an existing listing's sync rules;
@@ -113,27 +115,38 @@ scanned or moved.
 
 ### Expanded rows
 
-Only depth-zero/root rows participate in the legacy positional create/delete/
-rename classifier. Expanded child rows are display-only: editing, adding,
-deleting, duplicating, or losing a child's identity refuses the whole save
-before classifier actions, filesystem changes, auto-yank, register, or history
-effects. Keep child rows exactly as materialized. Directory indentation is
-presentation only; `>>` and `<<` do not enable move synchronization.
+Every expanded directory is an independent edit scope. Edit, add, or delete its
+children just as you would at the root. Directory lines end in `/`; files do
+not. Edits in multiple expanded directories are combined into one sync, and
+deleted entries are auto-yanked before they are removed.
 
-Expansion and collapse are ordinary text-undo changes. `u` after a collapse
+Indentation defines the tree: root rows have no leading spaces, direct children
+have two, and each additional level adds two more. A child must be under a
+directory. Change a row's indentation or move it beneath another expanded
+directory to move it; the move keeps the entry and its contents. New rows may be
+nested under a directory created in the same edit. Directory renames and moves
+carry their contents and retain visible expansions when possible.
+
+Before syncing an edited subtree, direct checks that its directory contents have
+not changed on disk since expansion. Invalid indentation, missing parents,
+duplicate destinations, lost identities, or a stale snapshot refuse the whole
+sync before auto-yank, filesystem, or history effects. A whole-line replacement
+whose identity is lost is treated as a rename only when sibling identities make
+that pairing unambiguous; otherwise the save is refused. Root-level edits retain
+the existing rename/create/delete classifier and its ambiguity rules.
+
+Deleting a directory row removes and auto-yanks the whole tree, including
+materialized descendants, unless you reindent surviving rows under another
+directory in the same edit to move them out first. Moving or renaming a directory
+together with separate edits to its descendants must be saved in separate syncs
+when their filesystem action order would otherwise be ambiguous.
+
+Expansion and collapse remain ordinary text-undo changes. `u` after a collapse
 restores the child rows and their identities; `<C-r>` re-applies the collapse.
-Undoing an expansion removes its rows, and redo restores them only when the
-original undo sequence and exact directory snapshot still match. A changed or
-ambiguous snapshot remains unsafe to save, open, or yank.
-
-A root file rename or other root-file change remains available while child rows
-are expanded. Renaming or deleting an expanded directory is refused. After
-collapsing a directory, a previously recorded non-empty child list continues to
-protect it from rename or deletion, including across re-listing; expanding it
-again re-reads current contents and refreshes that record. Empty directories
-follow normal rename/delete behavior. Child moves, subtree indentation mapping,
-and history recovery for tree edits are not supported.
-Root names beginning with whitespace and names that could escape the listed
+Redo restores materialized identities only when the original undo sequence and
+exact directory snapshot still match. A changed or ambiguous snapshot remains
+unsafe to save, open, or yank.
+Entry names beginning with whitespace and names that could escape the listed
 directory (such as `../x` or `a/b`) are refused at save time.
 
 Windows-specific component checks reject backslashes, drive prefixes, and

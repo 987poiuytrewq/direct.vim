@@ -1,8 +1,8 @@
 -- lua/direct/buffer.lua -- directory buffer model, listing, sync, and open operations.
 -- Path identity uses fs.same_path. Sync validates edits, stages dependent
 -- moves, records only successful actions, and re-lists the filesystem state.
--- Expanded child rows retain their filesystem identities; sync classifies only
--- root entries and refuses mutations of directories with known descendants.
+-- Expanded rows retain their filesystem identities; sync reconciles edits per
+-- directory and coordinates path-changing moves across the materialized tree.
 
 local M = {}
 
@@ -757,9 +757,8 @@ local function children_integrity(bufnr, lines)
         end
         invalid_child_ids[id] = true
       end
-      -- Root identities may be invalidated by deletion or rename. Keep that
-      -- intent for root-only classification below; loaded-directory mutations
-      -- are refused by blocks_loaded_directory before any side effects.
+      -- Root identities may be invalidated by deletion or rename. Preserve that
+      -- intent for the root classifier below.
     else
       local other_id = seen_row[row]
       local other = other_id and state.rows[other_id]
@@ -957,6 +956,479 @@ local function same_lines(actual, expected)
     if actual[index] ~= line then return false end
   end
   return true
+end
+
+-- edited_subtrees(bufnr, lines) -> a per-expanded-directory action plan, or
+-- nil, reason. The ordinary children_integrity path remains the fast path for
+-- an unchanged materialization. For edits, extmarks provide identity and the
+-- parsed indentation provides each row's desired parent and filesystem path.
+local function edited_subtrees(bufnr, lines)
+  local state = states[bufnr]
+  if not state then return nil, 'child identity state is unavailable' end
+  local undo_tree = vim.fn.undotree(bufnr)
+  local seq_cur = undo_tree.seq_cur
+  if #(state.materialization_recoveries or {}) > 0 then
+    return nil, 'redone child materialization could not be uniquely restored'
+  end
+  local active, undone_ids, current_path = {}, {}, false
+  for _, entry in ipairs(undo_tree.entries or {}) do
+    if not current_path then
+      active[entry.seq] = true
+      if entry.seq == seq_cur then current_path = true end
+    end
+  end
+  for _, materialization in ipairs(state.materialization_undos or {}) do
+    if not active[materialization.seq]
+      and (materialization.base_seq == 0 or active[materialization.base_seq]) then
+      for _, id in ipairs(materialization.child_ids or {}) do undone_ids[id] = true end
+    end
+  end
+  local function expansion_is_live(parent_id)
+    local expansion = state.expanded[parent_id]
+    if not expansion then return false end
+    if #(expansion.children or {}) == 0 then return true end
+    for _, child in ipairs(expansion.children) do
+      if not undone_ids[child.id] then return true end
+    end
+    return false
+  end
+
+  local marks_by_row, valid_ids, invalid_ids, invalid_rows = {}, {}, {}, {}
+  for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1,
+      { details = true })) do
+    local id, row, details = mark[1], mark[2], mark[4] or {}
+    if not state.rows[id] or valid_ids[id] or invalid_ids[id] then
+      return nil, 'child identity marks are invalid or duplicated'
+    end
+    if details.invalid then
+      invalid_ids[id], invalid_rows[id] = true, row
+    else
+      if marks_by_row[row] then
+        return nil, 'child identity marks are invalid or duplicated'
+      end
+      marks_by_row[row], valid_ids[id] = id, true
+    end
+  end
+  for _, id in ipairs(state.display_ids or {}) do
+    if not undone_ids[id] and not valid_ids[id] and not invalid_ids[id] then
+      return nil, 'child identity mark was lost'
+    end
+  end
+
+  -- A modified listing may use Neovim's one-empty-line representation for an
+  -- intentionally emptied tree. A clean empty listing is handled by sync's
+  -- existing root-listing special case.
+  if #lines == 1 and lines[1] == '' and vim.bo[bufnr].modified then
+    lines = {}
+  end
+
+  local roots, nodes, nodes_by_id, nodes_by_key, children_by_parent = {}, {}, {}, {}, {}
+  local stack, previous_depth = {}, 0
+  for row, line in ipairs(lines) do
+    local prefix = line:match('^( *)') or ''
+    if #prefix % 2 ~= 0 then
+      if not stack[1] or not is_dir_line(stack[1].name) then
+        return nil, 'root names may not begin with whitespace'
+      end
+      return nil, 'child row indentation must use pairs of spaces'
+    end
+    local depth = #prefix / 2
+    if depth > previous_depth + 1 then
+      return nil, 'a child row skips a directory level'
+    end
+    local name = line:sub(#prefix + 1)
+    if name == '' then return nil, 'empty child row' end
+
+    local parent = depth > 0 and stack[depth] or nil
+    if depth > 0 and not parent then
+      return nil, 'child row has no parent directory'
+    end
+    if parent and not is_dir_line(parent.name) then
+      return nil, 'child row parent is not a directory'
+    end
+    if parent and parent.id and not expansion_is_live(parent.id) then
+      return nil, 'cannot edit child rows under a collapsed directory'
+    end
+
+    local id = marks_by_row[row - 1]
+    local rec = id and state.rows[id] or nil
+
+    local reason = component_reason(name)
+    if reason then return nil, reason end
+    local parent_key = parent and parent.key or nil
+    local node = {
+      id = id,
+      rec = rec,
+      name = name,
+      depth = depth,
+      parent_id = parent_key,
+      parent_key = parent_key,
+      key = id or ('new:' .. row),
+      row = row - 1,
+    }
+    nodes[#nodes + 1] = node
+    if id then nodes_by_id[id] = node end
+    nodes_by_key[node.key] = node
+    if depth == 0 then
+      roots[#roots + 1] = name
+    else
+      children_by_parent[parent_key] = children_by_parent[parent_key] or {}
+      children_by_parent[parent_key][#children_by_parent[parent_key] + 1] = node
+    end
+    stack[depth + 1] = node
+    for level = depth + 2, #stack do stack[level] = nil end
+    previous_depth = depth
+  end
+
+  -- Root classifier input excludes identity-preserving moves across the root
+  -- boundary. A root moved into a child remains in its original virtual slot;
+  -- a child moved to the root is handled by the tree Move action, not ADD.
+  roots = {}
+  local root_ids = {}
+  for _, id in ipairs(state.root_ids or {}) do
+    root_ids[id] = true
+    local rec, now = state.rows[id], nodes_by_id[id]
+    if now then roots[#roots + 1] = now.depth == 0 and now.name or rec.name end
+  end
+  for _, node in ipairs(nodes) do
+    if node.depth == 0 and not node.id then roots[#roots + 1] = node.name end
+  end
+  for _, siblings in pairs(children_by_parent) do
+    local seen_names = {}
+    for _, node in ipairs(siblings) do
+      local basename = node.name:gsub('/+$', '')
+      if seen_names[basename] then
+        return nil, 'duplicate child entry: ' .. basename
+      end
+      seen_names[basename] = true
+    end
+  end
+
+  local nodes_by_row = {}
+  for _, node in ipairs(nodes) do nodes_by_row[node.row] = node end
+  for id in pairs(invalid_ids) do
+    local rec = state.rows[id]
+    local replacement = rec and rec.kind == 'child'
+      and nodes_by_row[invalid_rows[id]] or nil
+    if replacement and not replacement.id then
+      if replacement.depth ~= rec.depth or replacement.parent_id ~= rec.parent then
+        return nil, 'child identity was replaced outside its original directory row'
+      end
+      -- `cc`/line replacement invalidates extmarks in Neovim. Recover identity
+      -- only at the exact original row, parent, and depth; never adopt by name.
+      replacement.id, replacement.rec = id, rec
+      nodes_by_id[id] = replacement
+    elseif rec and rec.kind == 'child' then
+      local preceding = nodes_by_row[invalid_rows[id] - 1]
+      if preceding and not preceding.id and preceding.depth ~= rec.depth then
+        return nil, 'child identity was replaced at a different tree depth'
+      end
+    end
+  end
+
+  -- `cc` and whole-line replacements can invalidate an extmark even though
+  -- the edit is a rename. Reattach an invalid identity only inside an unbroken
+  -- sibling interval where removed and new rows pair one-for-one, bounded by
+  -- surviving identities. If counts differ, that interval mixes uncertain
+  -- renames with creates/deletes and is refused rather than guessed.
+  for parent_id, expansion in pairs(state.expanded or {}) do
+    if expansion_is_live(parent_id) then
+      local old_children, current = {}, children_by_parent[parent_id] or {}
+      for _, child in ipairs(expansion.children or {}) do
+        if not undone_ids[child.id] then old_children[#old_children + 1] = child end
+      end
+      local current_index, old_index = {}, {}
+      for index, node in ipairs(current) do
+        if node.id then current_index[node.id] = index end
+      end
+      for index, child in ipairs(old_children) do old_index[child.id] = index end
+      local anchors = {}
+      for id, oi in pairs(old_index) do
+        local ni = current_index[id]
+        if ni then anchors[#anchors + 1] = { old = oi, new = ni } end
+      end
+      table.sort(anchors, function(a, b) return a.old < b.old end)
+      local anchors_reordered = false
+      for index = 2, #anchors do
+        if anchors[index].new <= anchors[index - 1].new then
+          anchors_reordered = true
+          break
+        end
+      end
+      if anchors_reordered then
+        local has_unidentified_change = false
+        for _, child in ipairs(old_children) do
+          if invalid_ids[child.id] and not nodes_by_id[child.id] then
+            has_unidentified_change = true
+            break
+          end
+        end
+        if not has_unidentified_change then
+          for _, node in ipairs(current) do
+            if not node.id then has_unidentified_change = true; break end
+          end
+        end
+        if has_unidentified_change then
+          return nil, 'reordered child identities cannot be safely paired with line replacements'
+        end
+      end
+      local old_after, new_after = 0, 0
+      local function pair_interval(old_before, new_before)
+        local removed, inserted = {}, {}
+        for oi = old_after + 1, old_before - 1 do
+          local child = old_children[oi]
+          if invalid_ids[child.id] and not nodes_by_id[child.id] then
+            removed[#removed + 1] = child
+          end
+        end
+        for ni = new_after + 1, new_before - 1 do
+          local node = current[ni]
+          if not node.id then inserted[#inserted + 1] = node end
+        end
+        if #removed > 0 and #inserted > 0 then
+          if #removed ~= #inserted then
+            return nil, 'child row identities are ambiguous between rename and create/delete'
+          end
+          for pair = 1, #removed do
+            local child, node = removed[pair], inserted[pair]
+            node.id, node.rec = child.id, child
+            nodes_by_id[child.id] = node
+            invalid_ids[child.id] = nil
+          end
+        end
+        return true
+      end
+      if not anchors_reordered then
+        for _, anchor in ipairs(anchors) do
+          local ok, pair_err = pair_interval(anchor.old, anchor.new)
+          if not ok then return nil, pair_err end
+          old_after, new_after = anchor.old, anchor.new
+        end
+        local ok, pair_err = pair_interval(#old_children + 1, #current + 1)
+        if not ok then return nil, pair_err end
+      end
+    end
+  end
+
+  local lost_child_identity = false
+  for id in pairs(invalid_ids) do
+    local rec = state.rows[id]
+    if rec and rec.kind == 'child' and not nodes_by_id[id] and not undone_ids[id] then
+      lost_child_identity = true
+      break
+    end
+  end
+  if lost_child_identity then
+    for id in pairs(invalid_ids) do
+      local rec = state.rows[id]
+      if rec and rec.kind == 'child' and not nodes_by_id[id] and not undone_ids[id] then
+        for _, node in ipairs(nodes) do
+          if node.depth == 0 and not node.id and node.row == invalid_rows[id] then
+            return nil, 'child identity was lost while a root row was added'
+          end
+        end
+      end
+    end
+  end
+
+  local changed_parents = {}
+  for parent_id, expansion in pairs(state.expanded or {}) do
+    local parent = state.rows[parent_id]
+    if parent and nodes_by_id[parent_id] and expansion_is_live(parent_id) then
+      local current = children_by_parent[parent_id] or {}
+      local current_by_id = {}
+      local old_children = {}
+      for _, child in ipairs(expansion.children or {}) do
+        if not undone_ids[child.id] then
+          old_children[#old_children + 1] = child
+        end
+      end
+      for _, child in ipairs(current) do
+        if child.id then current_by_id[child.id] = child end
+      end
+
+      local changed = #current ~= #old_children
+      if not changed then
+        for index, child in ipairs(old_children) do
+          local now = current_by_id[child.id]
+          if not now or now.name ~= child.name or current[index] ~= now then
+            changed = true
+            break
+          end
+        end
+      end
+      if changed then
+        local ignored = M.ignore_set(parent.path, expansion.wildignore or '')
+        local disk, read_err = fs.read_dir_lines(parent.path, ignored)
+        if not disk or not same_lines(disk, expansion.listing_lines or {}) then
+          return nil, 'expanded directory changed on disk since it was read'
+            .. (read_err and (': ' .. tostring(read_err)) or '')
+        end
+        changed_parents[parent_id] = true
+
+      end
+    end
+  end
+
+  local function target_path(node)
+    if node.depth == 0 then
+      node.path = M.entry_path(state.root, node.name)
+    else
+      local parent = nodes_by_key[node.parent_key]
+      if not parent or not is_dir_line(parent.name) then return nil end
+      local parent_path = target_path(parent)
+      if not parent_path then return nil end
+      node.path = M.entry_path(parent_path, node.name)
+    end
+    return node.path
+  end
+  for _, node in ipairs(nodes) do
+    if not target_path(node) then return nil, 'child row has no destination directory' end
+  end
+
+  local creates, moves, removals, yanks = {}, {}, {}, {}
+  local deleted_ids, moving_ids = {}, {}
+  for id in pairs(root_ids) do
+    local rec, node = state.rows[id], nodes_by_id[id]
+    if rec and node and is_dir_line(rec.name) and node.depth == 0
+      and rec.name ~= node.name then
+      -- Root-directory moves are emitted by the root classifier. Mark them
+      -- here so separate descendant edits cannot be staged against stale paths.
+      moving_ids[id] = true
+    end
+  end
+  for _, id in ipairs(state.display_ids or {}) do
+    local rec = state.rows[id]
+    if rec and rec.kind == 'child' and not undone_ids[id] and not nodes_by_id[id] then
+      deleted_ids[id] = true
+    end
+  end
+  for id in pairs(deleted_ids) do
+    local rec = state.rows[id]
+    local ancestor = rec.parent
+    local covered = false
+    while ancestor do
+      if deleted_ids[ancestor] then covered = true; break end
+      local parent_rec = state.rows[ancestor]
+      ancestor = parent_rec and parent_rec.parent or nil
+    end
+    if not covered then
+      yanks[#yanks + 1] = rec.path
+      if is_dir_line(rec.name) then
+        removals[#removals + 1] = action_mod.RemoveDirectory(rec.path)
+      else
+        removals[#removals + 1] = action_mod.Remove(rec.path)
+      end
+    end
+  end
+
+  for _, node in ipairs(nodes) do
+    if not node.id then
+      if node.depth > 0 then
+        local destination = node.path
+        if is_dir_line(node.name) then
+          creates[#creates + 1] = { depth = node.depth, action = action_mod.MakeDirectory(destination) }
+        else
+          creates[#creates + 1] = { depth = node.depth, action = action_mod.Touch(destination) }
+        end
+      end
+    else
+      local rec = node.rec
+      local moved_from_root = rec.kind == 'root' and node.depth > 0
+      local child_changed = rec.kind == 'child'
+        and (rec.parent ~= node.parent_key or rec.name ~= node.name or rec.depth ~= node.depth)
+      if moved_from_root or child_changed then
+        if is_dir_line(rec.name) ~= is_dir_line(node.name)
+          and state.expanded[node.id] then
+          return nil, 'cannot change the type of an expanded directory'
+        end
+        moving_ids[node.id] = true
+        moves[#moves + 1] = { depth = node.depth, action = action_mod.Move(rec.path, node.path) }
+      end
+    end
+  end
+
+  -- A descendant whose own name/parent changes while an ancestor also moves
+  -- needs ordered, path-dependent staging. Refuse that combination until the
+  -- transaction scheduler can express its dependency explicitly.
+  for _, node in ipairs(nodes) do
+    if node.id and moving_ids[node.id] then
+      local ancestor = node.parent_key
+      while ancestor do
+        if moving_ids[ancestor] then
+          return nil, 'edit moved directories and their descendants in separate syncs'
+        end
+        local parent = nodes_by_key[ancestor]
+        ancestor = parent and parent.parent_key or nil
+      end
+    end
+  end
+  local function moved_ancestor(parent_key)
+    local ancestor = parent_key
+    while ancestor do
+      if moving_ids[ancestor] then return ancestor end
+      local parent = nodes_by_key[ancestor]
+      ancestor = parent and parent.parent_key or nil
+    end
+    return nil
+  end
+  for _, node in ipairs(nodes) do
+    if not node.id and moved_ancestor(node.parent_key) then
+      return nil, 'edit a moved directory and its new children in separate syncs'
+    end
+  end
+  for id in pairs(deleted_ids) do
+    local rec = state.rows[id]
+    local ancestor = rec.parent
+    while ancestor do
+      if moving_ids[ancestor] then
+        return nil, 'edit a moved directory and its removed children in separate syncs'
+      end
+      local parent_rec = state.rows[ancestor]
+      ancestor = parent_rec and parent_rec.parent or nil
+    end
+  end
+
+  local source_paths = {}
+  for _, item in ipairs(moves) do source_paths[item.action.src] = true end
+  for _, item in ipairs(creates) do
+    if fs.taken(item.action.dst) then
+      return nil, 'destination already exists: ' .. item.action.dst
+    end
+  end
+  for _, item in ipairs(moves) do
+    local source_target = false
+    for source in pairs(source_paths) do
+      if fs.same_path(source, item.action.dst) then source_target = true; break end
+    end
+    if fs.taken(item.action.dst) and not source_target then
+      return nil, 'move destination already exists: ' .. item.action.dst
+    end
+  end
+
+  table.sort(creates, function(a, b) return a.depth < b.depth end)
+  local actions = {}
+  for _, item in ipairs(creates) do actions[#actions + 1] = item.action end
+  for _, item in ipairs(moves) do actions[#actions + 1] = item.action end
+  for _, action in ipairs(removals) do actions[#actions + 1] = action end
+  local expanded_targets = {}
+  for parent_id in pairs(state.expanded or {}) do
+    local node = nodes_by_id[parent_id]
+    if node and is_dir_line(node.name) then
+      expanded_targets[#expanded_targets + 1] = {
+        id = parent_id, path = target_path(node), depth = node.depth or 0,
+      }
+    end
+  end
+  table.sort(expanded_targets, function(a, b) return a.depth < b.depth end)
+  return {
+    root_lines = roots,
+    actions = actions,
+    yanks = yanks,
+    changed_parents = changed_parents,
+    nodes_by_id = nodes_by_id,
+    expanded_targets = expanded_targets,
+  }
 end
 
 -- Restore one undone view insertion only when the undo-tree sequence, parent
@@ -1399,35 +1871,6 @@ reconcile_undone_materialization = function(bufnr)
   state.display_ids = expected_ids
   state.materialization_seq = seq_cur
   return true
-end
-
-local function blocks_loaded_directory(bufnr, plan)
-  local state = states[bufnr]
-  if not state then return nil end
-  for _, root_id in ipairs(state.root_ids or {}) do
-    local root = state.rows[root_id]
-    local expansion = state.expanded[root_id]
-    local known = state.known_children and state.known_children[root_id]
-    local known_nonempty = known and #known > 0
-    local filtered_empty_expansion = expansion
-      and #(expansion.listing_lines or {}) == 0 and known_nonempty
-    if root and root.kind == 'root' and is_dir_line(root.name)
-      and ((expansion and #expansion.children > 0)
-        or (known_nonempty and not filtered_empty_expansion)) then
-      local protected_path = M.entry_path(state.root, root.name)
-      for _, move in ipairs(plan.moves or {}) do
-        if fs.same_path(M.entry_path(state.root, move.src), protected_path) then
-          return root.name
-        end
-      end
-      for _, removed in ipairs(plan.removed or {}) do
-        if fs.same_path(M.entry_path(state.root, removed), protected_path) then
-          return root.name
-        end
-      end
-    end
-  end
-  return nil
 end
 
 -- ambiguous_message(plan, actual, expected) names the reason and both sides of
@@ -2115,11 +2558,68 @@ function Buffer:sync()
   end
   local visible = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local actual, child_err = children_integrity(bufnr, visible)
+  local subtree_edit
+  if actual then
+    local has_materialized_children = false
+    local state = states[bufnr]
+    for _, id in ipairs(state and state.display_ids or {}) do
+      local rec = state.rows[id]
+      if rec and rec.kind == 'child' then
+        has_materialized_children = true
+        break
+      end
+    end
+    local visible_ids, stack, has_tree_edit, has_indented = {}, {}, false, false
+    for row = 0, #visible - 1 do
+      local id = row_id_at(bufnr, row)
+      if id then visible_ids[id] = true end
+    end
+    for row, line in ipairs(visible) do
+      local rec = current_row_record(bufnr, row - 1)
+      if not rec then
+        local expected_id = state and state.display_ids[row]
+        local expected_rec = expected_id and state.rows[expected_id]
+        if expected_rec and line == expected_rec.text then rec = expected_rec end
+      end
+      local prefix = line:match('^( *)') or ''
+      if #prefix > 0 then has_indented = true end
+      if #prefix % 2 ~= 0 then
+        has_tree_edit = true
+        break
+      end
+      local depth = #prefix / 2
+      local parent = depth > 0 and stack[depth] or nil
+      if rec then
+        if rec.kind == 'root' and depth > 0 then
+          has_tree_edit = true
+          break
+        elseif rec.kind == 'child' and (rec.depth ~= depth
+            or rec.parent ~= (parent and parent.id or nil)) then
+          local old_parent = state.rows[rec.parent]
+          local implicit_root_delete = old_parent and old_parent.kind == 'root'
+            and not visible_ids[rec.parent]
+          if not implicit_root_delete then
+            has_tree_edit = true
+            break
+          end
+        end
+      end
+      stack[depth + 1] = rec
+      for level = depth + 2, #stack do stack[level] = nil end
+    end
+    if has_tree_edit or (not has_materialized_children and has_indented) then
+      actual, child_err = nil, 'row parentage changed in the expanded tree'
+    end
+  end
   if not actual then
-    vim.bo[bufnr].modified = true
-    ui.notify('Refusing to sync: ' .. tostring(child_err)
-      .. '; nothing was changed.', vim.log.levels.ERROR)
-    return nil, child_err
+    subtree_edit, child_err = edited_subtrees(bufnr, visible)
+    if not subtree_edit then
+      vim.bo[bufnr].modified = true
+      ui.notify('Refusing to sync: ' .. tostring(child_err)
+        .. '; nothing was changed.', vim.log.levels.ERROR)
+      return nil, child_err
+    end
+    actual = subtree_edit.root_lines
   end
   -- Neovim represents an empty buffer with one empty string.  A clean empty
   -- direct listing denotes zero root entries, not an empty filename.
@@ -2152,16 +2652,83 @@ function Buffer:sync()
     return nil, plan.reason
   end
 
-  local blocked_dir = blocks_loaded_directory(bufnr, plan)
-  if blocked_dir then
-    vim.bo[bufnr].modified = true
-    local reason = 'directory has expanded or known children: ' .. blocked_dir
-    ui.notify('Refusing to sync: ' .. reason .. '; nothing was changed.',
-      vim.log.levels.ERROR)
-    return nil, reason
-  end
-
   local actions, yanks = build_actions(self.root, plan)
+  if subtree_edit then
+    if plan.kind == 'DELETE' then
+      local removed_roots = {}
+      for _, line in ipairs(plan.removed or {}) do
+        if is_dir_line(line) then
+          removed_roots[#removed_roots + 1] = M.entry_path(self.root, line)
+        end
+      end
+      local function under_removed_root(path)
+        if type(path) ~= 'string' then return false end
+        local candidate = vim.fs.normalize(path)
+        for _, root_path in ipairs(removed_roots) do
+          local normalized = vim.fs.normalize(root_path):gsub('/+$', '')
+          if candidate == normalized or candidate:sub(1, #normalized + 1) == normalized .. '/' then
+            return true
+          end
+        end
+        return false
+      end
+      local kept_actions = {}
+      for _, act in ipairs(subtree_edit.actions) do
+        if act.name == 'mv' and under_removed_root(act.src)
+          and not under_removed_root(act.dst) then
+          kept_actions[#kept_actions + 1] = act -- a child explicitly moved out
+        elseif not (act.name == 'rm' or act.name == 'rmdir'
+            or act.name == 'mv') or not under_removed_root(act.src) then
+          kept_actions[#kept_actions + 1] = act
+        end
+      end
+      subtree_edit.actions = kept_actions
+      local kept_yanks = {}
+      for _, path in ipairs(subtree_edit.yanks) do
+        if not under_removed_root(path) then kept_yanks[#kept_yanks + 1] = path end
+      end
+      subtree_edit.yanks = kept_yanks
+    end
+    local combined_actions = {}
+    for _, act in ipairs(subtree_edit.actions) do
+      combined_actions[#combined_actions + 1] = act
+    end
+    for _, act in ipairs(actions) do combined_actions[#combined_actions + 1] = act end
+    actions = combined_actions
+    for _, path in ipairs(subtree_edit.yanks) do yanks[#yanks + 1] = path end
+    local priority = { mkdir = 1, mv = 2, touch = 3, rm = 4, rmdir = 4 }
+    table.sort(actions, function(a, b)
+      local ap, bp = priority[a.name] or 5, priority[b.name] or 5
+      if ap ~= bp then return ap < bp end
+      local adst, bdst = a.dst or a.src or '', b.dst or b.src or ''
+      local adepth = select(2, adst:gsub('/', ''))
+      local bdepth = select(2, bdst:gsub('/', ''))
+      if a.name == 'mkdir' and adepth ~= bdepth then return adepth < bdepth end
+      return adst < bdst
+    end)
+    local destinations = {}
+    for _, act in ipairs(actions) do
+      if act.name == 'mv' or act.name == 'touch' or act.name == 'mkdir' then
+        for _, destination in ipairs(destinations) do
+          if fs.same_path(destination, act.dst) then
+            vim.bo[bufnr].modified = true
+            local reason = 'multiple subtree actions target the same path: ' .. act.dst
+            ui.notify('Refusing to sync: ' .. reason .. '; nothing was changed.',
+              vim.log.levels.ERROR)
+            return nil, reason
+          end
+        end
+        destinations[#destinations + 1] = act.dst
+      end
+      local _, serialize_err = action_mod.serialize(act)
+      if serialize_err then
+        vim.bo[bufnr].modified = true
+        ui.notify('Unsafe action (' .. tostring(serialize_err)
+          .. '); nothing was changed.', vim.log.levels.ERROR)
+        return nil, serialize_err
+      end
+    end
+  end
 
   -- A visible directory row does not authorize moving its ignored contents.
   -- Refuse directory deletes and renames before yanking or other side effects.
@@ -2303,7 +2870,58 @@ function Buffer:sync()
 
   -- Re-list so the buffer reflects the filesystem, restore the cursor, and
   -- mark it unmodified only after the refresh succeeds.
+  local reopen = {}
+  -- Root directory/file renames retain their row identity even when an
+  -- expanded subtree is present. Refresh the root record's path before list()
+  -- rebuilds its inode index, so the expansion follows the renamed directory.
+  local state_before_list = states[bufnr]
+  if state_before_list then
+    for row, line in ipairs(visible) do
+      local id = row_id_at(bufnr, row - 1)
+      local rec = id and state_before_list.rows[id]
+      if rec and rec.kind == 'root' and not line:match('^%s') then
+        local path = M.entry_path(self.root, line)
+        if fs.exists(path) then
+          rec.name, rec.text, rec.path = line, line, path
+        end
+      end
+    end
+  end
+  if subtree_edit then
+    local state = states[bufnr]
+    reopen = vim.deepcopy(subtree_edit.expanded_targets or {})
+    for id in pairs(subtree_edit.changed_parents) do
+      local rec = state and state.rows[id]
+      if rec then
+        remove_expanded_subtree(bufnr, state, id)
+      end
+    end
+    if #reopen == 0 then
+      for id in pairs(subtree_edit.changed_parents) do
+        local rec = state and state.rows[id]
+        if rec then reopen[#reopen + 1] = { path = rec.path, depth = rec.depth or 0 } end
+      end
+      table.sort(reopen, function(a, b) return a.depth < b.depth end)
+    end
+  end
   self:list()
+  -- Re-materialize only the edited scopes, now from the filesystem's committed
+  -- state. Other expanded branches retain their original identities and view.
+  for _, target in ipairs(reopen) do
+    local state = states[bufnr]
+    for row = 0, vim.api.nvim_buf_line_count(bufnr) - 1 do
+      local rec = current_row_record(bufnr, row)
+      if rec and rec.kind == 'child' and is_dir_line(rec.name)
+        and fs.same_path(rec.path, target.path) then
+        self:expand(row + 1)
+        break
+      elseif rec and rec.kind == 'root' and is_dir_line(rec.name)
+        and fs.same_path(rec.path, target.path) then
+        self:expand(row + 1)
+        break
+      end
+    end
+  end
 
   if #actions > 0 then
     -- Emit one joined summary for the classified actions.
