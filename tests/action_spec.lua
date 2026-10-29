@@ -254,6 +254,29 @@ H.describe('action', function()
     H.assert_eq(vim.fn.isdirectory(sb.root .. '/newdir'), 1, 'directory created')
   end)
 
+  H.it('execute dispatches by action kind and the legacy do method delegates to it', function()
+    local sb = H.sandbox()
+    local dispatched = M.Touch(sb.root .. '/via-execute.txt')
+    H.assert_true(M.execute(dispatched) == true, 'the kind executor creates the file')
+    H.assert_true(H.exists(sb.root, 'via-execute.txt'), 'the dispatched action ran')
+
+    local legacy = M.Touch(sb.root .. '/via-do.txt')
+    H.assert_true(legacy['do']() == true, 'the compatibility method uses execute dispatch')
+    H.assert_true(H.exists(sb.root, 'via-do.txt'), 'the compatibility action ran')
+
+    local ok, err = M.execute({ name = 'unknown' })
+    H.assert_nil(ok, 'an unknown action has no executor')
+    H.assert_true(tostring(err):find('no executor', 1, true) ~= nil, tostring(err))
+
+    local mismatch = M.Touch(sb.root .. '/must-not-run.txt')
+    mismatch.name = 'mkdir'
+    ok, err = M.execute(mismatch)
+    H.assert_nil(ok, 'an action cannot dispatch through another kind')
+    H.assert_true(tostring(err):find('kind mismatch', 1, true) ~= nil, tostring(err))
+    H.assert_false(H.exists(sb.root, 'must-not-run.txt'),
+      'a mismatched action did not run its original executor')
+  end)
+
   H.it('creation and move actions refuse occupied destinations without overwriting', function()
     local sb = H.sandbox()
     H.mkfile(sb.root, 'source.txt', { 'source' })
@@ -330,24 +353,29 @@ H.describe('action', function()
     end)
   end)
 
-  H.it('serialize() emits NAME\\tfield... lines', function()
+  H.it('serialize() emits canonical JSON records with fixed key order', function()
     local sb = H.sandbox()
-    H.assert_eq(M.serialize(M.Move('/r/a', '/r/b')), 'mv\t/r/a\t/r/b', 'mv')
-    H.assert_eq(M.serialize(M.Touch('/r/t')), 'touch\t/r/t', 'touch')
-    H.assert_eq(M.serialize(M.MakeDirectory('/r/d')), 'mkdir\t/r/d', 'mkdir')
+    H.assert_eq(M.serialize(M.Move('/r/a', '/r/b')),
+      '{"op":"mv","src":"/r/a","dst":"/r/b"}', 'mv')
+    H.assert_eq(M.serialize(M.Touch('/r/t')), '{"op":"touch","dst":"/r/t"}', 'touch')
+    H.assert_eq(M.serialize(M.MakeDirectory('/r/d')),
+      '{"op":"mkdir","dst":"/r/d"}', 'mkdir')
     H.assert_eq(M.serialize(M.Restore('/r/trash', '/r/a')),
-      'rs\t/r/trash\t/r/a', 'rs')
+      '{"op":"rs","src":"/r/trash","dst":"/r/a"}', 'rs')
 
     local remove = M.Remove('/r/f')
-    H.assert_eq(M.serialize(remove), 'rm\t/r/f\t' .. remove.dst,
+    H.assert_eq(M.serialize(remove),
+      '{"op":"rm","src":"/r/f","dst":' .. vim.json.encode(remove.dst) .. '}',
       'rm stores the resolved trash dst')
 
     H.assert_eq(
       M.serialize(M.Paste('/r/reg', '/r/dst', { 'a', 'b' }, { 'a', 'b' })),
-      'p\t/r/reg\t/r/dst\ta b\ta b', 'p appends the two name lists')
+      '{"op":"p","src":"/r/reg","dst":"/r/dst",'
+        .. '"src_names":["a","b"],"dst_names":["a","b"]}', 'p name arrays')
     H.assert_eq(
       M.serialize(M.Unpaste('/r/dst', '/r/reg', { 'a', 'b' }, { 'a', 'b' })),
-      'up\t/r/dst\t/r/reg\ta b\ta b', 'up appends the two name lists')
+      '{"op":"up","src":"/r/dst","dst":"/r/reg",'
+        .. '"src_names":["a","b"],"dst_names":["a","b"]}', 'up name arrays')
   end)
 
   H.it('path_reason and serialize refuse only unrepresentable path fields', function()
@@ -366,21 +394,25 @@ H.describe('action', function()
     H.assert_nil(line, 'a tab-carrying field emits no line')
     H.assert_true(type(err) == 'string' and #err > 0, 'serialize carries a reason')
 
-    H.assert_eq(M.serialize(M.Touch('/r/a b')), 'touch\t/r/a b',
+    H.assert_eq(M.serialize(M.Touch('/r/a b')), '{"op":"touch","dst":"/r/a b"}',
       'a space path serializes verbatim')
   end)
 
-  H.it('entry_name_reason rejects empty, separator and control-char names', function()
+  H.it('entry_name_reason accepts spaces but rejects invalid basename components', function()
     H.assert_nil(M.entry_name_reason('notes.txt'),
       'a normal name can round-trip')
     H.assert_eq(M.entry_name_reason(''), 'empty', 'an empty name is refused')
     H.assert_eq(M.entry_name_reason(nil), 'empty', 'a non-string name is refused')
-    H.assert_eq(M.entry_name_reason('a b'), 'contains a space',
-      'the ENTRY_SEPARATOR is refused')
+    H.assert_nil(M.entry_name_reason('my file.txt'), 'spaces are valid JSON array values')
+    H.assert_eq(M.entry_name_reason('../escape'), 'not a basename component',
+      'a slash is refused')
+    H.assert_eq(M.entry_name_reason('..'), 'not a basename component',
+      'dot-dot is refused')
     H.assert_eq(M.entry_name_reason('a\tb'), 'contains a tab',
       'the FIELD_SEPARATOR is refused')
     H.assert_eq(M.entry_name_reason('a\nb'), 'contains a control character',
-      'an embedded NL is refused (the round trip no longer leans on the NUL encoding)')
+      'an embedded NL is refused')
+    H.assert_eq(M.entry_name_reason('a\255'), 'invalid UTF-8', 'invalid UTF-8 is refused')
   end)
 
   H.it('reverse(serialize(a)) round-trips all 9 action types', function()
@@ -443,12 +475,15 @@ H.describe('action', function()
     -- Pin the p/up serialization swapping verbatim (the renames inversion in
     -- the serialized form, which history will replay).
     local pa = M.Paste(reg, root, { 'x', 'y' }, { 'm', 'n' })
-    H.assert_eq(M.serialize(pa), 'p\t' .. reg .. '\t' .. root .. '\tx y\tm n',
-      'p serialized with both name lists')
+    H.assert_eq(M.serialize(pa), '{"op":"p","src":' .. vim.json.encode(reg)
+      .. ',"dst":' .. vim.json.encode(root)
+      .. ',"src_names":["x","y"],"dst_names":["m","n"]}',
+      'p serialized with both name arrays')
     local upa = M.reverse(M.serialize(pa))
-    H.assert_eq(M.serialize(upa),
-      'up\t' .. root .. '\t' .. reg .. '\tm n\tx y',
-      'the reversal swaps src/dst and inverts the name lists')
+    H.assert_eq(M.serialize(upa), '{"op":"up","src":' .. vim.json.encode(root)
+      .. ',"dst":' .. vim.json.encode(reg)
+      .. ',"src_names":["m","n"],"dst_names":["x","y"]}',
+      'the reversal swaps src/dst and inverts the name arrays')
     local back = M.reverse(M.serialize(upa))
     H.assert_eq(M.serialize(back), M.serialize(pa),
       'double reversal returns the original paste')
@@ -464,6 +499,31 @@ H.describe('action', function()
     H.assert_nil(r, 'reverse of an unknown line returns nil')
     r, e = M.reverse('')
     H.assert_nil(r, 'reverse of an empty line returns nil')
+  end)
+
+  H.it('JSON records use canonical escaping and reject duplicate or extra keys', function()
+    local src = '/r/quote"\\slash/café'
+    local expected = '{"op":"mv","src":"/r/quote\\"\\\\slash/café","dst":"/r/b"}'
+    H.assert_eq(M.serialize(M.Move(src, '/r/b')), expected,
+      'quotes and backslashes are escaped; slash and UTF-8 stay literal')
+    H.assert_eq(M.serialize(M.deserialize(expected)), expected,
+      'decode and re-encode preserve canonical bytes')
+
+    for _, record in ipairs({
+      '{"op":"mv","op":"mv","src":"/r/a","dst":"/r/b"}',
+      '{"op":"mv","src":"/r/a","dst":"/r/b","extra":1}',
+      '{"op":"mv","src":"/r/a"}',
+      '{"op":"mv","src":1,"dst":"/r/b"}',
+      '{"op":"future","dst":"/r/b"}',
+      '{ "op":"touch","dst":"/r/t"}',
+      '{"op":"g","moves":[{"src":"/r/a","dst":"/r/b"}]}',
+      '{"op":"g","moves":[{"src":"/r/a","dst":"/r/b"},'
+        .. '{"src":"/r/c","dst":"/r/d"}]}',
+    }) do
+      local parsed, err = M.deserialize(record)
+      H.assert_nil(parsed, 'invalid or non-canonical JSON is rejected')
+      H.assert_true(type(err) == 'string' and #err > 0, 'decoder reports a reason')
+    end
   end)
 
   H.it('Paste copies files and trees; Unpaste removes them without trashing', function()

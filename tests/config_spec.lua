@@ -59,6 +59,24 @@ H.describe('config', function()
     config.clear_mappings()
   end)
 
+  H.it('recursive expansion depth defaults to unlimited and accepts only positive integers', function()
+    local config = fresh_config()
+    config.clear_mappings()
+    H.assert_false(config.defaults.max_recursive_expand_depth,
+      'recursive expansion is unlimited by default')
+
+    local options = config.setup({ max_recursive_expand_depth = 3 })
+    H.assert_eq(options.max_recursive_expand_depth, 3,
+      'a positive integer depth limit is accepted')
+
+    H.capture_messages()
+    options = config.setup({ max_recursive_expand_depth = 0 })
+    H.assert_false(options.max_recursive_expand_depth,
+      'invalid depth limits leave the unlimited default in place')
+    H.assert_notified('max_recursive_expand_depth', vim.log.levels.ERROR)
+    config.clear_mappings()
+  end)
+
   H.it('setup() rejects an unknown key with an ERROR notification', function()
     local config = fresh_config()
     config.clear_mappings()
@@ -282,6 +300,35 @@ H.describe('config', function()
 
     H.assert_eq(buf_map_rhs('u', 'n'), ':echo "mine"<CR>', 'the user override survives')
     H.assert_nil(buf_map_rhs('p', 'n'), 'the plugin maps are still cleared')
+    pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+  end)
+
+  H.it('ftplugin undo removes only its maps and preserves the previous hook', function()
+    local config = fresh_config()
+    config.clear_mappings()
+    local bufnr = vim.api.nvim_create_buf(true, false)
+    vim.api.nvim_set_current_buf(bufnr)
+    vim.bo[bufnr].filetype = 'direct'
+    -- An already-loaded ftplugin may have populated this buffer variable; add
+    -- another hook to exercise composition when this ftplugin is sourced again.
+    vim.b[bufnr].undo_ftplugin = 'let b:previous_ftplugin_undo_ran = 1'
+    vim.cmd('runtime ftplugin/direct.lua')
+    H.assert_true(buf_map_rhs('<CR>', 'n') ~= nil,
+      'the direct ftplugin installed its buffer mappings')
+    H.assert_true(type(vim.b[bufnr].undo_ftplugin) == 'string'
+      and vim.b[bufnr].undo_ftplugin:find('previous_ftplugin_undo_ran', 1, true) ~= nil,
+      'the previous undo hook was retained')
+
+    vim.keymap.set('n', '<CR>', ':echo "user map"<CR>', { buffer = bufnr })
+    vim.api.nvim_buf_call(bufnr, function()
+      vim.cmd('execute b:undo_ftplugin')
+    end)
+
+    H.assert_eq(vim.b[bufnr].previous_ftplugin_undo_ran, 1,
+      'the previous undo hook ran')
+    H.assert_eq(buf_map_rhs('<CR>', 'n'), ':echo "user map"<CR>',
+      'the same-lhs user mapping survives')
+    H.assert_nil(buf_map_rhs('p', 'n'), 'the plugin mapping was removed')
     pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
   end)
 

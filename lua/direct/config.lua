@@ -3,11 +3,13 @@
 -- this plugin, including its buffer-local mappings in loaded direct buffers.
 
 local M = {}
+local constants = require('direct.constants')
 
 local defaults = {
   map_default_keys = true,
   show_folder_icons = false,
   show_file_icons = false,
+  max_recursive_expand_depth = false,
 }
 
 M.defaults = defaults
@@ -64,7 +66,8 @@ M.BUFFER_MAPS = {
 local function open_direct_buffers()
   local bufs = {}
   for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
-    if vim.api.nvim_buf_is_loaded(bufnr) and vim.bo[bufnr].filetype == 'direct' then
+    if vim.api.nvim_buf_is_loaded(bufnr)
+      and vim.bo[bufnr].filetype == constants.FILETYPE then
       bufs[#bufs + 1] = bufnr
     end
   end
@@ -99,13 +102,19 @@ end
 -- silently abort the rest of that buffer's mappings (a single pcall around the
 -- whole loop did exactly that while still returning true, leaving the buffer
 -- half-cleared with no sign of it).
-function M.clear_buffer_mappings()
-  for _, bufnr in ipairs(open_direct_buffers()) do
+function M.clear_buffer_mappings(bufnr)
+  local buffers
+  if bufnr ~= nil then
+    buffers = { bufnr == 0 and vim.api.nvim_get_current_buf() or bufnr }
+  else
+    buffers = open_direct_buffers()
+  end
+  for _, target in ipairs(buffers) do
     -- The handle can go invalid between the snapshot above and this call (the
     -- buffer is unloaded in the meantime) and nvim_buf_call raises on an
     -- invalid buffer id. The buffer is going away anyway, so the failure is
     -- ignored rather than propagated.
-    pcall(vim.api.nvim_buf_call, bufnr, function()
+    pcall(vim.api.nvim_buf_call, target, function()
       for _, entry in ipairs(M.BUFFER_MAPS) do
         local current = vim.fn.maparg(entry.lhs, entry.mode, false, true)
         local ours = current.rhs ~= nil
@@ -116,7 +125,7 @@ function M.clear_buffer_mappings()
           if not ok then
             require('direct.ui').notify(
               string.format('direct: cannot clear the %s mapping in buffer %d: %s',
-                entry.lhs, bufnr, tostring(err)),
+                entry.lhs, target, tostring(err)),
               vim.log.levels.WARN)
           end
         end
@@ -168,6 +177,12 @@ function M.setup(opts)
     if defaults[key] == nil then
       require('direct.ui').notify(
         string.format("direct: unknown option '%s'", tostring(key)),
+        vim.log.levels.ERROR)
+    elseif key == 'max_recursive_expand_depth'
+      and value ~= false
+      and (type(value) ~= 'number' or value < 1 or value % 1 ~= 0) then
+      require('direct.ui').notify(
+        'direct: max_recursive_expand_depth must be false or a positive integer',
         vim.log.levels.ERROR)
     else
       next_options[key] = value

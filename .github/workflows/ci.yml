@@ -1,18 +1,10 @@
 name: CI
 
-# `push` only, so one commit produces one workflow run. It stays unfiltered
-# (no `branches:`/`tags:`) because a push to a branch that has no PR must still
-# trigger a run -- that is how the red-run self-test was performed. What this
-# trades away:
-#   - Pull requests from forks will not trigger CI at all: a push in a fork
-#     does not trigger the upstream repository's workflows.
-#   - CI no longer tests the branch merged with the base (`pull_request` ran on
-#     `refs/pull/*/merge`), so a branch that is green alone but breaks when
-#     combined with `master` is only discovered by the run on `master` after
-#     merging.
-#   - Unfiltered `push` also means tag pushes trigger CI (harmless, but worth
-#     knowing).
-on: push
+# Push covers branches without PRs; pull_request also tests the merge result and
+# enables CI for fork PRs. Unfiltered push means tag pushes run too (harmless).
+on:
+  push:
+  pull_request:
 
 permissions:
   contents: read
@@ -65,3 +57,6 @@ jobs:
             coverage/index.html
             coverage/summary.out
           if-no-files-found: warn
+
+      - name: Run real-startup smoke test
+        run: tests/live_startup.sh

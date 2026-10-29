@@ -8,8 +8,6 @@ M.fs = require('direct.fs')
 M.paths = require('direct.paths')
 M.ui = require('direct.ui')
 
-local FIELD_SEPARATOR = '\t'
-
 -- Paste clash prompt cap (follow-up): a `ui.prompt` that keeps answering a
 -- name that still exists -- a stub, or a broken/hostile prompt -- would
 -- otherwise spin forever and freeze the editor. After this many collisions the
@@ -95,28 +93,16 @@ function M.split_names(str)
   return vim.split(str, ' ', { plain = true, trimempty = true })
 end
 
--- entry_name_reason(name) -> nil when `name` can round-trip through the `p`
--- `up` serialization, else a short reason: 'empty' | 'contains a space' |
--- 'contains a tab' | 'contains a control character'. A name carrying the ' '
--- ENTRY_SEPARATOR would split into two names on reload and desync the src/dst
--- name lists, letting Unpaste delete an unrelated file; a name
--- carrying the '\t' FIELD_SEPARATOR would break the `NAME\tfield...` line
--- framing itself; and any OTHER control character -- most importantly an
--- embedded '\n' -- is refused too, so the log round trip never depends on
--- `vim.fn.writefile` encoding a NL as NUL to keep the line framing intact.
--- This is the validator for the boundaries that feed a name into the
--- serialization: register.yank / _yank_one refuse such a name before it can
--- enter the register, and Paste refuses a separator-carrying clash answer
--- exactly like an empty/cancelled one. `deserialize` deliberately does
--- not re-validate: it only ever rebuilds actions from the Lua-owned
--- version-marked history log, where a separator-free name is guaranteed by
--- construction.
+-- entry_name_reason(name) -> nil when `name` is one valid basename component.
 function M.entry_name_reason(name)
   if type(name) ~= 'string' or name == '' then
     return 'empty'
   end
-  if name:find(' ', 1, true) ~= nil then
-    return 'contains a space'
+  if not M.paths.valid_utf8(name) then
+    return 'invalid UTF-8'
+  end
+  if name == '.' or name == '..' or name:find('/', 1, true) ~= nil then
+    return 'not a basename component'
   end
   if name:find('\t', 1, true) ~= nil then
     return 'contains a tab'
@@ -127,20 +113,18 @@ function M.entry_name_reason(name)
   return nil
 end
 
--- path_reason(path) -> nil when `path` can be a `NAME\tfield...` line field
--- else a short reason: 'invalid path' | 'contains a tab' | 'contains a control
--- character'. The '\t' IS the FIELD_SEPARATOR, so a field value carrying one
--- would split into two fields on reload (the data-integrity class); any
--- other control character -- an embedded '\n' included -- cannot survive the
--- line framing either. A ' ' (space) is legal in a path here: only the `p`/`up`
--- NAME lists use the ' ' ENTRY_SEPARATOR, and those names are validated by
--- `entry_name_reason` at their owning boundaries (register.yank/_yank_one and
--- the Paste clash answer). This is the universal guard `serialize` runs over
--- every field, so EVERY caller that can emit a history line is covered -- not
--- only the sync boundary that refuses early.
+-- path_reason(path) -> nil when a path is valid UTF-8 and has no control bytes.
+-- Tab keeps a specific diagnostic; all controls, including NUL and newlines,
+-- are rejected before a JSONL record is built.
 function M.path_reason(path)
   if type(path) ~= 'string' then
     return 'invalid path'
+  end
+  if path == '' then
+    return 'invalid path'
+  end
+  if not M.paths.valid_utf8(path) then
+    return 'invalid UTF-8'
   end
   if path:find('\t', 1, true) ~= nil then
     return 'contains a tab'
@@ -187,8 +171,8 @@ end
 -- ---------------------------------------------------------------------------
 
 function M.Move(src, dst)
-  local self = { name = 'mv', src = src, dst = dst }
-  self['do'] = function()
+  local self = { name = 'mv', _kind = 'mv', src = src, dst = dst }
+  self._execute = function()
     if M.fs.taken(self.dst) and not M.fs.same_entry(self.src, self.dst) then
       return nil, 'destination exists: ' .. tostring(self.dst)
     end
@@ -198,6 +182,7 @@ function M.Move(src, dst)
     end
     return M.fs.rename(self.src, self.dst)
   end
+  self['do'] = function() return M.execute(self) end
   function self.describe()
     return 'Moved ' .. M.rel(self.src) .. ' to ' .. M.rel(self.dst)
   end
@@ -211,29 +196,32 @@ end
 -- resolution failure is deferred to `do`, which returns nil, err (
 -- consumers branch, nothing raises).
 function M.Remove(src, dst)
-  local self = { name = 'rm', src = src }
+  local self = { name = 'rm', _kind = 'rm', src = src }
   if dst ~= nil then
     self.dst = dst
   else
-    local trash = M.paths.data_dir('trash')
+    local trash = M.paths.data_dir_path('trash')
     if trash then
       self.dst = M.first_free_trash(trash, src)
     end
   end
-  self['do'] = function()
+  self._execute = function()
     if not self.dst then
-      local trash, err = M.paths.data_dir('trash')
+      local trash, err = M.paths.ensure_data_dir('trash')
       if not trash then
         return nil, err
       end
       self.dst = M.first_free_trash(trash, self.src)
     end
+    local trash, err = M.paths.ensure_data_dir('trash')
+    if not trash then return nil, err end
     local ok, err = M.close_src_buffer(self.src)
     if not ok then
       return nil, err
     end
     return M.fs.rename(self.src, self.dst)
   end
+  self['do'] = function() return M.execute(self) end
   function self.describe()
     return 'Removed ' .. M.rel(self.src)
   end
@@ -241,29 +229,32 @@ function M.Remove(src, dst)
 end
 
 function M.RemoveDirectory(src, dst)
-  local self = { name = 'rmdir', src = src }
+  local self = { name = 'rmdir', _kind = 'rmdir', src = src }
   if dst ~= nil then
     self.dst = dst
   else
-    local trash = M.paths.data_dir('trash')
+    local trash = M.paths.data_dir_path('trash')
     if trash then
       self.dst = M.first_free_trash(trash, src)
     end
   end
-  self['do'] = function()
+  self._execute = function()
     if not self.dst then
-      local trash, err = M.paths.data_dir('trash')
+      local trash, err = M.paths.ensure_data_dir('trash')
       if not trash then
         return nil, err
       end
       self.dst = M.first_free_trash(trash, self.src)
     end
+    local trash, err = M.paths.ensure_data_dir('trash')
+    if not trash then return nil, err end
     local ok, err = M.close_src_buffer(self.src)
     if not ok then
       return nil, err
     end
     return M.fs.rename(self.src, self.dst)
   end
+  self['do'] = function() return M.execute(self) end
   function self.describe()
     return 'Removed ' .. M.rel(self.src)
   end
@@ -271,8 +262,8 @@ function M.RemoveDirectory(src, dst)
 end
 
 function M.Restore(src, dst)
-  local self = { name = 'rs', src = src, dst = dst }
-  self['do'] = function()
+  local self = { name = 'rs', _kind = 'rs', src = src, dst = dst }
+  self._execute = function()
     local ok, err = M.close_src_buffer(self.src)
     if not ok then
       return nil, err
@@ -288,6 +279,7 @@ function M.Restore(src, dst)
     end
     return res, rerr
   end
+  self['do'] = function() return M.execute(self) end
   function self.describe()
     return 'Restored ' .. M.rel(self.dst)
   end
@@ -295,8 +287,8 @@ function M.Restore(src, dst)
 end
 
 function M.RestoreDirectory(src, dst)
-  local self = { name = 'rsdir', src = src, dst = dst }
-  self['do'] = function()
+  local self = { name = 'rsdir', _kind = 'rsdir', src = src, dst = dst }
+  self._execute = function()
     local ok, err = M.close_src_buffer(self.src)
     if not ok then
       return nil, err
@@ -309,6 +301,7 @@ function M.RestoreDirectory(src, dst)
     end
     return res, rerr
   end
+  self['do'] = function() return M.execute(self) end
   function self.describe()
     return 'Restored ' .. M.rel(self.dst)
   end
@@ -316,13 +309,14 @@ function M.RestoreDirectory(src, dst)
 end
 
 function M.Touch(dst)
-  local self = { name = 'touch', dst = dst }
-  self['do'] = function()
+  local self = { name = 'touch', _kind = 'touch', dst = dst }
+  self._execute = function()
     if M.fs.taken(self.dst) then
       return nil, 'destination exists: ' .. tostring(self.dst)
     end
     return M.fs.touch(self.dst)
   end
+  self['do'] = function() return M.execute(self) end
   function self.describe()
     return 'Created ' .. M.rel(self.dst)
   end
@@ -330,13 +324,14 @@ function M.Touch(dst)
 end
 
 function M.MakeDirectory(dst)
-  local self = { name = 'mkdir', dst = dst }
-  self['do'] = function()
+  local self = { name = 'mkdir', _kind = 'mkdir', dst = dst }
+  self._execute = function()
     if M.fs.taken(self.dst) then
       return nil, 'destination exists: ' .. tostring(self.dst)
     end
     return M.fs.mkdirp(self.dst)
   end
+  self['do'] = function() return M.execute(self) end
   function self.describe()
     return 'Created ' .. M.rel(self.dst)
   end
@@ -355,10 +350,9 @@ end
 -- re-asked while the answer still names an existing path: an existing
 -- destination is never written to (a directory is never merged into, a file is
 -- never overwritten), so Undo -- which removes what `renames` records -- can
--- never delete data that predated the paste. An empty, cancelled, or
--- separator-carrying answer (one containing the ' '
--- ENTRY_SEPARATOR or the '\t' FIELD_SEPARATOR could not round-trip) skips the
--- entry and reports it. ui.prompt re-raises after inputrestore on
+-- never delete data that predated the paste. An empty, cancelled, or invalid
+-- basename answer skips the entry and reports it; spaces round-trip in JSON.
+-- ui.prompt re-raises after inputrestore on
 -- cancel/error, so the prompt is wrapped in pcall and a raise behaves exactly
 -- like an empty answer. Skipped entries are pruned from `renames` before
 -- `do` returns, so serialize/Unpaste never name an entry that was not
@@ -366,11 +360,12 @@ end
 function M.Paste(src, dst, src_names, dst_names)
   local self = {
     name = 'p',
+    _kind = 'p',
     src = src,
     dst = dst,
     renames = zipped(src_names, dst_names),
   }
-  self['do'] = function()
+  self._execute = function()
     local last = nil
     -- accumulate only the pairs actually written so `renames` (and its
     -- serialized form) never names a skipped entry; Unpaste then reverses
@@ -390,7 +385,7 @@ function M.Paste(src, dst, src_names, dst_names)
         -- pre-existing members included. Re-prompt until the answer names a
         -- path that does not exist (at most PASTE_CLASH_ATTEMPTS times: a
         -- prompt that stays stuck on an existing name is skipped, never spun
-        -- on); an empty, cancelled or separator-carrying
+        -- on); an empty, cancelled or invalid-component
         -- answer still skips the entry and leaves the existing
         -- destination untouched.
         local attempts = 0
@@ -408,9 +403,8 @@ function M.Paste(src, dst, src_names, dst_names)
           local okp, answer = pcall(M.ui.prompt,
             entry_type .. ' already exists. Paste as: ', pair.src, 'file')
           if not okp or answer == nil or M.entry_name_reason(answer) ~= nil then
-            -- an empty/cancelled answer -- or one carrying a
-            -- serialization separator (' ' ENTRY_SEPARATOR, '\t'
-            -- FIELD_SEPARATOR), which could not round-trip -- skips the ENTRY
+            -- an empty/cancelled answer or an invalid basename component skips
+            -- the ENTRY
             -- entirely; the original destination must not be touched.
             M.ui.notify('Skipped ' .. pair.src, vim.log.levels.WARN)
             skipped = true
@@ -452,6 +446,7 @@ function M.Paste(src, dst, src_names, dst_names)
     self.renames = copied
     return last or true
   end
+  self['do'] = function() return M.execute(self) end
   function self.describe()
     return 'Pasted into ' .. M.rel(self.dst) .. '/'
   end
@@ -464,11 +459,12 @@ end
 function M.Unpaste(src, dst, src_names, dst_names)
   local self = {
     name = 'up',
+    _kind = 'up',
     src = src,
     dst = dst,
     renames = zipped(src_names, dst_names),
   }
-  self['do'] = function()
+  self._execute = function()
     for _, pair in ipairs(self.renames) do
       local full = M.fs.join(self.src, pair.src)
       local st = M.fs.stat(full)
@@ -488,6 +484,7 @@ function M.Unpaste(src, dst, src_names, dst_names)
     end
     return true
   end
+  self['do'] = function() return M.execute(self) end
   function self.describe()
     return 'Reversed paste into ' .. M.rel(self.src) .. '/'
   end
@@ -702,7 +699,7 @@ end
 -- starts with the name of a single-entry action. `describe` joins the member
 -- descriptions, so `summarize` still emits ONE summary per undo press.
 function M.Group(actions)
-  local self = { name = 'g', actions = actions }
+  local self = { name = 'g', _kind = 'g', actions = actions }
   local function report_temps(staging)
     for _, tmp in ipairs(staging ~= nil and staging.temps or {}) do
       if M.fs.taken(tmp) then
@@ -711,7 +708,7 @@ function M.Group(actions)
       end
     end
   end
-  self['do'] = function()
+  self._execute = function()
     local members = self.actions or {}
     local staging, stage_err, stage_temps, stage_overrides =
       M.stage_moves(members)
@@ -748,7 +745,7 @@ function M.Group(actions)
         and staging.overrides[act.src] ~= nil then
         exec = M.Move(staging.overrides[act.src], act.dst)
       end
-      local ok, res, err = pcall(exec['do'])
+      local ok, res, err = pcall(M.execute, exec)
       if not ok then
         report_temps(staging)
         return nil, tostring(res)
@@ -760,6 +757,7 @@ function M.Group(actions)
     end
     return true
   end
+  self['do'] = function() return M.execute(self) end
   function self.describe()
     local parts = {}
     for _, member in ipairs(self.actions or {}) do
@@ -774,133 +772,503 @@ end
 -- Serialization
 -- ---------------------------------------------------------------------------
 
--- checked_line(words) -> the FIELD_SEPARATOR-joined line | nil, err. The
--- representability gate runs over every assembled field HERE, so every entry
--- kind (`NAME\tfield...` and the `g\t<count>\t<src>\t<dst>...` group) is checked
--- by the same code and no caller can emit an unrepresentable line.
-local function checked_line(words)
-  for _, word in ipairs(words) do
-    local reason = M.path_reason(word)
-    if reason ~= nil then
-      return nil, 'cannot serialize action: ' .. reason .. ': ' .. tostring(word)
-    end
-  end
-  return table.concat(words, FIELD_SEPARATOR)
+local function encode_string(value)
+  return vim.json.encode(value)
 end
 
--- serialize_group(action) -> `g\t<count>\t<src>\t<dst>...` | nil, err.
---
--- The format decision. Only the interlinked moves of one
--- RENAME sync can be grouped (see `M.move_groups`), so a group is serialized as
--- its member count followed by that many src/dst pairs: fixed arity makes the
--- line unambiguous without nesting the field separator inside a field, and a
--- count that does not match the field number is refused by `deserialize` rather
--- than half-replayed. A different group shape (a non-`mv` member) would need a
--- new marker, which the version gate already handles. The tab framing of an
--- ACTION line is untouched: a path carrying a tab is still refused.
+local function encode_array(values)
+  local encoded = {}
+  for i, value in ipairs(values) do
+    encoded[i] = encode_string(value)
+  end
+  return '[' .. table.concat(encoded, ',') .. ']'
+end
+
+-- Object fields are supplied as ordered { key, already_encoded_value } pairs;
+-- JSON table iteration order is never used for persisted records.
+local function encode_object(fields)
+  local encoded = {}
+  for i, field in ipairs(fields) do
+    encoded[i] = encode_string(field[1]) .. ':' .. field[2]
+  end
+  return '{' .. table.concat(encoded, ',') .. '}'
+end
+
+-- A group is one connected component of interlinked moves. Use path spelling
+-- only, rather than filesystem identity: replay and preflight must be pure with
+-- respect to the current filesystem state.
+local function group_is_connected(moves)
+  if type(moves) ~= 'table' or #moves < 2 then return false end
+  local endpoints, visited = {}, { [1] = true }
+  local function key(path)
+    local trimmed = path:gsub('/+$', '')
+    if trimmed == '' then trimmed = '/' end
+    return vim.fs.normalize(trimmed)
+  end
+  for i, move in ipairs(moves) do
+    endpoints[i] = { key(move.src), key(move.dst) }
+  end
+  local changed = true
+  while changed do
+    changed = false
+    for i, candidate in ipairs(endpoints) do
+      if not visited[i] then
+        for j in pairs(visited) do
+          if candidate[1] == endpoints[j][1] or candidate[1] == endpoints[j][2]
+            or candidate[2] == endpoints[j][1] or candidate[2] == endpoints[j][2] then
+            visited[i] = true
+            changed = true
+            break
+          end
+        end
+      end
+    end
+  end
+  for i = 1, #moves do
+    if not visited[i] then return false end
+  end
+  return true
+end
+
+local function checked_string(value, what)
+  local reason = M.path_reason(value)
+  if not reason then
+    local canonical = M.paths.root(value)
+    local spelling = value:gsub('/+$', '')
+    if spelling == '' then spelling = '/' end
+    if canonical ~= spelling then reason = 'path must be absolute and canonical' end
+  end
+  if reason then
+    return nil, 'cannot serialize action: ' .. reason .. ': ' .. tostring(value)
+  end
+  return encode_string(value)
+end
+
+local function encoded_move(src, dst)
+  local es, serr = checked_string(src, 'src')
+  if not es then return nil, serr end
+  local ed, derr = checked_string(dst, 'dst')
+  if not ed then return nil, derr end
+  return encode_object({
+    { 'src', es },
+    { 'dst', ed },
+  })
+end
+
+-- serialize_group(action) -> canonical JSONL record | nil, err.
 function M.serialize_group(action)
   local members = action.actions
   if type(members) ~= 'table' or #members < 2 then
     return nil, 'cannot serialize group: at least two actions are required'
   end
-  local words = { 'g', tostring(#members) }
+  local moves = {}
   for _, member in ipairs(members) do
     if type(member) ~= 'table' or member.name ~= 'mv'
       or type(member.src) ~= 'string' or type(member.dst) ~= 'string' then
       return nil, 'cannot serialize group: only move actions can be grouped'
     end
-    words[#words + 1] = member.src
-    words[#words + 1] = member.dst
+    local move, err = encoded_move(member.src, member.dst)
+    if not move then return nil, err end
+    moves[#moves + 1] = move
   end
-  return checked_line(words)
+  if not group_is_connected(members) then
+    return nil, 'cannot serialize group: moves are not interlinked'
+  end
+  return encode_object({
+    { 'op', encode_string('g') },
+    { 'moves', '[' .. table.concat(moves, ',') .. ']' },
+  })
 end
 
--- serialize(action) -> `NAME\tfield...` | nil, err. The field order follows the
--- Python version verbatim: src then dst (each present on the action), then for
--- `p`/`up` the ' '-joined src_names and dst_names lists.
---
--- this is the LAST gate every caller passes through before a line is
--- persisted, so the representability check lives HERE (`M.path_reason`, run over
--- every assembled field) instead of only at the sync boundary: a field value
--- carrying the '\t' FIELD_SEPARATOR -- or any other control character -- would
--- not survive `deserialize`/`reverse`, so NO line is emitted and a reason is
--- returned for the caller to report. The line is never silently truncated. The
--- sync boundary keeps its early, friendlier refusal; `register.paste`
--- pre-serializes the Paste for the same reason before it copies anything.
+-- Every action kind declares its serialized fields, parser, and reversal in one
+-- place. Factories keep the behavior on each action instance; execute dispatch
+-- uses this table so callers do not need to know that implementation detail.
+local function object_has_exact_fields(value, expected)
+  if type(value) ~= 'table' then return false end
+  local count = 0
+  for key in pairs(value) do
+    if type(key) ~= 'string' or not expected[key] then return false end
+    count = count + 1
+  end
+  for key in pairs(expected) do
+    if value[key] == nil then return false end
+  end
+  return count == vim.tbl_count(expected)
+end
+
+local function is_array(value)
+  if type(value) ~= 'table' then return false end
+  local count, max = 0, 0
+  for key in pairs(value) do
+    if type(key) ~= 'number' or key < 1 or key % 1 ~= 0 then return false end
+    count = count + 1
+    max = math.max(max, key)
+  end
+  return count == max
+end
+
+local KINDS = {
+  mv = {
+    fields = { 'src', 'dst' },
+    record_fields = { 'op', 'src', 'dst' },
+    deserialize = function(record) return M.Move(record.src, record.dst) end,
+    reverse = function(action) return M.Move(action.dst, action.src) end,
+  },
+  rm = {
+    fields = { 'src', 'dst' },
+    record_fields = { 'op', 'src', 'dst' },
+    deserialize = function(record) return M.Remove(record.src, record.dst) end,
+    reverse = function(action) return M.Restore(action.dst, action.src) end,
+  },
+  rmdir = {
+    fields = { 'src', 'dst' },
+    record_fields = { 'op', 'src', 'dst' },
+    deserialize = function(record) return M.RemoveDirectory(record.src, record.dst) end,
+    reverse = function(action) return M.RestoreDirectory(action.dst, action.src) end,
+  },
+  rs = {
+    fields = { 'src', 'dst' },
+    record_fields = { 'op', 'src', 'dst' },
+    deserialize = function(record) return M.Restore(record.src, record.dst) end,
+    reverse = function(action) return M.Remove(action.dst) end,
+  },
+  rsdir = {
+    fields = { 'src', 'dst' },
+    record_fields = { 'op', 'src', 'dst' },
+    deserialize = function(record) return M.RestoreDirectory(record.src, record.dst) end,
+    reverse = function(action) return M.RemoveDirectory(action.dst) end,
+  },
+  touch = {
+    fields = { 'dst' },
+    record_fields = { 'op', 'dst' },
+    deserialize = function(record) return M.Touch(record.dst) end,
+    reverse = function(action) return M.Remove(action.dst) end,
+  },
+  mkdir = {
+    fields = { 'dst' },
+    record_fields = { 'op', 'dst' },
+    deserialize = function(record) return M.MakeDirectory(record.dst) end,
+    reverse = function(action) return M.RemoveDirectory(action.dst) end,
+  },
+  p = {
+    fields = { 'src', 'dst' },
+    name_lists = true,
+    record_fields = { 'op', 'src', 'dst', 'src_names', 'dst_names' },
+    deserialize = function(record)
+      return M.Paste(record.src, record.dst, record.src_names, record.dst_names)
+    end,
+    reverse = function(action)
+      local src_names, dst_names = M.split_pairs(action.renames)
+      return M.Unpaste(action.dst, action.src, dst_names, src_names)
+    end,
+  },
+  up = {
+    fields = { 'src', 'dst' },
+    name_lists = true,
+    record_fields = { 'op', 'src', 'dst', 'src_names', 'dst_names' },
+    deserialize = function(record)
+      return M.Unpaste(record.src, record.dst, record.src_names, record.dst_names)
+    end,
+    reverse = function(action)
+      local src_names, dst_names = M.split_pairs(action.renames)
+      return M.Paste(action.dst, action.src, dst_names, src_names)
+    end,
+  },
+  g = {
+    fields = { 'actions' },
+    record_fields = { 'op', 'moves' },
+    serialize = M.serialize_group,
+    deserialize = function(record)
+      if not is_array(record.moves) or #record.moves < 2 then
+        return nil, 'invalid group record: at least two moves are required'
+      end
+      local members = {}
+      for _, move in ipairs(record.moves) do
+        if not object_has_exact_fields(move, { src = true, dst = true })
+          or type(move.src) ~= 'string' or type(move.dst) ~= 'string' then
+          return nil, 'invalid group record: each move needs src and dst strings'
+        end
+        members[#members + 1] = M.Move(move.src, move.dst)
+      end
+      return M.Group(members)
+    end,
+    reverse = function(action)
+      local members = {}
+      for i = #(action.actions or {}), 1, -1 do
+        local rev, err = M.reverse_action(action.actions[i])
+        if not rev then
+          return nil, err
+        end
+        members[#members + 1] = rev
+      end
+      if #members < 2 then
+        return nil, 'no reversal for group: fewer than two actions'
+      end
+      return M.Group(members)
+    end,
+  },
+}
+
+for name, kind in pairs(KINDS) do
+  local expected = name
+  kind.execute = function(action)
+    if action._kind ~= expected then
+      return nil, 'action kind mismatch: expected ' .. expected
+        .. ', got ' .. tostring(action._kind)
+    end
+    if type(action._execute) ~= 'function' then
+      return nil, 'action has no executor: ' .. expected
+    end
+    return action._execute()
+  end
+end
+
+function M.execute(action)
+  if type(action) ~= 'table' then
+    return nil, 'invalid action'
+  end
+  local kind = KINDS[action.name]
+  if kind == nil then
+    return nil, 'no executor for action: ' .. tostring(action.name)
+  end
+  return kind.execute(action)
+end
+
+-- serialize(action) -> a canonical JSON record with fixed key order | nil, err.
 function M.serialize(action)
   if type(action) ~= 'table' or type(action.name) ~= 'string' then
     return nil, 'cannot serialize action'
   end
-  if action.name == 'g' then
-    return M.serialize_group(action)
+  local kind = KINDS[action.name]
+  if kind == nil then
+    return nil, 'cannot serialize action'
   end
-  local words = { action.name }
-  if action.src ~= nil then
-    words[#words + 1] = action.src
+  if action._kind ~= action.name then
+    return nil, 'cannot serialize action: action kind mismatch'
   end
-  if action.dst ~= nil then
-    words[#words + 1] = action.dst
+  if kind.serialize ~= nil then
+    return kind.serialize(action)
   end
-  if action.name == 'p' or action.name == 'up' then
+  local fields = { { 'op', encode_string(action.name) } }
+  for _, field in ipairs(kind.fields) do
+    local encoded, err = checked_string(action[field], field)
+    if not encoded then return nil, err end
+    fields[#fields + 1] = { field, encoded }
+  end
+  if kind.name_lists then
     local src_names, dst_names = M.split_pairs(action.renames)
-    words[#words + 1] = table.concat(src_names, ' ')
-    words[#words + 1] = table.concat(dst_names, ' ')
+    if #src_names ~= #dst_names then
+      return nil, 'cannot serialize action: name arrays must have equal lengths'
+    end
+    for _, name in ipairs(src_names) do
+      local reason = M.entry_name_reason(name)
+      if reason then
+        return nil, 'cannot serialize action: ' .. reason .. ': ' .. tostring(name)
+      end
+    end
+    for _, name in ipairs(dst_names) do
+      local reason = M.entry_name_reason(name)
+      if reason then
+        return nil, 'cannot serialize action: ' .. reason .. ': ' .. tostring(name)
+      end
+    end
+    fields[#fields + 1] = { 'src_names', encode_array(src_names) }
+    fields[#fields + 1] = { 'dst_names', encode_array(dst_names) }
   end
-  return checked_line(words)
+  return encode_object(fields)
 end
 
--- deserialize(line) -> the action the line denotes, or nil, err for a
--- malformed or unknown line. Destructive actions are rebuilt through their
--- factories with the serialized dst passed verbatim, so a trashed entry is
--- always restored to and from the exact recorded path.
---
--- A `g` line is validated before anything is rebuilt: the member count must be a
--- plain decimal of at least two and must match the number of src/dst fields
--- exactly; otherwise refuse the whole line so history can retain it. A group is
--- never partially executed: a refusal means nothing ran.
+local function duplicate_object_keys(json)
+  local at = 1
+  local function whitespace()
+    while json:sub(at, at):match('%s') do at = at + 1 end
+  end
+  local function string_token()
+    local start = at
+    if json:sub(at, at) ~= '"' then return nil end
+    at = at + 1
+    while at <= #json do
+      local char = json:sub(at, at)
+      if char == '\\' then
+        at = at + 2
+      elseif char == '"' then
+        at = at + 1
+        local ok, value = pcall(vim.json.decode, json:sub(start, at - 1))
+        if not ok then return nil end
+        return value
+      else
+        at = at + 1
+      end
+    end
+    return nil
+  end
+  local parse_value
+  local function parse_object()
+    at = at + 1
+    whitespace()
+    if json:sub(at, at) == '}' then at = at + 1; return true end
+    local seen = {}
+    while at <= #json do
+      local key = string_token()
+      if key == nil then return nil, 'malformed object key' end
+      if seen[key] then return nil, 'duplicate JSON object key: ' .. key end
+      seen[key] = true
+      whitespace()
+      if json:sub(at, at) ~= ':' then return nil, 'missing object colon' end
+      at = at + 1
+      local ok, err = parse_value()
+      if not ok then return nil, err end
+      whitespace()
+      local separator = json:sub(at, at)
+      if separator == '}' then at = at + 1; return true end
+      if separator ~= ',' then return nil, 'malformed object separator' end
+      at = at + 1
+      whitespace()
+    end
+    return nil, 'unterminated object'
+  end
+  local function parse_array()
+    at = at + 1
+    whitespace()
+    if json:sub(at, at) == ']' then at = at + 1; return true end
+    while at <= #json do
+      local ok, err = parse_value()
+      if not ok then return nil, err end
+      whitespace()
+      local separator = json:sub(at, at)
+      if separator == ']' then at = at + 1; return true end
+      if separator ~= ',' then return nil, 'malformed array separator' end
+      at = at + 1
+      whitespace()
+    end
+    return nil, 'unterminated array'
+  end
+  parse_value = function()
+    whitespace()
+    local char = json:sub(at, at)
+    if char == '{' then return parse_object() end
+    if char == '[' then return parse_array() end
+    if char == '"' then
+      if string_token() == nil then return nil, 'malformed JSON string' end
+      return true
+    end
+    local start = at
+    while at <= #json do
+      local char = json:sub(at, at)
+      if char == ',' or char == ']' or char == '}' or char:match('%s') then
+        break
+      end
+      at = at + 1
+    end
+    if at == start then return nil, 'malformed JSON value' end
+    return true
+  end
+  local ok, err = parse_value()
+  if not ok then return nil, err end
+  whitespace()
+  if at <= #json then return nil, 'trailing JSON data' end
+  return true
+end
+
+local function exact_fields(record, keys)
+  local expected = {}
+  for _, key in ipairs(keys) do expected[key] = true end
+  return object_has_exact_fields(record, expected)
+end
+
+local function validate_json_action(record, kind)
+  if not exact_fields(record, kind.record_fields) then
+    return nil, 'action record has unknown or missing keys'
+  end
+  if record.op ~= 'g' then
+    for _, field in ipairs(kind.fields) do
+      local reason = M.path_reason(record[field])
+      if not reason then
+        local canonical = M.paths.root(record[field])
+        local spelling = record[field]:gsub('/+$', '')
+        if spelling == '' then spelling = '/' end
+        if canonical ~= spelling then reason = 'path must be absolute and canonical' end
+      end
+      if reason then return nil, reason .. ': ' .. tostring(record[field]) end
+    end
+  end
+  if kind.name_lists then
+    if not is_array(record.src_names) or not is_array(record.dst_names)
+      or #record.src_names ~= #record.dst_names then
+      return nil, 'name arrays must be arrays of equal length'
+    end
+    for _, names in ipairs({ record.src_names, record.dst_names }) do
+      for _, name in ipairs(names) do
+        local reason = M.entry_name_reason(name)
+        if reason then return nil, reason .. ': ' .. tostring(name) end
+      end
+    end
+  elseif record.op == 'g' then
+    if not is_array(record.moves) or #record.moves < 2 then
+      return nil, 'a group requires at least two move pairs'
+    end
+    for _, move in ipairs(record.moves) do
+      if not exact_fields(move, { 'src', 'dst' }) then
+        return nil, 'a group move requires exactly src and dst'
+      end
+      for _, field in ipairs({ 'src', 'dst' }) do
+        local reason = M.path_reason(move[field])
+        if not reason then
+          local canonical = M.paths.root(move[field])
+          local spelling = move[field]:gsub('/+$', '')
+          if spelling == '' then spelling = '/' end
+          if canonical ~= spelling then reason = 'path must be absolute and canonical' end
+        end
+        if reason then return nil, reason .. ': ' .. tostring(move[field]) end
+      end
+    end
+    if not group_is_connected(record.moves) then
+      return nil, 'group moves are not interlinked'
+    end
+  end
+  return true
+end
+
+-- deserialize(line) -> action, or nil, err. Re-encoding the parsed record and
+-- comparing bytes enforces canonical key order, escaping, and whitespace.
 function M.deserialize(line)
   if type(line) ~= 'string' or line == '' then
     return nil, 'invalid action line'
   end
-  local words = vim.split(line, FIELD_SEPARATOR, { plain = true })
-  local name = words[1]
-  if name == 'mv' then
-    return M.Move(words[2], words[3])
-  elseif name == 'rm' then
-    return M.Remove(words[2], words[3])
-  elseif name == 'rmdir' then
-    return M.RemoveDirectory(words[2], words[3])
-  elseif name == 'rs' then
-    return M.Restore(words[2], words[3])
-  elseif name == 'rsdir' then
-    return M.RestoreDirectory(words[2], words[3])
-  elseif name == 'touch' then
-    return M.Touch(words[2])
-  elseif name == 'mkdir' then
-    return M.MakeDirectory(words[2])
-  elseif name == 'p' then
-    return M.Paste(words[2], words[3],
-      M.split_names(words[4]), M.split_names(words[5]))
-  elseif name == 'up' then
-    return M.Unpaste(words[2], words[3],
-      M.split_names(words[4]), M.split_names(words[5]))
-  elseif name == 'g' then
-    local count = words[2]
-    if type(count) ~= 'string' or count:match('^%d+$') == nil then
-      return nil, 'invalid group line: bad member count'
-    end
-    count = tonumber(count)
-    if count < 2 or #words ~= 2 + 2 * count then
-      return nil, string.format('invalid group line: %d field(s) for %d move(s)',
-        #words - 2, count)
-    end
-    local members = {}
-    for i = 1, count do
-      members[#members + 1] = M.Move(words[1 + 2 * i], words[2 + 2 * i])
-    end
-    return M.Group(members)
+  if not M.paths.valid_utf8(line) then
+    return nil, 'invalid action line: invalid UTF-8'
   end
-  return nil, 'unknown action name: ' .. tostring(name)
+  local scan_ok, scan_err = duplicate_object_keys(line)
+  if not scan_ok then
+    return nil, 'invalid action line: ' .. tostring(scan_err)
+  end
+  local decoded_ok, record = pcall(vim.json.decode, line)
+  if not decoded_ok or type(record) ~= 'table' then
+    return nil, 'invalid action line: malformed JSON'
+  end
+  if type(record.op) ~= 'string' then
+    return nil, 'invalid action line: op must be a string'
+  end
+  local kind = KINDS[record.op]
+  if kind == nil then
+    return nil, 'unknown action name: ' .. tostring(record.op)
+  end
+  local valid, validation_err = validate_json_action(record, kind)
+  if not valid then
+    return nil, 'invalid action line: ' .. tostring(validation_err)
+  end
+  local action, build_err = kind.deserialize(record)
+  if not action then
+    return nil, build_err or 'invalid action line'
+  end
+  local canonical, encode_err = M.serialize(action)
+  if not canonical then
+    return nil, encode_err
+  end
+  if canonical ~= line then
+    return nil, 'invalid action line: non-canonical JSON'
+  end
+  return action
 end
 
 -- reverse_action(action) -> the reversal per the exact mapping
@@ -923,39 +1291,9 @@ function M.reverse_action(action)
   if type(action) ~= 'table' then
     return nil, 'invalid action'
   end
-  if action.name == 'mv' then
-    return M.Move(action.dst, action.src)
-  elseif action.name == 'rm' then
-    return M.Restore(action.dst, action.src)
-  elseif action.name == 'rmdir' then
-    return M.RestoreDirectory(action.dst, action.src)
-  elseif action.name == 'rs' then
-    return M.Remove(action.dst)
-  elseif action.name == 'rsdir' then
-    return M.RemoveDirectory(action.dst)
-  elseif action.name == 'touch' then
-    return M.Remove(action.dst)
-  elseif action.name == 'mkdir' then
-    return M.RemoveDirectory(action.dst)
-  elseif action.name == 'p' then
-    local src_names, dst_names = M.split_pairs(action.renames)
-    return M.Unpaste(action.dst, action.src, dst_names, src_names)
-  elseif action.name == 'up' then
-    local src_names, dst_names = M.split_pairs(action.renames)
-    return M.Paste(action.dst, action.src, dst_names, src_names)
-  elseif action.name == 'g' then
-    local members = {}
-    for i = #(action.actions or {}), 1, -1 do
-      local rev, err = M.reverse_action(action.actions[i])
-      if not rev then
-        return nil, err
-      end
-      members[#members + 1] = rev
-    end
-    if #members < 2 then
-      return nil, 'no reversal for group: fewer than two actions'
-    end
-    return M.Group(members)
+  local kind = KINDS[action.name]
+  if kind ~= nil then
+    return kind.reverse(action)
   end
   return nil, 'no reversal for action: ' .. tostring(action.name)
 end

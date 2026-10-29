@@ -9,6 +9,7 @@ local register = require('direct.register')
 local history = require('direct.history')
 local config = require('direct.config')
 local ui = require('direct.ui')
+local constants = require('direct.constants')
 
 -- Wired here so the no-arg `:DirectPaste` re-lists without register.lua touching buffers.
 register.relist = function()
@@ -20,7 +21,7 @@ function M.setup(opts)
 end
 
 local function guard(name)
-  if vim.bo.filetype == 'direct' then
+  if vim.bo.filetype == constants.FILETYPE then
     return true
   end
   ui.notify('direct: ' .. name .. ' can only be used in a direct buffer',

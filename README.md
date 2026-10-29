@@ -74,6 +74,7 @@ require('direct').setup({
   map_default_keys = true, -- set false to install no default mappings
   show_folder_icons = false, -- opt in to Nerd Font folder icons
   show_file_icons = false, -- opt in to a generic Nerd Font file icon
+  max_recursive_expand_depth = false, -- false means unlimited
 })
 ```
 
@@ -104,8 +105,13 @@ line opens the file.
 
 Use `zo` or `za` on a directory to expand it in place. Children are read lazily,
 one level at a time; repeating an expansion does not re-read or duplicate them.
-`za` or `zc` on an expanded directory removes its child rows; expanding again
-re-reads the directory. The initial listing remains flat.
+`zO` and `zA` recursively expand a directory, while `zC` recursively collapses
+it. `zR` expands all root directories and `zM` collapses them all. Recursive
+expansion is unlimited by default; set `max_recursive_expand_depth` to a positive
+integer to cap how many directory levels those recursive-open commands expand.
+The limit does not affect one-level `zo`/`za` browsing. `za` or `zc` on an
+expanded directory removes its child rows; expanding again re-reads the
+directory. The initial listing remains flat.
 
 ## Edit
 
@@ -276,18 +282,39 @@ Run `:checkhealth direct` to print the resolved data home. Inside it:
 - `trash/` — removed entries, kept so an undo can restore them;
 - `register/` — the most recent yank, and its content pointer.
 
+### History format and safety
+
+Undo and redo are stored as JSONL. Each stack begins with the exact header
+`{"format":"direct-history","version":1}` followed by one canonical JSON
+action record per line; paste and unpaste records store name lists as JSON
+arrays. Before an operation reads the register or changes the filesystem, direct
+validates its path inputs and classifies both history files from their raw
+bytes. Invalid UTF-8, control characters, malformed JSON, or unknown history
+formats are refused without changing the history, register, or filesystem.
+
+Recognized legacy Lua v2/v3 logs and strictly framed Python-era tab logs are
+reset to an empty current-format history with a warning. They are never replayed
+or migrated, and no backup is created. Unknown, future, malformed, or unreadable
+logs are instead preserved byte-for-byte; the triggering operation is refused.
+
+History rewrites use an exclusive temporary file in the same directory, then
+flush, close, and atomically rename it over the owned log. This protects each
+single-file rewrite, but does not make the full pop → filesystem action → append
+sequence transactional. A crash between those steps can leave history and disk
+out of sync; there is no cross-operation journal or inter-process lock.
+
 ## Upgrading from the Python version
 
-The Lua rewrite uses a new on-disk format and does **not** carry the Python-era
-data over:
+The Lua rewrite uses a new on-disk format and does **not** migrate the Python-era
+data:
 
-- **History** — the Lua logs are version-tagged, and a log without the tag is
-  never executed: it is renamed aside to `<name>.legacy` (or
-  `<name>.legacy.<n>` if that name is already taken) and a warning
-  (`Ignoring history written by an older version`) is shown. **Undo history
-  does not survive the upgrade.**
-- **Register** — entries written by the Python version are still listed, but a
-  name the Lua version cannot round-trip (a space, a tab or another control
-  character) is skipped with an error.
+- **History** — recognized Python-era tab logs and recognized Lua v2/v3 logs are
+  discarded and reset to empty JSONL history with a warning and no backup. They
+  are never executed or migrated, so their undo history does not survive. Old
+  space-framed Python logs and any unknown, malformed, or unreadable log are
+  preserved byte-for-byte and block the triggering operation.
+- **Register** — entries written by the Python version are still listed. Names
+  containing spaces are supported by the JSONL format; names containing control
+  characters or invalid UTF-8 are skipped with an error.
 - **Trash** — Python-era trash entries are still read, so an entry removed
   before the upgrade can still be restored.

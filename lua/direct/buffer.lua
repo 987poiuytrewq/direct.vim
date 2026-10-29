@@ -16,6 +16,8 @@ local history = require('direct.history')
 local register = require('direct.register')
 local ui = require('direct.ui')
 local highlight = require('direct.highlight')
+local constants = require('direct.constants')
+local folding = require('direct.folding')
 local reconcile_undone_materialization
 local remove_expanded_subtree
 local recorded_row_text
@@ -661,15 +663,10 @@ end
 -- the sync-boundary framing guard
 -- ---------------------------------------------------------------------------
 
--- unsafe_path_reason(path) -> the shared `action.path_reason`: nil
--- when `path` can round-trip through the `NAME\tfield...` history framing, else
--- a short reason. A tab IS the field separator, so it would split one path into
--- two fields; any other control character (a newline included) cannot survive
--- `vim.fn.writefile`'s line handling either. A space is legal here: only the
--- `p`/`up` name lists use the ' ' ENTRY_SEPARATOR, and the sync classification
--- never builds those. This boundary keeps its own early refusal for the user
--- `action.serialize` applies the SAME shared guard to every emitted field, so a
--- path outside the sync path can never bypass it.
+-- unsafe_path_reason(path) -> the shared `action.path_reason`, which rejects
+-- invalid UTF-8 and controls before any sync side effect. This boundary keeps
+-- its early, user-facing refusal; action serialization applies the same guard
+-- to every emitted record.
 local function unsafe_path_reason(path)
   return action_mod.path_reason(path)
 end
@@ -1917,12 +1914,12 @@ local function set_options(bufnr)
   vim.bo[bufnr].buftype = 'acwrite'
   vim.bo[bufnr].buflisted = true
   vim.bo[bufnr].swapfile = false
-  vim.bo[bufnr].filetype = 'direct'
-  -- BufWriteCmd <buffer> DirectSync: a `:write` in a direct
-  -- buffer routes to the sync instead of writing a file. Each buffer owns a
-  -- shared group outside `direct` so re-sourcing plugin/direct.lua can clear
-  -- its global handlers without removing this one. Clear only this buffer's
-  -- previous handler so relisting cannot stack handlers.
+  vim.bo[bufnr].filetype = constants.FILETYPE
+  -- BufWriteCmd <buffer>: modified listings sync, while a clean `:write`
+  -- refreshes from disk instead of interpreting external changes as deletions.
+  -- Each buffer owns a shared group outside `direct` so re-sourcing
+  -- plugin/direct.lua can clear its global handlers without removing this one.
+  -- Clear only this buffer's previous handler so relisting cannot stack handlers.
   local group = vim.api.nvim_create_augroup('direct-buffer', { clear = false })
   pcall(vim.api.nvim_clear_autocmds, { group = group, buffer = bufnr })
   vim.api.nvim_create_autocmd('BufWipeout', {
@@ -1934,8 +1931,24 @@ local function set_options(bufnr)
   vim.api.nvim_create_autocmd('BufWriteCmd', {
     group = group,
     buffer = bufnr,
-    command = 'DirectSync',
+    callback = function(args)
+      vim.api.nvim_set_current_buf(args.buf)
+      if vim.bo[args.buf].modified then
+        vim.cmd('DirectSync')
+      else
+        M.restore():list()
+      end
+    end,
     desc = 'direct: sync the listing on :write',
+  })
+  vim.api.nvim_create_autocmd('BufReadCmd', {
+    group = group,
+    buffer = bufnr,
+    callback = function(args)
+      vim.api.nvim_set_current_buf(args.buf)
+      M.restore():list()
+    end,
+    desc = 'direct: refresh the listing on :edit',
   })
   vim.api.nvim_create_autocmd('TextChanged', {
     group = group,
@@ -1943,12 +1956,7 @@ local function set_options(bufnr)
     callback = function() reconcile_undone_materialization(bufnr) end,
     desc = 'direct: reconcile child rows when undo removes a materialization',
   })
-  vim.keymap.set('n', 'zo', function() M.expand() end,
-    { buffer = bufnr, silent = true, desc = 'Expand one direct directory level' })
-  vim.keymap.set('n', 'za', function() M.toggle() end,
-    { buffer = bufnr, silent = true, desc = 'Toggle direct directory expansion' })
-  vim.keymap.set('n', 'zc', function() M.collapse() end,
-    { buffer = bufnr, silent = true, desc = 'Collapse direct directory rows' })
+  folding.install_mappings(bufnr, M)
 end
 
 -- Return the destination left by a successful create/move, or nil for removals.
@@ -2480,6 +2488,61 @@ function M.toggle()
   return M.expand()
 end
 
+local function visible_row_for_id(bufnr, state, id)
+  local mark = vim.api.nvim_buf_get_extmark_by_id(bufnr, namespace, id, {})
+  if #mark == 0 then return nil end
+  local row = mark[1] + 1
+  return state.display_ids[row] == id and row or nil
+end
+
+local function record_identity(rec)
+  if not rec then return nil end
+  return rec.identity or path_identity(rec.path)
+end
+
+-- Internal adapter for the folding command module. Keep row marks and state
+-- owned by this buffer model; folding.lua only receives these narrow accessors.
+function M._folding_context(bufnr)
+  local state = states[bufnr]
+  if not state then return nil end
+  return {
+    get_row_record = function(row) return current_row_record(bufnr, row - 1) end,
+    get_record = function(id) return state.rows[id] end,
+    visible_row_for_id = function(id) return visible_row_for_id(bufnr, state, id) end,
+    is_directory = function(rec) return rec ~= nil and is_dir_line(rec.name) end,
+    identity_for_record = record_identity,
+    is_expanded = function(id) return state.expanded[id] ~= nil end,
+    get_expanded_children = function(id)
+      local expansion = state.expanded[id]
+      return expansion and expansion.children or {}
+    end,
+    get_root_directory_ids = function()
+      local ids = {}
+      for _, id in ipairs(state.root_ids or {}) do
+        local rec = state.rows[id]
+        if rec and is_dir_line(rec.name) then ids[#ids + 1] = id end
+      end
+      return ids
+    end,
+  }
+end
+
+function M.expand_recursive()
+  return folding.expand_recursive(M)
+end
+
+function M.toggle_recursive()
+  return folding.toggle_recursive(M)
+end
+
+function M.expand_all()
+  return folding.expand_all(M)
+end
+
+function M.collapse_all()
+  return folding.collapse_all(M)
+end
+
 -- ---------------------------------------------------------------------------
 -- sync
 -- ---------------------------------------------------------------------------
@@ -2813,6 +2876,26 @@ function Buffer:sync()
     end
   end
 
+  -- Classify both raw history stacks only after the complete sync plan has
+  -- passed its read-only checks, but before auto-yank or filesystem mutation.
+  if #actions > 0 or #yanks > 0 then
+    local inputs = {}
+    for _, act in ipairs(actions) do
+      if type(act.src) == 'string' then inputs[#inputs + 1] = act.src end
+      if type(act.dst) == 'string' then inputs[#inputs + 1] = act.dst end
+      for _, member in ipairs(act.actions or {}) do
+        if type(member.src) == 'string' then inputs[#inputs + 1] = member.src end
+        if type(member.dst) == 'string' then inputs[#inputs + 1] = member.dst end
+      end
+    end
+    for _, path in ipairs(yanks) do inputs[#inputs + 1] = path end
+    local preflight, preflight_err = history.preflight(inputs)
+    if not preflight then
+      vim.bo[bufnr].modified = true
+      return nil, preflight_err
+    end
+  end
+
   -- Yank removed paths before applying actions. If yanking is refused, leave
   -- the filesystem untouched.
   if #yanks > 0 then
@@ -2851,7 +2934,7 @@ function Buffer:sync()
       and staging.overrides[act.src] ~= nil then
       exec_action = action_mod.Move(staging.overrides[act.src], act.dst)
     end
-    local ok, res, aerr = pcall(exec_action['do'])
+    local ok, res, aerr = pcall(action_mod.execute, exec_action)
     if ok and res then
       applied[i] = true
       self.current_entry = result_entry(act)

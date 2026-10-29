@@ -164,8 +164,17 @@ end)
 H.describe('entry: direct-buffer guard', function()
   H.it('the public API exposes every facade function', function()
     local api = require('direct')
-    for _, name in ipairs({ 'setup', 'list', 'list_buffer', 'list_cwd', 'open',
-      'sync', 'undo', 'redo', 'yank', 'paste', 'paste_as' }) do
+    local expected = { 'setup', 'list', 'list_buffer', 'list_cwd', 'open',
+      'sync', 'undo', 'redo', 'yank', 'paste', 'paste_as' }
+    local actual = {}
+    for name, value in pairs(api) do
+      actual[#actual + 1] = name
+      H.assert_eq(type(value), 'function', 'direct.' .. name .. ' is a function')
+    end
+    table.sort(expected)
+    table.sort(actual)
+    H.assert_eq(actual, expected, 'the documented facade exports exactly this API')
+    for _, name in ipairs(expected) do
       H.assert_eq(type(api[name]), 'function', 'direct.' .. name .. ' is a function')
     end
   end)
