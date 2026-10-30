@@ -12,6 +12,14 @@ local function temp_candidate(parent, tag)
     M.uv.os_getpid(), temp_sequence))
 end
 
+function M.unique_temp_path(parent, tag)
+  if type(parent) ~= 'string' or parent == '' then return nil, 'invalid parent path' end
+  temp_sequence = temp_sequence + 1
+  local nonce = tostring(M.uv.hrtime()) .. '-' .. tostring(temp_sequence)
+  return M.join(parent, string.format('.direct-%s-%d-%s', tag or 'temp',
+    M.uv.os_getpid(), nonce))
+end
+
 local function is_eexist(err, code)
   return code == 'EEXIST' or code == 17
     or (type(err) == 'string' and (err:find('EEXIST', 1, true) ~= nil
@@ -951,6 +959,8 @@ same_tree = function(src, dst)
   end
   return true
 end
+
+M.same_contents = same_tree
 
 local function restore_quarantined_source(quarantine_dir, dir_identity,
     quarantine, src, dst, reason)
