@@ -1,0 +1,8 @@
+include = {
+  "lua/direct/",
+}
+
+statsfile = "coverage/luacov.stats.out"
+reportfile = "coverage/index.html"
+reporter = "html"
+runreport = true

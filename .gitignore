@@ -1,4 +1,6 @@
 .cache
+.rocks/
+coverage/
 
 .DS_Store
 
