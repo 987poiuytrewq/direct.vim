@@ -192,9 +192,10 @@ action.
 7. Yank / Paste                                                *direct.vim-yank*
 
 `yy` and `Y` yank the file or directory on the current line, and a visual `y`
-yanks the selected range. `p` and `P` paste the yanked entries into the current
-directory. Directories are yanked recursively, so you can copy directory trees
-around the filesystem.
+yanks the selected range. `p` and `P` paste into the directory under the cursor,
+or into a file's parent directory when the cursor is on a file. Entries inside
+expanded directories use their displayed directory, too. Directories are yanked
+recursively, so you can copy directory trees around the filesystem.
 
 If an entry with the same name already exists, you are prompted
 (`File already exists. Paste as: `, or `Directory ...`) and can paste it under
@@ -232,11 +233,13 @@ so `:DirectUndo` reverses a paste as well.
         Yank the selected entries (a range; the default is the current line).
 
     :DirectPaste [dir]
-        With no argument, paste into the current buffer's directory and re-list
-        it. With {dir}, paste into {dir} and leave the current buffer untouched.
+        With no argument, paste into the directory under the cursor (or a file's
+        parent directory) and refresh the listing. With {dir}, paste into {dir}
+        and leave the current buffer untouched.
 
     :DirectPasteAs {name}
-        Paste into the current buffer's directory as {name}.
+        Paste into the cursor row's directory (or a file's parent directory) as
+        {name}.
 
 `:DirectSync`, `open()` (the public API used by the entry mappings),
 `:DirectUndo`, `:DirectRedo`, `:DirectYank`, `:DirectPaste` (no argument) and

@@ -299,6 +299,69 @@ H.describe('entry: direct-buffer guard', function()
     H.assert_false(H.messages():find('can only be used in a direct buffer', 1, true) ~= nil,
       'the {dir} form never raised the guard notice')
   end)
+
+  H.it(':DirectPaste targets the selected directory and refreshes its open folds', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local parent = H.mkdir(ws, 'parent')
+    local target = H.mkdir(parent, 'target')
+    local nested = H.mkdir(target, 'nested')
+    H.mkfile(target, 'old.txt', { 'old' })
+    H.mkfile(nested, 'leaf.txt', { 'leaf' })
+    local source = H.mkfile(sb.root, 'source.txt', { 'source' })
+    H.assert_true(require('direct.register').yank({ source }) == true,
+      'the register holds source.txt')
+
+    local listing = require('direct').list(ws)
+    listing:expand(1) -- parent/
+    listing:expand(2) -- target/
+    listing:expand(3) -- nested/
+    vim.api.nvim_win_set_cursor(0, { 2, 0 }) -- target/
+
+    vim.cmd('DirectPaste')
+
+    H.assert_true(H.exists(target, 'source.txt'),
+      'paste lands in the selected nested directory')
+    H.assert_false(H.exists(ws, 'source.txt'),
+      'paste does not use the listing root')
+    H.assert_buf_eq({
+      'parent/',
+      '  target/',
+      '    nested/',
+      '      leaf.txt',
+      '    old.txt',
+      '    source.txt',
+    }, 0, 'the refreshed listing retains both open directory folds')
+  end)
+
+  H.it(':DirectPasteAs on a file targets that file\'s parent, including under an open fold', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local parent = H.mkdir(ws, 'parent')
+    local target = H.mkfile(parent, 'target.txt', { 'target' })
+    local source = H.mkfile(sb.root, 'source.txt', { 'source' })
+    H.assert_true(require('direct.register').yank({ source }) == true,
+      'the register holds source.txt')
+
+    local listing = require('direct').list(ws)
+    listing:expand(1)
+    vim.api.nvim_win_set_cursor(0, { 2, 0 }) -- parent/target.txt
+
+    vim.cmd('DirectPasteAs copied.txt')
+
+    H.assert_true(H.exists(parent, 'copied.txt'),
+      'paste-as lands beside the selected file')
+    H.assert_false(H.exists(ws, 'copied.txt'),
+      'paste-as does not use the listing root')
+    H.assert_eq(vim.fn.readfile(parent .. '/copied.txt'), { 'source' },
+      'the copied content is intact')
+    H.assert_eq(vim.api.nvim_buf_get_lines(0, 0, -1, false), {
+      'parent/', '  copied.txt', '  target.txt',
+    }, 'the open parent fold is refreshed')
+    H.assert_true(H.exists(target), 'the original selected file remains untouched')
+  end)
 end)
 
 H.describe('entry: default mappings', function()

@@ -203,9 +203,10 @@ or restores anything on disk. Only `:DirectUndo` reverses a filesystem action.
 ## Yank / Paste
 
 `yy` and `Y` yank the file or directory on the current line, and a visual `y`
-yanks the selected range. `p` and `P` paste the yanked entries into the current
-directory. Directories are yanked recursively, so you can copy directory trees
-around the filesystem.
+yanks the selected range. `p` and `P` paste the yanked entries into the
+directory under the cursor, or into the parent directory when the cursor is on
+a file. This also works on entries shown inside expanded directories. Directories
+are yanked recursively, so you can copy directory trees around the filesystem.
 
 If an entry with the same name already exists, you are prompted
 (`File already exists. Paste as: `, or `Directory ...`) and can paste it under
@@ -226,8 +227,8 @@ filesystem change.
 | `:DirectUndo` | none | Undo the last filesystem action. |
 | `:DirectRedo` | none | Redo the last undone action. |
 | `:DirectYank` | range (default: current line) | Yank the ranged entries. |
-| `:DirectPaste [dir]` | optional `{dir}` (directory completion) | Paste into the current buffer's directory (no argument; re-lists it), or into `{dir}` without touching the current buffer. |
-| `:DirectPasteAs {name}` | `{name}` | Paste into the current buffer's directory as `{name}`. |
+| `:DirectPaste [dir]` | optional `{dir}` (directory completion) | With no argument, paste into the directory under the cursor (or a file's parent) and refresh the listing; with `{dir}`, paste there without touching the current buffer. |
+| `:DirectPasteAs {name}` | `{name}` | Paste into the cursor row's directory (or a file's parent) under `{name}`. |
 
 `:DirectSync`, `:DirectUndo`, `:DirectRedo`, `:DirectYank`, `:DirectPaste` (no
 argument), `:DirectPasteAs`, and the public `open()` API report an error and do
