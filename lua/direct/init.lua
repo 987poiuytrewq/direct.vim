@@ -11,9 +11,12 @@ local config = require('direct.config')
 local ui = require('direct.ui')
 local constants = require('direct.constants')
 
--- Wired here so the no-arg `:DirectPaste` re-lists without register.lua touching buffers.
-register.relist = function()
-  return require('direct.buffer').restore():list()
+-- Wired here so register.lua can request a destination-aware refresh without
+-- depending on the direct-buffer model.
+register.relist = function(destination)
+  local b = require('direct.buffer').restore()
+  if destination then return b:refresh_after_paste(destination) end
+  return b:list()
 end
 
 function M.setup(opts)
@@ -105,14 +108,20 @@ function M.yank(first, last)
   return b:list()
 end
 
--- No argument pastes into the current buffer's root and re-lists; `{dir}` pastes elsewhere, unguarded.
+-- No argument pastes relative to the current row and refreshes the listing;
+-- `{dir}` pastes elsewhere, unguarded.
 function M.paste(dir)
   if dir == nil or dir == '' then
     if not guard('DirectPaste') then
       return nil
     end
     local b = buffer.restore()
-    return register.paste(b.root, true)
+    local destination, path_err = b:paste_destination()
+    if not destination then
+      ui.notify('direct: cannot paste: ' .. tostring(path_err), vim.log.levels.ERROR)
+      return nil, path_err
+    end
+    return register.paste(destination, true)
   end
   return register.paste(dir, false)
 end
@@ -122,7 +131,12 @@ function M.paste_as(name)
     return nil
   end
   local b = buffer.restore()
-  return register.paste(b.root, true, name)
+  local destination, path_err = b:paste_destination()
+  if not destination then
+    ui.notify('direct: cannot paste: ' .. tostring(path_err), vim.log.levels.ERROR)
+    return nil, path_err
+  end
+  return register.paste(destination, true, name)
 end
 
 return M

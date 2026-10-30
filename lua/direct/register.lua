@@ -227,7 +227,7 @@ function M.paste(dst, relist_flag, name)
   M.ui.notify(M.action.summarize({ paste_action }), vim.log.levels.INFO)
   M.history.log(paste_action)
   if relist_flag and type(M.relist) == 'function' then
-    local rok, rerr = pcall(M.relist)
+    local rok, rerr = pcall(M.relist, dst)
     if not rok then
       M.ui.notify('direct: re-list failed: ' .. tostring(rerr),
         vim.log.levels.ERROR)

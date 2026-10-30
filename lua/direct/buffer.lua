@@ -3093,4 +3093,109 @@ function Buffer:get_paths(firstline, lastline)
   return out
 end
 
+-- Buffer:paste_destination([row]) -> the directory represented by the row.
+-- A directory row is itself the destination; a file row uses its parent.
+-- Resolve through the row record so expanded child rows never rely on their
+-- indented display text for filesystem paths.
+function Buffer:paste_destination(row)
+  local bufnr = vim.api.nvim_get_current_buf()
+  local safe, integrity_err = children_integrity(bufnr,
+    vim.api.nvim_buf_get_lines(bufnr, 0, -1, false))
+  if not safe then return nil, integrity_err end
+
+  row = row or vim.api.nvim_win_get_cursor(0)[1]
+  local line = vim.api.nvim_buf_get_lines(bufnr, row - 1, row, false)[1]
+  if line == nil then return nil, 'row identity is unavailable' end
+  local record = current_row_record(bufnr, row - 1)
+  if not record then
+    if line == '' then return self.root end
+    return nil, 'row identity is unavailable'
+  end
+  if line ~= recorded_row_text(record) then
+    return nil, 'cannot paste from a row with unsaved edits'
+  end
+  if type(record.path) ~= 'string' or record.path == '' then
+    return nil, 'row path is unavailable'
+  end
+  if is_dir_line(record.name) then return record.path end
+  return vim.fs.dirname(record.path)
+end
+
+local function normalized_path(path)
+  path = vim.fs.normalize(path):gsub('/+$', '')
+  return path == '' and '/' or path
+end
+
+local function path_is_within(parent, candidate)
+  parent, candidate = normalized_path(parent), normalized_path(candidate)
+  if candidate == parent then return true end
+  local prefix = parent == '/' and '/' or parent .. '/'
+  return candidate:sub(1, #prefix) == prefix
+end
+
+-- Refresh the root listing after a paste. If the destination is currently
+-- expanded, discard and reread that materialization, then reopen the same
+-- expanded descendants by path so pasted entries appear without closing folds.
+function Buffer:refresh_after_paste(destination)
+  local bufnr = vim.api.nvim_get_current_buf()
+  local state = states[bufnr]
+  if not state then return self:list() end
+
+  local expanded_paths, destination_id = {}, nil
+  for id in pairs(state.expanded or {}) do
+    local record = state.rows[id]
+    if record and record.path then
+      expanded_paths[#expanded_paths + 1] = record.path
+      if normalized_path(record.path) == normalized_path(destination) then
+        destination_id = id
+      end
+    end
+  end
+
+  local cursor_record = current_row_record(bufnr,
+    vim.api.nvim_win_get_cursor(0)[1] - 1)
+  local cursor_path = cursor_record and cursor_record.path or nil
+  local reopen = {}
+  if destination_id then
+    for _, path in ipairs(expanded_paths) do
+      if path_is_within(destination, path) then reopen[#reopen + 1] = path end
+    end
+    remove_expanded_subtree(bufnr, state, destination_id)
+  end
+
+  local ok, err = self:list()
+  if not ok then return nil, err end
+
+  local function visible_row(path)
+    local current = states[bufnr]
+    for row, id in ipairs(current.display_ids or {}) do
+      local record = current.rows[id]
+      if record and record.path
+        and normalized_path(record.path) == normalized_path(path) then
+        return row
+      end
+    end
+    return nil
+  end
+
+  table.sort(reopen, function(a, b) return #a < #b end)
+  for _, path in ipairs(reopen) do
+    local row = visible_row(path)
+    if row then
+      local current = states[bufnr]
+      local id = current.display_ids[row]
+      if not current.expanded[id] then
+        local expanded, expand_err = self:expand(row)
+        if expanded == nil then return nil, expand_err end
+      end
+    end
+  end
+
+  if cursor_path then
+    local row = visible_row(cursor_path)
+    if row then pcall(vim.api.nvim_win_set_cursor, 0, { row, 0 }) end
+  end
+  return true
+end
+
 return M
