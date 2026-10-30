@@ -313,6 +313,28 @@ Run `:checkhealth direct` to print the resolved data home. Inside it:
     a crash between those steps can leave the log and filesystem out of sync.
     There is no multi-operation journal or inter-process lock.
 
+    Filesystem destinations use atomic no-replace placement. Darwin and Linux
+    use their native exclusive-rename primitive; unsupported platforms or
+    filesystems fail closed. Touch uses exclusive file creation, and mkdir
+    refuses an existing destination. Cross-device moves copy files to an
+    exclusive temporary file and directories to a private temporary tree in the
+    destination parent before no-replace placement. Symlinks are recreated, not
+    followed; FIFO, socket, and device sources are refused. If placement
+    commits but source removal fails, both paths are reported and the destination
+    is recorded; two copies may remain. Network filesystems and unsupported
+    filesystem semantics are not guaranteed. Before removing an EXDEV source,
+    direct atomically captures it in a private temporary directory beside the
+    source and compares copied file bytes or recursive directory contents and
+    symlink targets. If they differ or cannot be verified, direct restores the
+    source with no-replace or preserves and reports its temporary path. A crash
+    in this brief capture/verify/remove window can leave a
+    `.direct-exdev-source-*` recovery directory. Concurrent writers can still
+    change open files after comparison; there is no snapshot or inter-process
+    lock. The final destination rename is atomic no-replace, but source/temp
+    inode checks and cleanup remain pathname operations. A same-user process can
+    race a replacement after a check; in that narrow window direct may preserve
+    and report a stranded temp or quarantine path for manual recovery.
+
 ==============================================================================
 11. Upgrading from the Python version                       *direct.vim-upgrade*
 

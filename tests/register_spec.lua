@@ -141,6 +141,70 @@ H.describe('register', function()
       'log() reset the redo log to its header')
   end)
 
+  H.it('file paste refuses an occupant created after the clash check', function()
+    local sb = H.sandbox()
+    H.mkfile(sb.root, 'f.txt', { 'REGISTER' })
+    H.assert_true(reg.yank({ sb.root .. '/f.txt' }) == true, 'yank source')
+    local ws = H.mkdir(sb.root, 'ws')
+    local dst = ws .. '/f.txt'
+    local real = fs.copy_file_exclusive
+    local injected = false
+    local restore = H.stub(fs, 'copy_file_exclusive', function(src, target)
+      if target == dst and not injected then
+        injected = true
+        H.mkfile(ws, 'f.txt', { 'FOREIGN' })
+      end
+      return real(src, target)
+    end)
+
+    H.capture_messages()
+    local result = reg.paste(ws)
+    restore()
+
+    H.assert_true(injected, 'the destination raced in after the check')
+    H.assert_nil(result, 'exclusive copy refuses the raced destination')
+    H.assert_eq(vim.fn.readfile(dst), { 'FOREIGN' }, 'raced file is unchanged')
+    H.assert_eq(vim.fn.readfile(reg.content() .. '/f.txt'), { 'REGISTER' },
+      'register source remains unchanged')
+    H.assert_eq(vim.fn.readfile(vim.fs.joinpath(sb.data_home,
+      'direct/history/undo.log')), { history.HEADER },
+      'a failed copy adds no action record')
+  end)
+
+  H.it('directory paste refuses an occupant that races in before final placement', function()
+    local sb = H.sandbox()
+    H.mkdir(sb.root, 'tree')
+    H.mkfile(sb.root, 'tree/source.txt', { 'REGISTER' })
+    H.assert_true(reg.yank({ sb.root .. '/tree' }) == true, 'yank directory')
+    local ws = H.mkdir(sb.root, 'ws')
+    local dst = ws .. '/tree'
+    local real = fs.rename_noreplace
+    local injected = false
+    local restore = H.stub(fs, 'rename_noreplace', function(src, target)
+      if target == dst and src:find('/payload$', 1) and not injected then
+        injected = true
+        H.mkdir(ws, 'tree')
+        H.mkfile(ws, 'tree/foreign.txt', { 'KEEP' })
+      end
+      return real(src, target)
+    end)
+
+    H.capture_messages()
+    local result = reg.paste(ws)
+    restore()
+
+    H.assert_true(injected, 'the destination raced in before placement')
+    H.assert_nil(result, 'no-replace placement refuses the raced directory')
+    H.assert_eq(vim.fn.readfile(dst .. '/foreign.txt'), { 'KEEP' },
+      'the raced directory and its contents remain untouched')
+    H.assert_false(fs.exists(dst .. '/source.txt'), 'the source tree was not merged')
+    H.assert_eq(vim.fn.glob(ws .. '/.direct-copy-tree-*'), '',
+      'the failed private copy temp was cleaned')
+    H.assert_eq(vim.fn.readfile(vim.fs.joinpath(sb.data_home,
+      'direct/history/undo.log')), { history.HEADER },
+      'failed directory placement adds no action record')
+  end)
+
   H.it('a destination clash prompts and pastes under the answered name', function()
     local sb = H.sandbox()
     H.mkfile(sb.root, 'f.txt', { 'f' })
@@ -671,7 +735,7 @@ H.describe('register', function()
     H.assert_true(reg.yank({ sb.root .. '/tree' }) == true, 'yank the tree')
     local ws = H.mkdir(sb.root, 'ws')
 
-    local restore = H.stub(fs, 'copy_tree', function()
+    local restore = H.stub(fs, 'copy_tree_exclusive', function()
       return true, { { path = '/register/tree/link', kind = 'symlink' } }
     end)
     H.capture_messages()
@@ -713,7 +777,7 @@ H.describe('register', function()
     H.assert_true(reg.yank({ sb.root .. '/f.txt' }) == true, 'yank')
     local ws = H.mkdir(sb.root, 'ws')
 
-    local restore = H.stub(fs, 'copy_file', function()
+    local restore = H.stub(fs, 'copy_file_exclusive', function()
       return nil, 'forced failure'
     end)
     H.capture_messages()

@@ -276,6 +276,29 @@ single-file rewrite, but does not make the full pop → filesystem action → ap
 sequence transactional. A crash between those steps can leave history and disk
 out of sync; there is no cross-operation journal or inter-process lock.
 
+Filesystem destinations are placed with atomic no-replace operations. On Darwin
+and Linux, direct uses the platform's exclusive rename primitive; unsupported
+platforms or filesystems fail closed. `touch` uses exclusive file creation and
+directory creation refuses an existing path. For cross-device moves, files are
+copied to an exclusive temporary file and directories to a private temporary
+tree in the destination parent before no-replace placement. Symlinks are
+recreated without following them; FIFO, socket, and device sources are refused.
+If a destination commits but the source cannot be removed, direct reports both
+paths, keeps the completed destination in history, and may leave two copies.
+Before removing an EXDEV source, direct atomically captures it in a private
+temporary directory beside the source and compares the copied file bytes or
+directory contents and symlink targets. If it changed or cannot be verified,
+direct restores it with no-replace or preserves and reports its exact temporary
+path instead of deleting newer data. A crash in that brief capture/verify/remove
+window can leave a `.direct-exdev-source-*` recovery directory. Concurrent
+writers can still change open files after comparison; there is no filesystem
+snapshot or inter-process lock. The final destination rename is atomic
+no-replace, but source/temp inode checks and cleanup remain pathname operations.
+A same-user process can race a replacement after a check; in that narrow window
+direct may preserve and report a stranded temp or quarantine path for manual
+recovery. Network filesystems and unsupported filesystem semantics are not
+guaranteed.
+
 ## Upgrading from the Python version
 
 The Lua rewrite uses a new on-disk format and does **not** migrate the Python-era

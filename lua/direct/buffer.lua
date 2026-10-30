@@ -2908,16 +2908,32 @@ function Buffer:sync()
   end
 
   -- swap/chain renames are staged before the real moves.
-  local staging, stage_err, stage_temps = stage_moves(actions)
+  local staging, stage_err, stage_temps, stage_overrides, stage_identities =
+    stage_moves(actions)
   if staging == nil and stage_err ~= nil then
     ui.notify('Action failed - could not stage renames: ' .. tostring(stage_err),
       vim.log.levels.ERROR)
-    -- a failed staging rename leaves every already-staged entry at
-    -- its temp path. Report each one -- the same treatment the post-execution
-    -- leftover block below gives -- instead of returning on the error alone
-    -- and orphaning the temps silently.
+    -- Restore only with atomic no-replace. Never delete a staged path: if its
+    -- original name was reoccupied or the primitive is unavailable, preserve
+    -- and report the exact stranded temp for manual recovery.
+    local staged_identities = stage_identities or {}
+    local reported = {}
+    for _, act in ipairs(actions) do
+      local tmp = act.src ~= nil and stage_overrides
+        and stage_overrides[act.src] or nil
+      if tmp and fs.taken(tmp) then
+        local expected = staged_identities[act.src]
+        local restored, restore_err = fs.rename_noreplace(tmp, act.src, expected)
+        if not restored then
+          reported[tmp] = true
+          ui.notify('direct: could not restore staged entry ' .. tmp .. ' to '
+            .. tostring(act.src) .. ' (' .. tostring(restore_err)
+            .. '); temp preserved; manual recovery required', vim.log.levels.ERROR)
+        end
+      end
+    end
     for _, tmp in ipairs(stage_temps or {}) do
-      if fs.exists(tmp) then
+      if fs.taken(tmp) and not reported[tmp] then
         ui.notify('direct: a failed rename left the staged entry ' .. tmp,
           vim.log.levels.ERROR)
       end
@@ -2950,20 +2966,14 @@ function Buffer:sync()
   end
   log_applied(actions, applied)
 
-  -- remove any staged temp that was not consumed. On the all-success path
-  -- every temp is consumed, so this is normally a no-op. On the failure path a
-  -- temp left over is reported instead of force-removed: deleting it could
-  -- discard the very entry a failed move could not place, and requires
-  -- failures to be reported without losing data.
+  -- Every staged temp is expected to be consumed by a successful no-replace
+  -- move. If a temp path remains, preserve and report it; never recursively
+  -- remove by pathname because it may now contain foreign user data.
   if staging ~= nil then
     for _, tmp in ipairs(staging.temps) do
-      if fs.exists(tmp) then
-        if #failed == 0 then
-          fs.rm_tree(tmp)
-        else
-          ui.notify('direct: a failed rename left the staged entry ' .. tmp,
-            vim.log.levels.ERROR)
-        end
+      if fs.taken(tmp) then
+        ui.notify('direct: a staged entry remains at ' .. tmp
+          .. '; preserved for manual recovery', vim.log.levels.ERROR)
       end
     end
   end
