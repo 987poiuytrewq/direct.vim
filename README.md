@@ -216,6 +216,20 @@ untouched.
 Yank and paste share the undo/redo history, so they can be undone like any other
 filesystem change.
 
+Undoing a paste first verifies each pasted file, directory tree, or symlink
+against the current register copy. If any target is missing, changed, unreadable,
+or the register has been changed by another yank, the whole Unpaste is refused
+and the history entry is retained. Matching entries are atomically moved to
+same-directory `.direct-unpaste-*` quarantine paths and checked again before any
+are removed. If capture fails, Direct restores captured entries without
+overwriting new occupants; blocked quarantines are reported for manual recovery.
+Deletion acts on the captured quarantine paths, never on the original paste
+names, so a new object appearing at an original name is left alone. A crash or
+failure during deletion can leave quarantine debris, and an identical-content
+replacement cannot be distinguished from the original paste. Open file handles
+and competing same-user processes can still race content checks; there is no
+filesystem snapshot or inter-process lock.
+
 ## Commands
 
 | Command | Arguments | Description |
