@@ -303,6 +303,144 @@ H.describe('action', function()
       'the move source is unchanged')
   end)
 
+  H.it('move never overwrites a target that appears after the action check', function()
+    local sb = H.sandbox()
+    local src, dst = H.mkfile(sb.root, 'source.txt', { 'SOURCE' }), sb.root .. '/target.txt'
+    local real = M.fs.rename_noreplace
+    local injected = false
+    local restore = H.stub(M.fs, 'rename_noreplace', function(from, to)
+      if from == src and to == dst and not injected then
+        injected = true
+        H.mkfile(sb.root, 'target.txt', { 'FOREIGN' })
+      end
+      return real(from, to)
+    end)
+
+    local ok, err = M.Move(src, dst)['do']()
+    restore()
+
+    H.assert_true(injected, 'the destination raced in after the action check')
+    H.assert_nil(ok, 'atomic no-replace rejects the raced destination')
+    H.assert_true(tostring(err):find('destination exists', 1, true) ~= nil, tostring(err))
+    H.assert_eq(vim.fn.readfile(src), { 'SOURCE' }, 'source remains unchanged')
+    H.assert_eq(vim.fn.readfile(dst), { 'FOREIGN' }, 'the raced occupant remains unchanged')
+  end)
+
+  H.it('touch and mkdir remain exclusive when a destination races in', function()
+    local sb = H.sandbox()
+    local file = sb.root .. '/new.txt'
+    local real_touch = M.fs.touch
+    local touch_injected = false
+    local restore_touch = H.stub(M.fs, 'touch', function(path)
+      if not touch_injected then
+        touch_injected = true
+        H.mkfile(sb.root, 'new.txt', { 'FOREIGN' })
+      end
+      return real_touch(path)
+    end)
+    local touched, touch_err = M.Touch(file)['do']()
+    restore_touch()
+    H.assert_true(touch_injected, 'file appeared after the action check')
+    H.assert_nil(touched, 'wx refuses the raced file')
+    H.assert_true(tostring(touch_err):find('destination exists', 1, true) ~= nil,
+      tostring(touch_err))
+    H.assert_eq(vim.fn.readfile(file), { 'FOREIGN' }, 'raced file was not truncated')
+
+    local dir = sb.root .. '/newdir'
+    local real_mkdir = M.fs.mkdir_exclusive
+    local mkdir_injected = false
+    local restore_mkdir = H.stub(M.fs, 'mkdir_exclusive', function(path)
+      if not mkdir_injected then
+        mkdir_injected = true
+        H.mkdir(sb.root, 'newdir')
+        H.mkfile(sb.root, 'newdir/foreign.txt', { 'KEEP' })
+      end
+      return real_mkdir(path)
+    end)
+    local made, mkdir_err = M.MakeDirectory(dir)['do']()
+    restore_mkdir()
+    H.assert_true(mkdir_injected, 'directory appeared after the action check')
+    H.assert_nil(made, 'exclusive mkdir refuses the raced directory')
+    H.assert_true(tostring(mkdir_err):find('destination exists', 1, true) ~= nil,
+      tostring(mkdir_err))
+    H.assert_eq(vim.fn.readfile(dir .. '/foreign.txt'), { 'KEEP' },
+      'raced directory contents remain untouched')
+  end)
+
+  H.it('trash and restore use atomic no-replace placement', function()
+    local sb = H.sandbox()
+    M.paths.ensure_data_dir('trash')
+    local src = H.mkfile(sb.root, 'source.txt', { 'SOURCE' })
+    local remove = M.Remove(src)
+    local trash = remove.dst
+    local real = M.fs.rename_noreplace
+    local injected = false
+    local restore = H.stub(M.fs, 'rename_noreplace', function(from, to)
+      if from == src and to == trash and not injected then
+        injected = true
+        H.mkfile(vim.fs.dirname(trash), vim.fs.basename(trash), { 'FOREIGN' })
+      end
+      return real(from, to)
+    end)
+    local removed, remove_err = remove['do']()
+    restore()
+    H.assert_true(injected, 'the trash slot raced in')
+    H.assert_nil(removed, 'trash move refuses the occupied slot')
+    H.assert_true(tostring(remove_err):find('destination exists', 1, true) ~= nil,
+      tostring(remove_err))
+    H.assert_eq(vim.fn.readfile(src), { 'SOURCE' }, 'source remains')
+    H.assert_eq(vim.fn.readfile(trash), { 'FOREIGN' }, 'foreign trash occupant remains')
+
+    local restore_src = H.mkfile(sb.root, 'trash-entry', { 'TRASH' })
+    local restore_dst = sb.root .. '/restored.txt'
+    local real_restore = M.fs.rename_noreplace
+    local restore_injected = false
+    local restore_stub = H.stub(M.fs, 'rename_noreplace', function(from, to)
+      if from == restore_src and to == restore_dst and not restore_injected then
+        restore_injected = true
+        H.mkfile(sb.root, 'restored.txt', { 'KEEP' })
+      end
+      return real_restore(from, to)
+    end)
+    local restored, restore_err = M.Restore(restore_src, restore_dst)['do']()
+    restore_stub()
+    H.assert_true(restore_injected, 'restore destination raced in')
+    H.assert_nil(restored, 'restore refuses to overwrite the raced destination')
+    H.assert_true(tostring(restore_err):find('destination exists', 1, true) ~= nil,
+      tostring(restore_err))
+    H.assert_eq(vim.fn.readfile(restore_src), { 'TRASH' }, 'trash source remains')
+    H.assert_eq(vim.fn.readfile(restore_dst), { 'KEEP' }, 'raced destination remains')
+  end)
+
+  H.it('stage_moves preserves a temp occupant that races in after selection', function()
+    local sb = H.sandbox()
+    local src_a = H.mkfile(sb.root, 'a.txt', { 'A' })
+    local src_b = H.mkfile(sb.root, 'b.txt', { 'B' })
+    local temp = M.first_free_temp(sb.root)
+    local real = M.fs.rename_noreplace
+    local injected = false
+    local restore = H.stub(M.fs, 'rename_noreplace', function(from, to)
+      if from == src_a and to == temp and not injected then
+        injected = true
+        H.mkfile(sb.root, vim.fs.basename(temp), { 'FOREIGN' })
+      end
+      return real(from, to)
+    end)
+
+    local staging, err, temps = M.stage_moves({
+      M.Move(src_a, src_b), M.Move(src_b, src_a),
+    })
+    restore()
+
+    H.assert_true(injected, 'temp path was occupied after selection')
+    H.assert_nil(staging, 'staging fails rather than replacing the occupant')
+    H.assert_true(tostring(err):find('destination exists', 1, true) ~= nil, tostring(err))
+    H.assert_eq(temps, {}, 'no source was displaced')
+    H.assert_eq(vim.fn.readfile(src_a), { 'A' }, 'first source remains')
+    H.assert_eq(vim.fn.readfile(src_b), { 'B' }, 'second source remains')
+    H.assert_eq(vim.fn.readfile(temp), { 'FOREIGN' }, 'raced temp occupant is untouched')
+  end)
+
   H.it('action guards treat trailing-slash dangling symlink destinations as occupied', function()
     local sb = H.sandbox()
     H.mkfile(sb.root, 'source.txt', { 'source' })

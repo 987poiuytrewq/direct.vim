@@ -551,6 +551,58 @@ local function swap_line(ws)
     }, 'the group remains in history after rollback itself fails')
   end)
 
+  H.it('group rollback does not move a replacement found at a staged temp path', function()
+    local _, _, fs, action, _, ui = modules()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local src_a = H.mkfile(ws, 'a.txt', { 'A' })
+    local src_b = H.mkfile(ws, 'b.txt', { 'B' })
+    local temp, backup = ws .. '/.direct-tmp-1', ws .. '/saved-staged-entry'
+    local real_rename = fs.rename
+    local staged, replaced = 0, false
+    local restore_rename = H.stub(fs, 'rename', function(src, dst)
+      if tostring(dst):match('%.direct%-tmp%-%d+$') then
+        staged = staged + 1
+        if dst == temp and not replaced then
+          local ok, err = real_rename(src, dst)
+          assert(ok, err)
+          assert(vim.uv.fs_rename(temp, backup) == true)
+          H.mkfile(ws, vim.fs.basename(temp), { 'FOREIGN TEMP' })
+          replaced = true
+          return true
+        end
+        return nil, 'forced late staging failure'
+      end
+      return real_rename(src, dst)
+    end)
+    local notices = {}
+    local restore_notify = H.stub(ui, 'notify', function(message)
+      notices[#notices + 1] = message
+    end)
+
+    local result, err = action.Group({
+      action.Move(src_a, src_b), action.Move(src_b, src_a),
+    })['do']()
+    restore_notify()
+    restore_rename()
+
+    H.assert_nil(result, 'late staging failure aborts the group')
+    H.assert_true(type(err) == 'string', 'group error is returned')
+    H.assert_true(replaced, 'the staged temp path was replaced')
+    H.assert_eq(vim.fn.readfile(backup), { 'A' }, 'the staged user data survives elsewhere')
+    H.assert_eq(vim.fn.readfile(temp), { 'FOREIGN TEMP' }, 'foreign temp stays untouched')
+    H.assert_nil(vim.uv.fs_lstat(src_a), 'group rollback did not move foreign data to src')
+    H.assert_eq(vim.fn.readfile(src_b), { 'B' }, 'the unstaged source remains')
+    local reported = false
+    for _, message in ipairs(notices) do
+      if message:find('source identity changed: ' .. temp, 1, true) then
+        reported = true
+      end
+    end
+    H.assert_true(reported, 'replacement at the temp path is reported')
+  end)
+
   H.it('a grouped undo that failed at a late member is retryable once the fault clears', function()
     local _, history, fs = modules()
     clean_buffers()

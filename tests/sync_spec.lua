@@ -240,6 +240,43 @@ H.describe('sync: applying actions', function()
       { HEADER, fixtures.move(ws .. '/a.txt', ws .. '/b.txt') })
   end)
 
+  H.it('EXDEV commit with source-remove failure is still recorded as completed', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local src, dst = H.mkfile(ws, 'a.txt', { 'PAYLOAD' }), ws .. '/b.txt'
+    local listing = buffer.list(ws)
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'b.txt' })
+
+    local real_rename, real_remove = fs.rename_noreplace, fs.rm_file
+    local restore_rename = H.stub(fs, 'rename_noreplace', function(from, to)
+      if from == src and to == dst then
+        return nil, 'EXDEV: forced cross-device move', 'EXDEV'
+      end
+      return real_rename(from, to)
+    end)
+    local restore_remove = H.stub(fs, 'rm_file', function(path)
+      if path:find('/.direct-exdev-source-', 1, true)
+        and path:sub(-#'/source') == '/source' then
+        return nil, 'forced source remove failure'
+      end
+      return real_remove(path)
+    end)
+
+    H.capture_messages()
+    local ok, err = listing:sync()
+    restore_remove()
+    restore_rename()
+
+    H.assert_true(ok == true, 'the committed destination is a completed action: ' .. tostring(err))
+    H.assert_eq(vim.fn.readfile(src), { 'PAYLOAD' }, 'the source copy remains')
+    H.assert_eq(vim.fn.readfile(dst), { 'PAYLOAD' }, 'the destination copy committed')
+    H.assert_notified(src, vim.log.levels.ERROR)
+    H.assert_notified(dst, vim.log.levels.ERROR)
+    H.assert_eq(history_lines('undo.log'), { HEADER, fixtures.move(src, dst) },
+      'history records the committed destination for later recovery')
+  end)
+
   H.it('RENAME (directory): moves the tree with trailing slashes on both ends', function()
     clean_buffers()
     local sb = H.sandbox()
@@ -2767,7 +2804,7 @@ H.describe('sync: safety guards', function()
     }, 'group history keeps the original directory and symlink path spellings')
   end)
 
-  H.it('a failed staging rename reports the orphaned temp instead of leaving it silent', function()
+  H.it('a failed staging rename restores prior temps with no-replace', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -2777,9 +2814,8 @@ H.describe('sync: safety guards', function()
     local buf = buffer.list(ws)
     vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'b.txt', 'a.txt' })
 
-    -- Fail the SECOND staging rename (b.txt -> .direct-tmp-2): the first
-    -- staging rename (a.txt -> .direct-tmp-1) already succeeded, so a.txt is
-    -- now parked at that temp path and MUST be reported rather than orphaned.
+    -- Fail the SECOND staging rename (b.txt -> .direct-tmp-2) after the first
+    -- staged source has moved; the sync boundary should restore it atomically.
     local real_rename = fs.rename
     local staged = 0
     local restore = H.stub(fs, 'rename', function(src, dst)
@@ -2799,17 +2835,103 @@ H.describe('sync: safety guards', function()
     H.assert_eq(reason, 'EACCES', 'the staging error is returned')
     H.assert_notified('could not stage renames')
 
-    local tmp = ws .. '/.direct-tmp-1'
-    H.assert_true(fs.exists(tmp), 'the first entry really was staged to a temp')
-    H.assert_notified(tmp, 'the orphaned staged path is named, never silent')
-    H.assert_eq(vim.fn.readfile(tmp), { 'A' },
-      'the orphaned temp still holds the entry moved out of a.txt')
-    -- No action ran after the failed staging. Preflight may have initialized the
-    -- empty stack, but no history record was written.
+    H.assert_false(fs.taken(ws .. '/.direct-tmp-1'), 'the staged temp was consumed by rollback')
+    H.assert_eq(vim.fn.readfile(ws .. '/a.txt'), { 'A' },
+      'rollback restored the first staged source')
     H.assert_eq(vim.fn.readfile(ws .. '/b.txt'), { 'B' },
       'b.txt is untouched (its staging rename failed before it moved)')
+    -- No action ran after the failed staging. Preflight may have initialized the
+    -- empty stack, but no history record was written.
     H.assert_eq(history_lines('undo.log'), { HEADER }, 'no history record was written')
     H.assert_true(vim.bo.modified, 'the refused sync leaves the buffer modified')
+  end)
+
+  H.it('failed staging rollback preserves and reports a temp when its source is reoccupied', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkfile(ws, 'a.txt', { 'A' })
+    H.mkfile(ws, 'b.txt', { 'B' })
+    local buf = buffer.list(ws)
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'b.txt', 'a.txt' })
+
+    local real_rename, real_noreplace = fs.rename, fs.rename_noreplace
+    local staged, occupant_created = 0, false
+    local restore_rename = H.stub(fs, 'rename', function(src, dst)
+      if tostring(dst):match('%.direct%-tmp%-%d+$') then
+        staged = staged + 1
+        if staged == 2 then return nil, 'EACCES' end
+      end
+      return real_rename(src, dst)
+    end)
+    local restore_noreplace = H.stub(fs, 'rename_noreplace', function(src, dst)
+      if tostring(src):match('%.direct%-tmp%-%d+$') and dst == ws .. '/a.txt'
+        and not occupant_created then
+        occupant_created = true
+        H.mkfile(ws, 'a.txt', { 'FOREIGN' })
+      end
+      return real_noreplace(src, dst)
+    end)
+
+    H.capture_messages()
+    local ok, reason = buf:sync()
+    restore_noreplace()
+    restore_rename()
+
+    local temp = ws .. '/.direct-tmp-1'
+    H.assert_nil(ok, 'the staging failure refuses the sync')
+    H.assert_eq(reason, 'EACCES', 'staging failure is returned')
+    H.assert_true(occupant_created, 'the original source name was raced back in')
+    H.assert_eq(vim.fn.readfile(ws .. '/a.txt'), { 'FOREIGN' },
+      'rollback never overwrites the new occupant')
+    H.assert_eq(vim.fn.readfile(temp), { 'A' }, 'staged user data is preserved')
+    H.assert_notified(temp, 'the stranded temp path is reported')
+    H.assert_eq(vim.fn.readfile(ws .. '/b.txt'), { 'B' }, 'the other source is untouched')
+    H.assert_eq(history_lines('undo.log'), { HEADER }, 'no action record is written')
+  end)
+
+  H.it('staging rollback refuses to move a replacement found at a temp path', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkfile(ws, 'a.txt', { 'A' })
+    H.mkfile(ws, 'b.txt', { 'B' })
+    local buf = buffer.list(ws)
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'b.txt', 'a.txt' })
+
+    local temp, backup = ws .. '/.direct-tmp-1', ws .. '/saved-staged-entry'
+    local real_rename = fs.rename
+    local injected = false
+    local restore = H.stub(fs, 'rename', function(src, dst)
+      if tostring(dst):match('%.direct%-tmp%-%d+$') then
+        if dst == temp and not injected then
+          local staged, stage_err = real_rename(src, dst)
+          H.assert_true(staged == true, 'the original entry was staged: ' .. tostring(stage_err))
+          H.assert_true(vim.uv.fs_rename(temp, backup) == true,
+            'the staged entry is moved to a safe fixture path')
+          H.mkfile(ws, vim.fs.basename(temp), { 'FOREIGN TEMP' })
+          injected = true
+          return true
+        elseif dst ~= temp then
+          return nil, 'forced late staging failure'
+        end
+      end
+      return real_rename(src, dst)
+    end)
+
+    H.capture_messages()
+    local ok, reason = buf:sync()
+    restore()
+
+    H.assert_nil(ok, 'late staging failure refuses sync')
+    H.assert_eq(reason, 'forced late staging failure', 'the staging error is returned')
+    H.assert_true(injected, 'a foreign object replaced the staged temp pathname')
+    H.assert_eq(vim.fn.readfile(backup), { 'A' }, 'the original staged data survives elsewhere')
+    H.assert_eq(vim.fn.readfile(temp), { 'FOREIGN TEMP' }, 'replacement temp is preserved')
+    H.assert_nil(vim.uv.fs_stat(ws .. '/a.txt'),
+      'rollback did not move the foreign temp into the source slot')
+    H.assert_eq(vim.fn.readfile(ws .. '/b.txt'), { 'B' }, 'other source remains intact')
+    H.assert_notified('source identity changed: ' .. temp)
   end)
 
   H.it('a control-character path is refused before any change', function()

@@ -297,7 +297,11 @@ function M.RestoreDirectory(src, dst)
     if res then
       -- directory variant: the marker is an empty directory (the POSIX
       -- rename below replaces an empty dir just as easily as a file).
-      M.fs.mkdirp(self.src)
+      local mok, merr = M.fs.mkdir_exclusive(self.src)
+      if not mok then
+        M.ui.notify('direct: restored directory, but could not reserve its trash slot '
+          .. self.src .. ': ' .. tostring(merr), vim.log.levels.WARN)
+      end
     end
     return res, rerr
   end
@@ -329,7 +333,7 @@ function M.MakeDirectory(dst)
     if M.fs.taken(self.dst) then
       return nil, 'destination exists: ' .. tostring(self.dst)
     end
-    return M.fs.mkdirp(self.dst)
+    return M.fs.mkdir_exclusive(self.dst)
   end
   self['do'] = function() return M.execute(self) end
   function self.describe()
@@ -385,9 +389,10 @@ function M.Paste(src, dst, src_names, dst_names)
         -- pre-existing members included. Re-prompt until the answer names a
         -- path that does not exist (at most PASTE_CLASH_ATTEMPTS times: a
         -- prompt that stays stuck on an existing name is skipped, never spun
-        -- on); an empty, cancelled or invalid-component
-        -- answer still skips the entry and leaves the existing
-        -- destination untouched.
+        -- on); an empty, cancelled or invalid-component answer skips the entry.
+        -- The final file copy is exclusive and directory copy commits by
+        -- no-replace rename, so a destination racing in after this check fails
+        -- closed too.
         local attempts = 0
         while M.fs.taken(full_dst) do
           attempts = attempts + 1
@@ -415,7 +420,7 @@ function M.Paste(src, dst, src_names, dst_names)
         end
         if not skipped then
           if st.type == 'file' then
-            local ok, err = M.fs.copy_file(full_src, full_dst)
+            local ok, err = M.fs.copy_file_exclusive(full_src, full_dst)
             if not ok then
               return nil, err
             end
@@ -426,7 +431,7 @@ function M.Paste(src, dst, src_names, dst_names)
             -- copy cannot reproduce is skipped and REPORTED (the register is
             -- persisted, untrusted data) rather than failing the paste or
             -- vanishing silently.
-            local ok, skipped = M.fs.copy_tree(full_src, full_dst)
+            local ok, skipped = M.fs.copy_tree_exclusive(full_src, full_dst)
             if not ok then
               return nil, skipped
             end
@@ -522,14 +527,14 @@ function M.first_free_temp(dir)
   return candidate
 end
 
--- stage_moves(actions) -> { overrides = { src -> tmp }, temps = { tmp } } when a
+-- stage_moves(actions) -> { overrides = { src -> tmp }, temps = { tmp },
+-- identities = { src -> identity } } when a
 -- rename `dst` is also some action's `src` (a swap, a chain or a rotation), else
 -- nil. Only `mv` actions participate. A staging rename failure returns
--- `nil, err, temps, overrides`, where `temps` are the entries ALREADY renamed to
--- their temp path and `overrides` is the partial src -> tmp map that put them
--- there: the caller must report them, because the entry no longer sits at its
--- original name and silently discarding the list would orphan it. The overrides
--- also let callers unwind landed renames and restore the pre-attempt state.
+-- `nil, err, temps, overrides, identities`, where `temps` are the entries
+-- ALREADY renamed to temp paths and `identities` records the staged inodes. The
+-- caller must verify identity and restore only with no-replace, or report any
+-- stranded path instead of deleting it.
 -- The caller executes each Move from `overrides[src]` when present, while
 -- `history.log` and `current_entry` keep using the original action, never a temp path.
 --
@@ -579,11 +584,12 @@ function M.stage_moves(actions)
   if not needed then
     return nil
   end
-  local overrides, temps = {}, {}
+  local overrides, temps, identities = {}, {}, {}
   for _, act in ipairs(actions) do
     if act.name == 'mv' and act.src ~= nil and stage_sources[move_key(act.src)]
       and overrides[act.src] == nil then
       local tmp = M.first_free_temp(parent_dir(act.src))
+      local identity = M.fs.entry_identity(act.src)
       local ok, err = M.fs.rename(act.src, tmp)
       if not ok then
         -- return the temps accumulated so far ALONGSIDE the error
@@ -591,13 +597,14 @@ function M.stage_moves(actions)
         -- the caller can report -- and, where it must, restore -- each entry
         -- that is now parked at a temp path instead of returning the error
         -- alone and orphaning them silently.
-        return nil, err, temps, overrides
+        return nil, err, temps, overrides, identities
       end
       overrides[act.src] = tmp
+      identities[act.src] = identity
       temps[#temps + 1] = tmp
     end
   end
-  return { overrides = overrides, temps = temps }
+  return { overrides = overrides, temps = temps, identities = identities }
 end
 
 -- move_groups(actions) -> an ordered partition of the action list into the
@@ -710,18 +717,22 @@ function M.Group(actions)
   end
   self._execute = function()
     local members = self.actions or {}
-    local staging, stage_err, stage_temps, stage_overrides =
+    local staging, stage_err, stage_temps, stage_overrides, stage_identities =
       M.stage_moves(members)
     if staging == nil and stage_err ~= nil then
       -- Restore only to an unoccupied original path with atomic no-replace
       -- rename. If that fails, leave and report the temp entry; retry only after
       -- manual recovery. The history entry remains available for that retry.
       local overrides = stage_overrides or {}
+      local identities = stage_identities or {}
+      local reported = {}
       for _, act in ipairs(members) do
         local tmp = act.src ~= nil and overrides[act.src] or nil
         if tmp ~= nil and M.fs.taken(tmp) then
-          local rok, rerr = M.fs.rename_noreplace(tmp, act.src)
+          local expected = identities[act.src]
+          local rok, rerr = M.fs.rename_noreplace(tmp, act.src, expected)
           if not rok then
+            reported[tmp] = true
             local occupied = M.fs.taken(act.src)
             local cause = occupied and 'destination is occupied' or tostring(rerr)
             M.ui.notify('direct: could not restore staged entry ' .. tmp
@@ -732,7 +743,7 @@ function M.Group(actions)
         end
       end
       for _, tmp in ipairs(stage_temps or {}) do
-        if M.fs.taken(tmp) then
+        if M.fs.taken(tmp) and not reported[tmp] then
           M.ui.notify('direct: a failed rename left the staged entry ' .. tmp,
             vim.log.levels.ERROR)
         end
