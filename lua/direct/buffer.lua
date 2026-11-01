@@ -179,6 +179,8 @@ local function refresh_icons(bufnr, state)
   local options = require('direct.config').options
   local show_folders = options.show_folder_icons == true
   local show_files = options.show_file_icons == true
+  local line_count = vim.api.nvim_buf_line_count(bufnr)
+  state.icon_line_count = line_count
   if not show_folders and not show_files then
     local existing = icon_namespace
       or vim.api.nvim_get_namespaces()[ICON_NAMESPACE]
@@ -191,7 +193,7 @@ local function refresh_icons(bufnr, state)
   vim.api.nvim_set_hl(0, 'DirectFolderIcon', { default = true, link = 'Directory' })
   vim.api.nvim_set_hl(0, 'DirectFileIcon', { default = true, link = 'Normal' })
   vim.api.nvim_buf_clear_namespace(bufnr, icon_namespace, 0, -1)
-  for row = 0, vim.api.nvim_buf_line_count(bufnr) - 1 do
+  for row = 0, line_count - 1 do
     local id = row_id_at(bufnr, row)
     local rec = id and state.rows[id]
     if rec then
@@ -1954,8 +1956,26 @@ local function set_options(bufnr)
   vim.api.nvim_create_autocmd('TextChanged', {
     group = group,
     buffer = bufnr,
-    callback = function() reconcile_undone_materialization(bufnr) end,
-    desc = 'direct: reconcile child rows when undo removes a materialization',
+    callback = function()
+      reconcile_undone_materialization(bufnr)
+      -- Edits such as `J` can move an icon extmark from a deleted row into the
+      -- middle of the surviving line. Rebuild icons from row identities after
+      -- reconciliation so display-only marks remain attached to line starts.
+      local state = states[bufnr]
+      if state then refresh_icons(bufnr, state) end
+    end,
+    desc = 'direct: reconcile child rows and refresh icons after text changes',
+  })
+  vim.api.nvim_create_autocmd('TextChangedI', {
+    group = group,
+    buffer = bufnr,
+    callback = function()
+      local state = states[bufnr]
+      if state and state.icon_line_count ~= vim.api.nvim_buf_line_count(bufnr) then
+        refresh_icons(bufnr, state)
+      end
+    end,
+    desc = 'direct: refresh icons when insert-mode edits change line count',
   })
   folding.install_mappings(bufnr, M)
 end
