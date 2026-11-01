@@ -4,10 +4,6 @@
 
 local H = require('tests.support.harness')
 local reg = require('direct.register')
--- Loading the facade wires `register.relist` to the real buffer re-list.
--- Require it here so `reg` is the same table wired by the facade,
--- not a table a later `require` created.
-require('direct')
 local paths = require('direct.paths')
 local fs = require('direct.fs')
 local history = require('direct.history')
@@ -738,33 +734,26 @@ H.describe('register', function()
     H.assert_notified('Skipped 1', vim.log.levels.WARN)
   end)
 
-  H.it('the re-list hook fires only for the no-arg paste form and tolerates nil', function()
+  H.it('register paste leaves buffer refresh to the public facade', function()
     local sb = H.sandbox()
-    H.mkfile(sb.root, 'f.txt', { 'f' })
-    H.assert_true(reg.yank({ sb.root .. '/f.txt' }) == true, 'yank')
+    local source = H.mkfile(sb.root, 'f.txt', { 'f' })
+    H.assert_true(reg.yank({ source }) == true, 'yank')
 
-    -- The facade wires the real buffer re-list into register.relist; this test
-    -- stubs that register-level seam directly.
-    H.assert_true(type(reg.relist) == 'function',
-      'M.relist is wired to the real buffer re-list')
-
-    -- Stub the seam so the two command forms can be told apart without
-    -- touching a real buffer.
-    local called, refreshed_destination, pasted_entry = 0, nil, nil
-    local restore = H.stub(reg, 'relist', function(destination, entry)
+    local ws = H.mkdir(sb.root, 'ws')
+    require('direct').list(ws)
+    local buffer = require('direct.buffer')
+    local called = 0
+    local restore = H.stub(buffer, 'restore', function()
       called = called + 1
-      refreshed_destination, pasted_entry = destination, entry
+      error('register paste must not access buffer state')
     end)
-    local ws2 = H.mkdir(sb.root, 'ws2')
-    H.assert_true(reg.paste(ws2, true) ~= nil, 'no-arg form pastes')
-    H.assert_eq(called, 1, 'no-arg form fires the re-list hook exactly once')
-    H.assert_eq(refreshed_destination, ws2, 'the hook receives the paste destination')
-    H.assert_eq(pasted_entry, ws2 .. '/f.txt',
-      'the hook receives the last successfully pasted entry')
-    local ws3 = H.mkdir(sb.root, 'ws3')
-    H.assert_true(reg.paste(ws3, false) ~= nil, '{dir} form pastes')
-    H.assert_eq(called, 1, '{dir} form never fires the re-list hook')
+    local ok, result = pcall(reg.paste, ws)
     restore()
+
+    H.assert_true(ok, 'register paste runs independently of the buffer model')
+    H.assert_true(result ~= nil, 'register paste succeeds')
+    H.assert_eq(called, 0, 'the register service does not refresh the listing')
+    H.assert_true(H.exists(ws, 'f.txt'), 'the entry is pasted')
   end)
 
   H.it('a failed paste notifies and logs no history', function()

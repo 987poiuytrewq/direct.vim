@@ -198,7 +198,7 @@ H.describe('sync: applying actions', function()
     H.assert_not_nil(register.content(), 'the auto-yank recorded the register pointer')
 
     local dst = H.mkdir(sb.root, 'dst')
-    H.assert_true(register.paste(dst, false) ~= nil, 'the auto-yanked entry pastes back')
+    H.assert_true(register.paste(dst) ~= nil, 'the auto-yanked entry pastes back')
     H.assert_fs_eq(dst, { 'a.txt' }, 'the deleted entry landed in the paste destination')
     H.assert_eq(vim.fn.readfile(dst .. '/a.txt'), { 'A' },
       'the entry content survived the delete/paste round trip')

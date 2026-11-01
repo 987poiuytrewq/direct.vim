@@ -1,6 +1,5 @@
 -- lua/direct/register.lua -- persistent yank/paste register.
 -- Names and destinations are checked before copying; skipped entries are reported.
--- Buffer refresh is delegated through the swappable M.relist hook.
 
 local M = {}
 
@@ -11,9 +10,6 @@ M.history = require('direct.history')
 M.log = require('direct.log')
 M.ui = require('direct.ui')
 M.pending = require('direct.pending')
-
--- Called after a successful no-argument paste; the `{dir}` form never re-lists.
-M.relist = nil
 
 -- content -> the absolute register path recorded in register/content (the
 -- yanked entry directory), or nil when no yank has happened, or nil, err when
@@ -139,17 +135,14 @@ function M._yank_one(dst, src)
   return nil, 'cannot yank: unsupported entry type for ' .. tostring(src)
 end
 
--- paste(dst, relist_flag[, name]) -> the last pasted entry | true | nil |
--- nil, err. relist_flag distinguishes the two `:DirectPaste` forms
--- true for the no-arg form (pastes into the buffer root and re-lists via
--- M.relist), false for `:DirectPaste {dir}` (never re-lists).
+-- paste(dst[, name[, callback]]) -> scheduled/result | nil, err.
+-- This service owns filesystem and history effects. The facade owns view refresh.
 --
 -- `name` is the `:DirectPasteAs {name}` extension: when given, the
 -- first pasted entry (the smallest source name, matching Paste's sorted
--- `renames`) is pasted as `name` instead. The extension is additive -- the three
--- existing call shapes (`paste(dst)`, `paste(dst, true)`, `paste(dst, false)`)
--- are unchanged.
-function M.paste(dst, relist_flag, name, callback)
+-- `renames`) is pasted as `name` instead. `callback(result, err, succeeded, changed)`
+-- runs once the asynchronous operation settles.
+function M.paste(dst, name, callback)
   if M.pending.refuse('paste') then return nil, 'another direct operation is pending' end
   local valid, path_err = M.paths.validate_path(dst)
   if not valid then
@@ -232,10 +225,13 @@ function M.paste(dst, relist_flag, name, callback)
   local function finish(ok, result, execution_err)
     if completed then return end
     completed = true
+    local changed = false
+    local pasted_entry
     local final_ok, final_err = xpcall(function()
       local copied = #(paste_action.renames or {})
+      changed = copied > 0
       if copied > 0 then
-        local pasted_entry = type(result) == 'string' and result or nil
+        pasted_entry = type(result) == 'string' and result or nil
         if pasted_entry == nil then
           local last = paste_action.renames[copied]
           if last then pasted_entry = M.paths.join(dst, last.dst) end
@@ -251,13 +247,6 @@ function M.paste(dst, relist_flag, name, callback)
           M.ui.notify('Partially pasted; completed entries were retained: '
             .. tostring(execution_err), vim.log.levels.ERROR)
         end
-        if relist_flag and type(M.relist) == 'function' then
-          local relisted, relist_err = pcall(M.relist, dst, pasted_entry)
-          if not relisted then
-            M.ui.notify('direct: re-list failed: ' .. tostring(relist_err),
-              vim.log.levels.ERROR)
-          end
-        end
       elseif not ok then
         M.ui.notify('Failed to paste: ' .. tostring(execution_err), vim.log.levels.ERROR)
       end
@@ -271,7 +260,8 @@ function M.paste(dst, relist_flag, name, callback)
     immediate_result = result
     immediate_err = execution_err
     if type(callback) == 'function' then
-      local called, callback_err = pcall(callback, result, execution_err, ok)
+      local called, callback_err = pcall(callback, result, execution_err, ok,
+        changed, pasted_entry)
       if not called then
         M.ui.notify('direct: paste callback failed: ' .. tostring(callback_err),
           vim.log.levels.ERROR)
