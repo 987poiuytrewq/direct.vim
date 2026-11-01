@@ -750,13 +750,17 @@ H.describe('register', function()
 
     -- Stub the seam so the two command forms can be told apart without
     -- touching a real buffer.
-    local called = 0
-    local restore = H.stub(reg, 'relist', function()
+    local called, refreshed_destination, pasted_entry = 0, nil, nil
+    local restore = H.stub(reg, 'relist', function(destination, entry)
       called = called + 1
+      refreshed_destination, pasted_entry = destination, entry
     end)
     local ws2 = H.mkdir(sb.root, 'ws2')
     H.assert_true(reg.paste(ws2, true) ~= nil, 'no-arg form pastes')
     H.assert_eq(called, 1, 'no-arg form fires the re-list hook exactly once')
+    H.assert_eq(refreshed_destination, ws2, 'the hook receives the paste destination')
+    H.assert_eq(pasted_entry, ws2 .. '/f.txt',
+      'the hook receives the last successfully pasted entry')
     local ws3 = H.mkdir(sb.root, 'ws3')
     H.assert_true(reg.paste(ws3, false) ~= nil, '{dir} form pastes')
     H.assert_eq(called, 1, '{dir} form never fires the re-list hook')

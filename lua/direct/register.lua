@@ -235,6 +235,11 @@ function M.paste(dst, relist_flag, name, callback)
     local final_ok, final_err = xpcall(function()
       local copied = #(paste_action.renames or {})
       if copied > 0 then
+        local pasted_entry = type(result) == 'string' and result or nil
+        if pasted_entry == nil then
+          local last = paste_action.renames[copied]
+          if last then pasted_entry = M.paths.join(dst, last.dst) end
+        end
         local logged, log_err = M.history.log(paste_action)
         if not logged then
           M.ui.notify('direct: paste completed but history could not be written: '
@@ -247,7 +252,7 @@ function M.paste(dst, relist_flag, name, callback)
             .. tostring(execution_err), vim.log.levels.ERROR)
         end
         if relist_flag and type(M.relist) == 'function' then
-          local relisted, relist_err = pcall(M.relist, dst)
+          local relisted, relist_err = pcall(M.relist, dst, pasted_entry)
           if not relisted then
             M.ui.notify('direct: re-list failed: ' .. tostring(relist_err),
               vim.log.levels.ERROR)

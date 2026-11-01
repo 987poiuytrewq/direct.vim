@@ -14,9 +14,11 @@ local pending = require('direct.pending')
 
 -- Wired here so register.lua can request a destination-aware refresh without
 -- depending on the direct-buffer model.
-register.relist = function(destination)
+register.relist = function(destination, pasted_entry)
   local b = require('direct.buffer').restore()
-  if destination then return b:refresh_after_paste(destination) end
+  if destination then
+    return b:refresh_after_paste(destination, pasted_entry)
+  end
   return b:list()
 end
 
