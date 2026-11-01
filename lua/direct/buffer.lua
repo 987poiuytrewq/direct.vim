@@ -3179,10 +3179,10 @@ local function path_is_within(parent, candidate)
   return candidate:sub(1, #prefix) == prefix
 end
 
--- Refresh the root listing after a paste. If the destination is currently
--- expanded, discard and reread that materialization, then reopen the same
--- expanded descendants by path so pasted entries appear without closing folds.
-function Buffer:refresh_after_paste(destination)
+-- Refresh the root listing after a paste. Reopen existing folds and the path to
+-- the destination so the last pasted entry is visible; place the cursor on its
+-- name and expand it when it is a directory.
+function Buffer:refresh_after_paste(destination, pasted_entry)
   local bufnr = vim.api.nvim_get_current_buf()
   local state = states[bufnr]
   if not state then return self:list() end
@@ -3224,9 +3224,35 @@ function Buffer:refresh_after_paste(destination)
     return nil
   end
 
-  table.sort(reopen, function(a, b) return #a < #b end)
-  for _, path in ipairs(reopen) do
-    local row = visible_row(path)
+  -- A paste into a collapsed nested directory still needs to expose the new
+  -- entry. Add each ancestor from the listing root through the destination to
+  -- the folds to reopen, then process shallow paths before their descendants.
+  if type(pasted_entry) == 'string' then
+    local root_path = normalized_path(self.root)
+    local path = normalized_path(destination)
+    local destination_ancestors = {}
+    while path ~= root_path and path_is_within(root_path, path) do
+      destination_ancestors[#destination_ancestors + 1] = path
+      local parent = normalized_path(vim.fs.dirname(path))
+      if parent == path then break end
+      path = parent
+    end
+    for _, ancestor in ipairs(destination_ancestors) do
+      reopen[#reopen + 1] = ancestor
+    end
+  end
+
+  local unique_reopen, reopen_seen = {}, {}
+  for _, expanded_path in ipairs(reopen) do
+    local key = normalized_path(expanded_path)
+    if not reopen_seen[key] then
+      reopen_seen[key] = true
+      unique_reopen[#unique_reopen + 1] = expanded_path
+    end
+  end
+  table.sort(unique_reopen, function(a, b) return #a < #b end)
+  for _, expanded_path in ipairs(unique_reopen) do
+    local row = visible_row(expanded_path)
     if row then
       local current = states[bufnr]
       local id = current.display_ids[row]
@@ -3237,7 +3263,16 @@ function Buffer:refresh_after_paste(destination)
     end
   end
 
-  if cursor_path then
+  local pasted_row = type(pasted_entry) == 'string' and visible_row(pasted_entry)
+    or nil
+  if pasted_row then
+    local record = current_row_record(bufnr, pasted_row - 1)
+    local col = record and record.kind == 'child'
+      and (record.depth or 0) * 2 or 0
+    pcall(vim.api.nvim_win_set_cursor, 0, { pasted_row, col })
+    local expanded, expand_err = self:expand(pasted_row)
+    if expanded == nil then return nil, expand_err end
+  elseif cursor_path then
     local row = visible_row(cursor_path)
     if row then pcall(vim.api.nvim_win_set_cursor, 0, { row, 0 }) end
   end
