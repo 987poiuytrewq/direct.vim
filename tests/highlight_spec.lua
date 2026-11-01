@@ -278,18 +278,61 @@ H.describe('listing filename highlights', function()
     H.assert_eq(listing_icon_marks(0), {}, 'disabling both kinds clears all icon slots')
   end)
 
+  H.it('styles hidden names and their optional icons with Comment', function()
+    clean_buffers()
+    vim.cmd('syntax on')
+    local config = require('direct.config')
+    config.setup({ show_folder_icons = true, show_file_icons = true })
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkdir(ws, '.hidden-dir')
+    H.mkfile(ws, '.hidden-file', '')
+
+    local listing = buffer.list(ws)
+    local bufnr = vim.api.nvim_get_current_buf()
+    vim.bo[bufnr].syntax = 'direct'
+    H.assert_eq(vim.bo[bufnr].filetype, 'direct', 'listing has the direct filetype')
+    H.assert_eq(vim.bo[bufnr].syntax, 'direct', 'direct syntax is active')
+    H.assert_eq(H.buf_lines(), { '.hidden-dir/', '.hidden-file' })
+    config.setup({ show_folder_icons = false, show_file_icons = false })
+
+    local cases = {
+      { row = 0, group = 'DirectHiddenDirectory', icon_group = 'DirectHiddenFolderIcon' },
+      { row = 1, group = 'DirectHiddenFile', icon_group = 'DirectHiddenFileIcon' },
+    }
+    for _, case in ipairs(cases) do
+      H.assert_eq(syntax_group(case.row + 1, 1), case.group,
+        'hidden entry uses its hidden syntax group')
+      H.assert_eq(vim.api.nvim_get_hl(0, { name = case.group, link = true }).link, 'Comment',
+        case.group .. ' links to Comment')
+
+      local mark = icon_mark(bufnr, case.row)
+      H.assert_not_nil(mark, 'hidden entry has an icon extmark')
+      if mark then
+        local icon_group = mark[4].virt_text[1][2]
+        H.assert_eq(icon_group, case.icon_group, 'hidden icon uses its hidden highlight group')
+        H.assert_eq(vim.api.nvim_get_hl(0, { name = icon_group, link = true }).link, 'Comment',
+          'hidden icon links to the same Comment style as its name')
+      end
+    end
+    H.assert_not_nil(listing, 'listing rendered')
+  end)
+
 
   H.it('default-links visible directories to Directory and hidden entries to Comment after ColorScheme', function()
     local expected = {
       DirectDirectory = 'Directory',
       DirectHiddenDirectory = 'Comment',
       DirectHiddenFile = 'Comment',
+      DirectFolderIcon = 'Directory',
+      DirectFileIcon = 'Normal',
+      DirectHiddenFolderIcon = 'Comment',
+      DirectHiddenFileIcon = 'Comment',
     }
     local function assert_defaults()
       for group, target in pairs(expected) do
-        H.assert_eq(vim.api.nvim_get_hl(0, { name = group, link = true }), {
-          link = target,
-        }, group .. ' default link')
+        H.assert_eq(vim.api.nvim_get_hl(0, { name = group, link = true }).link,
+          target, group .. ' default link')
       end
     end
 
@@ -301,6 +344,10 @@ H.describe('listing filename highlights', function()
     vim.cmd('highlight clear DirectDirectory')
     vim.cmd('highlight clear DirectHiddenDirectory')
     vim.cmd('highlight clear DirectHiddenFile')
+    vim.cmd('highlight clear DirectFolderIcon')
+    vim.cmd('highlight clear DirectFileIcon')
+    vim.cmd('highlight clear DirectHiddenFolderIcon')
+    vim.cmd('highlight clear DirectHiddenFileIcon')
     vim.api.nvim_exec_autocmds('ColorScheme', {})
     assert_defaults()
   end)
@@ -309,6 +356,8 @@ H.describe('listing filename highlights', function()
     vim.api.nvim_set_hl(0, 'DirectDirectory', { fg = 0x234567 })
     vim.api.nvim_set_hl(0, 'DirectHiddenDirectory', { fg = 0x123456 })
     vim.api.nvim_set_hl(0, 'DirectHiddenFile', { fg = 0x654321 })
+    vim.api.nvim_set_hl(0, 'DirectHiddenFolderIcon', { fg = 0x234567 })
+    vim.api.nvim_set_hl(0, 'DirectHiddenFileIcon', { fg = 0x765432 })
 
     vim.api.nvim_exec_autocmds('ColorScheme', {})
     H.assert_eq(vim.api.nvim_get_hl(0, { name = 'DirectDirectory', link = true }),
@@ -317,13 +366,21 @@ H.describe('listing filename highlights', function()
       { fg = 0x123456 }, 'default directory link does not overwrite a user highlight')
     H.assert_eq(vim.api.nvim_get_hl(0, { name = 'DirectHiddenFile', link = true }),
       { fg = 0x654321 }, 'default file link does not overwrite a user highlight')
+    H.assert_eq(vim.api.nvim_get_hl(0, { name = 'DirectHiddenFolderIcon', link = true }),
+      { fg = 0x234567 }, 'default hidden-folder icon link preserves a user highlight')
+    H.assert_eq(vim.api.nvim_get_hl(0, { name = 'DirectHiddenFileIcon', link = true }),
+      { fg = 0x765432 }, 'default hidden-file icon link preserves a user highlight')
 
     vim.api.nvim_set_hl(0, 'DirectDirectory', {})
     vim.api.nvim_set_hl(0, 'DirectHiddenDirectory', {})
     vim.api.nvim_set_hl(0, 'DirectHiddenFile', {})
+    vim.api.nvim_set_hl(0, 'DirectHiddenFolderIcon', {})
+    vim.api.nvim_set_hl(0, 'DirectHiddenFileIcon', {})
     vim.cmd('highlight default link DirectDirectory Directory')
     vim.cmd('highlight default link DirectHiddenDirectory Comment')
     vim.cmd('highlight default link DirectHiddenFile Comment')
+    vim.cmd('highlight default link DirectHiddenFolderIcon Comment')
+    vim.cmd('highlight default link DirectHiddenFileIcon Comment')
   end)
 
   H.it('does not add filename marks for ordinary, filetype-like, or exact special names', function()
