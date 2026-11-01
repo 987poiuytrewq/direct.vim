@@ -4,10 +4,6 @@
 
 local H = require('tests.support.harness')
 local reg = require('direct.register')
--- Loading the facade wires `register.relist` to the real buffer re-list.
--- Require it here so `reg` is the same table wired by the facade,
--- not a table a later `require` created.
-require('direct')
 local ui = require('direct.ui') -- chunk-time capture: the SAME table reg.M.ui uses
 local paths = require('direct.paths')
 local fs = require('direct.fs')
@@ -746,29 +742,26 @@ H.describe('register', function()
     H.assert_notified('Skipped 1', vim.log.levels.WARN)
   end)
 
-  H.it('the re-list hook fires only for the no-arg paste form and tolerates nil', function()
+  H.it('register paste leaves buffer refresh to the public facade', function()
     local sb = H.sandbox()
     H.mkfile(sb.root, 'f.txt', { 'f' })
     H.assert_true(reg.yank({ sb.root .. '/f.txt' }) == true, 'yank')
 
-    -- The facade wires the real buffer re-list into register.relist; this test
-    -- stubs that register-level seam directly.
-    H.assert_true(type(reg.relist) == 'function',
-      'M.relist is wired to the real buffer re-list')
-
-    -- Stub the seam so the two command forms can be told apart without
-    -- touching a real buffer.
+    local ws = H.mkdir(sb.root, 'ws')
+    require('direct').list(ws)
+    local buffer = require('direct.buffer')
     local called = 0
-    local restore = H.stub(reg, 'relist', function()
+    local restore = H.stub(buffer, 'restore', function()
       called = called + 1
+      error('register paste must not access buffer state')
     end)
-    local ws2 = H.mkdir(sb.root, 'ws2')
-    H.assert_true(reg.paste(ws2, true) ~= nil, 'no-arg form pastes')
-    H.assert_eq(called, 1, 'no-arg form fires the re-list hook exactly once')
-    local ws3 = H.mkdir(sb.root, 'ws3')
-    H.assert_true(reg.paste(ws3, false) ~= nil, '{dir} form pastes')
-    H.assert_eq(called, 1, '{dir} form never fires the re-list hook')
+    local ok, result = pcall(reg.paste, ws)
     restore()
+
+    H.assert_true(ok, 'register paste does not depend on the buffer model')
+    H.assert_true(result ~= nil, 'register paste succeeds')
+    H.assert_eq(called, 0, 'register paste leaves refresh orchestration to the facade')
+    H.assert_true(H.exists(ws, 'f.txt'), 'the entry was pasted')
   end)
 
   H.it('a failed paste notifies and logs no history', function()

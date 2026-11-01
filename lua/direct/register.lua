@@ -1,6 +1,5 @@
 -- lua/direct/register.lua -- persistent yank/paste register.
 -- Names and destinations are checked before copying; skipped entries are reported.
--- Buffer refresh is delegated through the swappable M.relist hook.
 
 local M = {}
 
@@ -10,9 +9,6 @@ M.action = require('direct.action')
 M.history = require('direct.history')
 M.log = require('direct.log')
 M.ui = require('direct.ui')
-
--- Called after a successful no-argument paste; the `{dir}` form never re-lists.
-M.relist = nil
 
 -- content -> the absolute register path recorded in register/content (the
 -- yanked entry directory), or nil when no yank has happened, or nil, err when
@@ -138,17 +134,14 @@ function M._yank_one(dst, src)
   return nil, 'cannot yank: unsupported entry type for ' .. tostring(src)
 end
 
--- paste(dst, relist_flag[, name]) -> the last pasted entry | true | nil |
--- nil, err. relist_flag distinguishes the two `:DirectPaste` forms
--- true for the no-arg form (pastes into the buffer root and re-lists via
--- M.relist), false for `:DirectPaste {dir}` (never re-lists).
+-- paste(dst[, name]) -> the last pasted entry | true | nil, err.
+-- This service changes the filesystem and records history; the public facade
+-- decides whether a current listing should be refreshed.
 --
 -- `name` is the `:DirectPasteAs {name}` extension: when given, the
 -- first pasted entry (the smallest source name, matching Paste's sorted
--- `renames`) is pasted as `name` instead. The extension is additive -- the three
--- existing call shapes (`paste(dst)`, `paste(dst, true)`, `paste(dst, false)`)
--- are unchanged.
-function M.paste(dst, relist_flag, name)
+-- `renames`) is pasted as `name` instead.
+function M.paste(dst, name)
   local valid, path_err = M.paths.validate_path(dst)
   if not valid then
     M.ui.notify('direct: cannot paste: ' .. tostring(path_err), vim.log.levels.ERROR)
@@ -230,13 +223,6 @@ function M.paste(dst, relist_flag, name)
   -- Success (order): notify the summary once, then log history.
   M.ui.notify(M.action.summarize({ paste_action }), vim.log.levels.INFO)
   M.history.log(paste_action)
-  if relist_flag and type(M.relist) == 'function' then
-    local rok, rerr = pcall(M.relist, dst)
-    if not rok then
-      M.ui.notify('direct: re-list failed: ' .. tostring(rerr),
-        vim.log.levels.ERROR)
-    end
-  end
   return result
 end
 

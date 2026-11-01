@@ -11,12 +11,20 @@ local config = require('direct.config')
 local ui = require('direct.ui')
 local constants = require('direct.constants')
 
--- Wired here so register.lua can request a destination-aware refresh without
--- depending on the direct-buffer model.
-register.relist = function(destination)
-  local b = require('direct.buffer').restore()
-  if destination then return b:refresh_after_paste(destination) end
-  return b:list()
+local function paste_and_refresh(destination, name)
+  local result, err = register.paste(destination, name)
+  if result == nil then
+    return nil, err
+  end
+
+  local ok, refresh_err = pcall(function()
+    return buffer.restore():refresh_after_paste(destination)
+  end)
+  if not ok then
+    ui.notify('direct: re-list failed: ' .. tostring(refresh_err),
+      vim.log.levels.ERROR)
+  end
+  return result, err
 end
 
 function M.setup(opts)
@@ -121,9 +129,9 @@ function M.paste(dir)
       ui.notify('direct: cannot paste: ' .. tostring(path_err), vim.log.levels.ERROR)
       return nil, path_err
     end
-    return register.paste(destination, true)
+    return paste_and_refresh(destination)
   end
-  return register.paste(dir, false)
+  return register.paste(dir)
 end
 
 function M.paste_as(name)
@@ -136,7 +144,7 @@ function M.paste_as(name)
     ui.notify('direct: cannot paste: ' .. tostring(path_err), vim.log.levels.ERROR)
     return nil, path_err
   end
-  return register.paste(destination, true, name)
+  return paste_and_refresh(destination, name)
 end
 
 return M
