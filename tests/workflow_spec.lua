@@ -83,7 +83,8 @@ H.describe('command workflows: filesystem and listing stay in sync', function()
       'paste copies the full directory tree')
     H.assert_eq(vim.fn.readfile(destination .. '/tree/inside.txt'), { 'nested contents' },
       'the pasted child content is intact')
-    H.assert_buf_eq({ 'tree/' }, 0, 'paste refreshes the destination listing')
+    H.assert_buf_eq({ 'tree/', '  inside.txt' }, 0,
+      'paste refreshes the destination listing and unfolds the pasted directory')
     H.assert_fs_eq(source, { 'tree/', 'tree/inside.txt' }, 'paste leaves the source intact')
 
     vim.cmd('DirectUndo')

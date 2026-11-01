@@ -13,10 +13,11 @@ local constants = require('direct.constants')
 local pending = require('direct.pending')
 
 local function paste_and_refresh(destination, name)
-  return register.paste(destination, name, function(_, _, _, changed)
+  return register.paste(destination, name, function(result, _, _, changed, pasted_entry)
     if not changed then return end
     local ok, refresh_err = pcall(function()
-      return buffer.restore():refresh_after_paste(destination)
+      return buffer.restore():refresh_after_paste(destination,
+        pasted_entry or (type(result) == 'string' and result or nil))
     end)
     if not ok then
       ui.notify('direct: re-list failed: ' .. tostring(refresh_err),

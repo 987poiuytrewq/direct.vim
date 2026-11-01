@@ -333,6 +333,46 @@ H.describe('entry: direct-buffer guard', function()
       '    old.txt',
       '    source.txt',
     }, 0, 'the refreshed listing retains both open directory folds')
+    H.assert_eq(vim.api.nvim_win_get_cursor(0), { 6, 4 },
+      'the cursor lands on the pasted entry name')
+  end)
+
+  H.it(':DirectPaste opens the selected collapsed directory and selects the pasted entry', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local target = H.mkdir(ws, 'target')
+    local source = H.mkfile(sb.root, 'source.txt', { 'source' })
+    H.assert_true(require('direct.register').yank({ source }) == true,
+      'the register holds source.txt')
+
+    require('direct').list(ws)
+    vim.api.nvim_win_set_cursor(0, { 1, 0 }) -- target/, still collapsed
+    vim.cmd('DirectPaste')
+
+    H.assert_true(H.exists(target, 'source.txt'), 'paste lands in target/')
+    H.assert_buf_eq({ 'target/', '  source.txt' },
+      0, 'the destination unfolds to show the pasted entry')
+    H.assert_eq(vim.api.nvim_win_get_cursor(0), { 2, 2 },
+      'the cursor lands on the first character of the pasted name')
+  end)
+
+  H.it(':DirectPaste unfolds a pasted directory and leaves the cursor on it', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local source = H.mkdir(sb.root, 'tree')
+    H.mkfile(source, 'leaf.txt', { 'leaf' })
+    H.assert_true(require('direct.register').yank({ source }) == true,
+      'the register holds tree/')
+
+    require('direct').list(ws)
+    vim.cmd('DirectPaste')
+
+    H.assert_buf_eq({ 'tree/', '  leaf.txt' },
+      0, 'the pasted directory is unfolded')
+    H.assert_eq(vim.api.nvim_win_get_cursor(0), { 1, 0 },
+      'the cursor stays on the first character of the pasted directory')
   end)
 
   H.it(':DirectPasteAs on a file targets that file\'s parent, including under an open fold', function()
@@ -360,6 +400,8 @@ H.describe('entry: direct-buffer guard', function()
     H.assert_eq(vim.api.nvim_buf_get_lines(0, 0, -1, false), {
       'parent/', '  copied.txt', '  target.txt',
     }, 'the open parent fold is refreshed')
+    H.assert_eq(vim.api.nvim_win_get_cursor(0), { 2, 2 },
+      'the cursor lands on the first character of the pasted-as entry')
     H.assert_true(H.exists(target), 'the original selected file remains untouched')
   end)
 end)

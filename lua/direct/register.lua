@@ -226,10 +226,16 @@ function M.paste(dst, name, callback)
     if completed then return end
     completed = true
     local changed = false
+    local pasted_entry
     local final_ok, final_err = xpcall(function()
       local copied = #(paste_action.renames or {})
       changed = copied > 0
       if copied > 0 then
+        pasted_entry = type(result) == 'string' and result or nil
+        if pasted_entry == nil then
+          local last = paste_action.renames[copied]
+          if last then pasted_entry = M.paths.join(dst, last.dst) end
+        end
         local logged, log_err = M.history.log(paste_action)
         if not logged then
           M.ui.notify('direct: paste completed but history could not be written: '
@@ -254,7 +260,8 @@ function M.paste(dst, name, callback)
     immediate_result = result
     immediate_err = execution_err
     if type(callback) == 'function' then
-      local called, callback_err = pcall(callback, result, execution_err, ok, changed)
+      local called, callback_err = pcall(callback, result, execution_err, ok,
+        changed, pasted_entry)
       if not called then
         M.ui.notify('direct: paste callback failed: ' .. tostring(callback_err),
           vim.log.levels.ERROR)
