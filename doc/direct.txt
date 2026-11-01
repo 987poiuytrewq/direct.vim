@@ -205,6 +205,19 @@ untouched.
 Yank, paste, undo and redo all work on the filesystem through the same history,
 so `:DirectUndo` reverses a paste as well.
 
+Undoing a paste verifies every pasted file, exact directory tree, or symlink
+target against the current register copy before changing anything. A missing,
+changed, unreadable, or re-yanked register refuses the entire Unpaste and keeps
+the history entry. Matching entries are atomically captured to unique
+same-directory `.direct-unpaste-*` paths and rechecked before deletion. If
+capture fails, Direct restores what it can with no-replace; a blocked quarantine
+is preserved and reported for manual recovery. Deletion uses only captured
+quarantine paths, never the original paste name, so a new object appearing at
+that name is not removed. A crash or failure during deletion can leave
+quarantine debris. Identical-content replacements are indistinguishable from
+the original paste; open handles and competing same-user processes can still
+race checks because there is no filesystem snapshot or inter-process lock.
+
 ==============================================================================
 8. Commands                                                *direct.vim-commands*
 
