@@ -83,6 +83,10 @@ and files use `nf-md-file` (U+F0214), regardless of filetype. When only one kind
 of icon is enabled, the other kind reserves a blank icon slot so entry names
 stay aligned. Icons are virtual text, so buffer lines and filesystem behavior
 are unchanged. No icon plugin or other dependency is required.
+With folder icons enabled, click a folder icon to expand or collapse that
+directory in place. Mouse input must be enabled in Neovim (for example,
+`:set mouse=a`). Clicking elsewhere in the listing retains normal cursor
+placement.
 
 ==============================================================================
 4. Navigate                                              *direct.vim-navigate*
@@ -94,8 +98,8 @@ with `:edit foo/`, or by starting Neovim on it.
 
 Once a directory is listed, `-` goes up to its parent directory and `<Enter>`
 opens the entry under the cursor: a directory line opens a new listing, a file
-line opens the file. This is enough to move around the filesystem without
-remembering any extra command.
+line opens the file. Double-clicking an entry opens it the same way. This is
+enough to move around the filesystem without remembering any extra command.
 
 Use `zo` or `za` on a directory to expand it in place. Children are read lazily,
 one level at a time; repeating an expansion does not re-read or duplicate them.
