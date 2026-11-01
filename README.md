@@ -16,8 +16,13 @@ rows are materialized in the buffer and removed when collapsed.
 
 Visible directories use the syntax group `DirectDirectory` (default link
 `Directory`) at any indentation depth. Hidden directories and files retain
-their prior `Comment` defaults. Listing files receive no custom filename,
+their `Comment` defaults. When icons are enabled, hidden directory and file icons
+also use the `Comment` style; visible directory and file icons retain their
+`Directory` and `Normal` defaults. Listing files receive no custom filename,
 filetype, or special-name highlights.
+
+The hidden icon groups are `DirectHiddenFolderIcon` and `DirectHiddenFileIcon`;
+both link to `Comment` by default and can be overridden independently.
 
 Highlight defaults are user-overridable and are reapplied after a `ColorScheme`
 event.
@@ -229,6 +234,15 @@ failure during deletion can leave quarantine debris, and an identical-content
 replacement cannot be distinguished from the original paste. Open file handles
 and competing same-user processes can still race content checks; there is no
 filesystem snapshot or inter-process lock.
+
+Paste name clashes use Neovim's callback-based `vim.ui.input`; there is no
+synchronous prompt fallback. Cancel, an empty answer, or an invalid name skips
+that entry. Answers that still clash are retried up to ten times. Entries copied
+before a later skip or error are retained and recorded; if every entry is
+skipped, no history action or success notice is produced. While a prompt is
+pending, sync, paste, undo, and redo are refused. History writes and listing
+refresh happen only after the callback flow completes. Grouped moves continue to
+use their existing synchronous staging path.
 
 ## Commands
 

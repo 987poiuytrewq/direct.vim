@@ -10,6 +10,7 @@ local history = require('direct.history')
 local config = require('direct.config')
 local ui = require('direct.ui')
 local constants = require('direct.constants')
+local pending = require('direct.pending')
 
 -- Wired here so register.lua can request a destination-aware refresh without
 -- depending on the direct-buffer model.
@@ -69,6 +70,7 @@ function M.sync()
   if not guard('DirectSync') then
     return nil
   end
+  if pending.refuse('sync') then return nil end
   return buffer.restore():sync()
 end
 
@@ -76,16 +78,20 @@ function M.undo()
   if not guard('DirectUndo') then
     return nil
   end
-  history.undo()
-  return buffer.restore():list()
+  if pending.refuse('undo') then return nil end
+  return history.undo_async(function()
+    buffer.restore():list()
+  end)
 end
 
 function M.redo()
   if not guard('DirectRedo') then
     return nil
   end
-  history.redo()
-  return buffer.restore():list()
+  if pending.refuse('redo') then return nil end
+  return history.redo_async(function()
+    buffer.restore():list()
+  end)
 end
 
 -- The range is normalised so an upward visual selection works; a nil range means the current line.
@@ -113,6 +119,7 @@ end
 -- No argument pastes relative to the current row and refreshes the listing;
 -- `{dir}` pastes elsewhere, unguarded.
 function M.paste(dir)
+  if pending.refuse('paste') then return nil end
   if dir == nil or dir == '' then
     if not guard('DirectPaste') then
       return nil
@@ -129,6 +136,7 @@ function M.paste(dir)
 end
 
 function M.paste_as(name)
+  if pending.refuse('paste') then return nil end
   if not guard('DirectPasteAs') then
     return nil
   end
