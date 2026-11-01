@@ -16,6 +16,7 @@ local history = require('direct.history')
 local register = require('direct.register')
 local ui = require('direct.ui')
 local highlight = require('direct.highlight')
+local git = require('direct.git')
 local constants = require('direct.constants')
 local folding = require('direct.folding')
 local reconcile_undone_materialization
@@ -172,6 +173,31 @@ local function is_dir_line(line)
   return type(line) == 'string' and line:sub(-1) == '/'
 end
 
+local function ensure_git_snapshot(state, options)
+  if options.git.enabled and state.git_status == nil then
+    state.git_status = git.read(state.root) or false
+  end
+  return state.git_status
+end
+
+local function refresh_highlights(bufnr, state)
+  local options = require('direct.config').options
+  local snapshot = ensure_git_snapshot(state, options)
+  local rows = {}
+  for row = 0, vim.api.nvim_buf_line_count(bufnr) - 1 do
+    local id = row_id_at(bufnr, row)
+    local rec = id and state.rows[id]
+    if rec then
+      rows[#rows + 1] = {
+        row = row,
+        depth = rec.depth or 0,
+        status = snapshot and git.status_for(snapshot, rec.path) or nil,
+      }
+    end
+  end
+  highlight.render(bufnr, rows, options)
+end
+
 -- Refresh display-only icons. When either kind is enabled, every row gets an
 -- icon slot: rows whose icon is disabled receive a two-cell spacer so names
 -- remain aligned. Buffer text and row identities are never changed here.
@@ -179,6 +205,9 @@ local function refresh_icons(bufnr, state)
   local options = require('direct.config').options
   local show_folders = options.show_folder_icons == true
   local show_files = options.show_file_icons == true
+  local snapshot = ensure_git_snapshot(state, options)
+  local git_enabled = options.git.enabled == true
+  local git_display = options.git.display
   local line_count = vim.api.nvim_buf_line_count(bufnr)
   state.icon_line_count = line_count
   if not show_folders and not show_files then
@@ -201,12 +230,30 @@ local function refresh_icons(bufnr, state)
       local enabled = is_folder and show_folders or (not is_folder and show_files)
       local glyph = '  '
       local group = 'Normal'
+      local base_glyph
+      local base_group
       if enabled and is_folder then
-        glyph = state.expanded[id] and FOLDER_ICON_OPEN or FOLDER_ICON_CLOSED
-        group = 'DirectFolderIcon'
+        base_glyph = state.expanded[id] and FOLDER_ICON_OPEN or FOLDER_ICON_CLOSED
+        base_group = 'DirectFolderIcon'
       elseif enabled then
-        glyph = FILE_ICON
-        group = 'DirectFileIcon'
+        base_glyph = FILE_ICON
+        base_group = 'DirectFileIcon'
+      end
+      if enabled then
+        glyph, group = base_glyph, base_group
+        local status = git_enabled and snapshot and git.status_for(snapshot, rec.path)
+        local settings = status and options.git.statuses[status]
+        if settings and (git_display == 'icon' or git_display == 'both') then
+          group = settings.icon_hl or group
+          if type(settings.icon) == 'string' then
+            glyph = settings.icon
+          elseif type(settings.icon) == 'table' then
+            local variant = is_folder
+              and (state.expanded[id] and 'folder_open' or 'folder') or 'file'
+            glyph = settings.icon[variant] or settings.icon[is_folder and 'folder' or 'file']
+              or glyph
+          end
+        end
       end
       vim.api.nvim_buf_set_extmark(bufnr, icon_namespace, row,
         (rec.depth or 0) * 2, {
@@ -1680,7 +1727,7 @@ local function restore_undone_collapse(bufnr, state, snapshot)
   state.expanded = restored_expanded
   state.display_ids = vim.deepcopy(expected_order)
   state.materialization_seq = vim.fn.undotree(bufnr).seq_cur
-  highlight.render(bufnr)
+  refresh_highlights(bufnr, state)
   refresh_icons(bufnr, state)
   return true
 end
@@ -1958,13 +2005,15 @@ local function set_options(bufnr)
     buffer = bufnr,
     callback = function()
       reconcile_undone_materialization(bufnr)
-      -- Edits such as `J` can move an icon extmark from a deleted row into the
-      -- middle of the surviving line. Rebuild icons from row identities after
-      -- reconciliation so display-only marks remain attached to line starts.
+      -- Edits such as `J` can move display extmarks from a deleted row into
+      -- the middle of the surviving line. Rebuild them from row identities.
       local state = states[bufnr]
-      if state then refresh_icons(bufnr, state) end
+      if state then
+        refresh_highlights(bufnr, state)
+        refresh_icons(bufnr, state)
+      end
     end,
-    desc = 'direct: reconcile child rows and refresh icons after text changes',
+    desc = 'direct: reconcile child rows and refresh display marks after text changes',
   })
   vim.api.nvim_create_autocmd('TextChangedI', {
     group = group,
@@ -1972,10 +2021,11 @@ local function set_options(bufnr)
     callback = function()
       local state = states[bufnr]
       if state and state.icon_line_count ~= vim.api.nvim_buf_line_count(bufnr) then
+        refresh_highlights(bufnr, state)
         refresh_icons(bufnr, state)
       end
     end,
-    desc = 'direct: refresh icons when insert-mode edits change line count',
+    desc = 'direct: refresh display marks when insert-mode edits change line count',
   })
   folding.install_mappings(bufnr, M)
 end
@@ -2139,7 +2189,11 @@ function Buffer:list()
       and vim.deepcopy(old_state.materialization_recoveries or {}) or {},
     collapse_undos = old_state
       and vim.deepcopy(old_state.collapse_undos or {}) or {},
+    git_status = nil,
   }
+  if require('direct.config').options.git.enabled then
+    state.git_status = git.read(self.root) or false
+  end
   set_directory_snapshot(state, snapshot)
   local roots = {}
   local used_root = {}
@@ -2212,7 +2266,7 @@ function Buffer:list()
   for row, item in ipairs(rendered) do
     set_row_mark(bufnr, row - 1, item.id)
   end
-  highlight.render(bufnr)
+  refresh_highlights(bufnr, state)
   refresh_icons(bufnr, state)
   state.materialization_seq = vim.fn.undotree().seq_cur
   set_options(bufnr)
@@ -2310,7 +2364,7 @@ function Buffer:expand(row)
         local id = row_id_at(bufnr, display_row)
         if id then state.display_ids[#state.display_ids + 1] = id end
       end
-      highlight.render(bufnr)
+      refresh_highlights(bufnr, state)
       state.materialization_seq = vim.fn.undotree().seq_cur
       if state.materialization_seq ~= base_seq then
         local child_ids = {}
@@ -2481,7 +2535,7 @@ function Buffer:collapse(row)
     state.collapse_undos[#state.collapse_undos + 1] = snapshot
     remove_expanded_subtree(bufnr, state, parent.id)
     refresh_display_ids(bufnr, state)
-    highlight.render(bufnr)
+    refresh_highlights(bufnr, state)
     vim.bo[bufnr].modified = modified
   else
     state.expanded[parent.id] = nil

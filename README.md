@@ -17,7 +17,7 @@ rows are materialized in the buffer and removed when collapsed.
 Visible directories use the syntax group `DirectDirectory` (default link
 `Directory`) at any indentation depth. Hidden directories and files retain
 their prior `Comment` defaults. Listing files receive no custom filename,
-filetype, or special-name highlights.
+filetype, or special-name highlights; Git status highlighting is described below.
 
 Highlight defaults are user-overridable and are reapplied after a `ColorScheme`
 event.
@@ -75,6 +75,10 @@ require('direct').setup({
   show_folder_icons = false, -- opt in to Nerd Font folder icons
   show_file_icons = false, -- opt in to a generic Nerd Font file icon
   max_recursive_expand_depth = false, -- false means unlimited
+  git = {
+    enabled = true,
+    display = "both", -- "icon", "text", or "both"
+  },
 })
 ```
 
@@ -91,6 +95,46 @@ and files use `nf-md-file` (U+F0214), regardless of filetype. When only one kind
 of icon is enabled, the other kind reserves a blank icon slot so entry names
 stay aligned. Icons are virtual text, so the listing lines and filesystem
 behavior are unchanged. No icon plugin or other dependency is required.
+
+### Git status
+
+When a listing is inside a Git repository, direct reads the repository status
+once per listing refresh. Added (including untracked), modified, renamed, and
+conflicted entries are highlighted without changing the listing text. A
+directory inherits the strongest status of its changed descendants, in the order
+conflicted, renamed, added, then modified. Staged and unstaged changes use the
+same status display; deleted entries have no listing row to mark. Git status is
+refreshed by re-listing the directory.
+
+By default, Git status highlights both an enabled file/folder icon and the entry
+name; it does not change the icon glyph or add a gutter symbol. The built-in
+highlight groups link to `DiffAdd` for added entries, `DiffChange` for modified
+and renamed entries, and `ErrorMsg` for conflicts. Customize a display layer or
+add an optional gutter marker per status:
+
+```lua
+require('direct').setup({
+  git = {
+    display = "both", -- "icon", "text", or "both"
+    statuses = {
+      added = {
+        icon_hl = "MyGitAddedIcon",
+        text_hl = "MyGitAdded",
+        icon = { file = "+", folder = "+", folder_open = "+" },
+        gutter = { symbol = "A", highlight = "MyGitAddedGutter" },
+      },
+      modified = {
+        icon_hl = "MyGitModifiedIcon",
+        text_hl = "MyGitModified",
+      },
+    },
+  },
+})
+```
+
+`icon` overrides are optional and can be set per file, closed folder, and open
+folder; omitted variants retain their regular file/folder glyph. Gutter markers
+are off unless configured. Set `enabled = false` to disable Git awareness.
 
 ## Navigate
 
