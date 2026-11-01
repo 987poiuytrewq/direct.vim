@@ -230,6 +230,15 @@ replacement cannot be distinguished from the original paste. Open file handles
 and competing same-user processes can still race content checks; there is no
 filesystem snapshot or inter-process lock.
 
+Paste name clashes use Neovim's callback-based `vim.ui.input`; there is no
+synchronous prompt fallback. Cancel, an empty answer, or an invalid name skips
+that entry. Answers that still clash are retried up to ten times. Entries copied
+before a later skip or error are retained and recorded; if every entry is
+skipped, no history action or success notice is produced. While a prompt is
+pending, sync, paste, undo, and redo are refused. History writes and listing
+refresh happen only after the callback flow completes. Grouped moves continue to
+use their existing synchronous staging path.
+
 ## Commands
 
 | Command | Arguments | Description |

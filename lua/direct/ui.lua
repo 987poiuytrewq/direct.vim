@@ -19,4 +19,40 @@ function M.prompt(prompt, text, completion)
   return answer
 end
 
+-- input(prompt, default, completion, on_confirm[, on_error]) runs vim.ui.input
+-- through its callback API. It is intentionally separate from prompt():
+-- callers cannot fall back to vim.fn.input if a UI backend is missing or fails.
+function M.input(prompt, default, completion, on_confirm, on_error)
+  if type(on_confirm) ~= 'function' then
+    return nil, 'vim.ui.input requires a completion callback'
+  end
+  local completed = false
+  local function settle(value)
+    if completed then return end
+    completed = true
+    local ok, err = xpcall(function() on_confirm(value) end, debug.traceback)
+    if not ok then
+      if type(on_error) == 'function' then
+        local reported, report_err = pcall(on_error, err)
+        if not reported then
+          M.notify('direct: input error handler failed: ' .. tostring(report_err),
+            vim.log.levels.ERROR)
+        end
+      else
+        M.notify('direct: input callback failed: ' .. tostring(err),
+          vim.log.levels.ERROR)
+      end
+    end
+  end
+  local ok, err = pcall(vim.ui.input, {
+    prompt = prompt,
+    default = default or '',
+    completion = completion or '',
+  }, settle)
+  if not ok then
+    return nil, tostring(err)
+  end
+  return true
+end
+
 return M

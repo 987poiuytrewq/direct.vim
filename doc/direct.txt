@@ -218,6 +218,15 @@ quarantine debris. Identical-content replacements are indistinguishable from
 the original paste; open handles and competing same-user processes can still
 race checks because there is no filesystem snapshot or inter-process lock.
 
+Paste name clashes use Neovim's callback-based `vim.ui.input`; there is no
+synchronous prompt fallback. Cancel, an empty answer, or an invalid basename
+skips that entry. A still-colliding answer is retried up to ten times. Entries
+copied before a later skip or error are retained and recorded; if all entries
+are skipped, no history action or success notice is produced. While a prompt is
+pending, sync, paste, undo, and redo are refused. History writes and listing
+refresh wait until the callback flow completes. Grouped moves retain their
+existing synchronous staging behavior.
+
 ==============================================================================
 8. Commands                                                *direct.vim-commands*
 

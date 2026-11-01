@@ -18,6 +18,7 @@ local ui = require('direct.ui')
 local highlight = require('direct.highlight')
 local constants = require('direct.constants')
 local folding = require('direct.folding')
+local pending = require('direct.pending')
 local reconcile_undone_materialization
 local remove_expanded_subtree
 local recorded_row_text
@@ -1936,6 +1937,7 @@ local function set_options(bufnr)
     buffer = bufnr,
     callback = function(args)
       vim.api.nvim_set_current_buf(args.buf)
+      if pending.refuse('sync') then return end
       if vim.bo[args.buf].modified then
         vim.cmd('DirectSync')
       else
@@ -2642,6 +2644,7 @@ end
 -- sync or any action failed. Failed action batches are still re-listed so the
 -- buffer reflects any independent actions that did succeed.
 function Buffer:sync()
+  if pending.refuse('sync') then return nil, 'another direct operation is pending' end
   local bufnr = vim.api.nvim_get_current_buf()
   reconcile_undone_materialization(bufnr)
   local state = states[bufnr]
