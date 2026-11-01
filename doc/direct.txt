@@ -39,6 +39,9 @@ defaults. The hidden icon groups DirectHiddenFolderIcon and DirectHiddenFileIcon
 link to Comment and can be overridden independently. Listing files receive no
 custom filename, filetype, or special-name highlights.
 
+Direct loads its listing syntax locally, including when Neovim's global syntax
+loader is disabled.
+
 Highlight defaults are user-overridable and are reapplied after a ColorScheme
 event.
 
