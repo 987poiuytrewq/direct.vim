@@ -1,8 +1,7 @@
--- Action-kind dispatch and canonical history record encoding.
+-- Action-kind dispatch, async execution, and canonical history record encoding.
 -- The action facade is injected to keep factories and record handling acyclic.
 return function(M)
-  -- ---------------------------------------------------------------------------
-  -- Action registry and history records
+  -- Serialization
   -- ---------------------------------------------------------------------------
 
   local function encode_string(value)
@@ -265,6 +264,37 @@ return function(M)
       return nil, 'no executor for action: ' .. tostring(action.name)
     end
     return kind.execute(action)
+  end
+
+  -- execute_async(action, callback) dispatches callback-capable actions without
+  -- changing their factory contract. Non-prompt actions execute immediately, so
+  -- grouped moves retain their existing synchronous staging behavior.
+  function M.execute_async(action, callback)
+    if type(callback) ~= 'function' then
+      return nil, 'execute_async requires a completion callback'
+    end
+    local completed = false
+    local function finish(ok, result, err)
+      if completed then return end
+      completed = true
+      local called, callback_err = pcall(callback, ok, result, err)
+      if not called then
+        M.ui.notify('direct: async action completion failed: '
+          .. tostring(callback_err), vim.log.levels.ERROR)
+      end
+    end
+    if type(action) == 'table' and type(action._execute_async) == 'function' then
+      local ok, err = pcall(action._execute_async, finish)
+      if not ok then finish(false, nil, err) end
+      return true
+    end
+    local ok, result, err = pcall(M.execute, action)
+    if not ok then
+      finish(false, nil, result)
+    else
+      finish(result ~= nil, result, err)
+    end
+    return true
   end
 
   -- serialize(action) -> a canonical JSON record with fixed key order | nil, err.

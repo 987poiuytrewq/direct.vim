@@ -9,6 +9,7 @@ M.action = require('direct.action')
 M.history = require('direct.history')
 M.log = require('direct.log')
 M.ui = require('direct.ui')
+M.pending = require('direct.pending')
 
 -- content -> the absolute register path recorded in register/content (the
 -- yanked entry directory), or nil when no yank has happened, or nil, err when
@@ -134,14 +135,15 @@ function M._yank_one(dst, src)
   return nil, 'cannot yank: unsupported entry type for ' .. tostring(src)
 end
 
--- paste(dst[, name]) -> the last pasted entry | true | nil, err.
--- This service changes the filesystem and records history; the public facade
--- decides whether a current listing should be refreshed.
+-- paste(dst[, name[, callback]]) -> scheduled/result | nil, err.
+-- This service owns filesystem and history effects. The facade owns view refresh.
 --
 -- `name` is the `:DirectPasteAs {name}` extension: when given, the
 -- first pasted entry (the smallest source name, matching Paste's sorted
--- `renames`) is pasted as `name` instead.
-function M.paste(dst, name)
+-- `renames`) is pasted as `name` instead. `callback(result, err, succeeded, changed)`
+-- runs once the asynchronous operation settles.
+function M.paste(dst, name, callback)
+  if M.pending.refuse('paste') then return nil, 'another direct operation is pending' end
   local valid, path_err = M.paths.validate_path(dst)
   if not valid then
     M.ui.notify('direct: cannot paste: ' .. tostring(path_err), vim.log.levels.ERROR)
@@ -214,16 +216,60 @@ function M.paste(dst, name)
     M.ui.notify('direct: ' .. msg, vim.log.levels.ERROR)
     return nil, msg
   end
-  local ok, result = pcall(M.action.execute, paste_action)
-  if not ok or result == nil then
-    local why = ok and 'action returned nil' or tostring(result)
-    M.ui.notify('Failed to paste: ' .. tostring(why), vim.log.levels.ERROR)
-    return nil, result
+  local began, begin_err = M.pending.begin('paste')
+  if not began then
+    M.ui.notify('direct: cannot paste: ' .. tostring(begin_err), vim.log.levels.WARN)
+    return nil, begin_err
   end
-  -- Success (order): notify the summary once, then log history.
-  M.ui.notify(M.action.summarize({ paste_action }), vim.log.levels.INFO)
-  M.history.log(paste_action)
-  return result
+  local completed, immediate_result, immediate_err = false, nil, nil
+  local function finish(ok, result, execution_err)
+    if completed then return end
+    completed = true
+    local changed = false
+    local final_ok, final_err = xpcall(function()
+      local copied = #(paste_action.renames or {})
+      changed = copied > 0
+      if copied > 0 then
+        local logged, log_err = M.history.log(paste_action)
+        if not logged then
+          M.ui.notify('direct: paste completed but history could not be written: '
+            .. tostring(log_err), vim.log.levels.ERROR)
+        end
+        if ok then
+          M.ui.notify(M.action.summarize({ paste_action }), vim.log.levels.INFO)
+        else
+          M.ui.notify('Partially pasted; completed entries were retained: '
+            .. tostring(execution_err), vim.log.levels.ERROR)
+        end
+      elseif not ok then
+        M.ui.notify('Failed to paste: ' .. tostring(execution_err), vim.log.levels.ERROR)
+      end
+    end, debug.traceback)
+    M.pending.finish()
+    if not final_ok then
+      M.ui.notify('direct: paste completion failed: ' .. tostring(final_err),
+        vim.log.levels.ERROR)
+      ok, result, execution_err = false, nil, final_err
+    end
+    immediate_result = result
+    immediate_err = execution_err
+    if type(callback) == 'function' then
+      local called, callback_err = pcall(callback, result, execution_err, ok, changed)
+      if not called then
+        M.ui.notify('direct: paste callback failed: ' .. tostring(callback_err),
+          vim.log.levels.ERROR)
+      end
+    end
+  end
+  local called, start_result, start_err = pcall(
+    M.action.execute_async, paste_action, finish)
+  if not called then
+    finish(false, nil, start_result)
+  elseif start_result == nil then
+    finish(false, nil, start_err or 'could not start paste')
+  end
+  if completed then return immediate_result, immediate_err end
+  return true
 end
 
 return M

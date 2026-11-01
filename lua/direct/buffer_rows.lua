@@ -89,8 +89,6 @@ local function refresh_icons(bufnr, state)
   if not icon_namespace then
     icon_namespace = vim.api.nvim_create_namespace(ICON_NAMESPACE)
   end
-  vim.api.nvim_set_hl(0, 'DirectFolderIcon', { default = true, link = 'Directory' })
-  vim.api.nvim_set_hl(0, 'DirectFileIcon', { default = true, link = 'Normal' })
   vim.api.nvim_buf_clear_namespace(bufnr, icon_namespace, 0, -1)
   for row = 0, line_count - 1 do
     local id = row_id_at(bufnr, row)
@@ -100,12 +98,13 @@ local function refresh_icons(bufnr, state)
       local enabled = is_folder and show_folders or (not is_folder and show_files)
       local glyph = '  '
       local group = 'Normal'
+      local hidden = rec.name:sub(1, 1) == '.'
       if enabled and is_folder then
         glyph = state.expanded[id] and FOLDER_ICON_OPEN or FOLDER_ICON_CLOSED
-        group = 'DirectFolderIcon'
+        group = hidden and 'DirectHiddenFolderIcon' or 'DirectFolderIcon'
       elseif enabled then
         glyph = FILE_ICON
-        group = 'DirectFileIcon'
+        group = hidden and 'DirectHiddenFileIcon' or 'DirectFileIcon'
       end
       vim.api.nvim_buf_set_extmark(bufnr, icon_namespace, row,
         (rec.depth or 0) * 2, {

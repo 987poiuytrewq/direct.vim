@@ -4,7 +4,6 @@
 
 local H = require('tests.support.harness')
 local reg = require('direct.register')
-local ui = require('direct.ui') -- chunk-time capture: the SAME table reg.M.ui uses
 local paths = require('direct.paths')
 local fs = require('direct.fs')
 local history = require('direct.history')
@@ -212,12 +211,9 @@ H.describe('register', function()
 
     H.capture_messages()
     local last = nil
-    -- Stub the chunk-time ui table (the one reg.M.ui resolves to), not a
-    -- fresh require: the harness forgets direct.* modules at the file
-    -- boundary, so `require('direct.ui')` at test time would return a
-    -- new table and the stub would miss. The real prompt would then reach
-    -- vim.fn.input under `-l` instead of failing through this test seam.
-    local restore = H.stub(ui, 'prompt', function() return 'other.txt' end)
+    local restore = H.stub(vim.ui, 'input', function(_, callback)
+      callback('other.txt')
+    end)
     local ok, perr = xpcall(function()
       last = reg.paste(ws)
     end, debug.traceback)
@@ -250,9 +246,9 @@ H.describe('register', function()
 
     H.capture_messages()
     local prompts, answers = 0, { 'tree', 'fresh' }
-    local restore = H.stub(ui, 'prompt', function()
+    local restore = H.stub(vim.ui, 'input', function(_, callback)
       prompts = prompts + 1
-      return table.remove(answers, 1) or ''
+      callback(table.remove(answers, 1) or '')
     end)
     local res
     local ok, perr = xpcall(function() res = reg.paste(ws) end, debug.traceback)
@@ -277,8 +273,8 @@ H.describe('register', function()
     H.mkfile(ws, 'tree/keep.txt', { 'KEEP' })
 
     local answers = { 'tree', 'fresh' }
-    local restore = H.stub(ui, 'prompt', function()
-      return table.remove(answers, 1) or ''
+    local restore = H.stub(vim.ui, 'input', function(_, callback)
+      callback(table.remove(answers, 1) or '')
     end)
     local ok, perr = xpcall(function() reg.paste(ws) end, debug.traceback)
     restore()
@@ -300,8 +296,8 @@ H.describe('register', function()
 
     H.capture_messages()
     local answers = { 'tree', '' } -- collide once, then cancel
-    local restore = H.stub(ui, 'prompt', function()
-      return table.remove(answers, 1) or ''
+    local restore = H.stub(vim.ui, 'input', function(_, callback)
+      callback(table.remove(answers, 1) or '')
     end)
     local ok, perr = xpcall(function() reg.paste(ws) end, debug.traceback)
     restore()
@@ -324,8 +320,8 @@ H.describe('register', function()
     H.mkfile(ws, 'f.txt', { 'KEEP' })
 
     local answers = { 'f.txt', 'f-copy.txt' }
-    local restore = H.stub(ui, 'prompt', function()
-      return table.remove(answers, 1) or ''
+    local restore = H.stub(vim.ui, 'input', function(_, callback)
+      callback(table.remove(answers, 1) or '')
     end)
     local ok, perr = xpcall(function() reg.paste(ws) end, debug.traceback)
     restore()
@@ -357,12 +353,12 @@ H.describe('register', function()
 
     H.capture_messages()
     local prompts = 0
-    local restore = H.stub(ui, 'prompt', function()
+    local restore = H.stub(vim.ui, 'input', function(_, callback)
       prompts = prompts + 1
       if prompts > 50 then
         error('paste clash prompt exceeded its ceiling: the loop is unbounded', 0)
       end
-      return 'f.txt' -- always the name that already exists
+      callback('f.txt') -- always the name that already exists
     end)
     local ok, perr = xpcall(function() reg.paste(ws) end, debug.traceback)
     restore()
@@ -388,9 +384,9 @@ H.describe('register', function()
       'the following check reports the name free')
 
     local prompts = 0
-    local restore = H.stub(ui, 'prompt', function()
+    local restore = H.stub(vim.ui, 'input', function(_, callback)
       prompts = prompts + 1
-      return 'f-copy.txt'
+      callback('f-copy.txt')
     end)
     local ok, perr = xpcall(function() reg.paste(ws) end, debug.traceback)
     restore()
@@ -405,7 +401,7 @@ H.describe('register', function()
       'the copy landed under the fresh name the answer gave')
   end)
 
-  H.it('an empty prompt answer skips the entry and reports it', function()
+  H.it('an empty async input answer skips the entry and reports it', function()
     local sb = H.sandbox()
     H.mkfile(sb.root, 'f.txt', { 'f' })
     H.assert_true(reg.yank({ sb.root .. '/f.txt' }) == true, 'yank')
@@ -414,7 +410,7 @@ H.describe('register', function()
 
     H.capture_messages()
     local res = nil
-    local restore = H.stub(ui, 'prompt', function() return '' end)
+    local restore = H.stub(vim.ui, 'input', function(_, callback) callback('') end)
     local ok, perr = xpcall(function()
       res = reg.paste(ws)
     end, debug.traceback)
@@ -423,8 +419,7 @@ H.describe('register', function()
       error(perr, 0)
     end
 
-    -- A fully-skipped Paste returns true (last or true); nothing was copied.
-    H.assert_eq(res, true, 'a fully-skipped paste still succeeds')
+    H.assert_nil(res, 'a fully-skipped paste has no result')
     H.assert_eq(vim.fn.readfile(ws .. '/f.txt'), { 'original' },
       'nothing was pasted')
     H.assert_notified('Skipped f.txt')
@@ -443,7 +438,7 @@ H.describe('register', function()
 
     H.capture_messages()
     local last = nil
-    local restore = H.stub(ui, 'prompt', function() return '' end)
+    local restore = H.stub(vim.ui, 'input', function(_, callback) callback('') end)
     local ok, perr = xpcall(function()
       last = reg.paste(ws)
     end, debug.traceback)
@@ -468,7 +463,7 @@ H.describe('register', function()
       'undo removes the entry that was actually pasted')
   end)
 
-  H.it('a fully-skipped paste logs a reversal that changes nothing', function()
+  H.it('a fully-skipped paste writes no history', function()
     local sb = H.sandbox()
     H.mkfile(sb.root, 'a.txt', { 'reg-a' })
     H.mkfile(sb.root, 'b.txt', { 'reg-b' })
@@ -480,7 +475,7 @@ H.describe('register', function()
 
     H.capture_messages()
     local res = nil
-    local restore = H.stub(ui, 'prompt', function() return '' end)
+    local restore = H.stub(vim.ui, 'input', function(_, callback) callback('') end)
     local ok, perr = xpcall(function()
       res = reg.paste(ws)
     end, debug.traceback)
@@ -489,17 +484,13 @@ H.describe('register', function()
       error(perr, 0)
     end
 
-    H.assert_eq(res, true, 'a fully-skipped paste still succeeds')
+    H.assert_nil(res, 'all skipped entries produce no result')
     H.assert_eq(vim.fn.readfile(ws .. '/a.txt'), { 'orig-a' }, 'a.txt untouched')
     H.assert_eq(vim.fn.readfile(ws .. '/b.txt'), { 'orig-b' }, 'b.txt untouched')
 
-    -- Every entry was skipped, so the pruned renames list is empty and the
-    -- logged reversal is a no-op (before it deleted both originals).
-    H.assert_true(history.undo() ~= nil, 'undo succeeds')
-    H.assert_eq(vim.fn.readfile(ws .. '/a.txt'), { 'orig-a' },
-      'undo changes nothing when every entry was skipped')
-    H.assert_eq(vim.fn.readfile(ws .. '/b.txt'), { 'orig-b' },
-      'undo changes nothing when every entry was skipped')
+    local undo_path = vim.fs.joinpath(sb.data_home, 'direct/history/undo.log')
+    H.assert_eq(vim.fn.readfile(undo_path), { history.HEADER },
+      'all-skipped paste does not append an action')
   end)
 
   H.it('space-named entries round-trip through JSONL without arming unrelated deletes', function()
@@ -565,9 +556,8 @@ H.describe('register', function()
     local last = nil
     -- Consumed in ascending src order: both names are valid JSON array values.
     local answers = { 'a.txt copy', 'renamed.txt' }
-    local restore = H.stub(ui, 'prompt', function()
-      if #answers == 0 then return nil end
-      return table.remove(answers, 1)
+    local restore = H.stub(vim.ui, 'input', function(_, callback)
+      callback(table.remove(answers, 1))
     end)
     local ok, perr = xpcall(function()
       last = reg.paste(ws)
@@ -629,7 +619,9 @@ H.describe('register', function()
 
     H.capture_messages()
     local res = nil
-    local restore = H.stub(ui, 'prompt', function() return 'f\tother.txt' end)
+    local restore = H.stub(vim.ui, 'input', function(_, callback)
+      callback('f\tother.txt')
+    end)
     local ok, perr = xpcall(function()
       res = reg.paste(ws)
     end, debug.traceback)
@@ -638,16 +630,16 @@ H.describe('register', function()
       error(perr, 0)
     end
 
-    H.assert_eq(res, true, 'a fully-skipped paste still succeeds')
+    H.assert_nil(res, 'a fully-skipped paste has no result')
     H.assert_eq(vim.fn.readfile(ws .. '/f.txt'), { 'original' },
       'the tab-answered clash is skipped, never overwritten')
     H.assert_false(fs.exists(ws .. '/f\tother.txt'),
       'no tab-named file is created')
     H.assert_notified('Skipped f.txt')
 
-    H.assert_true(history.undo() ~= nil, 'undo succeeds')
-    H.assert_eq(vim.fn.readfile(ws .. '/f.txt'), { 'original' },
-      'undo changes nothing when the only entry was skipped')
+    H.assert_eq(vim.fn.readfile(vim.fs.joinpath(sb.data_home,
+      'direct/history/undo.log')), { fixtures.header },
+      'all-skipped paste writes no history')
   end)
 
   -- A destination containing a control byte is refused before copy or history.
@@ -744,8 +736,8 @@ H.describe('register', function()
 
   H.it('register paste leaves buffer refresh to the public facade', function()
     local sb = H.sandbox()
-    H.mkfile(sb.root, 'f.txt', { 'f' })
-    H.assert_true(reg.yank({ sb.root .. '/f.txt' }) == true, 'yank')
+    local source = H.mkfile(sb.root, 'f.txt', { 'f' })
+    H.assert_true(reg.yank({ source }) == true, 'yank')
 
     local ws = H.mkdir(sb.root, 'ws')
     require('direct').list(ws)
@@ -758,10 +750,10 @@ H.describe('register', function()
     local ok, result = pcall(reg.paste, ws)
     restore()
 
-    H.assert_true(ok, 'register paste does not depend on the buffer model')
+    H.assert_true(ok, 'register paste runs independently of the buffer model')
     H.assert_true(result ~= nil, 'register paste succeeds')
-    H.assert_eq(called, 0, 'register paste leaves refresh orchestration to the facade')
-    H.assert_true(H.exists(ws, 'f.txt'), 'the entry was pasted')
+    H.assert_eq(called, 0, 'the register service does not refresh the listing')
+    H.assert_true(H.exists(ws, 'f.txt'), 'the entry is pasted')
   end)
 
   H.it('a failed paste notifies and logs no history', function()
@@ -778,7 +770,7 @@ H.describe('register', function()
     restore()
 
     H.assert_nil(res, 'paste reports the failure')
-    H.assert_nil(err, 'the failure is reported through the notification')
+    H.assert_eq(err, 'forced failure', 'execution failure is returned')
     H.assert_notified('Failed to paste')
     H.assert_eq(vim.fn.readfile(vim.fs.joinpath(sb.data_home,
       'direct/history/undo.log')), { fixtures.header },

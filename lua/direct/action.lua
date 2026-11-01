@@ -8,11 +8,8 @@ M.fs = require('direct.fs')
 M.paths = require('direct.paths')
 M.ui = require('direct.ui')
 
--- Paste clash prompt cap (follow-up): a `ui.prompt` that keeps answering a
--- name that still exists -- a stub, or a broken/hostile prompt -- would
--- otherwise spin forever and freeze the editor. After this many collisions the
--- entry is SKIPPED and reported, exactly like a cancelled answer: the
--- existing destination is never written to.
+-- Bound repeated asynchronous answers that still name an occupied destination.
+-- On exhaustion, skip the entry; never write to an existing target.
 M.PASTE_CLASH_ATTEMPTS = 10
 
 -- ---------------------------------------------------------------------------
@@ -346,21 +343,8 @@ end
 -- Multi-actions
 -- ---------------------------------------------------------------------------
 
--- Paste(src, dst, src_names, dst_names) copies entries from the register
--- `src` into the directory `dst`. `renames` is the ordered zip of the two name
--- lists, sorted ascending by src name. On a destination clash the
--- user is prompted for a new name; renames[i].dst is updated so the
--- serialization always reflects what was actually pasted. The prompt is
--- re-asked while the answer still names an existing path: an existing
--- destination is never written to (a directory is never merged into, a file is
--- never overwritten), so Undo -- which removes what `renames` records -- can
--- never delete data that predated the paste. An empty, cancelled, or invalid
--- basename answer skips the entry and reports it; spaces round-trip in JSON.
--- ui.prompt re-raises after inputrestore on
--- cancel/error, so the prompt is wrapped in pcall and a raise behaves exactly
--- like an empty answer. Skipped entries are pruned from `renames` before
--- `do` returns, so serialize/Unpaste never name an entry that was not
--- actually written.
+-- Paste creates an action. Its callback executor prompts asynchronously on
+-- clashes; the synchronous executor refuses clashes rather than blocking.
 function M.Paste(src, dst, src_names, dst_names)
   local self = {
     name = 'p',
@@ -370,86 +354,135 @@ function M.Paste(src, dst, src_names, dst_names)
     renames = zipped(src_names, dst_names),
   }
   self._execute = function()
-    local last = nil
-    -- accumulate only the pairs actually written so `renames` (and its
-    -- serialized form) never names a skipped entry; Unpaste then reverses
-    -- exactly what was copied instead of deleting an untouched original.
-    local copied = {}
+    local copied, last = {}, nil
     for _, pair in ipairs(self.renames) do
       local full_src = M.fs.join(self.src, pair.src)
       local full_dst = M.fs.join(self.dst, pair.dst)
       local st = M.fs.stat(full_src)
       if st then
-        local skipped = false
-        -- an existing destination is NEVER written to. Previously the
-        -- answered name was taken verbatim, so answering a name that still
-        -- existed merged a tree into the existing directory (copy_tree) or
-        -- overwrote the existing file (copy_file) -- while `renames` recorded it
-        -- as newly created, so Undo then deleted the whole destination
-        -- pre-existing members included. Re-prompt until the answer names a
-        -- path that does not exist (at most PASTE_CLASH_ATTEMPTS times: a
-        -- prompt that stays stuck on an existing name is skipped, never spun
-        -- on); an empty, cancelled or invalid-component answer skips the entry.
-        -- The final file copy is exclusive and directory copy commits by
-        -- no-replace rename, so a destination racing in after this check fails
-        -- closed too.
-        local attempts = 0
-        while M.fs.taken(full_dst) do
-          attempts = attempts + 1
-          if attempts > M.PASTE_CLASH_ATTEMPTS then
-            M.ui.notify('Skipped ' .. pair.src, vim.log.levels.WARN)
-            skipped = true
-            break
-          end
-          local entry_type = 'File'
-          if not M.fs.is_file(full_dst) then
-            entry_type = 'Directory'
-          end
-          local okp, answer = pcall(M.ui.prompt,
-            entry_type .. ' already exists. Paste as: ', pair.src, 'file')
-          if not okp or answer == nil or M.entry_name_reason(answer) ~= nil then
-            -- an empty/cancelled answer or an invalid basename component skips
-            -- the ENTRY
-            -- entirely; the original destination must not be touched.
-            M.ui.notify('Skipped ' .. pair.src, vim.log.levels.WARN)
-            skipped = true
-            break
-          end
-          pair.dst = answer
-          full_dst = M.fs.join(self.dst, pair.dst)
+        if M.fs.taken(full_dst) then
+          return nil, 'paste requires async execution for a destination clash: '
+            .. tostring(full_dst)
         end
-        if not skipped then
-          if st.type == 'file' then
-            local ok, err = M.fs.copy_file_exclusive(full_src, full_dst)
-            if not ok then
-              return nil, err
-            end
-            last = full_dst
-            copied[#copied + 1] = { src = pair.src, dst = pair.dst }
-          elseif st.type == 'directory' then
-            -- A paste destroys nothing, so an entry the
-            -- copy cannot reproduce is skipped and REPORTED (the register is
-            -- persisted, untrusted data) rather than failing the paste or
-            -- vanishing silently.
-            local ok, skipped = M.fs.copy_tree_exclusive(full_src, full_dst)
-            if not ok then
-              return nil, skipped
-            end
-            local n = skipped ~= nil and #skipped or 0
-            if n > 0 then
-              M.ui.notify('Skipped ' .. n .. ' ' .. (n == 1 and 'entry' or 'entries')
-                .. ' that cannot be copied: ' .. full_src, vim.log.levels.WARN)
-            end
-            last = full_dst
-            copied[#copied + 1] = { src = pair.src, dst = pair.dst }
+        if st.type == 'file' then
+          local ok, err = M.fs.copy_file_exclusive(full_src, full_dst)
+          if not ok then return nil, err end
+        elseif st.type == 'directory' then
+          local ok, skipped = M.fs.copy_tree_exclusive(full_src, full_dst)
+          if not ok then return nil, skipped end
+          if skipped ~= nil and #skipped > 0 then
+            M.ui.notify('Skipped ' .. #skipped .. ' '
+              .. (#skipped == 1 and 'entry' or 'entries')
+              .. ' that cannot be copied: ' .. full_src, vim.log.levels.WARN)
           end
         end
+        copied[#copied + 1] = { src = pair.src, dst = pair.dst }
+        last = full_dst
       end
     end
-    -- only the written pairs remain; a fully-skipped paste ends with an
-    -- empty renames list, so its reversal is a no-op.
     self.renames = copied
     return last or true
+  end
+  self._execute_async = function(callback)
+    local copied, index, last = {}, 1, nil
+    local completed = false
+    local function finish(ok, result, err)
+      if completed then return end
+      completed = true
+      self.renames = copied
+      callback(ok, result, err)
+    end
+    local function fail(err)
+      finish(false, nil, tostring(err or 'paste failed'))
+    end
+    local process_next
+    local function skip(pair)
+      M.ui.notify('Skipped ' .. pair.src, vim.log.levels.WARN)
+      index = index + 1
+      process_next()
+    end
+    local function copy_pair(pair, full_src, full_dst, st)
+      local called, ok, extra, code = pcall(function()
+        if st.type == 'file' then
+          return M.fs.copy_file_exclusive(full_src, full_dst)
+        elseif st.type == 'directory' then
+          return M.fs.copy_tree_exclusive(full_src, full_dst)
+        end
+        return true
+      end)
+      if not called then
+        fail(ok)
+        return
+      end
+      if not ok then
+        fail(extra or code or 'copy failed')
+        return
+      end
+      if st.type == 'directory' and type(extra) == 'table' and #extra > 0 then
+        M.ui.notify('Skipped ' .. #extra .. ' '
+          .. (#extra == 1 and 'entry' or 'entries')
+          .. ' that cannot be copied: ' .. full_src, vim.log.levels.WARN)
+      end
+      last = full_dst
+      copied[#copied + 1] = { src = pair.src, dst = pair.dst }
+      index = index + 1
+      process_next()
+    end
+    local function request_name(pair, full_src, st, attempts)
+      if attempts >= M.PASTE_CLASH_ATTEMPTS then
+        skip(pair)
+        return
+      end
+      local current = M.fs.join(self.dst, pair.dst)
+      local entry_type = M.fs.is_file(current) and 'File' or 'Directory'
+      local called, started, start_err = pcall(M.ui.input,
+        entry_type .. ' already exists. Paste as: ', pair.src, 'file',
+        function(answer)
+          if answer == nil or M.entry_name_reason(answer) ~= nil then
+            skip(pair)
+            return
+          end
+          pair.dst = answer
+          local chosen = M.fs.join(self.dst, pair.dst)
+          if M.fs.taken(chosen) then
+            request_name(pair, full_src, st, attempts + 1)
+          else
+            copy_pair(pair, full_src, chosen, st)
+          end
+        end,
+        function(input_err)
+          fail(input_err)
+        end)
+      if not called then
+        fail(started)
+      elseif started ~= true then
+        fail(start_err or 'could not start paste input')
+      end
+    end
+    process_next = function()
+      if index > #self.renames then
+        finish(true, last, nil)
+        return
+      end
+      local pair = self.renames[index]
+      local full_src = M.fs.join(self.src, pair.src)
+      local full_dst = M.fs.join(self.dst, pair.dst)
+      local st = M.fs.stat(full_src)
+      if not st then
+        index = index + 1
+        process_next()
+      elseif st.type ~= 'file' and st.type ~= 'directory' then
+        M.ui.notify('Skipped unsupported register entry: ' .. full_src,
+          vim.log.levels.WARN)
+        index = index + 1
+        process_next()
+      elseif M.fs.taken(full_dst) then
+        request_name(pair, full_src, st, 0)
+      else
+        copy_pair(pair, full_src, full_dst, st)
+      end
+    end
+    process_next()
   end
   self['do'] = function() return M.execute(self) end
   function self.describe()
@@ -646,7 +679,6 @@ function M.Unpaste(src, dst, src_names, dst_names)
   return self
 end
 
--- ---------------------------------------------------------------------------
 -- Human summaries
 -- ---------------------------------------------------------------------------
 
@@ -672,8 +704,6 @@ function M.summarize(actions)
   return summary
 end
 
--- Attach dispatch, serialization, deserialization, and reversal after all
--- action factories and facade helpers have been defined.
 require('direct.action_moves')(M)
 require('direct.action_registry')(M)
 

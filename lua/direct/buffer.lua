@@ -64,6 +64,7 @@ local first_unsafe = sync_plan.first_unsafe
 local ambiguous_message = sync_plan.ambiguous_message
 local result_entry = sync_plan.result_entry
 local build_actions = sync_plan.build_actions
+local pending = require('direct.pending')
 local reconcile_undone_materialization
 local edited_subtrees
 local children_integrity
@@ -253,6 +254,7 @@ local function set_options(bufnr)
     buffer = bufnr,
     callback = function(args)
       vim.api.nvim_set_current_buf(args.buf)
+      if pending.refuse('sync') then return end
       if vim.bo[args.buf].modified then
         vim.cmd('DirectSync')
       else
@@ -883,6 +885,7 @@ end
 -- sync or any action failed. Failed action batches are still re-listed so the
 -- buffer reflects any independent actions that did succeed.
 function Buffer:sync()
+  if pending.refuse('sync') then return nil, 'another direct operation is pending' end
   local bufnr = vim.api.nvim_get_current_buf()
   reconcile_undone_materialization(bufnr)
   local state = states[bufnr]

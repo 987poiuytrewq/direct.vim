@@ -32,9 +32,12 @@ materialized in the buffer and removed when collapsed.
 Filename highlights ~
 
 Visible directories use DirectDirectory (default link Directory) at any
-indentation depth. Hidden directories and files retain their prior Comment
-defaults. Listing files receive no custom filename, filetype, or special-name
-highlights.
+indentation depth. Hidden directories and files use their Comment defaults.
+When icons are enabled, hidden directory and file icons also use the Comment
+style; visible directory and file icons retain their Directory and Normal
+defaults. The hidden icon groups DirectHiddenFolderIcon and DirectHiddenFileIcon
+link to Comment and can be overridden independently. Listing files receive no
+custom filename, filetype, or special-name highlights.
 
 Highlight defaults are user-overridable and are reapplied after a ColorScheme
 event.
@@ -80,6 +83,10 @@ and files use `nf-md-file` (U+F0214), regardless of filetype. When only one kind
 of icon is enabled, the other kind reserves a blank icon slot so entry names
 stay aligned. Icons are virtual text, so buffer lines and filesystem behavior
 are unchanged. No icon plugin or other dependency is required.
+With folder icons enabled, click a folder icon to expand or collapse that
+directory in place. Mouse input must be enabled in Neovim (for example,
+`:set mouse=a`). Clicking elsewhere in the listing retains normal cursor
+placement.
 
 ==============================================================================
 4. Navigate                                              *direct.vim-navigate*
@@ -91,8 +98,8 @@ with `:edit foo/`, or by starting Neovim on it.
 
 Once a directory is listed, `-` goes up to its parent directory and `<Enter>`
 opens the entry under the cursor: a directory line opens a new listing, a file
-line opens the file. This is enough to move around the filesystem without
-remembering any extra command.
+line opens the file. Double-clicking an entry opens it the same way. This is
+enough to move around the filesystem without remembering any extra command.
 
 Use `zo` or `za` on a directory to expand it in place. Children are read lazily,
 one level at a time; repeating an expansion does not re-read or duplicate them.
@@ -217,6 +224,15 @@ that name is not removed. A crash or failure during deletion can leave
 quarantine debris. Identical-content replacements are indistinguishable from
 the original paste; open handles and competing same-user processes can still
 race checks because there is no filesystem snapshot or inter-process lock.
+
+Paste name clashes use Neovim's callback-based `vim.ui.input`; there is no
+synchronous prompt fallback. Cancel, an empty answer, or an invalid basename
+skips that entry. A still-colliding answer is retried up to ten times. Entries
+copied before a later skip or error are retained and recorded; if all entries
+are skipped, no history action or success notice is produced. While a prompt is
+pending, sync, paste, undo, and redo are refused. History writes and listing
+refresh wait until the callback flow completes. Grouped moves retain their
+existing synchronous staging behavior.
 
 ==============================================================================
 8. Commands                                                *direct.vim-commands*
