@@ -114,6 +114,52 @@ H.describe('listing filename highlights', function()
     H.assert_eq(listing:get_paths(1, 2), { ws .. '/directory/', ws .. '/file.txt' })
   end)
 
+  H.it('clicking a folder icon toggles only that directory', function()
+    clean_buffers()
+    local config = require('direct.config')
+    config.setup({ show_folder_icons = true })
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkdir(ws, 'sub')
+    H.mkfile(ws, 'sub/inside.txt', '')
+    H.mkfile(ws, 'other.txt', '')
+    buffer.list(ws)
+
+    local winid = vim.api.nvim_get_current_win()
+    local icon = vim.fn.screenpos(winid, 1, 1)
+    local click = {
+      winid = winid,
+      line = 1,
+      column = 1,
+      screenrow = icon.row,
+      screencol = icon.col,
+    }
+    local click_map = vim.fn.maparg('<LeftMouse>', 'n', false, true)
+    H.assert_true(type(click_map and click_map.callback) == 'function',
+      'direct buffers install the folder-icon mouse handler')
+    local function click_at(position)
+      local restore = H.stub(vim.fn, 'getmousepos', function() return position end)
+      local ok, err = pcall(click_map.callback)
+      restore()
+      if not ok then error(err, 0) end
+    end
+
+    click_at(click)
+    H.assert_buf_eq({ 'sub/', '  inside.txt', 'other.txt' }, 0,
+      'clicking the icon expands its directory')
+
+    click_at(click)
+    H.assert_buf_eq({ 'sub/', 'other.txt' }, 0,
+      'clicking the open icon collapses its directory')
+
+    click.screencol = icon.curscol
+    click_at(click)
+    H.assert_buf_eq({ 'sub/', 'other.txt' }, 0,
+      'clicking the directory name does not toggle it')
+    H.assert_eq(vim.api.nvim_win_get_cursor(winid)[1], 1,
+      'a non-icon click still moves the cursor to its row')
+  end)
+
   H.it('renders closed/open icons idempotently without changing buffer lines', function()
     clean_buffers()
     local config = require('direct.config')

@@ -1048,6 +1048,47 @@ H.describe('buffer: listing', function()
       'the prior direct buffer is wiped as before')
   end)
 
+  H.it('double-click opens the directory or file under the mouse', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkdir(ws, 'sub')
+    H.mkfile(ws, 'sub/inside.txt', { 'inside' })
+    H.mkfile(ws, 'root.txt', { 'root' })
+    buffer.list(ws)
+
+    local function double_click(row, column)
+      local callback = vim.fn.maparg('<2-LeftMouse>', 'n', false, true).callback
+      H.assert_true(type(callback) == 'function',
+        'direct buffers install the double-click handler')
+      local mouse = {
+        winid = vim.api.nvim_get_current_win(),
+        line = row,
+        column = column or 1,
+      }
+      local restore = H.stub(vim.fn, 'getmousepos', function() return mouse end)
+      local ok, err = pcall(callback)
+      restore()
+      if not ok then error(err, 0) end
+    end
+
+    local old_buf = vim.api.nvim_get_current_buf()
+    double_click(1)
+    H.assert_true(fs.same_path(vim.api.nvim_buf_get_name(0), ws .. '/sub'),
+      'double-clicking a directory opens its listing')
+    H.assert_buf_eq({ 'inside.txt' }, 0)
+    H.assert_false(vim.api.nvim_buf_is_valid(old_buf),
+      'opening the directory replaces the old listing')
+
+    old_buf = vim.api.nvim_get_current_buf()
+    double_click(1)
+    H.assert_true(fs.same_path(vim.api.nvim_buf_get_name(0), ws .. '/sub/inside.txt'),
+      'double-clicking a file opens the file')
+    H.assert_buf_eq({ 'inside' }, 0)
+    H.assert_false(vim.api.nvim_buf_is_valid(old_buf),
+      'opening the file replaces the old listing')
+  end)
+
   H.it('full list replacement reattaches child identities without re-reading', function()
     clean_buffers()
     local sb = H.sandbox()
