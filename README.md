@@ -16,8 +16,13 @@ rows are materialized in the buffer and removed when collapsed.
 
 Visible directories use the syntax group `DirectDirectory` (default link
 `Directory`) at any indentation depth. Hidden directories and files retain
-their prior `Comment` defaults. Listing files receive no custom filename,
+their `Comment` defaults. When icons are enabled, hidden directory and file icons
+also use the `Comment` style; visible directory and file icons retain their
+`Directory` and `Normal` defaults. Listing files receive no custom filename,
 filetype, or special-name highlights.
+
+The hidden icon groups are `DirectHiddenFolderIcon` and `DirectHiddenFileIcon`;
+both link to `Comment` by default and can be overridden independently.
 
 Highlight defaults are user-overridable and are reapplied after a `ColorScheme`
 event.

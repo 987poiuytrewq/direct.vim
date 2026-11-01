@@ -6,6 +6,7 @@
 -- `direct.buffer`; do not reference the legacy Vimscript entry points.
 local group = vim.api.nvim_create_augroup('direct', { clear = true })
 local constants = require('direct.constants')
+require('direct.highlight').setup()
 
 -- netrw neutralisation runs at three points: clear the `FileExplorer` group at
 -- load (pcall, when it already exists), again synchronously on `VimEnter`, and

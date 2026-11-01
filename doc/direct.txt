@@ -32,9 +32,12 @@ materialized in the buffer and removed when collapsed.
 Filename highlights ~
 
 Visible directories use DirectDirectory (default link Directory) at any
-indentation depth. Hidden directories and files retain their prior Comment
-defaults. Listing files receive no custom filename, filetype, or special-name
-highlights.
+indentation depth. Hidden directories and files use their Comment defaults.
+When icons are enabled, hidden directory and file icons also use the Comment
+style; visible directory and file icons retain their Directory and Normal
+defaults. The hidden icon groups DirectHiddenFolderIcon and DirectHiddenFileIcon
+link to Comment and can be overridden independently. Listing files receive no
+custom filename, filetype, or special-name highlights.
 
 Highlight defaults are user-overridable and are reapplied after a ColorScheme
 event.
