@@ -1913,11 +1913,32 @@ local stage_moves = action_mod.stage_moves
 -- Buffer options
 -- ---------------------------------------------------------------------------
 
+local function ensure_direct_syntax(bufnr)
+  vim.api.nvim_buf_call(bufnr, function()
+    if vim.b.current_syntax ~= 'direct' then
+      if vim.b.current_syntax ~= nil then
+        vim.cmd('syntax clear')
+      end
+      vim.b.current_syntax = nil
+      vim.bo.syntax = 'direct'
+      -- `syntax=direct` does not source a syntax file when the user's global
+      -- syntax loader is off. Source this small buffer-local syntax explicitly
+      -- so direct listings still get their filename highlights in that setup.
+      if vim.b.current_syntax ~= 'direct' then
+        vim.cmd('runtime! syntax/direct.vim')
+      end
+    else
+      vim.bo.syntax = 'direct'
+    end
+  end)
+end
+
 local function set_options(bufnr)
   vim.bo[bufnr].buftype = 'acwrite'
   vim.bo[bufnr].buflisted = true
   vim.bo[bufnr].swapfile = false
   vim.bo[bufnr].filetype = constants.FILETYPE
+  ensure_direct_syntax(bufnr)
   -- BufWriteCmd <buffer>: modified listings sync, while a clean `:write`
   -- refreshes from disk instead of interpreting external changes as deletions.
   -- Each buffer owns a shared group outside `direct` so re-sourcing

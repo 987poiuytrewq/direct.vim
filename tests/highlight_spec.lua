@@ -384,7 +384,8 @@ H.describe('listing filename highlights', function()
 
   H.it('styles hidden names and their optional icons with Comment', function()
     clean_buffers()
-    vim.cmd('syntax on')
+    vim.cmd('syntax off')
+    H.assert_false(vim.g.syntax_on == 1, 'test exercises the syntax-off configuration')
     local config = require('direct.config')
     config.setup({ show_folder_icons = true, show_file_icons = true })
     local sb = H.sandbox()
@@ -394,9 +395,10 @@ H.describe('listing filename highlights', function()
 
     local listing = buffer.list(ws)
     local bufnr = vim.api.nvim_get_current_buf()
-    vim.bo[bufnr].syntax = 'direct'
     H.assert_eq(vim.bo[bufnr].filetype, 'direct', 'listing has the direct filetype')
     H.assert_eq(vim.bo[bufnr].syntax, 'direct', 'direct syntax is active')
+    H.assert_eq(vim.b[bufnr].current_syntax, 'direct',
+      'listing loads its syntax even when global syntax is off')
     H.assert_eq(H.buf_lines(), { '.hidden-dir/', '.hidden-file' })
     config.setup({ show_folder_icons = false, show_file_icons = false })
 

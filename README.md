@@ -21,6 +21,9 @@ also use the `Comment` style; visible directory and file icons retain their
 `Directory` and `Normal` defaults. Listing files receive no custom filename,
 filetype, or special-name highlights.
 
+Direct loads its listing syntax locally, including when Neovim's global syntax
+loader is disabled.
+
 The hidden icon groups are `DirectHiddenFolderIcon` and `DirectHiddenFileIcon`;
 both link to `Comment` by default and can be overridden independently.
 
