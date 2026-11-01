@@ -208,6 +208,64 @@ H.describe('listing filename highlights', function()
       'cursor on the inserted first character is displayed after the inline icon')
   end)
 
+  H.it('removes the joined row icon when two filenames are joined', function()
+    clean_buffers()
+    require('direct.config').setup({
+      show_folder_icons = true,
+      show_file_icons = true,
+    })
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkfile(ws, 'alpha.txt', '')
+    H.mkfile(ws, 'beta.txt', '')
+    buffer.list(ws)
+    H.assert_eq(#listing_icon_marks(0), 2, 'each filename initially has an icon')
+
+    vim.api.nvim_win_set_cursor(0, { 1, 0 })
+    vim.api.nvim_feedkeys('J', 'mx', false)
+    -- Headless feedkeys does not dispatch TextChanged automatically.
+    vim.api.nvim_exec_autocmds('TextChanged', { buffer = 0 })
+
+    H.assert_eq(vim.api.nvim_buf_get_lines(0, 0, -1, false), {
+      'alpha.txt beta.txt',
+    }, 'J joins the two filenames into one line')
+    local marks = listing_icon_marks(0)
+    H.assert_eq(#marks, 1, 'only the joined line start keeps an icon')
+    if marks[1] then
+      H.assert_eq(marks[1][2], 0, 'the remaining icon is on the joined line')
+      H.assert_eq(marks[1][3], 0, 'the icon stays at the line start, not between names')
+    end
+  end)
+
+  H.it('removes the joined row icon when Backspace deletes a newline in insert mode', function()
+    clean_buffers()
+    require('direct.config').setup({
+      show_folder_icons = true,
+      show_file_icons = true,
+    })
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkfile(ws, 'alpha.txt', '')
+    H.mkfile(ws, 'beta.txt', '')
+    buffer.list(ws)
+
+    vim.api.nvim_win_set_cursor(0, { 2, 0 })
+    local keys = vim.api.nvim_replace_termcodes('i<BS><Esc>', true, false, true)
+    vim.api.nvim_feedkeys(keys, 'xt', false)
+    -- Headless feedkeys does not dispatch TextChangedI automatically.
+    vim.api.nvim_exec_autocmds('TextChangedI', { buffer = 0 })
+
+    H.assert_eq(vim.api.nvim_buf_get_lines(0, 0, -1, false), {
+      'alpha.txtbeta.txt',
+    }, 'Backspace at the second line start deletes the newline')
+    local marks = listing_icon_marks(0)
+    H.assert_eq(#marks, 1, 'insert-mode joining removes the stale second icon')
+    if marks[1] then
+      H.assert_eq(marks[1][2], 0, 'the remaining icon is on the joined line')
+      H.assert_eq(marks[1][3], 0, 'the icon stays at the line start')
+    end
+  end)
+
   H.it('marks an empty expanded directory open and reserves slots on file rows', function()
     clean_buffers()
     local config = require('direct.config')
