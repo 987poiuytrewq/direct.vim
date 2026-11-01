@@ -210,6 +210,7 @@ local function refresh_icons(bufnr, state)
         (rec.depth or 0) * 2, {
           virt_text = { { glyph .. (enabled and ' ' or ''), group } },
           virt_text_pos = 'inline',
+          right_gravity = false,
           hl_mode = 'combine',
         })
     end

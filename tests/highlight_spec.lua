@@ -182,6 +182,32 @@ H.describe('listing filename highlights', function()
       'sync keeps the same line data when icons are enabled')
   end)
 
+  H.it('keeps the icon before text inserted at the start of a filename', function()
+    clean_buffers()
+    require('direct.config').setup({
+      show_folder_icons = true,
+      show_file_icons = true,
+    })
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkfile(ws, 'alpha.txt', '')
+    buffer.list(ws)
+
+    vim.api.nvim_win_set_cursor(0, { 1, 0 })
+    vim.api.nvim_feedkeys('ix\27', 'xt', false)
+
+    H.assert_eq(vim.api.nvim_buf_get_lines(0, 0, -1, false), { 'xalpha.txt' },
+      'typing at the first character edits the filename')
+    local mark = icon_mark(0, 0)
+    H.assert_not_nil(mark, 'the filename row keeps its icon extmark')
+    if mark then
+      H.assert_eq(mark[3], 0, 'the icon remains anchored before inserted text')
+    end
+    local pos = vim.fn.screenpos(0, 1, 1)
+    H.assert_true(pos.curscol > pos.col,
+      'cursor on the inserted first character is displayed after the inline icon')
+  end)
+
   H.it('marks an empty expanded directory open and reserves slots on file rows', function()
     clean_buffers()
     local config = require('direct.config')
