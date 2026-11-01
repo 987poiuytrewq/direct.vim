@@ -5,12 +5,249 @@ return function(deps)
   local fs = deps.fs
   local states = deps.states
   local namespace = deps.namespace
+  local set_row_mark = deps.set_row_mark
   local is_dir_line = deps.is_dir_line
   local component_reason = deps.component_reason
   local same_lines = deps.same_lines
   local entry_path = deps.entry_path
   local ignore_set = deps.ignore_set
   local action_mod = deps.action_mod
+
+  local function children_integrity(bufnr, lines)
+    local state = states[bufnr]
+    if not state then return lines end
+    local seq_cur = vim.fn.undotree(bufnr).seq_cur
+    for _, materialization in ipairs(state.materialization_recoveries or {}) do
+      if materialization.seq == seq_cur then
+        return nil, 'redone child materialization could not be uniquely restored'
+      end
+    end
+    local expected_order, child_count = {}, 0
+    for _, id in ipairs(state.display_ids or {}) do
+      local rec = state.rows[id]
+      if rec and rec.kind == 'child' then
+        expected_order[#expected_order + 1] = rec
+        child_count = child_count + 1
+      end
+    end
+    if child_count == 0 then
+      -- Keep ordinary root-only validation semantics, but do not let an extmark
+      -- restored by :redo become an untracked root action after its snapshot was
+      -- rejected or its records were discarded.
+      for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1, {})) do
+        if not state.rows[mark[1]] then
+          return nil, 'child identity marks are invalid or duplicated'
+        end
+      end
+      return lines
+    end
+    local mark_rows, seen_id, seen_row, invalid_child_ids = {}, {}, {}, {}
+    for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1,
+        { details = true })) do
+      local id, row, details = mark[1], mark[2], mark[4] or {}
+      local rec = state.rows[id]
+      if not rec then
+        return nil, 'child identity marks are invalid or duplicated'
+      end
+      if details.invalid then
+        if rec.kind == 'child' then
+          if invalid_child_ids[id] then
+            return nil, 'child identity marks are invalid or duplicated'
+          end
+          invalid_child_ids[id] = true
+        end
+        -- Root identities may be invalidated by deletion or rename. Preserve that
+        -- intent for the root classifier below.
+      else
+        local other_id = seen_row[row]
+        local other = other_id and state.rows[other_id]
+        if seen_id[id] or (other_id and (rec.kind == 'child'
+            or other and other.kind == 'child')) then
+          return nil, 'child identity marks are invalid or duplicated'
+        end
+        seen_id[id], seen_row[row] = true, id
+        mark_rows[id] = row
+      end
+    end
+
+    local recovered_rows = {}
+    local missing_children = 0
+    for _, rec in ipairs(expected_order) do
+      if mark_rows[rec.id] == nil then
+        if not invalid_child_ids[rec.id] then
+          return nil, 'child identity marks are invalid or duplicated'
+        end
+        missing_children = missing_children + 1
+      end
+    end
+    if missing_children > 0 then
+      if vim.fn.undotree().seq_cur ~= state.materialization_seq then
+        return nil, 'child identity marks were lost outside an undo to their materialization baseline'
+      end
+      -- Undo can invalidate child extmarks even when the restored lines are still
+      -- exactly the rows that were materialized. Reattach only against each
+      -- expanded root's live identity and its complete, ordered subtree baseline.
+      -- No filename/basename search is used: parent, sibling order, depth, count,
+      -- and the exact rendered line all participate in attribution.
+      local root_rows = {}
+      local previous_root_row = -1
+      for _, root_id in ipairs(state.root_ids or {}) do
+        local row = mark_rows[root_id]
+        if row == nil or row <= previous_root_row then
+          return nil, 'child rows cannot be uniquely associated with their root identity'
+        end
+        root_rows[root_id] = row
+        previous_root_row = row
+      end
+
+      local expected_child_ids = {}
+      local function append_subtree(parent_id, parent_depth, out)
+        local expansion = state.expanded[parent_id]
+        if not expansion then return true end
+        local previous_order = 0
+        for _, child in ipairs(expansion.children) do
+          if child.kind ~= 'child' or child.parent ~= parent_id
+            or state.rows[child.id] ~= child or child.order <= previous_order
+            or child.depth ~= parent_depth + 1
+            or child.text ~= string.rep('  ', child.depth) .. child.name then
+            return false
+          end
+          previous_order = child.order
+          expected_child_ids[child.id] = true
+          out[#out + 1] = child
+          if not append_subtree(child.id, child.depth, out) then return false end
+        end
+        return true
+      end
+
+      for _, root_id in ipairs(state.root_ids or {}) do
+        local root = state.rows[root_id]
+        local expansion = state.expanded[root_id]
+        if root and expansion and #expansion.children > 0 then
+          local subtree = {}
+          if not append_subtree(root_id, root.depth or 0, subtree) then
+            return nil, 'child materialization baseline is inconsistent'
+          end
+          local parent_row = root_rows[root_id]
+          for offset, child in ipairs(subtree) do
+            local row = parent_row + offset
+            if lines[row + 1] ~= child.text then
+              return nil, 'child row text differs from its materialization baseline'
+            end
+            local occupied_by_root = false
+            for _, other_root_id in ipairs(state.root_ids or {}) do
+              if root_rows[other_root_id] == row then
+                occupied_by_root = true
+                break
+              end
+            end
+            if occupied_by_root then
+              return nil, 'child order no longer follows its owning root row'
+            end
+            local existing_row = mark_rows[child.id]
+            if existing_row ~= nil and existing_row ~= row then
+              return nil, 'child row identity moved from its materialization baseline'
+            end
+            if existing_row == nil and not invalid_child_ids[child.id] then
+              return nil, 'child identity marks are invalid or duplicated'
+            end
+            if existing_row == nil then recovered_rows[child.id] = row end
+            mark_rows[child.id] = row
+          end
+        end
+      end
+      for id in pairs(invalid_child_ids) do
+        if not expected_child_ids[id] then
+          return nil, 'child identity marks are invalid or duplicated'
+        end
+      end
+      for _, rec in ipairs(expected_order) do
+        if mark_rows[rec.id] == nil then
+          return nil, 'child rows were added, deleted, reordered, or lost identity'
+        end
+      end
+    end
+
+    local previous_row = -1
+    for _, rec in ipairs(expected_order) do
+      local row = mark_rows[rec.id]
+      if row == nil or row <= previous_row then
+        return nil, 'child rows were added, deleted, reordered, or lost identity'
+      end
+      if lines[row + 1] ~= rec.text then
+        return nil, 'child row text differs from its materialization baseline'
+      end
+      previous_row = row
+    end
+
+    -- Every expanded parent with children must retain its identity.  For each
+    -- subtree, unmarked inserted lines between the parent and its last child are
+    -- not root entries and may never reach the positional classifier.
+    local protected = {}
+    for parent_id, expansion in pairs(state.expanded or {}) do
+      if #expansion.children > 0 then
+        local parent_row = mark_rows[parent_id]
+        -- A missing expanded parent can be a deleted or renamed root directory;
+        -- its independently marked descendants stay excluded from classification.
+        if parent_row ~= nil then
+          local last = parent_row
+          for _, rec in ipairs(expected_order) do
+            local ancestor = rec.parent
+            while ancestor do
+              if ancestor == parent_id then
+                local child_row = mark_rows[rec.id]
+                if child_row == nil or child_row <= parent_row then
+                  return nil, 'child order no longer follows its parent'
+                end
+                last = math.max(last, child_row)
+                break
+              end
+              local ancestor_rec = state.rows[ancestor]
+              ancestor = ancestor_rec and ancestor_rec.parent or nil
+            end
+          end
+          for row = parent_row + 1, last do protected[row] = true end
+        end
+      end
+    end
+
+    local row_ids = {}
+    for id, row in pairs(mark_rows) do
+      if row_ids[row] ~= nil then
+        return nil, 'child identity marks are invalid or duplicated'
+      end
+      row_ids[row] = id
+    end
+    local actual_children = 0
+    for row, line in ipairs(lines) do
+      local id = row_ids[row - 1]
+      local rec = id and state.rows[id]
+      if rec and rec.kind == 'child' then
+        actual_children = actual_children + 1
+      elseif protected[row - 1] or (not rec and line:match('^%s')) then
+        return nil, 'unidentified child row is present'
+      end
+    end
+    if actual_children ~= child_count then
+      return nil, 'child row count differs from its materialization baseline'
+    end
+
+    local root_lines = {}
+    for row, line in ipairs(lines) do
+      local id = row_ids[row - 1]
+      local rec = id and state.rows[id]
+      if not rec or rec.kind ~= 'child' then
+        root_lines[#root_lines + 1] = line
+      end
+    end
+    for id, row in pairs(recovered_rows) do
+      local ok = pcall(set_row_mark, bufnr, row, id)
+      if not ok then
+        return nil, 'child identity marks could not be restored safely'
+      end
+    end
+    return root_lines
+  end
 
   -- edited_subtrees(bufnr, lines) -> a per-expanded-directory action plan, or
   -- nil, reason. The ordinary children_integrity path remains the fast path for
@@ -484,5 +721,5 @@ return function(deps)
       expanded_targets = expanded_targets,
     }
   end
-  return edited_subtrees
+  return { children_integrity = children_integrity, edited_subtrees = edited_subtrees }
 end

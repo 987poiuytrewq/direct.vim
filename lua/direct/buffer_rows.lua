@@ -155,6 +155,17 @@ local function visible_row_for_id(bufnr, state, id)
   return state.display_ids[row] == id and row or nil
 end
 
+local function remove_expanded_subtree(bufnr, state, parent_id)
+  local expansion = state.expanded[parent_id]
+  if not expansion then return end
+  state.expanded[parent_id] = nil
+  for _, child in ipairs(expansion.children or {}) do
+    remove_expanded_subtree(bufnr, state, child.id)
+    pcall(vim.api.nvim_buf_del_extmark, bufnr, namespace, child.id)
+    state.rows[child.id] = nil
+  end
+end
+
 M.states = states
 M.namespace = namespace
 M.state_for_test = function(bufnr) return states[bufnr] end
@@ -169,6 +180,7 @@ M.refresh_icons = refresh_icons
 M.dirs_then_name = dirs_then_name
 M.recorded_row_text = recorded_row_text
 M.visible_row_for_id = visible_row_for_id
+M.remove_expanded_subtree = remove_expanded_subtree
 M.record_identity = function(rec)
   if not rec then return nil end
   return rec.identity or path_identity(rec.path)
