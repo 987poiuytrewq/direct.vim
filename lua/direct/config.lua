@@ -22,23 +22,15 @@ local defaults = {
     display = 'gutter',
     statuses = {
       added = {
-        icon_hl = 'DirectGitAddedIcon',
-        text_hl = 'DirectGitAdded',
         gutter = { symbol = '┃', highlight = 'DirectGitAddedGutter' },
       },
       modified = {
-        icon_hl = 'DirectGitModifiedIcon',
-        text_hl = 'DirectGitModified',
         gutter = { symbol = '┃', highlight = 'DirectGitModifiedGutter' },
       },
       renamed = {
-        icon_hl = 'DirectGitRenamedIcon',
-        text_hl = 'DirectGitRenamed',
         gutter = { symbol = '┃', highlight = 'DirectGitRenamedGutter' },
       },
       conflicted = {
-        icon_hl = 'DirectGitConflictedIcon',
-        text_hl = 'DirectGitConflicted',
         gutter = { symbol = '┃', highlight = 'DirectGitConflictedGutter' },
       },
     },

@@ -133,9 +133,11 @@ no listing row to mark. Re-list to refresh Git status.
 By default, `git.display` is `gutter`: changed entries show a `┃` in the sign
 column without changing their icon glyphs or highlighting their names. Added
 entries use DiffAdd, modified and renamed entries use DiffChange, and conflicts
-use ErrorMsg. Choose `icon`, `text`, or `both` to add inline icon and/or name
-highlighting; gutter symbols remain configurable per status. Configure highlight
-groups, optional icon overrides, and gutter symbols per status:
+use ErrorMsg. Choose `icon`, `text`, or `both` to select inline icon and/or name
+highlighting; gutter symbols remain configurable per status. Icon and entry-name
+highlighting are unset by default; set `icon_hl` and/or `text_hl` per status to
+opt in. Configure highlight groups, optional icon overrides, and gutter symbols
+per status:
 
     require('direct').setup({
       git = {

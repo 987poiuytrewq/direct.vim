@@ -88,8 +88,10 @@ H.describe('config', function()
     config.clear_mappings()
     H.assert_true(config.defaults.git.enabled, 'Git status is enabled by default')
     H.assert_eq(config.defaults.git.display, 'gutter', 'gutter-only display is the default')
-    H.assert_eq(config.defaults.git.statuses.added.icon_hl, 'DirectGitAddedIcon',
-      'added icons have a plugin highlight group')
+    H.assert_nil(config.defaults.git.statuses.added.icon_hl,
+      'Git status does not color icons by default')
+    H.assert_nil(config.defaults.git.statuses.added.text_hl,
+      'Git status does not color entry names by default')
     H.assert_nil(config.defaults.git.statuses.added.icon,
       'Git status does not replace the existing icon glyph by default')
     H.assert_eq(config.defaults.git.statuses.added.gutter,
@@ -109,10 +111,10 @@ H.describe('config', function()
     H.assert_eq(options.git.display, 'icon', 'icon-only display is accepted')
     H.assert_eq(options.git.statuses.added.icon, { folder = '+' },
       'folder glyph can be overridden independently')
-    H.assert_eq(options.git.statuses.added.text_hl, 'DirectGitAdded',
-      'omitted status options retain their defaults')
-    H.assert_eq(options.git.statuses.modified.text_hl, 'DirectGitModified',
-      'omitted statuses retain their defaults')
+    H.assert_nil(options.git.statuses.added.text_hl,
+      'omitted inline highlight options remain disabled')
+    H.assert_nil(options.git.statuses.modified.text_hl,
+      'omitted statuses do not enable inline highlights')
     config.clear_mappings()
   end)
 

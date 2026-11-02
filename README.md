@@ -198,9 +198,10 @@ By default, `git.display` is `"gutter"`: changed entries show a `┃` in the sig
 column without changing their icon glyphs or highlighting their names. Added
 entries use `DiffAdd`, modified and renamed entries use `DiffChange`, and
 conflicts use `ErrorMsg`. Set `display` to `"icon"`, `"text"`, or `"both"` to
-add inline icon and/or name highlighting; gutter symbols remain configurable per
-status. Highlight groups, optional icon overrides, and gutter symbols can be
-customized per status:
+select inline icon and/or name highlighting; gutter symbols remain configurable
+per status. Icon and entry-name highlighting are unset by default; set `icon_hl`
+and/or `text_hl` per status to opt in. Gutter symbols and optional icon overrides
+can also be customized per status:
 
 ```lua
 require('direct').setup({
