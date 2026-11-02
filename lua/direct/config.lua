@@ -7,6 +7,8 @@ local constants = require('direct.constants')
 
 local defaults = {
   map_default_keys = true,
+  show_hidden = true,
+  respect_gitignore = false,
   show_folder_icons = false,
   show_file_icons = false,
   icons = {
@@ -206,7 +208,7 @@ M._setup_called = false
 M._vim_enter_installed = false
 M._installed = vim.fn.maparg(M.GLOBAL_MAP.lhs, M.GLOBAL_MAP.mode) == M.GLOBAL_MAP.rhs
 
--- The nine buffer-local mappings for filetype=direct buffers, owned
+-- The ten buffer-local mappings for filetype=direct buffers, owned
 -- here so setup can clear and restore them in
 -- ALREADY-open direct buffers. Installed by `ftplugin/direct.lua` via
 -- `install_buffer_mappings(0)`. Built on `<Cmd>` (never a `:` command that
@@ -230,6 +232,7 @@ M.BUFFER_MAPS = {
     rhs = '<Cmd>lua require("direct").yank(vim.fn.line("v"), vim.fn.line("."))<CR>' },
   { mode = 'n', lhs = 'p', rhs = '<Cmd>DirectPaste<CR>' },
   { mode = 'n', lhs = 'P', rhs = '<Cmd>DirectPaste<CR>' },
+  { mode = 'n', lhs = 'gh', rhs = '<Cmd>DirectToggleHidden<CR>' },
 }
 
 -- The loaded buffers whose filetype is `direct`: the retrofit targets for
@@ -245,7 +248,7 @@ local function open_direct_buffers()
   return bufs
 end
 
--- install_buffer_mappings(bufnr) -> true. Installs the nine buffer-local
+-- install_buffer_mappings(bufnr) -> true. Installs the ten buffer-local
 -- mappings into `bufnr` (0 = the current buffer). Idempotent: re-setting a
 -- mapping replaces it in place, so repeated ftplugin runs cannot stack.
 function M.install_buffer_mappings(bufnr)
@@ -357,6 +360,10 @@ function M.setup(opts)
         vim.log.levels.ERROR)
     elseif key == 'icons' then
       next_options.icons = resolve_icon_options(value)
+    elseif (key == 'show_hidden' or key == 'respect_gitignore')
+      and type(value) ~= 'boolean' then
+      require('direct.ui').notify(
+        string.format('direct: %s must be a boolean', key), vim.log.levels.ERROR)
     elseif key == 'git' then
       next_options.git = resolve_git_options(value)
     else

@@ -40,8 +40,8 @@ M._state_for_test = rows.state_for_test
 M.entry_path = listing.entry_path
 M.ignore_set = listing.ignore_set
 M.read = listing.read
-local function list_with_snapshot(root)
-  return listing.list_with_snapshot(root, M.read)
+local function list_with_snapshot(root, show_hidden)
+  return listing.list_with_snapshot(root, M.read, show_hidden)
 end
 local set_directory_snapshot = listing.set_directory_snapshot
 local get_directory_snapshot = listing.get_directory_snapshot
@@ -218,6 +218,7 @@ local tree_planner = require('direct.buffer_tree')({
   same_lines = same_lines,
   entry_path = M.entry_path,
   ignore_set = M.ignore_set,
+  read_with_snapshot = listing.read_with_snapshot,
   action_mod = action_mod,
 })
 children_integrity = tree_planner.children_integrity
@@ -235,6 +236,7 @@ reconcile_undone_materialization = require('direct.buffer_undo_state')({
   recorded_row_text = recorded_row_text,
   ignore_set = M.ignore_set,
   read = M.read,
+  read_with_snapshot = listing.read_with_snapshot,
   entry_path = M.entry_path,
   highlight = highlight,
   refresh_highlights = refresh_highlights,
@@ -432,7 +434,14 @@ end
 -- entry, and lists the survivors. A ' ' (space) name is NOT dropped: a space is
 -- representable and must still list.
 function Buffer:list()
-  local lines, snapshot, err = list_with_snapshot(self.root)
+  local bufnr = vim.api.nvim_get_current_buf()
+  local old_state = states[bufnr]
+  local show_hidden_override
+  if old_state and old_state.view_show_hidden_override
+    and type(old_state.view_show_hidden) == 'boolean' then
+    show_hidden_override = old_state.view_show_hidden
+  end
+  local lines, snapshot, err = list_with_snapshot(self.root, show_hidden_override)
   if not lines then
     ui.notify('direct: cannot list ' .. tostring(self.root) .. ': '
       .. tostring(err), vim.log.levels.ERROR)
@@ -450,9 +459,8 @@ function Buffer:list()
     end
   end
 
-  local bufnr = vim.api.nvim_get_current_buf()
   reconcile_undone_materialization(bufnr)
-  local old_state = states[bufnr]
+  old_state = states[bufnr]
   local old_expanded = {}
   local old_known_children = {}
   local old_index = { by_path = {}, by_inode = {}, unknown_by_path = {} }
@@ -502,6 +510,8 @@ function Buffer:list()
     collapse_undos = old_state
       and vim.deepcopy(old_state.collapse_undos or {}) or {},
     git_status = nil,
+    view_show_hidden = snapshot.show_hidden,
+    view_show_hidden_override = old_state and old_state.view_show_hidden_override or false,
   }
   local git_options = require('direct.config').options.git
   if git_options.enabled then
@@ -608,7 +618,7 @@ function Buffer:expand(row)
   local just_materialized = false
   if not state.expanded[rec.id] then
     local path = row_path(self.root, rec, line)
-    local children, snapshot, err = list_with_snapshot(path)
+    local children, snapshot, err = list_with_snapshot(path, state.view_show_hidden)
     if not children then
       ui.notify('direct: cannot expand ' .. tostring(path) .. ': '
         .. tostring(err), vim.log.levels.ERROR)
@@ -638,6 +648,7 @@ function Buffer:expand(row)
       children = materialized,
       listing_lines = vim.deepcopy(children),
       wildignore = snapshot.wildignore,
+      filter_snapshot = vim.deepcopy(snapshot),
     }
     set_directory_snapshot(state, snapshot)
     just_materialized = true
@@ -688,6 +699,7 @@ function Buffer:expand(row)
           parent_identity = path_identity(path),
           listing_lines = vim.deepcopy(children),
           wildignore = snapshot.wildignore or '',
+          filter_snapshot = vim.deepcopy(snapshot),
           children_snapshot = vim.deepcopy(materialized),
         }
         state.materialization_undos = state.materialization_undos or {}
@@ -765,6 +777,7 @@ local function collapse_snapshot(bufnr, state, parent, parent_row)
         directory_snapshots[id] = {
           listing_lines = vim.deepcopy(expanded.listing_lines or {}),
           wildignore = expanded.wildignore or vim.o.wildignore or '',
+          filter_snapshot = vim.deepcopy(expanded.filter_snapshot),
         }
       end
     end
@@ -795,6 +808,7 @@ local function collapse_snapshot(bufnr, state, parent, parent_row)
     children_snapshot = vim.deepcopy(state.expanded[parent.id].children),
     listing_lines = vim.deepcopy(state.expanded[parent.id].listing_lines or {}),
     wildignore = vim.o.wildignore or '',
+    filter_snapshot = vim.deepcopy(get_directory_snapshot(state, parent.path)),
     display_snapshot = display_snapshot,
   }
 end
@@ -859,6 +873,47 @@ function M.toggle()
     return M.collapse()
   end
   return M.expand()
+end
+
+function M.toggle_hidden()
+  local bufnr = vim.api.nvim_get_current_buf()
+  if vim.bo[bufnr].modified then
+    local reason = 'cannot toggle hidden entries with unsaved edits; sync or discard them first'
+    ui.notify('direct: ' .. reason, vim.log.levels.ERROR)
+    return nil, reason
+  end
+  local state = states[bufnr]
+  if not state then
+    local reason = 'direct listing state is unavailable; re-list this directory'
+    ui.notify('direct: ' .. reason, vim.log.levels.ERROR)
+    return nil, reason
+  end
+  local previous = {
+    view_show_hidden = state.view_show_hidden,
+    view_show_hidden_override = state.view_show_hidden_override,
+    expanded = state.expanded,
+    known_children = state.known_children,
+    directory_snapshots = state.directory_snapshots,
+    materialization_undos = state.materialization_undos,
+    materialization_recoveries = state.materialization_recoveries,
+    collapse_undos = state.collapse_undos,
+  }
+  state.view_show_hidden = not state.view_show_hidden
+  state.view_show_hidden_override = true
+  -- Rebuild from the root so every expanded subtree uses the same visibility
+  -- setting; doing this only changes the view and is not text-undoable.
+  state.expanded = {}
+  state.known_children = {}
+  state.directory_snapshots = {}
+  state.materialization_undos = {}
+  state.materialization_recoveries = {}
+  state.collapse_undos = {}
+  local listed, err = M.restore():list()
+  if not listed then
+    for key, value in pairs(previous) do state[key] = value end
+    return nil, err
+  end
+  return listed
 end
 
 -- Internal adapter for the folding command module. Keep row marks and state
@@ -954,6 +1009,21 @@ function Buffer:sync()
       vim.log.levels.ERROR)
     return nil, reason
   end
+  local checked_git = {}
+  for _, directory_snapshot in ipairs(state.directory_snapshots or {}) do
+    if directory_snapshot.respect_gitignore then
+      local matches, git_err = git.ignore_snapshot_matches(
+        directory_snapshot.git, directory_snapshot.path, checked_git)
+      if matches ~= true then
+        vim.bo[bufnr].modified = true
+        local reason = matches == false and git_err
+          or ('Git ignore query failed: ' .. tostring(git_err))
+        ui.notify('Refusing to sync: ' .. tostring(reason) .. '; nothing was changed.',
+          vim.log.levels.ERROR)
+        return nil, reason
+      end
+    end
+  end
   local visible = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local actual, child_err = children_integrity(bufnr, visible)
   local subtree_edit
@@ -1025,7 +1095,15 @@ function Buffer:sync()
       .. tostring(read_err), vim.log.levels.ERROR)
     return nil, read_err
   end
-  expected = apply_snapshot(self.root, expected, snapshot)
+  local filtered_expected, filter_err = apply_snapshot(self.root, expected, snapshot)
+  if not filtered_expected then
+    vim.bo[bufnr].modified = true
+    local reason = 'Git ignore query failed: ' .. tostring(filter_err)
+    ui.notify('Refusing to sync: ' .. reason .. '; nothing was changed.',
+      vim.log.levels.ERROR)
+    return nil, reason
+  end
+  expected = filtered_expected
   -- Neovim represents an empty buffer with one empty string. An empty listing
   -- denotes zero root entries, not an empty filename: this applies both to a
   -- clean listing of an empty directory and to deleting its final visible row.

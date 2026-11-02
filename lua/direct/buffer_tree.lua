@@ -11,6 +11,7 @@ return function(deps)
   local same_lines = deps.same_lines
   local entry_path = deps.entry_path
   local ignore_set = deps.ignore_set
+  local read_with_snapshot = deps.read_with_snapshot
   local action_mod = deps.action_mod
 
   local function children_integrity(bufnr, lines)
@@ -549,8 +550,13 @@ return function(deps)
           end
         end
         if changed then
-          local ignored = ignore_set(parent.path, expansion.wildignore or '')
-          local disk, read_err = fs.read_dir_lines(parent.path, ignored)
+          local disk, read_err
+          if expansion.filter_snapshot and read_with_snapshot then
+            disk, read_err = read_with_snapshot(parent.path, expansion.filter_snapshot)
+          else
+            local ignored = ignore_set(parent.path, expansion.wildignore or '')
+            disk, read_err = fs.read_dir_lines(parent.path, ignored)
+          end
           if not disk or not same_lines(disk, expansion.listing_lines or {}) then
             return nil, 'expanded directory changed on disk since it was read'
               .. (read_err and (': ' .. tostring(read_err)) or '')

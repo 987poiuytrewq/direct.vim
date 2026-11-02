@@ -13,6 +13,7 @@ return function(deps)
   local recorded_row_text = deps.recorded_row_text
   local ignore_set = deps.ignore_set
   local read = deps.read
+  local read_with_snapshot = deps.read_with_snapshot
   local entry_path = deps.entry_path
   local highlight = deps.highlight
   local refresh_highlights = deps.refresh_highlights or function(bufnr)
@@ -42,8 +43,13 @@ return function(deps)
     -- snapshot, and pass its match-set explicitly so nil means unfiltered rather
     -- than falling back to the current option.
     if type(materialization.wildignore) ~= 'string' then return false end
-    local ignored = ignore_set(parent.path, materialization.wildignore)
-    local listed = read(parent.path, ignored)
+    local listed
+    if materialization.filter_snapshot and read_with_snapshot then
+      listed = read_with_snapshot(parent.path, materialization.filter_snapshot)
+    else
+      local ignored = ignore_set(parent.path, materialization.wildignore)
+      listed = read(parent.path, ignored)
+    end
     if not listed or not same_lines(listed, materialization.listing_lines or {}) then
       return false
     end
@@ -96,6 +102,7 @@ return function(deps)
       children = children,
       listing_lines = vim.deepcopy(materialization.listing_lines or {}),
       wildignore = materialization.wildignore or '',
+      filter_snapshot = vim.deepcopy(materialization.filter_snapshot),
     }
     for _, child in ipairs(children) do
       local ok = pcall(set_row_mark, bufnr, expected_rows[child.id], child.id)
@@ -202,8 +209,13 @@ return function(deps)
     for id, expected in pairs(display.directory_snapshots or {}) do
       local rec = records[id]
       if not rec then return false end
-      local current = fs.read_dir_lines(rec.path,
-        ignore_set(rec.path, expected.wildignore or ''))
+      local current
+      if expected.filter_snapshot and read_with_snapshot then
+        current = read_with_snapshot(rec.path, expected.filter_snapshot)
+      else
+        current = fs.read_dir_lines(rec.path,
+          ignore_set(rec.path, expected.wildignore or ''))
+      end
       if not current or not same_lines(current, expected.listing_lines or {}) then return false end
     end
 
@@ -229,6 +241,7 @@ return function(deps)
         children = {},
         listing_lines = vim.deepcopy(expansion.listing_lines or {}),
         wildignore = expansion.wildignore or '',
+        filter_snapshot = vim.deepcopy(expansion.filter_snapshot),
       }
       for _, child in ipairs(expansion.children or {}) do
         local rec = records[child.id]

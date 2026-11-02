@@ -78,6 +78,12 @@ function M.sync()
   return buffer.restore():sync()
 end
 
+function M.toggle_hidden()
+  if not guard('DirectToggleHidden') then return nil end
+  if pending.refuse('toggle hidden entries') then return nil end
+  return buffer.toggle_hidden()
+end
+
 function M.undo()
   if not guard('DirectUndo') then
     return nil
