@@ -1,8 +1,8 @@
 -- tests/run.lua -- zero-dependency harness entry point for direct.nvim.
 
 -- Usage:
---   nvim --headless -l tests/run.lua              # run every tests/*_spec.lua
---   nvim --headless -l tests/run.lua sync         # filter spec filenames
+--   nvim --headless -l tests/run.lua              # run every tests/**/*_spec.lua
+--   nvim --headless -l tests/run.lua sync         # filter spec paths/names
 --   nvim --headless -l tests/run.lua --verbose    # per-assert output
 --   nvim --headless -l tests/run.lua --print-tmp  # print the temp root
 --
@@ -107,11 +107,19 @@ end
 -- ---------------------------------------------------------------------------
 
 local specs = {}
-for name, kind in vim.fs.dir(tests_dir) do
-  if kind == 'file' and name:match('_spec%.lua$') and matches_filters(name) then
-    specs[#specs + 1] = { name = name, path = vim.fs.joinpath(tests_dir, name) }
+local function discover_specs(directory, relative_directory)
+  for name, kind in vim.fs.dir(directory) do
+    local path = vim.fs.joinpath(directory, name)
+    local relative = relative_directory == '' and name
+      or (relative_directory .. '/' .. name)
+    if kind == 'directory' then
+      discover_specs(path, relative)
+    elseif kind == 'file' and name:match('_spec%.lua$') and matches_filters(relative) then
+      specs[#specs + 1] = { name = relative, path = path }
+    end
   end
 end
+discover_specs(tests_dir, '')
 table.sort(specs, function(a, b) return a.name < b.name end)
 
 -- ---------------------------------------------------------------------------

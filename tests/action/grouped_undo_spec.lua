@@ -19,7 +19,8 @@ local fixtures = require('tests.support.history_fixtures')
 
 -- Resolve the repository root from this test file for the fresh-session script.
 local SPEC_FILE = debug.getinfo(1, 'S').source:gsub('^@', '')
-local REPO_ROOT = vim.fs.dirname(vim.fs.dirname(vim.fn.fnamemodify(SPEC_FILE, ':p')))
+local SPEC_DIR = vim.fs.dirname(vim.fn.fnamemodify(SPEC_FILE, ':p'))
+local REPO_ROOT = vim.fs.dirname(vim.fs.dirname(SPEC_DIR))
 
 local MARKER = fixtures.header
 local V2_MARKER = '#direct-history-v2'
