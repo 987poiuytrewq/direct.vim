@@ -18,14 +18,16 @@ With [lazy.nvim](https://github.com/folke/lazy.nvim), load Direct at startup so
 it can handle directories opened from the command line:
 
 ```lua
-{ '987poiuytrewq/direct.vim', lazy = false }
+return {
+  { '987poiuytrewq/direct.vim', lazy = false },
+}
 ```
 
 ## Quick start
 
 Open a directory with `nvim .` or `:DirectList path/to/directory`.
 
-Default keys (`map_default_keys = true`):
+Default keys:
 
 - `<Enter>` opens the file or directory under the cursor.
 - `-` goes to the parent directory.
@@ -41,13 +43,14 @@ Edit the listing like any other buffer:
 | Delete | Remove the line |
 
 Save with `:write` to apply your change. Directory names must end in `/` (such
-as `archive/`); file names must not. At the root level, keep each save to one
-kind of change—create, rename, or delete. Ambiguous edits are refused without
-changing the filesystem.
+as `archive/`); file names must not. At the root level, save one kind of change
+at a time—create, rename, or delete. If Direct can't tell what you meant, it
+refuses the save and leaves the filesystem unchanged.
 
-`yy` yanks the entry under the cursor and `p` pastes it. Press `u` to undo the
-last filesystem operation or `<C-r>` to redo it. Use `:undo` and `:redo` for
-text changes in the listing.
+`yy` yanks the entry under the cursor and `p` pastes it.
+
+**Undo keys are different in Direct:** `u` undoes the last filesystem operation
+and `<C-r>` redoes it. Use `:undo` and `:redo` for text changes in the listing.
 
 ## Optional setup
 
