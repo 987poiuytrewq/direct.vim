@@ -65,8 +65,8 @@ loader is disabled.
 2. Requirements                                        *direct.vim-requirements*
 
     - Neovim >= 0.12
-    - No Python: the plugin is pure Lua and needs nothing beyond the Neovim
-      runtime.
+    - No Python: the plugin is pure Lua. Git is optional for ordinary listings;
+      Git status and `respect_gitignore` use the Git command-line executable.
 
 Run `:checkhealth direct` to confirm the version and the data home in use:
 
@@ -79,6 +79,8 @@ Run `:checkhealth direct` to confirm the version and the data home in use:
 
     require('direct').setup({
       map_default_keys = true, -- set false to install no default mappings
+      show_hidden = true, -- set false to hide dot-prefixed entries
+      respect_gitignore = false, -- opt in to Git ignore filtering
       show_folder_icons = false, -- opt in to Nerd Font folder icons
       show_file_icons = false, -- opt in to a generic Nerd Font file icon
       icons = {
@@ -97,6 +99,12 @@ option name as an error instead of silently ignoring it. See
 `max_recursive_expand_depth` defaults to `false` (unlimited). Set it to a
 positive integer to cap the directory levels opened by recursive commands
 `zO`, `zA`, and `zR`. The cap does not restrict one-level `zo`/`za` browsing.
+
+Dot-prefixed files and directories are visible by default. Set
+`show_hidden = false` to hide them. `:DirectToggleHidden` (also mapped to `gh`)
+switches the current direct buffer's view. It refuses while the listing has
+unsaved edits, refreshes from disk, and collapses expanded subtrees so every
+visible level uses the same filter.
 
 File and folder icons ~
 
@@ -147,9 +155,24 @@ highlight groups, optional icon overrides, and gutter symbols per status:
       },
     })
 
-Icon overrides are optional; unspecified file/folder variants keep the base
+Icon overrides are optional; unspecified file/folder variants keep their base
 `icons` glyphs. Gutter symbols are off unless configured. Set
-`git.enabled = false` to disable Git status display.
+`git.enabled = false` to disable Git status display; this does not affect
+Git-ignore filtering.
+
+Git-ignore filtering is separately opt-in with `respect_gitignore = true`. It
+uses Git's own matching for root and nested `.gitignore` files, negations,
+anchoring, escaped patterns, `.git/info/exclude`, and the configured global
+excludes file. Tracked files remain visible, as do directories containing
+tracked descendants. Outside a repository this filter has no effect. Git must
+be available when the option is enabled; if an ignore query fails in a detected
+repository, listing fails safely instead of guessing. If effective ignore rules,
+excludes, or tracked index membership change after listing, sync refuses before
+filesystem or history effects; re-list to refresh the rule snapshot. The
+fingerprint is deliberately conservative: it currently walks the full repository
+to find ignore sources, so large trees incur a full-tree scan when listing or
+validating sync. A change to a nested repository's ignore source may require a
+re-list even when that source did not affect the current view.
 
 ==============================================================================
 4. Navigate                                              *direct.vim-navigate*
@@ -203,11 +226,14 @@ duplicated line, is reported as ambiguous, naming both sides of the comparison.
 Nothing is changed, no history is written, and the buffer stays modified so you
 can fix it.
 
-`&wildignore` is honoured using the value captured when each directory is
-listed. Changing the option does not change an existing listing's sync rules;
-re-list after changing it. Filtered entries are excluded from sync, and a sync
-is refused before filesystem or history effects if an add/rename would use an
-occupied filtered path or a directory move would carry a filtered descendant.
+`&wildignore`, dot-hidden visibility, and Git-ignore filtering are independent;
+enabled filters compose as a union. `&wildignore` keeps its existing behavior.
+Each directory captures the filters and matches used for that listing. Changing
+an option does not change an existing listing's sync rules; re-list to refresh
+them. Filtered entries are excluded from sync, and sync is refused before
+filesystem or history effects if an add/rename would use an occupied filtered
+path or a directory move would carry a filtered descendant. Newly appearing
+entries matching the captured filters are not treated as delete sources.
 Directory symlinks are treated as leaves when renamed; their targets are not
 scanned or moved.
 
@@ -322,6 +348,10 @@ existing synchronous staging behavior.
         Classify and apply the edits in the current buffer. Also runs on
         `:write` (`BufWriteCmd`).
 
+    :DirectToggleHidden
+        Toggle dot-hidden entries in the current direct listing and refresh its
+        view. Refuses if the listing has unsaved edits.
+
     :DirectUndo
         Undo the last filesystem action.
 
@@ -340,7 +370,7 @@ existing synchronous staging behavior.
         Paste into the cursor row's directory (or a file's parent directory) as
         {name}.
 
-`:DirectSync`, `open()` (the public API used by the entry mappings),
+`:DirectSync`, `:DirectToggleHidden`, `open()` (the public API used by the entry mappings),
 `:DirectUndo`, `:DirectRedo`, `:DirectYank`, `:DirectPaste` (no argument) and
 `:DirectPasteAs` report an error and do nothing when the current buffer is not a
 direct buffer. The listing commands `:DirectList`, `:DirectListBuffer` and
@@ -375,6 +405,7 @@ fold commands are always installed):
     normal      yy, Y       :DirectYank (current line)
     visual      y           :DirectYank (selected range)
     normal      p, P        :DirectPaste
+    normal      gh          :DirectToggleHidden
 
 The buffer-local `-` wins over the global `-` inside a direct buffer.
 Fold commands are installed for every direct listing, independently of
