@@ -239,8 +239,8 @@ materialized descendants, unless you reindent surviving rows under another
 directory in the same edit to move them out first. Moving or renaming a directory
 together with separate edits to its descendants must be saved in separate syncs
 when their filesystem action order would otherwise be ambiguous. Expansion and
-collapse remain ordinary text-undo changes. `u` after collapse restores child
-rows and identities; `<C-r>` re-applies the collapse. Redo restores materialized
+collapse remain ordinary text-undo changes. `:undo` after collapse restores child
+rows and identities; `:redo` re-applies the collapse. Redo restores materialized
 identities only when the original undo sequence and exact directory snapshot
 still match. A changed or ambiguous snapshot remains unsafe to save, open, or yank.
 Entry names beginning with whitespace and names that could escape the listed
@@ -254,14 +254,13 @@ verified; this documentation does not claim Windows support.
 ==============================================================================
 6. Undo / Redo                                                 *direct.vim-undo*
 
-In a direct buffer, `u` and `<C-r>` perform Neovim text undo and redo. The
-filesystem action history is separate: use `:DirectUndo` and `:DirectRedo` to
-reverse or re-apply actions a sync or paste performed. `:DirectUndo` right
-after a paste, for example, undoes the paste.
+In a direct buffer, `u` and `<C-r>` undo and redo the last filesystem action
+performed by Direct, such as a sync or paste. They invoke the same actions as
+`:DirectUndo` and `:DirectRedo`.
 
-Text undo only reverses changes to buffer lines; it never renames, creates,
-deletes or restores anything on disk. Only `:DirectUndo` reverses a filesystem
-action.
+Use `:undo` and `:redo` for Neovim text undo and redo in the listing. Text undo
+only changes buffer lines; it does not rename, create, delete, or restore
+anything on disk.
 
 ==============================================================================
 7. Yank / Paste                                                *direct.vim-yank*
@@ -372,8 +371,8 @@ fold commands are always installed):
     normal      zR          recursively expand all root directories
     normal      zM          collapse all root directories
     normal      -           open ../ (the parent directory)
-    normal      u           Neovim text undo
-    normal      <C-r>       Neovim text redo
+    normal      u           undo the last filesystem action
+    normal      <C-r>       redo the last filesystem action
     normal      yy, Y       :DirectYank (current line)
     visual      y           :DirectYank (selected range)
     normal      p, P        :DirectPaste

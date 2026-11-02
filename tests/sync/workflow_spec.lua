@@ -29,7 +29,7 @@ local function set_listing(lines, bufnr)
 end
 
 H.describe('command workflows: filesystem and listing stay in sync', function()
-  H.it('writes a rename, then :DirectUndo and :DirectRedo refresh the listing', function()
+  H.it('u and <C-r> undo and redo a saved filesystem rename', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -48,18 +48,19 @@ H.describe('command workflows: filesystem and listing stay in sync', function()
     H.assert_buf_eq({ 'after.txt' }, bufnr, 'the listing reflects the committed rename')
     H.assert_false(vim.bo[bufnr].modified, 'successful write clears modified state')
 
-    vim.cmd('DirectUndo')
+    vim.api.nvim_feedkeys('u', 'mx', false)
     H.assert_fs_eq(ws, { 'before.txt' }, 'filesystem undo restores the original path')
     H.assert_eq(vim.fn.readfile(ws .. '/before.txt'), { 'preserve these bytes' },
       'undo preserves the original contents')
-    H.assert_buf_eq({ 'before.txt' }, bufnr, ':DirectUndo refreshes the listing')
+    H.assert_buf_eq({ 'before.txt' }, bufnr, 'u refreshes the listing')
     H.assert_false(vim.bo[bufnr].modified, 'undo leaves the listing clean')
 
-    vim.cmd('DirectRedo')
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<C-r>', true, false, true),
+      'mx', false)
     H.assert_fs_eq(ws, { 'after.txt' }, 'filesystem redo reapplies the rename')
     H.assert_eq(vim.fn.readfile(ws .. '/after.txt'), { 'preserve these bytes' },
       'redo preserves the file contents')
-    H.assert_buf_eq({ 'after.txt' }, bufnr, ':DirectRedo refreshes the listing')
+    H.assert_buf_eq({ 'after.txt' }, bufnr, '<C-r> refreshes the listing')
     H.assert_false(vim.bo[bufnr].modified, 'redo leaves the listing clean')
   end)
 

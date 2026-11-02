@@ -33,7 +33,8 @@ event.
 ## Requirements
 
 - Neovim >= 0.12
-- No Python: the plugin is pure Lua and needs nothing beyond the Neovim runtime.
+- No Python: the plugin is pure Lua. Git is needed for Git status and Git-ignore
+  features.
 
 Run `:checkhealth direct` to confirm the version and the data home in use.
 
@@ -66,12 +67,42 @@ summary.
 
 ## Install
 
-Install with your favourite package manager. For example, with
+With Neovim's built-in `vim.pack`:
+
+```lua
+vim.pack.add({ 'https://github.com/987poiuytrewq/direct.vim' })
+```
+
+With [lazy.nvim](https://github.com/folke/lazy.nvim), load Direct at startup so
+it can handle directories opened from the command line:
+
+```lua
+return {
+  { '987poiuytrewq/direct.vim', lazy = false },
+}
+```
+
+Other package managers work too. For example, with
 [vim-plug](https://github.com/junegunn/vim-plug):
 
 ```vim
 Plug '987poiuytrewq/direct.vim'
 ```
+
+## Quick start
+
+Open a directory with `nvim .` or `:DirectList path/to/directory`.
+
+Default keys:
+
+- `<Enter>` opens the file or directory under the cursor.
+- `-` goes to the parent directory.
+- `zo` expands a directory in place.
+- `gh` shows or hides dotfiles.
+
+Edit the listing to rename, create, or delete entries, then save with `:write`.
+Directory names end in `/`; file names do not. At the root level, save one kind
+of change at a time. `yy` yanks the entry under the cursor and `p` pastes it.
 
 ## Setup
 
@@ -255,11 +286,11 @@ directory in the same edit to move them out first. Moving or renaming a director
 together with separate edits to its descendants must be saved in separate syncs
 when their filesystem action order would otherwise be ambiguous.
 
-Expansion and collapse remain ordinary text-undo changes. `u` after a collapse
-restores the child rows and their identities; `<C-r>` re-applies the collapse.
-Redo restores materialized identities only when the original undo sequence and
-exact directory snapshot still match. A changed or ambiguous snapshot remains
-unsafe to save, open, or yank.
+Expansion and collapse remain ordinary text-undo changes. `:undo` after a
+collapse restores the child rows and their identities; `:redo` re-applies the
+collapse. Redo restores materialized identities only when the original undo
+sequence and exact directory snapshot still match. A changed or ambiguous
+snapshot remains unsafe to save, open, or yank.
 Entry names beginning with whitespace and names that could escape the listed
 directory (such as `../x` or `a/b`) are refused at save time.
 
@@ -269,13 +300,13 @@ verified; this documentation does not claim Windows support.
 
 ### Undo / Redo
 
-In a direct buffer, `u` and `<C-r>` perform Neovim text undo and redo. The
-filesystem action history is separate: use `:DirectUndo` and `:DirectRedo` to
-reverse or re-apply actions a sync or paste performed; `:DirectUndo` right after
-a paste, for example, undoes the paste.
+In a direct buffer, `u` and `<C-r>` undo and redo filesystem actions. The
+`:DirectUndo` and `:DirectRedo` commands do the same; `:DirectUndo` right after a
+paste, for example, undoes the paste. Use `:undo` and `:redo` for Neovim text
+changes in the listing.
 
-Text undo only reverses buffer-line changes; it never renames, creates, deletes
-or restores anything on disk. Only `:DirectUndo` reverses a filesystem action.
+Text undo only reverses buffer-line changes; it never renames, creates, deletes,
+or restores anything on disk. Only filesystem undo reverses a filesystem action.
 
 ## Yank / Paste
 
@@ -359,8 +390,8 @@ Buffer-local, in a direct buffer (standard actions follow `map_default_keys`;
 | normal | `za` | expand or collapse one directory |
 | normal | `zc` | collapse one directory |
 | normal | `-` | open `../` (the parent directory) |
-| normal | `u` | Neovim text undo |
-| normal | `<C-r>` | Neovim text redo |
+| normal | `u` | undo the last filesystem operation |
+| normal | `<C-r>` | redo the last filesystem operation |
 | normal | `yy`, `Y` | `:DirectYank` (current line) |
 | visual | `y` | `:DirectYank` (selected range) |
 | normal | `p`, `P` | `:DirectPaste` |
