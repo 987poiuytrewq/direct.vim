@@ -52,6 +52,112 @@ H.describe('sync: applying actions', function()
     }, 'directories first, then files, each sorted')
   end)
 
+  H.it('ADD (nested paths): creates missing parents before files and directories', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkfile(ws, 'keep.txt', { 'keep' })
+
+    local _, ok, reason = list_edit_and_sync(ws, {
+      'keep.txt', 'archive/2026/', 'archive/2026/summary.txt',
+    })
+
+    H.assert_true(ok == true, tostring(reason))
+    H.assert_eq(H.fs_snapshot(ws), {
+      'archive/', 'archive/2026/', 'archive/2026/summary.txt', 'keep.txt',
+    }, 'nested directory and file paths are materialized')
+    H.assert_eq(history_lines('undo.log'), {
+      HEADER,
+      fixtures.mkdir(ws .. '/archive'),
+      fixtures.mkdir(ws .. '/archive/2026/'),
+      fixtures.touch(ws .. '/archive/2026/summary.txt'),
+    }, 'each created directory and file is independently undoable')
+    H.assert_buf_eq({ 'archive/', '  2026/', '    summary.txt', 'keep.txt' }, 0,
+      'the new parent directories are expanded after the root refresh')
+    H.assert_eq(vim.api.nvim_win_get_cursor(0), { 3, 4 },
+      'the cursor lands on the last nested entry')
+  end)
+
+  H.it('ADD (nested path): reuses existing parent directories', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkdir(ws, 'reports')
+    H.mkfile(ws, 'keep.txt', { 'keep' })
+
+    local _, ok, reason = list_edit_and_sync(ws, {
+      'reports/', 'keep.txt', 'reports/summary.txt', 'reports/2026/final.txt',
+    })
+
+    H.assert_true(ok == true, tostring(reason))
+    H.assert_true(H.exists(ws, 'reports/summary.txt'), 'file uses the existing parent')
+    H.assert_true(H.exists(ws, 'reports/2026/final.txt'), 'missing deeper parent is created')
+    H.assert_eq(history_lines('undo.log'), {
+      HEADER,
+      fixtures.mkdir(ws .. '/reports/2026'),
+      fixtures.touch(ws .. '/reports/2026/final.txt'),
+      fixtures.touch(ws .. '/reports/summary.txt'),
+    }, 'only missing parent directories receive mkdir history')
+    H.assert_buf_eq({
+      'reports/', '  2026/', '    final.txt', '  summary.txt', 'keep.txt',
+    }, 0, 'existing and newly created parent directories are expanded')
+    H.assert_eq(vim.api.nvim_win_get_cursor(0), { 3, 4 },
+      'the cursor lands on the last added entry')
+  end)
+
+  H.it('ADD (nested path): undo and redo remove and restore parents in order', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkfile(ws, 'keep.txt', { 'keep' })
+    local _, ok, reason = list_edit_and_sync(ws, { 'keep.txt', 'deep/more/file.txt' })
+    H.assert_true(ok == true, tostring(reason))
+
+    H.assert_not_nil(history.undo(), 'first undo removes the file')
+    H.assert_not_nil(history.undo(), 'second undo removes the inner directory')
+    H.assert_not_nil(history.undo(), 'third undo removes the outer directory')
+    H.assert_false(H.exists(ws, 'deep'), 'undo removes every newly created parent')
+    H.assert_fs_eq(ws, { 'keep.txt' }, 'undo restores the original directory state')
+
+    H.assert_not_nil(history.redo(), 'first redo recreates the outer directory')
+    H.assert_not_nil(history.redo(), 'second redo recreates the inner directory')
+    H.assert_not_nil(history.redo(), 'third redo recreates the file')
+    H.assert_true(H.exists(ws, 'deep/more/file.txt'), 'redo restores the full path')
+  end)
+
+  H.it('ADD (nested path): refuses traversal, malformed separators, and file parents', function()
+    local invalid = { '../outside.txt', '/absolute.txt', 'bad//path.txt',
+      'bad/../path.txt', 'blocked/child.txt' }
+    for _, entry in ipairs(invalid) do
+      clean_buffers()
+      local sb = H.sandbox()
+      local ws = H.mkdir(sb.root, 'ws')
+      H.mkfile(ws, 'keep.txt', { 'keep' })
+      H.mkfile(ws, 'blocked', { 'not a directory' })
+      local listing = buffer.list(ws)
+      vim.api.nvim_buf_set_lines(0, -1, -1, false, { entry })
+      local ok, reason = listing:sync()
+      H.assert_nil(ok, entry .. ' is refused: ' .. tostring(reason))
+      H.assert_true(vim.bo.modified, 'refusal keeps the edit visible')
+      H.assert_eq(H.fs_snapshot(ws), { 'blocked', 'keep.txt' },
+        entry .. ' makes no filesystem changes')
+      H.assert_eq(history_lines('undo.log'), {}, entry .. ' writes no action history')
+      H.assert_false(H.exists(sb.root, 'outside.txt'), 'traversal did not escape the root')
+    end
+
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkfile(ws, 'keep.txt', { 'keep' })
+    local listing = buffer.list(ws)
+    vim.api.nvim_buf_set_lines(0, -1, -1, false,
+      { 'node', 'node/child.txt' })
+    local ok, reason = listing:sync()
+    H.assert_nil(ok, 'a file cannot also be a parent directory: ' .. tostring(reason))
+    H.assert_fs_eq(ws, { 'keep.txt' }, 'conflicting planned paths make no changes')
+    H.assert_eq(history_lines('undo.log'), {}, 'conflicting paths write no history')
+  end)
+
   H.it('DELETE (file): moves it to trash, auto-yanks it, and logs an rm line', function()
     clean_buffers()
     local sb = H.sandbox()

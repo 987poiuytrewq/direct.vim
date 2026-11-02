@@ -206,7 +206,11 @@ delete:
 
     - Rename: edit the line of the file or directory you want to rename, and
       save.
-    - Create: add new lines at any location, and save.
+    - Create: add new lines at any location, and save. A new relative path such
+      as `reports/2026/summary.txt` creates the file and missing parent
+      directories. A path ending in `/`, such as `reports/2026/`, creates a
+      directory at that path. After saving nested paths, their parent
+      directories are expanded and the cursor moves to the last added entry.
     - Delete: delete the lines for the entries you want to remove, and save.
       Deleted entries are yanked automatically, so you can paste them back.
 
@@ -264,8 +268,12 @@ collapse remain ordinary text-undo changes. `:undo` after collapse restores chil
 rows and identities; `:redo` re-applies the collapse. Redo restores materialized
 identities only when the original undo sequence and exact directory snapshot
 still match. A changed or ambiguous snapshot remains unsafe to save, open, or yank.
-Entry names beginning with whitespace and names that could escape the listed
-directory (such as `../x` or `a/b`) are refused at save time.
+Path components beginning with whitespace and paths that could escape the listed
+directory (absolute paths, empty components such as `a//b`, or `.`/`..` components
+such as `a/../b`) are refused at save time. Nested paths are supported for new
+entries only; renames remain single-component names. Newly created parent
+directories are recorded separately, so `u` and `<C-r>` can undo and redo them
+in the correct order.
 
 Windows-specific component checks reject backslashes, drive prefixes, reserved
 device names (including extension aliases), and trailing dots or spaces that

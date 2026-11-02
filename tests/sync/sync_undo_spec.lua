@@ -1161,6 +1161,12 @@ H.describe('sync with expanded children', function()
     end
     H.assert_nil(buffer._component_reason('literal\\name', 'posix'),
       'POSIX backslashes remain literal')
+    for _, name in ipairs({ 'nested/CON.txt', 'nested/trailing.', 'nested/trailing ' }) do
+      H.assert_not_nil(buffer._nested_path_reason(name, 'win32'),
+        name .. ' has an unsafe nested Windows component')
+    end
+    H.assert_nil(buffer._nested_path_reason('nested/normal.txt', 'win32'),
+      'a normal nested Windows path is valid')
   end)
 
   H.it('renames and deletes a root directory while descendants are expanded', function()
@@ -1385,8 +1391,8 @@ H.describe('sync with expanded children', function()
     H.assert_fs_eq(ws, { 'sub/', 'sub/inside.txt' }, 'no filesystem action was needed')
   end)
 
-  H.it('root containment guard rejects traversal and multi-component names', function()
-    for _, malicious in ipairs({ '../escaped', 'x/new.txt' }) do
+  H.it('root containment guard rejects traversal paths before classification', function()
+    for _, malicious in ipairs({ '../escaped' }) do
       clean_buffers()
       local sb = H.sandbox()
       local ws = H.mkdir(sb.root, 'ws')
@@ -1405,6 +1411,26 @@ H.describe('sync with expanded children', function()
       H.assert_false(fs.exists(ws .. '/x'), 'nested component was not created')
       H.assert_eq(history_lines('undo.log'), {}, 'unsafe input writes no history')
     end
+  end)
+
+  H.it('root containment guard still rejects nested rename destinations', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkfile(ws, 'old.txt', { 'old' })
+    local listing = buffer.list(ws)
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'x/new.txt' })
+    local classified = 0
+    local classify = buffer.classify
+    buffer.classify = function(...) classified = classified + 1; return classify(...) end
+    local ok, reason = listing:sync()
+    buffer.classify = classify
+    H.assert_nil(ok, 'a rename cannot use a nested destination')
+    H.assert_true(tostring(reason):find('component', 1, true) ~= nil, tostring(reason))
+    H.assert_eq(classified, 0, 'path guard precedes rename classification')
+    H.assert_true(fs.exists(ws .. '/old.txt'), 'rename source remains intact')
+    H.assert_false(fs.exists(ws .. '/x'), 'nested rename did not create a directory')
+    H.assert_eq(history_lines('undo.log'), {}, 'unsafe rename writes no history')
   end)
 
   H.it('refuses root-level names beginning with whitespace', function()

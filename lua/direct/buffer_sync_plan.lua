@@ -6,6 +6,7 @@ return function(deps)
   local dirs_then_name = deps.dirs_then_name
   local lstat = deps.lstat
   local path_without_marker = deps.path_without_marker
+  local fs = deps.fs
 
   local function classify(actual, expected)
     actual = actual or {}
@@ -103,13 +104,41 @@ return function(deps)
     return nil
   end
 
+  -- A nested entry is still one root-buffer row, but its forward-slash
+  -- separated components must each be safe filenames. A single trailing slash
+  -- is the existing directory marker; empty, absolute, and dot components are
+  -- never accepted.
+  local function nested_path_reason(line, path_style)
+    if type(line) ~= 'string' then return 'invalid path component' end
+    local control_reason = action_mod.path_reason(line)
+    if control_reason then return control_reason end
+    local path = is_dir_line(line) and line:sub(1, -2) or line
+    if path == '' or path:sub(1, 1) == '/' then return 'invalid path component' end
+    local start = 1
+    while true do
+      local slash = path:find('/', start, true)
+      local part = slash and path:sub(start, slash - 1) or path:sub(start)
+      if part == '' then return 'invalid path component' end
+      local reason = component_reason(part, path_style)
+      if reason then return reason end
+      if not slash then break end
+      start = slash + 1
+    end
+    return nil
+  end
+
   -- Kept visible for platform-independent unit coverage of Win32 component rules.
   -- first_unsafe(root, lines) -> { path, reason } for the first line whose path
   -- is unrepresentable, else nil. Both the edited lines and the on-disk listing
   -- are checked: either side can be an OS-chosen name.
-  local function first_unsafe(root, lines)
+  local function first_unsafe(root, lines, nested_allowed)
     for _, line in ipairs(lines) do
-      local component_error = component_reason(line)
+      local component_error
+      if nested_allowed and nested_allowed[line] then
+        component_error = nested_path_reason(line)
+      else
+        component_error = component_reason(line)
+      end
       if component_error then
         return { path = line, reason = component_error }
       end
@@ -141,14 +170,79 @@ return function(deps)
   local function build_actions(root, plan)
     local actions, yanks = {}, {}
     if plan.kind == 'ADD' then
+      local planned, create_dirs, touches = {}, {}, {}
+      local function normalized(path)
+        path = path:gsub('/+$', '')
+        if path == '' then path = '/' end
+        return vim.fs.normalize(path)
+      end
+      local function components(line)
+        local path = is_dir_line(line) and line:sub(1, -2) or line
+        local out, start = {}, 1
+        while true do
+          local slash = path:find('/', start, true)
+          out[#out + 1] = slash and path:sub(start, slash - 1) or path:sub(start)
+          if not slash then break end
+          start = slash + 1
+        end
+        return out
+      end
+
+      -- Detect target/type collisions across the batch before making any
+      -- directories, e.g. adding both `a` and `a/child.txt`.
+      for _, line in ipairs(plan.added) do
+        local key = normalized(entry_path(root, line))
+        local kind = is_dir_line(line) and 'directory' or 'file'
+        if planned[key] ~= nil and planned[key] ~= kind then
+          return nil, nil, 'conflicting entries target the same path: ' .. key
+        end
+        planned[key] = kind
+      end
+
       for _, line in ipairs(plan.added) do
         local path = entry_path(root, line)
-        if is_dir_line(line) then
-          actions[#actions + 1] = action_mod.MakeDirectory(path)
+        local parts = components(line)
+        local is_directory = is_dir_line(line)
+        local parent_count = #parts - 1
+        local parent = root
+        for i = 1, parent_count do
+          parent = fs.join(parent, parts[i])
+          local key = normalized(parent)
+          if planned[key] == 'file' then
+            return nil, nil, 'path parent is not a directory: ' .. parent
+          end
+          if fs.taken(parent) then
+            if not fs.is_dir(parent) then
+              return nil, nil, 'path parent is not a directory: ' .. parent
+            end
+          else
+            if create_dirs[key] == nil then create_dirs[key] = parent end
+          end
+        end
+        local target_key = normalized(path)
+        if fs.taken(path) then
+          return nil, nil, 'destination already exists: ' .. path
+        end
+        if is_directory then
+          create_dirs[target_key] = path
         else
-          actions[#actions + 1] = action_mod.Touch(path)
+          touches[#touches + 1] = action_mod.Touch(path)
         end
       end
+
+      local directories = {}
+      for _, path in pairs(create_dirs) do
+        directories[#directories + 1] = path
+      end
+      table.sort(directories, function(a, b)
+        local da, db = select(2, a:gsub('/', '')), select(2, b:gsub('/', ''))
+        if da ~= db then return da < db end
+        return a < b
+      end)
+      for _, path in ipairs(directories) do
+        actions[#actions + 1] = action_mod.MakeDirectory(path)
+      end
+      for _, action in ipairs(touches) do actions[#actions + 1] = action end
     elseif plan.kind == 'DELETE' then
       for _, line in ipairs(plan.removed) do
         local path = entry_path(root, line)
@@ -182,5 +276,6 @@ return function(deps)
     ambiguous_message = ambiguous_message,
     result_entry = result_entry,
     build_actions = build_actions,
+    nested_path_reason = nested_path_reason,
   }
 end
