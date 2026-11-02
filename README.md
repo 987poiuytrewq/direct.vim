@@ -115,8 +115,13 @@ require('direct').setup({
   respect_gitignore = false, -- opt in to Git's ignore rules
   show_folder_icons = false, -- opt in to Nerd Font folder icons
   show_file_icons = false, -- opt in to a generic Nerd Font file icon
+  icons = {
+    file = '\u{f0214}',
+    folder = '\u{f024b}',
+    folder_open = '\u{f0770}',
+  },
   max_recursive_expand_depth = false, -- false means unlimited
-  git = { enabled = true, display = "both" }, -- icon, text, or both
+  git = { enabled = true, display = 'both' }, -- icon, text, or both
 })
 ```
 
@@ -129,6 +134,26 @@ switches the current direct buffer's view. The toggle is refused while the
 listing has unsaved edits. It refreshes from disk and collapses expanded
 subtrees so every visible level uses the same setting.
 
+Configuration defaults:
+
+| Option | Default | Description |
+|---|---|---|
+| `map_default_keys` | `true` | Install Direct's default key mappings. |
+| `show_hidden` | `true` | Show dotfiles; `gh` toggles visibility in a listing. |
+| `respect_gitignore` | `false` | Apply Git ignore rules to listings; tracked files remain visible. |
+| `show_folder_icons` | `false` | Show folder icons. |
+| `show_file_icons` | `false` | Show generic file icons. |
+| `icons.file` | U+F0214 | Base file glyph string. |
+| `icons.folder` | U+F024B | Base collapsed-folder glyph string. |
+| `icons.folder_open` | U+F0770 | Base expanded-folder glyph string. |
+| `max_recursive_expand_depth` | `false` | Positive integer limit for recursive expansion; `false` is unlimited. |
+| `git.enabled` | `true` | Show Git status in repositories. |
+| `git.display` | `'both'` | Status display: `'icon'`, `'text'`, or `'both'`. |
+| `git.statuses` | Four default styles | Configure status highlights, icons, and optional gutter symbols. |
+
+For complete command, safety, and data/history documentation, see `:help direct.vim`.
+Run `:checkhealth direct` to check the Neovim version and data directory.
+
 ### File and folder icons
 
 Set `show_folder_icons = true` to show inline directory glyphs, and
@@ -139,6 +164,9 @@ and files use `nf-md-file` (U+F0214), regardless of filetype. When only one kind
 of icon is enabled, the other kind reserves a blank icon slot so entry names
 stay aligned. Icons are virtual text, so the listing lines and filesystem
 behavior are unchanged. No icon plugin or other dependency is required.
+Set `icons.file`, `icons.folder`, and `icons.folder_open` to customize the base
+glyphs; Git status icon overrides take precedence. Highlight groups can be
+customized in your colorscheme or with `vim.api.nvim_set_hl()`.
 With folder icons enabled, click an icon to expand or collapse that directory in
 place; mouse input must be enabled in Neovim (for example, `:set mouse=a`).
 

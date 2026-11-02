@@ -35,16 +35,31 @@ Visible directories use DirectDirectory (default link Directory) at any
 indentation depth. Hidden directories and files use their Comment defaults.
 When icons are enabled, hidden directory and file icons also use the Comment
 style; visible directory and file icons retain their Directory and Normal
-defaults. The hidden icon groups DirectHiddenFolderIcon and DirectHiddenFileIcon
-link to Comment and can be overridden independently. Listing files receive no
-filename-, filetype-, or special-name-derived highlights; Git status styling is
-described below.
+defaults. These highlight groups can be customized in a colorscheme or with
+`nvim_set_hl()`:
+
+    DirectDirectory             visible directory names (Directory)
+    DirectHiddenDirectory       hidden directory names (Comment)
+    DirectHiddenFile            hidden file names (Comment)
+    DirectFolderIcon            visible folder icons (Directory)
+    DirectFileIcon              file icons (Normal)
+    DirectHiddenFolderIcon      hidden folder icons (Comment)
+    DirectHiddenFileIcon        hidden file icons (Comment)
+    DirectGitAddedIcon          added status icon (DiffAdd)
+    DirectGitAdded              added status name (DiffAdd)
+    DirectGitModifiedIcon       modified status icon (DiffChange)
+    DirectGitModified           modified status name (DiffChange)
+    DirectGitRenamedIcon        renamed status icon (DiffChange)
+    DirectGitRenamed            renamed status name (DiffChange)
+    DirectGitConflictedIcon     conflicted status icon (ErrorMsg)
+    DirectGitConflicted         conflicted status name (ErrorMsg)
+
+Defaults are reapplied after a ColorScheme event without replacing
+user-defined groups. Listing files receive no filename-, filetype-, or
+special-name-derived highlights; Git status styling is described below.
 
 Direct loads its listing syntax locally, including when Neovim's global syntax
 loader is disabled.
-
-Highlight defaults are user-overridable and are reapplied after a ColorScheme
-event.
 
 ==============================================================================
 2. Requirements                                        *direct.vim-requirements*
@@ -68,6 +83,11 @@ Run `:checkhealth direct` to confirm the version and the data home in use:
       respect_gitignore = false, -- opt in to Git ignore filtering
       show_folder_icons = false, -- opt in to Nerd Font folder icons
       show_file_icons = false, -- opt in to a generic Nerd Font file icon
+      icons = {
+        file = '\u{f0214}',
+        folder = '\u{f024b}',
+        folder_open = '\u{f0770}',
+      },
       max_recursive_expand_depth = false, -- false means unlimited
       git = { enabled = true, display = 'both' }, -- icon, text, or both
     })
@@ -90,12 +110,12 @@ File and folder icons ~
 
 Set `show_folder_icons = true` to display inline directory glyphs, and
 `show_file_icons = true` to display one generic icon for every file; both options
-default to `false`. A Nerd Font is required. Collapsed directories use
-`nf-md-folder` (U+F024B), expanded directories use `nf-md-folder_open` (U+F0770),
-and files use `nf-md-file` (U+F0214), regardless of filetype. When only one kind
-of icon is enabled, the other kind reserves a blank icon slot so entry names
-stay aligned. Icons are virtual text, so buffer lines and filesystem behavior
-are unchanged. No icon plugin or other dependency is required.
+default to `false`. Built-in glyphs require a Nerd Font. Customize them with the
+`icons` table: `file` defaults to U+F0214, `folder` to U+F024B, and `folder_open`
+to U+F0770. These glyphs are used regardless of filetype. When only one kind of
+icon is enabled, the other kind reserves a blank icon slot so entry names stay
+aligned. Icons are virtual text, so buffer lines and filesystem behavior are
+unchanged. No icon plugin or other dependency is required.
 With folder icons enabled, click a folder icon to expand or collapse that
 directory in place. Mouse input must be enabled in Neovim (for example,
 `:set mouse=a`). Clicking elsewhere in the listing retains normal cursor
@@ -135,9 +155,10 @@ highlight groups, optional icon overrides, and gutter symbols per status:
       },
     })
 
-Icon overrides are optional; unspecified file/folder variants keep their regular
-glyphs. Gutter symbols are off unless configured. Set `git.enabled = false` to
-disable Git status display; this does not affect Git-ignore filtering.
+Icon overrides are optional; unspecified file/folder variants keep their base
+`icons` glyphs. Gutter symbols are off unless configured. Set
+`git.enabled = false` to disable Git status display; this does not affect
+Git-ignore filtering.
 
 Git-ignore filtering is separately opt-in with `respect_gitignore = true`. It
 uses Git's own matching for root and nested `.gitignore` files, negations,
