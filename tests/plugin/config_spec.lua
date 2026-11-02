@@ -59,6 +59,51 @@ H.describe('config', function()
     config.clear_mappings()
   end)
 
+  H.it('Git display defaults to both layers and accepts partial status overrides', function()
+    local config = fresh_config()
+    config.clear_mappings()
+    H.assert_true(config.defaults.git.enabled, 'Git status is enabled by default')
+    H.assert_eq(config.defaults.git.display, 'both', 'both display layers are the default')
+    H.assert_eq(config.defaults.git.statuses.added.icon_hl, 'DirectGitAddedIcon',
+      'added icons have a plugin highlight group')
+    H.assert_nil(config.defaults.git.statuses.added.icon,
+      'Git status does not replace the existing icon glyph by default')
+    H.assert_nil(config.defaults.git.statuses.added.gutter,
+      'gutter symbols are disabled by default')
+
+    local options = config.setup({ git = {
+      display = 'icon',
+      statuses = { added = { icon = { folder = '+' } } },
+    } })
+    H.assert_eq(options.git.display, 'icon', 'icon-only display is accepted')
+    H.assert_eq(options.git.statuses.added.icon, { folder = '+' },
+      'folder glyph can be overridden independently')
+    H.assert_eq(options.git.statuses.added.text_hl, 'DirectGitAdded',
+      'omitted status options retain their defaults')
+    H.assert_eq(options.git.statuses.modified.text_hl, 'DirectGitModified',
+      'omitted statuses retain their defaults')
+    config.clear_mappings()
+  end)
+
+  H.it('Git display validates mode and status customization without rejecting other options', function()
+    local config = fresh_config()
+    config.clear_mappings()
+    H.capture_messages()
+    local options = config.setup({
+      git = {
+        display = 'glyphs',
+        statuses = { changed = { text_hl = 'NoSuchStatus' } },
+      },
+      show_file_icons = true,
+    })
+    H.assert_eq(options.git.display, 'both', 'invalid mode keeps its default')
+    H.assert_nil(options.git.statuses.changed, 'unknown status is not stored')
+    H.assert_true(options.show_file_icons, 'valid sibling options still apply')
+    H.assert_notified('git.display', vim.log.levels.ERROR)
+    H.assert_notified('git.statuses.changed', vim.log.levels.ERROR)
+    config.clear_mappings()
+  end)
+
   H.it('recursive expansion depth defaults to unlimited and accepts only positive integers', function()
     local config = fresh_config()
     config.clear_mappings()

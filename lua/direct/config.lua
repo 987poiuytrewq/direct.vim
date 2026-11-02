@@ -10,7 +10,146 @@ local defaults = {
   show_folder_icons = false,
   show_file_icons = false,
   max_recursive_expand_depth = false,
+  git = {
+    enabled = true,
+    display = 'both',
+    statuses = {
+      added = {
+        icon_hl = 'DirectGitAddedIcon',
+        text_hl = 'DirectGitAdded',
+      },
+      modified = {
+        icon_hl = 'DirectGitModifiedIcon',
+        text_hl = 'DirectGitModified',
+      },
+      renamed = {
+        icon_hl = 'DirectGitRenamedIcon',
+        text_hl = 'DirectGitRenamed',
+      },
+      conflicted = {
+        icon_hl = 'DirectGitConflictedIcon',
+        text_hl = 'DirectGitConflicted',
+      },
+    },
+  },
 }
+
+local git_statuses = { added = true, modified = true, renamed = true, conflicted = true }
+local git_display_modes = { icon = true, text = true, both = true }
+
+local function report_invalid_git_option(key, reason)
+  require('direct.ui').notify(
+    string.format("direct: invalid git.%s: %s", key, reason),
+    vim.log.levels.ERROR)
+end
+
+local function resolve_git_options(value)
+  if type(value) ~= 'table' then
+    report_invalid_git_option('', 'expected a table')
+    return vim.deepcopy(defaults.git)
+  end
+
+  local result = vim.deepcopy(defaults.git)
+  for key, option in pairs(value) do
+    if key == 'enabled' then
+      if type(option) == 'boolean' then
+        result.enabled = option
+      else
+        report_invalid_git_option(key, 'expected a boolean')
+      end
+    elseif key == 'display' then
+      if type(option) == 'string' and git_display_modes[option] then
+        result.display = option
+      else
+        report_invalid_git_option(key, "expected 'icon', 'text', or 'both'")
+      end
+    elseif key == 'statuses' then
+      if type(option) ~= 'table' then
+        report_invalid_git_option(key, 'expected a table')
+      else
+        for status, settings in pairs(option) do
+          if not git_statuses[status] then
+            report_invalid_git_option('statuses.' .. tostring(status), 'unknown status')
+          elseif type(settings) ~= 'table' then
+            report_invalid_git_option('statuses.' .. status, 'expected a table')
+          else
+            local resolved = result.statuses[status]
+            for setting, setting_value in pairs(settings) do
+              if setting == 'icon_hl' or setting == 'text_hl' then
+                if type(setting_value) == 'string' and setting_value ~= '' then
+                  resolved[setting] = setting_value
+                else
+                  report_invalid_git_option('statuses.' .. status .. '.' .. setting,
+                    'expected a non-empty highlight group name')
+                end
+              elseif setting == 'icon' then
+                if type(setting_value) == 'string' then
+                  resolved.icon = setting_value
+                elseif type(setting_value) == 'table' then
+                  resolved.icon = resolved.icon or {}
+                  for kind, glyph in pairs(setting_value) do
+                    if kind == 'file' or kind == 'folder' or kind == 'folder_open' then
+                      if type(glyph) == 'string' then
+                        resolved.icon[kind] = glyph
+                      else
+                        report_invalid_git_option('statuses.' .. status .. '.icon.' .. kind,
+                          'expected a string')
+                      end
+                    else
+                      report_invalid_git_option('statuses.' .. status .. '.icon.' .. tostring(kind),
+                        'expected file, folder, or folder_open')
+                    end
+                  end
+                else
+                  report_invalid_git_option('statuses.' .. status .. '.icon',
+                    'expected a string or a table of icon variants')
+                end
+              elseif setting == 'gutter' then
+                if setting_value == false then
+                  resolved.gutter = nil
+                elseif type(setting_value) == 'table' then
+                  local gutter = vim.deepcopy(resolved.gutter or {})
+                  for gutter_key, gutter_value in pairs(setting_value) do
+                    if gutter_key == 'symbol' or gutter_key == 'highlight' then
+                      if type(gutter_value) == 'string' and gutter_value ~= ''
+                        and (gutter_key ~= 'symbol'
+                          or vim.fn.strdisplaywidth(gutter_value) <= 2) then
+                        gutter[gutter_key] = gutter_value
+                      else
+                        report_invalid_git_option('statuses.' .. status .. '.gutter.' .. gutter_key,
+                          gutter_key == 'symbol'
+                            and 'expected a non-empty symbol no wider than two cells'
+                            or 'expected a non-empty highlight group name')
+                      end
+                    else
+                      report_invalid_git_option('statuses.' .. status .. '.gutter.'
+                        .. tostring(gutter_key), 'unknown setting')
+                    end
+                  end
+                  if gutter.symbol and gutter.highlight then
+                    resolved.gutter = gutter
+                  else
+                    report_invalid_git_option('statuses.' .. status .. '.gutter',
+                      'symbol and highlight are both required')
+                  end
+                else
+                  report_invalid_git_option('statuses.' .. status .. '.gutter',
+                    'expected a table or false')
+                end
+              else
+                report_invalid_git_option('statuses.' .. status .. '.' .. tostring(setting),
+                  'unknown setting')
+              end
+            end
+          end
+        end
+      end
+    else
+      report_invalid_git_option(tostring(key), 'unknown setting')
+    end
+  end
+  return result
+end
 
 M.defaults = defaults
 M.options = vim.deepcopy(defaults)
@@ -184,6 +323,8 @@ function M.setup(opts)
       require('direct.ui').notify(
         'direct: max_recursive_expand_depth must be false or a positive integer',
         vim.log.levels.ERROR)
+    elseif key == 'git' then
+      next_options.git = resolve_git_options(value)
     else
       next_options[key] = value
     end
