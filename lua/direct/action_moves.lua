@@ -222,6 +222,7 @@ return function(M)
     end
     self._execute = function()
       local members = self.actions or {}
+      self._completed_actions = {}
       local staging, stage_err, stage_temps, stage_overrides, stage_identities =
         M.stage_moves(members)
       if staging == nil and stage_err ~= nil then
@@ -270,6 +271,7 @@ return function(M)
           report_temps(staging)
           return nil, err ~= nil and tostring(err) or 'action failed'
         end
+        self._completed_actions[#self._completed_actions + 1] = act
       end
       return true
     end

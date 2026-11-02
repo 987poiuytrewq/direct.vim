@@ -311,6 +311,31 @@ Directory-only `&wildignore` patterns such as `cache/` also protect matching
 nested directories. Directory symlinks are treated as leaves when renamed; their
 targets are not scanned or moved.
 
+### LSP workspace file operations
+
+Direct sends `workspace/didCreateFiles`, `workspace/didRenameFiles`, and
+`workspace/didDeleteFiles` after successful filesystem changes when a running
+workspace client advertises the corresponding `workspace.fileOperations`
+capability. For renames it also sends the `workspace/willRenameFiles` request
+before staging or changing paths, and applies returned WorkspaceEdits in stable
+client-ID order. Clients are selected by workspace coverage (not by attachment
+to the direct listing buffer); advertised file/folder and glob filters are
+honoured where Neovim exposes them. Paths are sent as `file:` URIs.
+
+`willRenameFiles` is asynchronous: `:write` returns while requests are pending,
+and the listing remains modified and guarded until the callback completes. Other
+direct filesystem operations are refused during that interval. A server error or
+timeout warns and the rename proceeds without that server's edit. If applying a
+returned edit fails, the rename is refused; edits applied by earlier clients may
+already be present. Direct then revalidates the listing and filesystem snapshots
+before it performs its own changes.
+
+Post-operation notifications describe only logical workspace paths whose
+filesystem effects succeeded, including paste and undo/redo reversals. Trash,
+register, staging, temporary, marker, and quarantine paths are never reported;
+yank alone does not emit a file-operation event. Servers that do not advertise
+the relevant capability receive no file-operation requests or notifications.
+
 ### Expanded rows
 
 Every expanded directory is an independent edit scope. Edit, add, or delete its

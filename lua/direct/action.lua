@@ -561,8 +561,10 @@ function M.Unpaste(src, dst, src_names, dst_names)
     src = src,
     dst = dst,
     renames = zipped(src_names, dst_names),
+    _completed_renames = {},
   }
   self._execute = function()
+    self._completed_renames = {}
     -- A re-yank changes the register pointer. The old content path is not enough
     -- to authorize deletion if the live register no longer refers to it.
     local current_register, register_err = require('direct.register').content()
@@ -596,6 +598,7 @@ function M.Unpaste(src, dst, src_names, dst_names)
         reference = reference,
         identity = identity,
         kind = stat.type,
+        pair = pair,
       }
     end
 
@@ -669,6 +672,9 @@ function M.Unpaste(src, dst, src_names, dst_names)
         return unpaste_refusal('could not delete captured entry '
           .. item.quarantine .. ': ' .. tostring(delete_err))
       end
+      self._completed_renames[#self._completed_renames + 1] = {
+        src = item.pair.src, dst = item.pair.dst,
+      }
     end
     return true
   end

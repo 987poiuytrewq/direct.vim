@@ -8,6 +8,22 @@ M.action = require('direct.action')
 M.paths = require('direct.paths')
 M.ui = require('direct.ui')
 M.pending = require('direct.pending')
+local file_operations = require('direct.file_operations')
+
+local function rename_files(action, files, paths)
+  if action.name == 'mv' then
+    files[#files + 1] = {
+      oldUri = vim.uri_from_fname(M.action.fs.abspath(action.src)),
+      newUri = vim.uri_from_fname(M.action.fs.abspath(action.dst)),
+    }
+    paths[#paths + 1] = action.src
+    paths[#paths + 1] = action.dst
+  elseif action.name == 'g' then
+    for _, member in ipairs(action.actions or {}) do
+      rename_files(member, files, paths)
+    end
+  end
+end
 
 M.HEADER = format.HEADER
 
@@ -205,6 +221,14 @@ function M._reverse(which)
     return nil, reverse_err
   end
 
+  local files, paths = {}, {}
+  rename_files(reversal, files, paths)
+  if #files > 0 and #file_operations.clients('workspace/willRenameFiles', paths) > 0 then
+    -- Preserve the synchronous no-client path, but route a real LSP rename
+    -- through the same guarded async preflight used by Direct's public commands.
+    return M._reverse_async(which, nil)
+  end
+
   table.remove(src_lines)
   local ok, err = write_stack(src_path, src_lines)
   if not ok then
@@ -215,6 +239,10 @@ function M._reverse(which)
 
   local ran, result, execute_err = pcall(M.action.execute, reversal)
   if not ran or result == nil then
+    if reversal.name == 'g' and #(reversal._completed_actions or {}) > 0
+      or reversal.name == 'up' and #(reversal._completed_renames or {}) > 0 then
+      file_operations.emit_actions({ reversal })
+    end
     src_lines[#src_lines + 1] = record
     local restored, restore_err = write_stack(src_path, src_lines)
     local why = not ran and tostring(result)
@@ -225,6 +253,8 @@ function M._reverse(which)
       vim.log.levels.ERROR)
     return nil, why
   end
+
+  file_operations.emit_actions({ reversal })
 
   local inverse, serialize_err = M.action.serialize(reversal)
   if not inverse then
@@ -259,10 +289,19 @@ function M.redo_async(callback)
   return M._reverse_async('redo', callback)
 end
 
-function M._reverse_async(which, callback)
-  if M.pending.refuse(which) then return nil, 'another direct operation is pending' end
+function M._reverse_async(which, callback, options)
+  options = options or {}
+  local token = options.pending_token
+  if token and not M.pending.is_active(token) then
+    finish_callback(callback, nil, 'pending history operation was canceled')
+    return nil, 'pending history operation was canceled'
+  end
+  if not token and M.pending.refuse(which) then
+    return nil, 'another direct operation is pending'
+  end
   local state, preflight_err = M.preflight()
   if not state then
+    if token then M.pending.finish(token) end
     finish_callback(callback, nil, preflight_err)
     return nil, preflight_err
   end
@@ -274,11 +313,13 @@ function M._reverse_async(which, callback)
     src_path, dst_path = state.redo_path, state.undo_path
     src_lines, dst_lines = state.redo_lines, state.undo_lines
   else
+    if token then M.pending.finish(token) end
     return nil, 'history._reverse_async: expected undo or redo'
   end
   if #src_lines <= 1 then
     M.ui.notify(which == 'undo' and 'Nothing to undo' or 'Nothing to redo',
       vim.log.levels.INFO)
+    if token then M.pending.finish(token) end
     finish_callback(callback, nil, nil)
     return nil
   end
@@ -288,22 +329,72 @@ function M._reverse_async(which, callback)
   if not reversal then
     M.ui.notify('Failed to ' .. which .. ' action - ' .. tostring(reverse_err),
       vim.log.levels.ERROR)
+    if token then M.pending.finish(token) end
     finish_callback(callback, nil, reverse_err)
     return nil, reverse_err
   end
-  local began, begin_err = M.pending.begin(which)
-  if not began then
-    M.ui.notify('direct: cannot ' .. which .. ': ' .. tostring(begin_err),
-      vim.log.levels.WARN)
-    finish_callback(callback, nil, begin_err)
-    return nil, begin_err
+
+  if options.expected_record and record ~= options.expected_record then
+    local why = 'history changed while waiting for LSP willRenameFiles'
+    M.ui.notify('Failed to ' .. which .. ' action - ' .. why, vim.log.levels.WARN)
+    if token then M.pending.finish(token) end
+    finish_callback(callback, nil, why)
+    return nil, why
+  end
+
+  local files, paths = {}, {}
+  rename_files(reversal, files, paths)
+  if not token and not options.skip_will and #files > 0
+    and #file_operations.clients('workspace/willRenameFiles', paths) > 0 then
+    local began, begin_token = M.pending.begin('willRenameFiles')
+    if not began then
+      M.ui.notify('direct: cannot ' .. which .. ': another operation is pending',
+        vim.log.levels.WARN)
+      finish_callback(callback, nil, 'another direct operation is pending')
+      return nil, 'another direct operation is pending'
+    end
+    token = begin_token
+    file_operations.will_rename(files, function(ok, suppressed_or_err)
+      if not ok then
+        M.ui.notify('Failed to ' .. which .. ' after LSP WorkspaceEdit failure '
+          .. '(earlier server edits may already have applied): '
+          .. tostring(suppressed_or_err), vim.log.levels.ERROR)
+        M.pending.finish(token)
+        finish_callback(callback, nil, suppressed_or_err)
+        return
+      end
+      M._reverse_async(which, callback, {
+        pending_token = token,
+        skip_will = true,
+        expected_record = record,
+        suppressed = suppressed_or_err,
+      })
+    end, nil, function() return M.pending.is_active(token) end)
+    return true
+  end
+
+  if not token then
+    local began, begin_token = M.pending.begin(which)
+    if not began then
+      M.ui.notify('direct: cannot ' .. which .. ': another operation is pending',
+        vim.log.levels.WARN)
+      finish_callback(callback, nil, 'another direct operation is pending')
+      return nil, 'another direct operation is pending'
+    end
+    token = begin_token
+  end
+
+  if not M.pending.is_active(token) then
+    M.pending.finish(token)
+    finish_callback(callback, nil, 'pending history operation was canceled')
+    return nil, 'pending history operation was canceled'
   end
 
   table.remove(src_lines)
   local popped, pop_err = write_stack(src_path, src_lines)
   if not popped then
     src_lines[#src_lines + 1] = record
-    M.pending.finish()
+    M.pending.finish(token)
     M.ui.notify('Failed to ' .. which .. ' action - cannot update history: '
       .. tostring(pop_err), vim.log.levels.ERROR)
     finish_callback(callback, nil, pop_err)
@@ -316,6 +407,10 @@ function M._reverse_async(which, callback)
     local all_skipped = reversal.name == 'p' and #(reversal.renames or {}) == 0
       and result == nil
     if (not ok and not copied) or all_skipped then
+      if reversal.name == 'g' and #(reversal._completed_actions or {}) > 0
+        or reversal.name == 'up' and #(reversal._completed_renames or {}) > 0 then
+        file_operations.emit_actions({ reversal }, nil, options.suppressed)
+      end
       src_lines[#src_lines + 1] = record
       local restored, restore_err = write_stack(src_path, src_lines)
       local why = execution_err ~= nil and tostring(execution_err)
@@ -326,16 +421,18 @@ function M._reverse_async(which, callback)
           .. M.action.summarize({ reversal }) .. ' (' .. why .. ')',
           vim.log.levels.ERROR)
       end
-      M.pending.finish()
+      M.pending.finish(token)
       finish_callback(callback, nil, all_skipped and nil or why)
       return
     end
+
+    file_operations.emit_actions({ reversal }, nil, options.suppressed)
 
     local inverse, serialize_err = M.action.serialize(reversal)
     if not inverse then
       M.ui.notify('Failed to ' .. which .. ' action - cannot serialize reversal: '
         .. tostring(serialize_err), vim.log.levels.ERROR)
-      M.pending.finish()
+      M.pending.finish(token)
       finish_callback(callback, nil, serialize_err)
       return
     end
@@ -350,7 +447,7 @@ function M._reverse_async(which, callback)
         .. tostring(execution_err), vim.log.levels.ERROR)
     end
     M.ui.notify(M.action.summarize({ reversal }), vim.log.levels.INFO)
-    M.pending.finish()
+    M.pending.finish(token)
     finish_callback(callback, reversal, appended and nil or append_err)
   end
   local function complete(ok, result, execution_err)
@@ -360,7 +457,7 @@ function M._reverse_async(which, callback)
       complete_inner(ok, result, execution_err)
     end, debug.traceback)
     if not finished then
-      M.pending.finish()
+      M.pending.finish(token)
       M.ui.notify('Failed to complete async ' .. which .. ' history action: '
         .. tostring(completion_err), vim.log.levels.ERROR)
       finish_callback(callback, nil, completion_err)
