@@ -98,7 +98,8 @@ option name as an error instead of silently ignoring it. See
 
 `max_recursive_expand_depth` defaults to `false` (unlimited). Set it to a
 positive integer to cap the directory levels opened by recursive commands
-`zO`, `zA`, and `zR`. The cap does not restrict one-level `zo`/`za` browsing.
+`zO`, `zA`, `zR`, and `:DirectUnfoldAll`. The cap does not restrict one-level
+`zo`/`za` browsing.
 
 Dot-prefixed files and directories are visible by default. Set
 `show_hidden = false` to hide them. `:DirectToggleHidden` (also mapped to `gh`)
@@ -348,6 +349,12 @@ existing synchronous staging behavior.
         Classify and apply the edits in the current buffer. Also runs on
         `:write` (`BufWriteCmd`).
 
+    :DirectFoldAll
+        Collapse all expanded directories in the current listing.
+
+    :DirectUnfoldAll
+        Recursively expand all directories in the current listing.
+
     :DirectToggleHidden
         Toggle dot-hidden entries in the current direct listing and refresh its
         view. Refuses if the listing has unsaved edits.
@@ -377,7 +384,8 @@ existing synchronous staging behavior.
         The command must contain {} and the current row must name an existing
         entry. Captured output and exit status are reported when it finishes.
 
-`:DirectSync`, `open()` (the public API used by the entry mappings),
+`:DirectSync`, `:DirectFoldAll`, `:DirectUnfoldAll`,
+`open()` (the public API used by the entry mappings),
 `:DirectUndo`, `:DirectRedo`, `:DirectYank`, `:DirectPaste` (no argument),
 `:DirectPasteAs` and `:DirectRun` report an error and do nothing when the current
 buffer is not a direct buffer. The listing commands `:DirectList`, `:DirectListBuffer` and
@@ -393,8 +401,7 @@ Global (normal mode), installed when `map_default_keys` is true:
 
     -           :DirectListBuffer~
 
-Buffer-local, in a direct buffer (standard actions follow `map_default_keys`;
-fold commands are always installed):
+Buffer-local, in a direct buffer (all mappings follow `map_default_keys`):
 
     Mode        Key         Action ~
     normal      <CR>        open the entry under the cursor
@@ -414,9 +421,11 @@ fold commands are always installed):
     normal      p, P        :DirectPaste
     normal      gh          :DirectToggleHidden
 
-The buffer-local `-` wins over the global `-` inside a direct buffer.
-Fold commands are installed for every direct listing, independently of
-`map_default_keys`.
+The buffer-local `-` wins over the global `-` inside a direct buffer. All
+buffer-local mappings, including fold and mouse mappings, are omitted when
+`map_default_keys` is false.
+`:DirectUnfoldAll` and `:DirectFoldAll` provide command-line equivalents of `zR`
+and `zM`.
 
 ==============================================================================
 10. Data directory                                          *direct.vim-data*

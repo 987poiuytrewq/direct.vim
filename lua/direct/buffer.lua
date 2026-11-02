@@ -352,7 +352,9 @@ local function set_options(bufnr)
     end,
     desc = 'direct: refresh display marks when insert-mode edits change line count',
   })
-  folding.install_mappings(bufnr, M)
+  if require('direct.config').options.map_default_keys then
+    folding.install_mappings(bufnr, M)
+  end
 end
 
 -- ---------------------------------------------------------------------------

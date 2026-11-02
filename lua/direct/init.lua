@@ -79,6 +79,16 @@ function M.sync()
   return buffer.restore():sync()
 end
 
+function M.fold_all()
+  if not guard('DirectFoldAll') then return nil end
+  return require('direct.folding').collapse_all(buffer)
+end
+
+function M.unfold_all()
+  if not guard('DirectUnfoldAll') then return nil end
+  return require('direct.folding').expand_all(buffer)
+end
+
 function M.toggle_hidden()
   if not guard('DirectToggleHidden') then return nil end
   if pending.refuse('toggle hidden entries') then return nil end

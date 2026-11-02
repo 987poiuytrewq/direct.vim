@@ -308,6 +308,7 @@ function M.clear_buffer_mappings(bufnr)
           end
         end
       end
+      require('direct.folding').clear_mappings()
     end)
   end
   return true
@@ -328,6 +329,7 @@ function M.install_mappings()
   -- buffer is created).
   for _, bufnr in ipairs(open_direct_buffers()) do
     M.install_buffer_mappings(bufnr)
+    require('direct.folding').install_mappings(bufnr, require('direct.buffer'))
   end
   return true
 end
