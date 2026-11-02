@@ -4,9 +4,6 @@ local M = {}
 local states = {}
 local namespace = vim.api.nvim_create_namespace('direct-listing-rows')
 local ICON_NAMESPACE = 'direct-listing-icons'
-local FOLDER_ICON_CLOSED = '\u{f024b}'
-local FOLDER_ICON_OPEN = '\u{f0770}'
-local FILE_ICON = '\u{f0214}'
 local icon_namespace
 local function next_id(state)
   state.next_id = (state.next_id or 0) + 1
@@ -107,10 +104,10 @@ local function refresh_icons(bufnr, state)
       local base_glyph
       local base_group
       if enabled and is_folder then
-        base_glyph = state.expanded[id] and FOLDER_ICON_OPEN or FOLDER_ICON_CLOSED
+        base_glyph = state.expanded[id] and options.icons.folder_open or options.icons.folder
         base_group = hidden and 'DirectHiddenFolderIcon' or 'DirectFolderIcon'
       elseif enabled then
-        base_glyph = FILE_ICON
+        base_glyph = options.icons.file
         base_group = hidden and 'DirectHiddenFileIcon' or 'DirectFileIcon'
       end
       if enabled then
