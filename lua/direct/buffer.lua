@@ -40,8 +40,8 @@ M._state_for_test = rows.state_for_test
 M.entry_path = listing.entry_path
 M.ignore_set = listing.ignore_set
 M.read = listing.read
-local function list_with_snapshot(root)
-  return listing.list_with_snapshot(root, M.read)
+local function list_with_snapshot(root, show_hidden)
+  return listing.list_with_snapshot(root, M.read, show_hidden)
 end
 local set_directory_snapshot = listing.set_directory_snapshot
 local get_directory_snapshot = listing.get_directory_snapshot
@@ -83,9 +83,11 @@ local sync_plan = require('direct.buffer_sync_plan')({
   dirs_then_name = dirs_then_name,
   lstat = lstat,
   path_without_marker = path_without_marker,
+  fs = fs,
 })
 M.classify = sync_plan.classify
 M._component_reason = sync_plan.component_reason
+M._nested_path_reason = sync_plan.nested_path_reason
 local component_reason = sync_plan.component_reason
 local first_unsafe = sync_plan.first_unsafe
 local ambiguous_message = sync_plan.ambiguous_message
@@ -220,6 +222,7 @@ local tree_planner = require('direct.buffer_tree')({
   same_lines = same_lines,
   entry_path = M.entry_path,
   ignore_set = M.ignore_set,
+  read_with_snapshot = listing.read_with_snapshot,
   action_mod = action_mod,
 })
 children_integrity = tree_planner.children_integrity
@@ -237,6 +240,7 @@ reconcile_undone_materialization = require('direct.buffer_undo_state')({
   recorded_row_text = recorded_row_text,
   ignore_set = M.ignore_set,
   read = M.read,
+  read_with_snapshot = listing.read_with_snapshot,
   entry_path = M.entry_path,
   highlight = highlight,
   refresh_highlights = refresh_highlights,
@@ -441,7 +445,14 @@ end
 -- entry, and lists the survivors. A ' ' (space) name is NOT dropped: a space is
 -- representable and must still list.
 function Buffer:list()
-  local lines, snapshot, err = list_with_snapshot(self.root)
+  local bufnr = vim.api.nvim_get_current_buf()
+  local old_state = states[bufnr]
+  local show_hidden_override
+  if old_state and old_state.view_show_hidden_override
+    and type(old_state.view_show_hidden) == 'boolean' then
+    show_hidden_override = old_state.view_show_hidden
+  end
+  local lines, snapshot, err = list_with_snapshot(self.root, show_hidden_override)
   if not lines then
     ui.notify('direct: cannot list ' .. tostring(self.root) .. ': '
       .. tostring(err), vim.log.levels.ERROR)
@@ -459,9 +470,8 @@ function Buffer:list()
     end
   end
 
-  local bufnr = vim.api.nvim_get_current_buf()
   reconcile_undone_materialization(bufnr)
-  local old_state = states[bufnr]
+  old_state = states[bufnr]
   local old_expanded = {}
   local old_known_children = {}
   local old_index = { by_path = {}, by_inode = {}, unknown_by_path = {} }
@@ -511,6 +521,8 @@ function Buffer:list()
     collapse_undos = old_state
       and vim.deepcopy(old_state.collapse_undos or {}) or {},
     git_status = nil,
+    view_show_hidden = snapshot.show_hidden,
+    view_show_hidden_override = old_state and old_state.view_show_hidden_override or false,
   }
   local git_options = require('direct.config').options.git
   if git_options.enabled then
@@ -617,7 +629,7 @@ function Buffer:expand(row)
   local just_materialized = false
   if not state.expanded[rec.id] then
     local path = row_path(self.root, rec, line)
-    local children, snapshot, err = list_with_snapshot(path)
+    local children, snapshot, err = list_with_snapshot(path, state.view_show_hidden)
     if not children then
       ui.notify('direct: cannot expand ' .. tostring(path) .. ': '
         .. tostring(err), vim.log.levels.ERROR)
@@ -647,6 +659,7 @@ function Buffer:expand(row)
       children = materialized,
       listing_lines = vim.deepcopy(children),
       wildignore = snapshot.wildignore,
+      filter_snapshot = vim.deepcopy(snapshot),
     }
     set_directory_snapshot(state, snapshot)
     just_materialized = true
@@ -697,6 +710,7 @@ function Buffer:expand(row)
           parent_identity = path_identity(path),
           listing_lines = vim.deepcopy(children),
           wildignore = snapshot.wildignore or '',
+          filter_snapshot = vim.deepcopy(snapshot),
           children_snapshot = vim.deepcopy(materialized),
         }
         state.materialization_undos = state.materialization_undos or {}
@@ -774,6 +788,7 @@ local function collapse_snapshot(bufnr, state, parent, parent_row)
         directory_snapshots[id] = {
           listing_lines = vim.deepcopy(expanded.listing_lines or {}),
           wildignore = expanded.wildignore or vim.o.wildignore or '',
+          filter_snapshot = vim.deepcopy(expanded.filter_snapshot),
         }
       end
     end
@@ -804,6 +819,7 @@ local function collapse_snapshot(bufnr, state, parent, parent_row)
     children_snapshot = vim.deepcopy(state.expanded[parent.id].children),
     listing_lines = vim.deepcopy(state.expanded[parent.id].listing_lines or {}),
     wildignore = vim.o.wildignore or '',
+    filter_snapshot = vim.deepcopy(get_directory_snapshot(state, parent.path)),
     display_snapshot = display_snapshot,
   }
 end
@@ -871,6 +887,47 @@ function M.toggle()
     return M.collapse()
   end
   return M.expand()
+end
+
+function M.toggle_hidden()
+  local bufnr = vim.api.nvim_get_current_buf()
+  if vim.bo[bufnr].modified then
+    local reason = 'cannot toggle hidden entries with unsaved edits; sync or discard them first'
+    ui.notify('direct: ' .. reason, vim.log.levels.ERROR)
+    return nil, reason
+  end
+  local state = states[bufnr]
+  if not state then
+    local reason = 'direct listing state is unavailable; re-list this directory'
+    ui.notify('direct: ' .. reason, vim.log.levels.ERROR)
+    return nil, reason
+  end
+  local previous = {
+    view_show_hidden = state.view_show_hidden,
+    view_show_hidden_override = state.view_show_hidden_override,
+    expanded = state.expanded,
+    known_children = state.known_children,
+    directory_snapshots = state.directory_snapshots,
+    materialization_undos = state.materialization_undos,
+    materialization_recoveries = state.materialization_recoveries,
+    collapse_undos = state.collapse_undos,
+  }
+  state.view_show_hidden = not state.view_show_hidden
+  state.view_show_hidden_override = true
+  -- Rebuild from the root so every expanded subtree uses the same visibility
+  -- setting; doing this only changes the view and is not text-undoable.
+  state.expanded = {}
+  state.known_children = {}
+  state.directory_snapshots = {}
+  state.materialization_undos = {}
+  state.materialization_recoveries = {}
+  state.collapse_undos = {}
+  local listed, err = M.restore():list()
+  if not listed then
+    for key, value in pairs(previous) do state[key] = value end
+    return nil, err
+  end
+  return listed
 end
 
 -- Internal adapter for the folding command module. Keep row marks and state
@@ -996,6 +1053,21 @@ function Buffer:sync(options)
       vim.log.levels.ERROR)
     return nil, reason
   end
+  local checked_git = {}
+  for _, directory_snapshot in ipairs(state.directory_snapshots or {}) do
+    if directory_snapshot.respect_gitignore then
+      local matches, git_err = git.ignore_snapshot_matches(
+        directory_snapshot.git, directory_snapshot.path, checked_git)
+      if matches ~= true then
+        vim.bo[bufnr].modified = true
+        local reason = matches == false and git_err
+          or ('Git ignore query failed: ' .. tostring(git_err))
+        ui.notify('Refusing to sync: ' .. tostring(reason) .. '; nothing was changed.',
+          vim.log.levels.ERROR)
+        return nil, reason
+      end
+    end
+  end
   local visible = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local actual, child_err = children_integrity(bufnr, visible)
   local subtree_edit
@@ -1067,7 +1139,15 @@ function Buffer:sync(options)
       .. tostring(read_err), vim.log.levels.ERROR)
     return nil, read_err
   end
-  expected = apply_snapshot(self.root, expected, snapshot)
+  local filtered_expected, filter_err = apply_snapshot(self.root, expected, snapshot)
+  if not filtered_expected then
+    vim.bo[bufnr].modified = true
+    local reason = 'Git ignore query failed: ' .. tostring(filter_err)
+    ui.notify('Refusing to sync: ' .. reason .. '; nothing was changed.',
+      vim.log.levels.ERROR)
+    return nil, reason
+  end
+  expected = filtered_expected
   -- Neovim represents an empty buffer with one empty string. An empty listing
   -- denotes zero root entries, not an empty filename: this applies both to a
   -- clean listing of an empty directory and to deleting its final visible row.
@@ -1080,7 +1160,29 @@ function Buffer:sync(options)
 
   -- refuse a path the history framing cannot represent, before any
   -- action or history write. The buffer is not re-listed and stays modified.
-  local unsafe = first_unsafe(self.root, actual) or first_unsafe(self.root, expected)
+  local nested_added = {}
+  -- Recognize a pure add without invoking the classifier: unsafe path checks
+  -- intentionally precede classification, and only new rows may use a nested
+  -- relative path. Renames and mixed edits retain the basename-only rule.
+  local actual_set, expected_set, unique = {}, {}, true
+  for _, line in ipairs(actual) do
+    if actual_set[line] then unique = false end
+    actual_set[line] = true
+  end
+  for _, line in ipairs(expected) do expected_set[line] = true end
+  local is_add = unique and #actual > #expected
+  if is_add then
+    for line in pairs(expected_set) do
+      if not actual_set[line] then is_add = false; break end
+    end
+  end
+  if is_add then
+    for line in pairs(actual_set) do
+      if not expected_set[line] then nested_added[line] = true end
+    end
+  end
+  local unsafe = first_unsafe(self.root, actual, nested_added)
+    or first_unsafe(self.root, expected)
   if unsafe ~= nil then
     vim.bo[bufnr].modified = true
     ui.notify('Unsafe entry in the buffer (' .. unsafe.reason
@@ -1096,7 +1198,46 @@ function Buffer:sync(options)
     return nil, plan.reason
   end
 
-  local actions, yanks = build_actions(self.root, plan)
+  local actions, yanks, build_err = build_actions(self.root, plan)
+  if not actions then
+    vim.bo[bufnr].modified = true
+    ui.notify('Refusing to sync: ' .. tostring(build_err)
+      .. '; nothing was changed.', vim.log.levels.ERROR)
+    return nil, build_err
+  end
+  local added_expand_paths, added_focus_path = {}, nil
+  if plan.kind == 'ADD' then
+    local added_set, expand_by_path = {}, {}
+    for _, line in ipairs(plan.added or {}) do added_set[line] = true end
+    -- Keep the cursor target in the user's row order, not the sorted action
+    -- order. Nested parent directories are expanded for every new nested path.
+    for _, line in ipairs(actual) do
+      if added_set[line] then
+        local relative = line:gsub('/+$', '')
+        added_focus_path = M.entry_path(self.root, line)
+        if relative:find('/', 1, true) then
+          local parts = vim.split(relative, '/', { plain = true })
+          local directory_count = #parts - (is_dir_line(line) and 0 or 1)
+          local parent = self.root
+          for index = 1, directory_count do
+            parent = fs.join(parent, parts[index])
+            local normalized_parent = parent:gsub('/+$', '')
+            local key = vim.fs.normalize(normalized_parent)
+            expand_by_path[key] = parent
+          end
+        end
+      end
+    end
+    for _, path in pairs(expand_by_path) do
+      added_expand_paths[#added_expand_paths + 1] = path
+    end
+    table.sort(added_expand_paths, function(a, b)
+      local depth_a, depth_b = select(2, a:gsub('/', '')), select(2, b:gsub('/', ''))
+      if depth_a ~= depth_b then return depth_a < depth_b end
+      return a < b
+    end)
+    if #added_expand_paths == 0 then added_focus_path = nil end
+  end
   if subtree_edit then
     if plan.kind == 'DELETE' then
       local removed_roots = {}
@@ -1479,6 +1620,27 @@ function Buffer:sync(options)
     end
   end
 
+  -- Open every parent directory on newly added nested paths, including parents
+  -- that already existed, then put the cursor on the last added row.
+  for _, path in ipairs(added_expand_paths) do
+    for row = 0, vim.api.nvim_buf_line_count(bufnr) - 1 do
+      local rec = current_row_record(bufnr, row)
+      if rec and is_dir_line(rec.name) and fs.same_path(rec.path, path) then
+        self:expand(row + 1)
+        break
+      end
+    end
+  end
+  if added_focus_path then
+    for row = 0, vim.api.nvim_buf_line_count(bufnr) - 1 do
+      local rec = current_row_record(bufnr, row)
+      if rec and fs.same_path(rec.path, added_focus_path) then
+        pcall(vim.api.nvim_win_set_cursor, 0, { row + 1, (rec.depth or 0) * 2 })
+        break
+      end
+    end
+  end
+
   if #actions > 0 then
     -- Emit one joined summary for the classified actions.
     ui.notify(action_mod.summarize(actions), vim.log.levels.INFO)
@@ -1562,6 +1724,25 @@ function Buffer:get_paths(firstline, lastline)
     end
   end
   return out
+end
+
+-- Buffer:get_entry_path(row) -> the existing row identity at one display row.
+-- Unlike get_paths(), this is for actions that must target the entry that was
+-- actually listed: it refuses blank rows and rows with unsaved name edits.
+function Buffer:get_entry_path(row)
+  local bufnr = vim.api.nvim_get_current_buf()
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local safe, integrity_err = children_integrity(bufnr, lines)
+  if not safe then return nil, integrity_err end
+  local line = lines[row]
+  local record = current_row_record(bufnr, row - 1)
+  if not line or not record then
+    return nil, 'row identity is unavailable'
+  end
+  if line ~= record.text then
+    return nil, 'current row has unsaved edits'
+  end
+  return record.path
 end
 
 -- Buffer:paste_destination([row]) -> the directory represented by the row.

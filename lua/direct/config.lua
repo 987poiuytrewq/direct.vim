@@ -7,8 +7,15 @@ local constants = require('direct.constants')
 
 local defaults = {
   map_default_keys = true,
+  show_hidden = true,
+  respect_gitignore = false,
   show_folder_icons = false,
   show_file_icons = false,
+  icons = {
+    file = '\u{f0214}',
+    folder = '\u{f024b}',
+    folder_open = '\u{f0770}',
+  },
   max_recursive_expand_depth = false,
   git = {
     enabled = true,
@@ -36,6 +43,33 @@ local defaults = {
 
 local git_statuses = { added = true, modified = true, renamed = true, conflicted = true }
 local git_display_modes = { icon = true, text = true, both = true }
+local icon_variants = { file = true, folder = true, folder_open = true }
+
+local function report_invalid_icon_option(key, reason)
+  local option = key == '' and 'icons' or ('icons.' .. key)
+  require('direct.ui').notify(
+    string.format('direct: invalid %s: %s', option, reason),
+    vim.log.levels.ERROR)
+end
+
+local function resolve_icon_options(value)
+  if type(value) ~= 'table' then
+    report_invalid_icon_option('', 'expected a table')
+    return vim.deepcopy(defaults.icons)
+  end
+
+  local result = vim.deepcopy(defaults.icons)
+  for key, glyph in pairs(value) do
+    if not icon_variants[key] then
+      report_invalid_icon_option(tostring(key), 'unknown icon; expected file, folder, or folder_open')
+    elseif type(glyph) ~= 'string' or glyph == '' then
+      report_invalid_icon_option(key, 'expected a non-empty glyph string')
+    else
+      result[key] = glyph
+    end
+  end
+  return result
+end
 
 local function report_invalid_git_option(key, reason)
   require('direct.ui').notify(
@@ -174,7 +208,7 @@ M._setup_called = false
 M._vim_enter_installed = false
 M._installed = vim.fn.maparg(M.GLOBAL_MAP.lhs, M.GLOBAL_MAP.mode) == M.GLOBAL_MAP.rhs
 
--- The nine buffer-local mappings for filetype=direct buffers, owned
+-- The ten buffer-local mappings for filetype=direct buffers, owned
 -- here so setup can clear and restore them in
 -- ALREADY-open direct buffers. Installed by `ftplugin/direct.lua` via
 -- `install_buffer_mappings(0)`. Built on `<Cmd>` (never a `:` command that
@@ -186,8 +220,8 @@ M.BUFFER_MAPS = {
     rhs = '<Cmd>lua require("direct").open()<CR>' },
   { mode = 'n', lhs = '-',
     rhs = '<Cmd>lua require("direct").open("../")<CR>' },
-  { mode = 'n', lhs = 'u', rhs = '<Cmd>undo<CR>' },
-  { mode = 'n', lhs = '<C-r>', rhs = '<Cmd>redo<CR>' },
+  { mode = 'n', lhs = 'u', rhs = '<Cmd>DirectUndo<CR>' },
+  { mode = 'n', lhs = '<C-r>', rhs = '<Cmd>DirectRedo<CR>' },
   { mode = 'n', lhs = 'yy', rhs = '<Cmd>DirectYank<CR>' },
   { mode = 'n', lhs = 'Y', rhs = '<Cmd>DirectYank<CR>' },
   -- Visual `y`: a ranged command (`:<C-U>'<,'>DirectYank<CR>`) raises E20 and
@@ -198,6 +232,7 @@ M.BUFFER_MAPS = {
     rhs = '<Cmd>lua require("direct").yank(vim.fn.line("v"), vim.fn.line("."))<CR>' },
   { mode = 'n', lhs = 'p', rhs = '<Cmd>DirectPaste<CR>' },
   { mode = 'n', lhs = 'P', rhs = '<Cmd>DirectPaste<CR>' },
+  { mode = 'n', lhs = 'gh', rhs = '<Cmd>DirectToggleHidden<CR>' },
 }
 
 -- The loaded buffers whose filetype is `direct`: the retrofit targets for
@@ -213,7 +248,7 @@ local function open_direct_buffers()
   return bufs
 end
 
--- install_buffer_mappings(bufnr) -> true. Installs the nine buffer-local
+-- install_buffer_mappings(bufnr) -> true. Installs the ten buffer-local
 -- mappings into `bufnr` (0 = the current buffer). Idempotent: re-setting a
 -- mapping replaces it in place, so repeated ftplugin runs cannot stack.
 function M.install_buffer_mappings(bufnr)
@@ -323,6 +358,12 @@ function M.setup(opts)
       require('direct.ui').notify(
         'direct: max_recursive_expand_depth must be false or a positive integer',
         vim.log.levels.ERROR)
+    elseif key == 'icons' then
+      next_options.icons = resolve_icon_options(value)
+    elseif (key == 'show_hidden' or key == 'respect_gitignore')
+      and type(value) ~= 'boolean' then
+      require('direct.ui').notify(
+        string.format('direct: %s must be a boolean', key), vim.log.levels.ERROR)
     elseif key == 'git' then
       next_options.git = resolve_git_options(value)
     else

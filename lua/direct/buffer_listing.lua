@@ -1,6 +1,7 @@
 -- Directory listing, wildignore snapshots, and filtered-descendant checks.
 local M = {}
 local fs = require('direct.fs')
+local git = require('direct.git')
 
 local function path_identity(path)
   return fs.path_identity(path, fs.stat(path))
@@ -85,10 +86,63 @@ end
 -- list_with_snapshot(root) returns the current filtered listing and the names
 -- omitted by that exact list-time wildignore value. Sync uses the captured names
 -- later instead of consulting a possibly changed option.
-local function list_with_snapshot(root, read)
-  local wildignore = vim.o.wildignore or ''
-  local ignored = M.ignore_set(root, wildignore)
-  local visible, err = (read or M.read)(root, ignored)
+local function capture_filter(root, show_hidden_override)
+  local config = require('direct.config').options
+  local snapshot = {
+    path = root,
+    wildignore = vim.o.wildignore or '',
+    show_hidden = show_hidden_override == nil and config.show_hidden ~= false
+      or show_hidden_override == true,
+    respect_gitignore = config.respect_gitignore == true,
+  }
+  if snapshot.respect_gitignore then
+    local git_snapshot, git_err = git.ignore_snapshot(root)
+    if git_err then return nil, git_err end
+    snapshot.git = git_snapshot
+    -- Preserve the distinction between an enabled filter outside a repository
+    -- and a snapshot that was never checked. Sync must validate either context.
+    snapshot.git_repo = git_snapshot ~= nil
+  end
+  return snapshot
+end
+
+local function filtered_paths(root, paths, snapshot)
+  local matches = {}
+  for _, path in ipairs(M.ignore_set(root, snapshot.wildignore or '') or {}) do
+    matches[#matches + 1] = path
+  end
+  if snapshot.show_hidden == false then
+    for _, path in ipairs(paths) do
+      local name = path:match('([^/]+)$') or path
+      if name:sub(1, 1) == '.' then matches[#matches + 1] = path end
+    end
+  end
+  if snapshot.respect_gitignore and snapshot.git then
+    local ignored, err = git.ignored_paths(snapshot.git, paths)
+    if not ignored then return nil, err end
+    vim.list_extend(matches, ignored)
+  end
+  return matches
+end
+
+local function read_with_snapshot(root, snapshot, read)
+  local scan, scan_err = vim.uv.fs_scandir(root)
+  if not scan then return nil, scan_err end
+  local paths = {}
+  while true do
+    local name = vim.uv.fs_scandir_next(scan)
+    if name == nil then break end
+    paths[#paths + 1] = M.entry_path(root, name)
+  end
+  local ignored, filter_err = filtered_paths(root, paths, snapshot)
+  if not ignored then return nil, filter_err end
+  return (read or M.read)(root, ignored)
+end
+
+local function list_with_snapshot(root, read, show_hidden_override)
+  local snapshot, filter_err = capture_filter(root, show_hidden_override)
+  if not snapshot then return nil, nil, filter_err end
+  local visible, err = read_with_snapshot(root, snapshot, read)
   if not visible then return nil, nil, err end
   local scan, scan_err = vim.uv.fs_scandir(root)
   if not scan then return nil, nil, scan_err end
@@ -107,7 +161,8 @@ local function list_with_snapshot(root, read)
     if not visible_set[name] then hidden[#hidden + 1] = name end
   end
   table.sort(hidden)
-  return visible, { path = root, hidden = hidden, wildignore = wildignore }
+  snapshot.hidden = hidden
+  return visible, snapshot
 end
 
 local function set_directory_snapshot(state, snapshot)
@@ -226,11 +281,17 @@ local function apply_snapshot(root, lines, snapshot)
   -- those patterns to the current directory so matching entries that appeared
   -- after listing cannot be mistaken for user-visible DELETE sources.
   local ignored = ignored_identity_index(M.ignore_set(root, snapshot.wildignore or ''))
+  local paths = {}
+  for _, line in ipairs(lines) do paths[#paths + 1] = M.entry_path(root, line) end
+  local current_filtered, filter_err = filtered_paths(root, paths, snapshot)
+  if not current_filtered then return nil, filter_err end
+  local current_index = ignored_identity_index(current_filtered)
   local visible = {}
   for _, line in ipairs(lines) do
     local identity = line:gsub('/+$', '')
     if not hidden[identity]
-      and not identity_is_ignored(M.entry_path(root, line), ignored) then
+      and not identity_is_ignored(M.entry_path(root, line), ignored)
+      and not identity_is_ignored(M.entry_path(root, line), current_index) then
       visible[#visible + 1] = line
     end
   end
@@ -276,11 +337,15 @@ end
 local function hidden_descendant(directory, root_snapshot, state)
   local visited = {}
   local filters = {}
+  local git_contexts = {}
+  if root_snapshot.git then
+    git_contexts[vim.fs.normalize(root_snapshot.git.root)] = root_snapshot.git
+  end
   local initial_relative = relative_path(root_snapshot.path, directory)
   if initial_relative == nil then
     return nil, 'directory is outside its list-time snapshot'
   end
-  local function visit(path, inherited_snapshot, relative_directory)
+  local function visit(path, inherited_snapshot, relative_directory, inherited_git)
     local real = fs.realpath(path)
     if visited[real] then return nil end
     visited[real] = true
@@ -288,7 +353,36 @@ local function hidden_descendant(directory, root_snapshot, state)
     local local_snapshot = get_directory_snapshot(state, path)
     local snapshot = local_snapshot or inherited_snapshot
     if local_snapshot then relative_directory = '' end
-    local filter = snapshot and filters[snapshot]
+    local git_context = (local_snapshot and local_snapshot.git) or inherited_git
+      or (snapshot and snapshot.git) or nil
+    if snapshot and snapshot.respect_gitignore then
+      -- The captured context remains valid throughout this repo. Git discovery
+      -- is needed only when the raw walk enters a directory with its own .git
+      -- marker (including a nested worktree's .git file).
+      local marker = vim.fs.joinpath(path_without_marker(path), '.git')
+      local marker_stat = lstat(marker)
+      if marker_stat then
+        local marker_root = vim.fs.normalize(real)
+        local context_root = git_context and vim.fs.normalize(git_context.root) or nil
+        if marker_root ~= context_root then
+          local cached = git_contexts[marker_root]
+          if cached == nil then
+            local discovered, discover_err = git.ignore_snapshot(real)
+            if discover_err then return nil, discover_err end
+            cached = discovered or false
+            git_contexts[marker_root] = cached
+          end
+          git_context = cached ~= false and cached or nil
+        end
+      end
+    end
+    local snapshot_filters = snapshot and filters[snapshot]
+    if snapshot and not snapshot_filters then
+      snapshot_filters = {}
+      filters[snapshot] = snapshot_filters
+    end
+    local context_key = git_context and vim.fs.normalize(git_context.root) or false
+    local filter = snapshot_filters and snapshot_filters[context_key]
     if not filter then
       local wildignore = snapshot and snapshot.wildignore or ''
       local patterns, pattern_err = compile_wildignore(wildignore)
@@ -297,8 +391,11 @@ local function hidden_descendant(directory, root_snapshot, state)
         ignored = ignored_identity_index(
           M.ignore_set(snapshot and snapshot.path or path, wildignore)),
         patterns = patterns,
+        show_hidden = snapshot and snapshot.show_hidden ~= false,
+        respect_gitignore = snapshot and snapshot.respect_gitignore == true,
+        git = git_context,
       }
-      if snapshot then filters[snapshot] = filter end
+      if snapshot_filters then snapshot_filters[context_key] = filter end
     end
     local names, scan_err = {}, nil
     local scan
@@ -311,6 +408,19 @@ local function hidden_descendant(directory, root_snapshot, state)
     end
     table.sort(names)
 
+    local child_paths = {}
+    for _, name in ipairs(names) do
+      child_paths[#child_paths + 1] = M.entry_path(path_without_marker(path), name)
+    end
+    local git_hidden = {}
+    if filter.respect_gitignore and filter.git then
+      local matches, git_err = git.ignored_paths(filter.git, child_paths)
+      if not matches then return nil, git_err end
+      for _, match in ipairs(matches) do
+        git_hidden[vim.fs.normalize(match)] = true
+      end
+    end
+
     local hidden = {}
     if snapshot and fs.same_path(snapshot.path, path) then
       for _, name in ipairs(snapshot.hidden or {}) do
@@ -321,7 +431,9 @@ local function hidden_descendant(directory, root_snapshot, state)
       local child_path = M.entry_path(path_without_marker(path), name)
       local relative_name = relative_directory == '' and name
         or (relative_directory .. '/' .. name)
-      if hidden[name] or path_is_ignored(child_path, filter.ignored) then
+      if hidden[name] or path_is_ignored(child_path, filter.ignored)
+        or (not filter.show_hidden and name:sub(1, 1) == '.')
+        or git_hidden[vim.fs.normalize(child_path)] then
         return child_path
       end
 
@@ -343,16 +455,18 @@ local function hidden_descendant(directory, root_snapshot, state)
       -- A directory symlink is a leaf, not permission to inspect its target.
       if child_stat.type == 'directory' then
         local found, child_err = visit(child_path, snapshot or root_snapshot,
-          relative_name)
+          relative_name, filter.git)
         if found or child_err then return found, child_err end
       end
     end
     return nil
   end
-  return visit(directory, root_snapshot, initial_relative)
+  return visit(directory, root_snapshot, initial_relative,
+    root_snapshot.git)
 end
 
 M.list_with_snapshot = list_with_snapshot
+M.read_with_snapshot = read_with_snapshot
 M.set_directory_snapshot = set_directory_snapshot
 M.get_directory_snapshot = get_directory_snapshot
 M.apply_snapshot = apply_snapshot

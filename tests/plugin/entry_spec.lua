@@ -45,12 +45,13 @@ end
 local EXPECTED_N = {
   ['<CR>'] = '<Cmd>lua require("direct").open()<CR>',
   ['-'] = '<Cmd>lua require("direct").open("../")<CR>',
-  ['u'] = '<Cmd>undo<CR>',
-  ['<C-R>'] = '<Cmd>redo<CR>',
+  ['u'] = '<Cmd>DirectUndo<CR>',
+  ['<C-R>'] = '<Cmd>DirectRedo<CR>',
   ['yy'] = '<Cmd>DirectYank<CR>',
   ['Y'] = '<Cmd>DirectYank<CR>',
   ['p'] = '<Cmd>DirectPaste<CR>',
   ['P'] = '<Cmd>DirectPaste<CR>',
+  ['gh'] = '<Cmd>DirectToggleHidden<CR>',
 }
 
 local EXPECTED_V = {
@@ -62,15 +63,17 @@ local EXPECTED_CMDS = {
   DirectListBuffer = { nargs = '0' },
   DirectListCwd = { nargs = '0' },
   DirectSync = { nargs = '0' },
+  DirectToggleHidden = { nargs = '0' },
   DirectUndo = { nargs = '0' },
   DirectRedo = { nargs = '0' },
   DirectYank = { nargs = '0', range = '.' },
   DirectPaste = { nargs = '?', complete = 'dir' },
   DirectPasteAs = { nargs = '1', complete = 'file' },
+  DirectRun = { nargs = '+' },
 }
 
 H.describe('entry: command surface', function()
-  H.it('the nine commands exist with their exact nargs/range/complete', function()
+  H.it('the ten commands exist with their exact nargs/range/complete', function()
     local cmds = vim.api.nvim_get_commands({ builtin = false })
     for name, want in pairs(EXPECTED_CMDS) do
       local got = cmds[name]
@@ -164,8 +167,8 @@ end)
 H.describe('entry: direct-buffer guard', function()
   H.it('the public API exposes every facade function', function()
     local api = require('direct')
-    local expected = { 'setup', 'list', 'list_buffer', 'list_cwd', 'open',
-      'sync', 'undo', 'redo', 'yank', 'paste', 'paste_as' }
+    local expected = { 'setup', 'list', 'list_buffer', 'list_cwd', 'open', 'toggle_hidden',
+      'sync', 'undo', 'redo', 'yank', 'paste', 'paste_as', 'run' }
     local actual = {}
     for name, value in pairs(api) do
       actual[#actual + 1] = name
@@ -184,8 +187,10 @@ H.describe('entry: direct-buffer guard', function()
       { name = 'DirectUndo', call = function(api) return api.undo() end },
       { name = 'DirectRedo', call = function(api) return api.redo() end },
       { name = 'DirectYank', call = function(api) return api.yank(1, 1) end },
+      { name = 'DirectToggleHidden', call = function(api) return api.toggle_hidden() end },
       { name = 'DirectPaste', call = function(api) return api.paste() end },
       { name = 'DirectPasteAs', call = function(api) return api.paste_as('x.txt') end },
+      { name = 'DirectRun', call = function(api) return api.run('echo {}') end },
     }
     for _, case in ipairs(cases) do
       clean_buffers()
@@ -417,7 +422,7 @@ H.describe('entry: default mappings', function()
     end
   end)
 
-  H.it('all nine buffer-local mappings resolve to their commands and none call the retired Vimscript', function()
+  H.it('all ten buffer-local mappings resolve to their commands and none call the retired Vimscript', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -468,6 +473,7 @@ H.describe('entry: default mappings', function()
           'the opt-out must not install the Lua mapping for normal ' .. lhs)
       end
     end
+    H.assert_nil(normal.gh, 'the opt-out does not install the hidden toggle mapping')
     for lhs in pairs(EXPECTED_V) do
       local rhs = visual[lhs]
       if rhs ~= nil then

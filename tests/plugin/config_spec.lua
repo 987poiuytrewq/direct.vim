@@ -59,6 +59,30 @@ H.describe('config', function()
     config.clear_mappings()
   end)
 
+  H.it('base icon glyphs have defaults, accept partial overrides, and validate variants', function()
+    local config = fresh_config()
+    config.clear_mappings()
+    H.assert_eq(config.defaults.icons.file, '\u{f0214}', 'default file glyph')
+    H.assert_eq(config.defaults.icons.folder, '\u{f024b}', 'default closed-folder glyph')
+    H.assert_eq(config.defaults.icons.folder_open, '\u{f0770}', 'default open-folder glyph')
+
+    local options = config.setup({ icons = { file = 'F', folder = 'D' } })
+    H.assert_eq(options.icons.file, 'F', 'file glyph override is applied')
+    H.assert_eq(options.icons.folder, 'D', 'folder glyph override is applied')
+    H.assert_eq(options.icons.folder_open, config.defaults.icons.folder_open,
+      'omitted variant retains its default')
+
+    H.capture_messages()
+    options = config.setup({ icons = { file = false, folder_closed = 'x' } })
+    H.assert_eq(options.icons.file, config.defaults.icons.file,
+      'invalid glyph retains its default')
+    H.assert_eq(options.icons.folder, config.defaults.icons.folder,
+      'unknown variant is ignored')
+    H.assert_notified('icons.file', vim.log.levels.ERROR)
+    H.assert_notified('icons.folder_closed', vim.log.levels.ERROR)
+    config.clear_mappings()
+  end)
+
   H.it('Git display defaults to both layers and accepts partial status overrides', function()
     local config = fresh_config()
     config.clear_mappings()
@@ -286,10 +310,10 @@ H.describe('config', function()
     -- mapping was cleared, or never installed) while a global `u` carrying the
     -- plugin's own rhs resolves through it.
     vim.keymap.del('n', 'u', { buffer = true })
-    vim.keymap.set('n', 'u', '<Cmd>undo<CR>', { silent = true, noremap = true })
+    vim.keymap.set('n', 'u', '<Cmd>DirectUndo<CR>', { silent = true, noremap = true })
     local resolved = vim.fn.maparg('u', 'n', false, true)
     H.assert_eq(resolved.buffer, 0, 'premise: only a global u resolves here')
-    H.assert_eq(resolved.rhs, '<Cmd>undo<CR>', 'premise: it carries the plugin rhs')
+    H.assert_eq(resolved.rhs, '<Cmd>DirectUndo<CR>', 'premise: it carries the plugin rhs')
 
     config.setup({ map_default_keys = false })
 
@@ -299,7 +323,7 @@ H.describe('config', function()
     -- The global fallback is not this buffer's mapping: it must survive.
     local after = vim.fn.maparg('u', 'n', false, true)
     H.assert_eq(after.buffer, 0, 'the global u is still global')
-    H.assert_eq(after.rhs, '<Cmd>undo<CR>', 'the global u was not deleted')
+    H.assert_eq(after.rhs, '<Cmd>DirectUndo<CR>', 'the global u was not deleted')
     vim.keymap.del('n', 'u')
     pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
   end)

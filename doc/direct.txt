@@ -35,23 +35,38 @@ Visible directories use DirectDirectory (default link Directory) at any
 indentation depth. Hidden directories and files use their Comment defaults.
 When icons are enabled, hidden directory and file icons also use the Comment
 style; visible directory and file icons retain their Directory and Normal
-defaults. The hidden icon groups DirectHiddenFolderIcon and DirectHiddenFileIcon
-link to Comment and can be overridden independently. Listing files receive no
-filename-, filetype-, or special-name-derived highlights; Git status styling is
-described below.
+defaults. These highlight groups can be customized in a colorscheme or with
+`nvim_set_hl()`:
+
+    DirectDirectory             visible directory names (Directory)
+    DirectHiddenDirectory       hidden directory names (Comment)
+    DirectHiddenFile            hidden file names (Comment)
+    DirectFolderIcon            visible folder icons (Directory)
+    DirectFileIcon              file icons (Normal)
+    DirectHiddenFolderIcon      hidden folder icons (Comment)
+    DirectHiddenFileIcon        hidden file icons (Comment)
+    DirectGitAddedIcon          added status icon (DiffAdd)
+    DirectGitAdded              added status name (DiffAdd)
+    DirectGitModifiedIcon       modified status icon (DiffChange)
+    DirectGitModified           modified status name (DiffChange)
+    DirectGitRenamedIcon        renamed status icon (DiffChange)
+    DirectGitRenamed            renamed status name (DiffChange)
+    DirectGitConflictedIcon     conflicted status icon (ErrorMsg)
+    DirectGitConflicted         conflicted status name (ErrorMsg)
+
+Defaults are reapplied after a ColorScheme event without replacing
+user-defined groups. Listing files receive no filename-, filetype-, or
+special-name-derived highlights; Git status styling is described below.
 
 Direct loads its listing syntax locally, including when Neovim's global syntax
 loader is disabled.
-
-Highlight defaults are user-overridable and are reapplied after a ColorScheme
-event.
 
 ==============================================================================
 2. Requirements                                        *direct.vim-requirements*
 
     - Neovim >= 0.12
-    - No Python: the plugin is pure Lua and needs nothing beyond the Neovim
-      runtime.
+    - No Python: the plugin is pure Lua. Git is optional for ordinary listings;
+      Git status and `respect_gitignore` use the Git command-line executable.
 
 Run `:checkhealth direct` to confirm the version and the data home in use:
 
@@ -64,8 +79,15 @@ Run `:checkhealth direct` to confirm the version and the data home in use:
 
     require('direct').setup({
       map_default_keys = true, -- set false to install no default mappings
+      show_hidden = true, -- set false to hide dot-prefixed entries
+      respect_gitignore = false, -- opt in to Git ignore filtering
       show_folder_icons = false, -- opt in to Nerd Font folder icons
       show_file_icons = false, -- opt in to a generic Nerd Font file icon
+      icons = {
+        file = '\u{f0214}',
+        folder = '\u{f024b}',
+        folder_open = '\u{f0770}',
+      },
       max_recursive_expand_depth = false, -- false means unlimited
       git = { enabled = true, display = 'both' }, -- icon, text, or both
     })
@@ -78,16 +100,22 @@ option name as an error instead of silently ignoring it. See
 positive integer to cap the directory levels opened by recursive commands
 `zO`, `zA`, and `zR`. The cap does not restrict one-level `zo`/`za` browsing.
 
+Dot-prefixed files and directories are visible by default. Set
+`show_hidden = false` to hide them. `:DirectToggleHidden` (also mapped to `gh`)
+switches the current direct buffer's view. It refuses while the listing has
+unsaved edits, refreshes from disk, and collapses expanded subtrees so every
+visible level uses the same filter.
+
 File and folder icons ~
 
 Set `show_folder_icons = true` to display inline directory glyphs, and
 `show_file_icons = true` to display one generic icon for every file; both options
-default to `false`. A Nerd Font is required. Collapsed directories use
-`nf-md-folder` (U+F024B), expanded directories use `nf-md-folder_open` (U+F0770),
-and files use `nf-md-file` (U+F0214), regardless of filetype. When only one kind
-of icon is enabled, the other kind reserves a blank icon slot so entry names
-stay aligned. Icons are virtual text, so buffer lines and filesystem behavior
-are unchanged. No icon plugin or other dependency is required.
+default to `false`. Built-in glyphs require a Nerd Font. Customize them with the
+`icons` table: `file` defaults to U+F0214, `folder` to U+F024B, and `folder_open`
+to U+F0770. These glyphs are used regardless of filetype. When only one kind of
+icon is enabled, the other kind reserves a blank icon slot so entry names stay
+aligned. Icons are virtual text, so buffer lines and filesystem behavior are
+unchanged. No icon plugin or other dependency is required.
 With folder icons enabled, click a folder icon to expand or collapse that
 directory in place. Mouse input must be enabled in Neovim (for example,
 `:set mouse=a`). Clicking elsewhere in the listing retains normal cursor
@@ -127,9 +155,24 @@ highlight groups, optional icon overrides, and gutter symbols per status:
       },
     })
 
-Icon overrides are optional; unspecified file/folder variants keep their regular
-glyphs. Gutter symbols are off unless configured. Set `git.enabled = false` to
-disable Git awareness.
+Icon overrides are optional; unspecified file/folder variants keep their base
+`icons` glyphs. Gutter symbols are off unless configured. Set
+`git.enabled = false` to disable Git status display; this does not affect
+Git-ignore filtering.
+
+Git-ignore filtering is separately opt-in with `respect_gitignore = true`. It
+uses Git's own matching for root and nested `.gitignore` files, negations,
+anchoring, escaped patterns, `.git/info/exclude`, and the configured global
+excludes file. Tracked files remain visible, as do directories containing
+tracked descendants. Outside a repository this filter has no effect. Git must
+be available when the option is enabled; if an ignore query fails in a detected
+repository, listing fails safely instead of guessing. If effective ignore rules,
+excludes, or tracked index membership change after listing, sync refuses before
+filesystem or history effects; re-list to refresh the rule snapshot. The
+fingerprint is deliberately conservative: it currently walks the full repository
+to find ignore sources, so large trees incur a full-tree scan when listing or
+validating sync. A change to a nested repository's ignore source may require a
+re-list even when that source did not affect the current view.
 
 ==============================================================================
 4. Navigate                                              *direct.vim-navigate*
@@ -163,7 +206,11 @@ delete:
 
     - Rename: edit the line of the file or directory you want to rename, and
       save.
-    - Create: add new lines at any location, and save.
+    - Create: add new lines at any location, and save. A new relative path such
+      as `reports/2026/summary.txt` creates the file and missing parent
+      directories. A path ending in `/`, such as `reports/2026/`, creates a
+      directory at that path. After saving nested paths, their parent
+      directories are expanded and the cursor moves to the last added entry.
     - Delete: delete the lines for the entries you want to remove, and save.
       Deleted entries are yanked automatically, so you can paste them back.
 
@@ -179,11 +226,14 @@ duplicated line, is reported as ambiguous, naming both sides of the comparison.
 Nothing is changed, no history is written, and the buffer stays modified so you
 can fix it.
 
-`&wildignore` is honoured using the value captured when each directory is
-listed. Changing the option does not change an existing listing's sync rules;
-re-list after changing it. Filtered entries are excluded from sync, and a sync
-is refused before filesystem or history effects if an add/rename would use an
-occupied filtered path or a directory move would carry a filtered descendant.
+`&wildignore`, dot-hidden visibility, and Git-ignore filtering are independent;
+enabled filters compose as a union. `&wildignore` keeps its existing behavior.
+Each directory captures the filters and matches used for that listing. Changing
+an option does not change an existing listing's sync rules; re-list to refresh
+them. Filtered entries are excluded from sync, and sync is refused before
+filesystem or history effects if an add/rename would use an occupied filtered
+path or a directory move would carry a filtered descendant. Newly appearing
+entries matching the captured filters are not treated as delete sources.
 Directory symlinks are treated as leaves when renamed; their targets are not
 scanned or moved.
 
@@ -214,12 +264,16 @@ materialized descendants, unless you reindent surviving rows under another
 directory in the same edit to move them out first. Moving or renaming a directory
 together with separate edits to its descendants must be saved in separate syncs
 when their filesystem action order would otherwise be ambiguous. Expansion and
-collapse remain ordinary text-undo changes. `u` after collapse restores child
-rows and identities; `<C-r>` re-applies the collapse. Redo restores materialized
+collapse remain ordinary text-undo changes. `:undo` after collapse restores child
+rows and identities; `:redo` re-applies the collapse. Redo restores materialized
 identities only when the original undo sequence and exact directory snapshot
 still match. A changed or ambiguous snapshot remains unsafe to save, open, or yank.
-Entry names beginning with whitespace and names that could escape the listed
-directory (such as `../x` or `a/b`) are refused at save time.
+Path components beginning with whitespace and paths that could escape the listed
+directory (absolute paths, empty components such as `a//b`, or `.`/`..` components
+such as `a/../b`) are refused at save time. Nested paths are supported for new
+entries only; renames remain single-component names. Newly created parent
+directories are recorded separately, so `u` and `<C-r>` can undo and redo them
+in the correct order.
 
 Windows-specific component checks reject backslashes, drive prefixes, reserved
 device names (including extension aliases), and trailing dots or spaces that
@@ -229,14 +283,13 @@ verified; this documentation does not claim Windows support.
 ==============================================================================
 6. Undo / Redo                                                 *direct.vim-undo*
 
-In a direct buffer, `u` and `<C-r>` perform Neovim text undo and redo. The
-filesystem action history is separate: use `:DirectUndo` and `:DirectRedo` to
-reverse or re-apply actions a sync or paste performed. `:DirectUndo` right
-after a paste, for example, undoes the paste.
+In a direct buffer, `u` and `<C-r>` undo and redo the last filesystem action
+performed by Direct, such as a sync or paste. They invoke the same actions as
+`:DirectUndo` and `:DirectRedo`.
 
-Text undo only reverses changes to buffer lines; it never renames, creates,
-deletes or restores anything on disk. Only `:DirectUndo` reverses a filesystem
-action.
+Use `:undo` and `:redo` for Neovim text undo and redo in the listing. Text undo
+only changes buffer lines; it does not rename, create, delete, or restore
+anything on disk.
 
 ==============================================================================
 7. Yank / Paste                                                *direct.vim-yank*
@@ -295,6 +348,10 @@ existing synchronous staging behavior.
         Classify and apply the edits in the current buffer. Also runs on
         `:write` (`BufWriteCmd`).
 
+    :DirectToggleHidden
+        Toggle dot-hidden entries in the current direct listing and refresh its
+        view. Refuses if the listing has unsaved edits.
+
     :DirectUndo
         Undo the last filesystem action.
 
@@ -313,10 +370,17 @@ existing synchronous staging behavior.
         Paste into the cursor row's directory (or a file's parent directory) as
         {name}.
 
+    :DirectRun {command}
+        Run {command} asynchronously in the shell, with the listing directory
+        as the working directory. Each literal {} is replaced by the
+        shell-escaped absolute path of the current entry; leave {} unquoted.
+        The command must contain {} and the current row must name an existing
+        entry. Captured output and exit status are reported when it finishes.
+
 `:DirectSync`, `open()` (the public API used by the entry mappings),
-`:DirectUndo`, `:DirectRedo`, `:DirectYank`, `:DirectPaste` (no argument) and
-`:DirectPasteAs` report an error and do nothing when the current buffer is not a
-direct buffer. The listing commands `:DirectList`, `:DirectListBuffer` and
+`:DirectUndo`, `:DirectRedo`, `:DirectYank`, `:DirectPaste` (no argument),
+`:DirectPasteAs` and `:DirectRun` report an error and do nothing when the current
+buffer is not a direct buffer. The listing commands `:DirectList`, `:DirectListBuffer` and
 `:DirectListCwd` remain available from ordinary buffers; they list a directory
 without operating on the current buffer's listing. `:DirectPaste {dir}` is also
 available from an ordinary buffer: it pastes into the explicitly named
@@ -343,11 +407,12 @@ fold commands are always installed):
     normal      zR          recursively expand all root directories
     normal      zM          collapse all root directories
     normal      -           open ../ (the parent directory)
-    normal      u           Neovim text undo
-    normal      <C-r>       Neovim text redo
+    normal      u           undo the last filesystem action
+    normal      <C-r>       redo the last filesystem action
     normal      yy, Y       :DirectYank (current line)
     visual      y           :DirectYank (selected range)
     normal      p, P        :DirectPaste
+    normal      gh          :DirectToggleHidden
 
 The buffer-local `-` wins over the global `-` inside a direct buffer.
 Fold commands are installed for every direct listing, independently of
