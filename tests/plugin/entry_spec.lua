@@ -25,6 +25,14 @@ local function buf_maps(bufnr, mode)
   return by_lhs
 end
 
+local function buf_map_records(bufnr, mode)
+  local by_lhs = {}
+  for _, map in ipairs(vim.api.nvim_buf_get_keymap(bufnr, mode)) do
+    by_lhs[map.lhs] = map
+  end
+  return by_lhs
+end
+
 -- global_map(lhs) -> the normal-mode GLOBAL mapping for lhs, or nil. Uses
 -- `nvim_get_keymap` (global set only) so a buffer-local mapping of the same lhs
 -- can never masquerade as the global one.
@@ -63,6 +71,8 @@ local EXPECTED_CMDS = {
   DirectListBuffer = { nargs = '0' },
   DirectListCwd = { nargs = '0' },
   DirectSync = { nargs = '0' },
+  DirectFoldAll = { nargs = '0' },
+  DirectUnfoldAll = { nargs = '0' },
   DirectToggleHidden = { nargs = '0' },
   DirectUndo = { nargs = '0' },
   DirectRedo = { nargs = '0' },
@@ -73,7 +83,7 @@ local EXPECTED_CMDS = {
 }
 
 H.describe('entry: command surface', function()
-  H.it('the ten commands exist with their exact nargs/range/complete', function()
+  H.it('the twelve commands exist with their exact nargs/range/complete', function()
     local cmds = vim.api.nvim_get_commands({ builtin = false })
     for name, want in pairs(EXPECTED_CMDS) do
       local got = cmds[name]
@@ -168,7 +178,7 @@ H.describe('entry: direct-buffer guard', function()
   H.it('the public API exposes every facade function', function()
     local api = require('direct')
     local expected = { 'setup', 'list', 'list_buffer', 'list_cwd', 'open', 'toggle_hidden',
-      'sync', 'undo', 'redo', 'yank', 'paste', 'paste_as', 'run' }
+      'sync', 'fold_all', 'unfold_all', 'undo', 'redo', 'yank', 'paste', 'paste_as', 'run' }
     local actual = {}
     for name, value in pairs(api) do
       actual[#actual + 1] = name
@@ -186,6 +196,8 @@ H.describe('entry: direct-buffer guard', function()
     local cases = {
       { name = 'DirectUndo', call = function(api) return api.undo() end },
       { name = 'DirectRedo', call = function(api) return api.redo() end },
+      { name = 'DirectFoldAll', call = function(api) return api.fold_all() end },
+      { name = 'DirectUnfoldAll', call = function(api) return api.unfold_all() end },
       { name = 'DirectYank', call = function(api) return api.yank(1, 1) end },
       { name = 'DirectToggleHidden', call = function(api) return api.toggle_hidden() end },
       { name = 'DirectPaste', call = function(api) return api.paste() end },
@@ -207,6 +219,21 @@ H.describe('entry: direct-buffer guard', function()
       H.assert_notified(case.name .. ' can only be used in a direct buffer')
       H.assert_buf_eq({ 'keep' })
     end
+  end)
+
+  H.it(':DirectUnfoldAll and :DirectFoldAll expand and collapse the full tree', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local deepest = H.mkdir(ws, 'a/b')
+    H.mkfile(deepest, 'leaf.txt', { 'leaf' })
+    require('direct').list(ws)
+
+    vim.cmd('DirectUnfoldAll')
+    H.assert_buf_eq({ 'a/', '  b/', '    leaf.txt' })
+
+    vim.cmd('DirectFoldAll')
+    H.assert_buf_eq({ 'a/' })
   end)
 
   H.it(':DirectSync is rejected in a named normal buffer without changing it', function()
@@ -422,7 +449,7 @@ H.describe('entry: default mappings', function()
     end
   end)
 
-  H.it('all ten buffer-local mappings resolve to their commands and none call the retired Vimscript', function()
+  H.it('default buffer-local mappings are installed and do not call the retired Vimscript', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -434,11 +461,30 @@ H.describe('entry: default mappings', function()
 
     local normal = buf_maps(buf, 'n')
     local visual = buf_maps(buf, 'v')
+    local normal_records = buf_map_records(buf, 'n')
     for lhs, rhs in pairs(EXPECTED_N) do
       H.assert_eq(normal[lhs], rhs, 'normal-mode ' .. lhs)
     end
     for lhs, rhs in pairs(EXPECTED_V) do
       H.assert_eq(visual[lhs], rhs, 'visual-mode ' .. lhs)
+    end
+    local fold_descriptions = {
+      zo = 'direct: Expand one direct directory level',
+      za = 'direct: Toggle direct directory expansion',
+      zc = 'direct: Collapse direct directory rows',
+      zO = 'direct: Recursively expand direct directories',
+      zA = 'direct: Recursively toggle direct directories',
+      zC = 'direct: Recursively collapse direct directories',
+      zR = 'direct: Expand all direct directories',
+      zM = 'direct: Collapse all direct directories',
+      ['<LeftMouse>'] = 'direct: Toggle a direct directory from its folder icon',
+      ['<2-LeftMouse>'] = 'direct: Open the direct entry under the double-click',
+    }
+    for lhs, desc in pairs(fold_descriptions) do
+      H.assert_true(normal_records[lhs] and normal_records[lhs].callback ~= nil,
+        'fold mapping ' .. lhs .. ' uses a callback')
+      H.assert_eq(normal_records[lhs] and normal_records[lhs].desc, desc,
+        'fold mapping description ' .. lhs)
     end
 
     for _, maps in ipairs({ normal, visual }) do
@@ -449,7 +495,7 @@ H.describe('entry: default mappings', function()
     end
   end)
 
-  H.it('map_default_keys=false installs no global - and no Lua buffer-local mappings', function()
+  H.it('map_default_keys=false installs no global, standard, or fold mappings', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -465,6 +511,7 @@ H.describe('entry: default mappings', function()
     -- Scoped to OUR ftplugin's `<Cmd>`-based mappings: the retired Vimscript
     -- ftplugin is gone, so a key absent here is simply not mapped.
     local normal = buf_maps(buf, 'n')
+    local normal_records = buf_map_records(buf, 'n')
     local visual = buf_maps(buf, 'v')
     for lhs in pairs(EXPECTED_N) do
       local rhs = normal[lhs]
@@ -474,6 +521,10 @@ H.describe('entry: default mappings', function()
       end
     end
     H.assert_nil(normal.gh, 'the opt-out does not install the hidden toggle mapping')
+    for _, lhs in ipairs({ 'zo', 'za', 'zc', 'zO', 'zA', 'zC', 'zR', 'zM',
+      '<LeftMouse>', '<2-LeftMouse>' }) do
+      H.assert_nil(normal_records[lhs], 'the opt-out leaves fold key ' .. lhs .. ' unmapped')
+    end
     for lhs in pairs(EXPECTED_V) do
       local rhs = visual[lhs]
       if rhs ~= nil then

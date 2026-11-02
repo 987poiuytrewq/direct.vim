@@ -248,6 +248,10 @@ H.describe('config', function()
     return vim.fn.maparg(lhs, mode, false, true).rhs
   end
 
+  local function buf_map_desc(lhs, mode)
+    return vim.fn.maparg(lhs, mode, false, true).desc
+  end
+
   H.it('setup({ map_default_keys = false }) clears buffer-local maps in already-open direct buffers', function()
     local config = fresh_config()
     config.clear_mappings()
@@ -255,12 +259,16 @@ H.describe('config', function()
     local bufnr = open_direct_buffer()
     H.assert_true(buf_map_rhs('u', 'n') ~= nil, 'premise: buffer-local u installed')
     H.assert_true(buf_map_rhs('p', 'n') ~= nil, 'premise: buffer-local p installed')
+    H.assert_eq(buf_map_desc('zR', 'n'), 'direct: Expand all direct directories',
+      'premise: fold mapping zR installed')
 
     config.setup({ map_default_keys = false })
 
     H.assert_nil(buf_map_rhs('u', 'n'), 'the buffer-local u mapping is gone')
     H.assert_nil(buf_map_rhs('p', 'n'), 'the buffer-local p mapping is gone')
     H.assert_nil(buf_map_rhs('y', 'v'), 'the buffer-local visual y mapping is gone')
+    H.assert_nil(buf_map_desc('zR', 'n'), 'the fold mapping zR is gone')
+    H.assert_nil(buf_map_desc('<LeftMouse>', 'n'), 'the folder click mapping is gone')
     pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
   end)
 
@@ -303,6 +311,8 @@ H.describe('config', function()
     H.assert_true(buf_map_rhs('u', 'n') ~= nil,
       'the buffer-local u mapping is restored in the open direct buffer')
     H.assert_true(buf_map_rhs('p', 'n') ~= nil, 'the buffer-local p mapping is restored')
+    H.assert_eq(buf_map_desc('zR', 'n'), 'direct: Expand all direct directories',
+      'fold mappings are restored too')
     pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
   end)
 

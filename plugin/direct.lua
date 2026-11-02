@@ -78,6 +78,14 @@ vim.api.nvim_create_user_command('DirectSync', function()
   require('direct').sync()
 end, { nargs = 0, desc = 'direct: sync the listing with the filesystem' })
 
+vim.api.nvim_create_user_command('DirectFoldAll', function()
+  require('direct').fold_all()
+end, { nargs = 0, desc = 'direct: collapse all directories in the listing' })
+
+vim.api.nvim_create_user_command('DirectUnfoldAll', function()
+  require('direct').unfold_all()
+end, { nargs = 0, desc = 'direct: recursively expand all directories in the listing' })
+
 vim.api.nvim_create_user_command('DirectToggleHidden', function()
   require('direct').toggle_hidden()
 end, { nargs = 0, desc = 'direct: toggle hidden entries in this listing' })

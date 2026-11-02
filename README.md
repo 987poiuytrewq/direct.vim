@@ -267,10 +267,15 @@ one level at a time; repeating an expansion does not re-read or duplicate them.
 `zO` and `zA` recursively expand a directory, while `zC` recursively collapses
 it. `zR` expands all root directories and `zM` collapses them all. Recursive
 expansion is unlimited by default; set `max_recursive_expand_depth` to a positive
-integer to cap how many directory levels those recursive-open commands expand.
+integer to cap how many directory levels those recursive-open commands (including
+`:DirectUnfoldAll`) expand.
 The limit does not affect one-level `zo`/`za` browsing. `za` or `zc` on an
 expanded directory removes its child rows; expanding again re-reads the
 directory. The initial listing remains flat.
+
+Use `:DirectUnfoldAll` to recursively expand all directories in the listing and
+`:DirectFoldAll` to collapse them all; these are the command-line equivalents of
+`zR` and `zM`.
 
 ## Edit
 
@@ -434,6 +439,8 @@ use their existing synchronous staging path.
 | `:DirectListBuffer` | none | List the directory of the current file, or the working directory when the buffer is not tied to one (no file name, or a non-empty `&buftype`). |
 | `:DirectListCwd` | none | List the current working directory. |
 | `:DirectSync` | none | Classify and apply the current direct buffer's edits; also runs on `:write` in a direct buffer. |
+| `:DirectFoldAll` | none | Collapse all expanded directories in the current listing. |
+| `:DirectUnfoldAll` | none | Recursively expand all directories in the current listing. |
 | `:DirectToggleHidden` | none | Toggle dot-hidden entries in the current direct listing and refresh its view. |
 | `:DirectUndo` | none | Undo the last filesystem action. |
 | `:DirectRedo` | none | Redo the last undone action. |
@@ -441,8 +448,9 @@ use their existing synchronous staging path.
 | `:DirectPaste [dir]` | optional `{dir}` (directory completion) | With no argument, paste into the directory under the cursor (or a file's parent) and refresh the listing; with `{dir}`, paste there without touching the current buffer. |
 | `:DirectPasteAs {name}` | `{name}` | Paste into the cursor row's directory (or a file's parent) under `{name}`. |
 
-`:DirectSync`, `:DirectToggleHidden`, `:DirectUndo`, `:DirectRedo`, `:DirectYank`, `:DirectPaste` (no
-argument), `:DirectPasteAs`, and the public `open()` API report an error and do
+`:DirectSync`, `:DirectFoldAll`, `:DirectUnfoldAll`, `:DirectToggleHidden`,
+`:DirectUndo`, `:DirectRedo`, `:DirectYank`, `:DirectPaste` (no argument),
+`:DirectPasteAs`, `:DirectRun`, and the public `open()` API report an error and do
 nothing when the current buffer is not a direct buffer. `open()` is also used by
 the direct-buffer entry mappings. `:DirectPaste {dir}` is the exception: it
 pastes into an explicitly named directory and never touches the current buffer,
@@ -459,8 +467,7 @@ Global (normal mode), installed when `map_default_keys` is true:
 |---|---|
 | `-` | `:DirectListBuffer` |
 
-Buffer-local, in a direct buffer (standard actions follow `map_default_keys`;
-`zo`/`za`/`zc` are always installed):
+Buffer-local, in a direct buffer (all mappings follow `map_default_keys`):
 
 | Mode | Key | Action |
 |---|---|---|
@@ -468,6 +475,11 @@ Buffer-local, in a direct buffer (standard actions follow `map_default_keys`;
 | normal | `zo` | lazily expand one directory level |
 | normal | `za` | expand or collapse one directory |
 | normal | `zc` | collapse one directory |
+| normal | `zO` | recursively expand the directory under the cursor |
+| normal | `zA` | recursively expand or collapse the directory under the cursor |
+| normal | `zC` | recursively collapse the directory under the cursor |
+| normal | `zR` | recursively expand all directories (`:DirectUnfoldAll`) |
+| normal | `zM` | collapse all directories (`:DirectFoldAll`) |
 | normal | `-` | open `../` (the parent directory) |
 | normal | `u` | undo the last filesystem operation |
 | normal | `<C-r>` | redo the last filesystem operation |
@@ -476,9 +488,9 @@ Buffer-local, in a direct buffer (standard actions follow `map_default_keys`;
 | normal | `p`, `P` | `:DirectPaste` |
 | normal | `gh` | `:DirectToggleHidden` |
 
-The buffer-local `-` wins over the global `-` inside a direct buffer.
-`zo`, `za`, and `zc` are installed for every direct listing, independently of
-`map_default_keys`.
+The buffer-local `-` wins over the global `-` inside a direct buffer. All
+buffer-local mappings, including fold and mouse mappings, are omitted when
+`map_default_keys` is false.
 
 ## Data directory
 

@@ -29,8 +29,31 @@ function M.install_mappings(bufnr, buffer)
     vim.keymap.set('n', map[1], map[2], {
       buffer = bufnr,
       silent = true,
-      desc = map[3],
+      desc = 'direct: ' .. map[3],
     })
+  end
+end
+
+-- Remove only mappings still owned by Direct. Descriptions are stable across
+-- config-module reloads, and user replacements do not carry this marker.
+function M.clear_mappings()
+  local descriptions = {
+    ['<LeftMouse>'] = 'direct: Toggle a direct directory from its folder icon',
+    ['<2-LeftMouse>'] = 'direct: Open the direct entry under the double-click',
+    zo = 'direct: Expand one direct directory level',
+    za = 'direct: Toggle direct directory expansion',
+    zc = 'direct: Collapse direct directory rows',
+    zO = 'direct: Recursively expand direct directories',
+    zA = 'direct: Recursively toggle direct directories',
+    zC = 'direct: Recursively collapse direct directories',
+    zR = 'direct: Expand all direct directories',
+    zM = 'direct: Collapse all direct directories',
+  }
+  for lhs, desc in pairs(descriptions) do
+    local current = vim.fn.maparg(lhs, 'n', false, true)
+    if current.buffer == 1 and current.desc == desc then
+      pcall(vim.keymap.del, 'n', lhs, { buffer = true })
+    end
   end
 end
 
