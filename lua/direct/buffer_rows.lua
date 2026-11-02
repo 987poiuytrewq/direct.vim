@@ -15,6 +15,7 @@ end
 
 local fs = require('direct.fs')
 local listing = require('direct.buffer_listing')
+local git = require('direct.git')
 
 local function path_identity(path)
   return fs.path_identity(path, fs.stat(path))
@@ -78,6 +79,10 @@ local function refresh_icons(bufnr, state)
   local options = require('direct.config').options
   local show_folders = options.show_folder_icons == true
   local show_files = options.show_file_icons == true
+  if options.git.enabled and state.git_status == nil then
+    state.git_status = git.read(state.root) or false
+  end
+  local git_snapshot = state.git_status
   local line_count = vim.api.nvim_buf_line_count(bufnr)
   state.icon_line_count = line_count
   if not show_folders and not show_files then
@@ -99,12 +104,31 @@ local function refresh_icons(bufnr, state)
       local glyph = '  '
       local group = 'Normal'
       local hidden = rec.name:sub(1, 1) == '.'
+      local base_glyph
+      local base_group
       if enabled and is_folder then
-        glyph = state.expanded[id] and FOLDER_ICON_OPEN or FOLDER_ICON_CLOSED
-        group = hidden and 'DirectHiddenFolderIcon' or 'DirectFolderIcon'
+        base_glyph = state.expanded[id] and FOLDER_ICON_OPEN or FOLDER_ICON_CLOSED
+        base_group = hidden and 'DirectHiddenFolderIcon' or 'DirectFolderIcon'
       elseif enabled then
-        glyph = FILE_ICON
-        group = hidden and 'DirectHiddenFileIcon' or 'DirectFileIcon'
+        base_glyph = FILE_ICON
+        base_group = hidden and 'DirectHiddenFileIcon' or 'DirectFileIcon'
+      end
+      if enabled then
+        glyph, group = base_glyph, base_group
+        local status = options.git.enabled and git_snapshot
+          and git.status_for(git_snapshot, rec.path)
+        local settings = status and options.git.statuses[status]
+        if settings and (options.git.display == 'icon' or options.git.display == 'both') then
+          group = settings.icon_hl or group
+          if type(settings.icon) == 'string' then
+            glyph = settings.icon
+          elseif type(settings.icon) == 'table' then
+            local variant = is_folder
+              and (state.expanded[id] and 'folder_open' or 'folder') or 'file'
+            glyph = settings.icon[variant] or settings.icon[is_folder and 'folder' or 'file']
+              or glyph
+          end
+        end
       end
       vim.api.nvim_buf_set_extmark(bufnr, icon_namespace, row,
         (rec.depth or 0) * 2, {

@@ -15,6 +15,9 @@ return function(deps)
   local read = deps.read
   local entry_path = deps.entry_path
   local highlight = deps.highlight
+  local refresh_highlights = deps.refresh_highlights or function(bufnr)
+    highlight.render(bufnr)
+  end
   local refresh_icons = deps.refresh_icons
   local remove_expanded_subtree = deps.remove_expanded_subtree
 
@@ -251,7 +254,7 @@ return function(deps)
     state.expanded = restored_expanded
     state.display_ids = vim.deepcopy(expected_order)
     state.materialization_seq = vim.fn.undotree(bufnr).seq_cur
-    highlight.render(bufnr)
+    refresh_highlights(bufnr, state)
     refresh_icons(bufnr, state)
     return true
   end
