@@ -39,13 +39,17 @@ Edit the listing like any other buffer:
 | To… | Edit the listing |
 |---|---|
 | Rename | Change an existing name, e.g. `old.txt` to `new.txt` |
-| Create | Add a line, e.g. `notes.md` |
+| Create | Add a line, e.g. `notes.md` or `reports/2026/summary.md` |
 | Delete | Remove the line |
 
 Save with `:write` to apply your change. Directory names must end in `/` (such
 as `archive/`); file names must not. At the root level, save one kind of change
-at a time—create, rename, or delete. If Direct can't tell what you meant, it
-refuses the save and leaves the filesystem unchanged.
+at a time—create, rename, or delete. A new relative path may contain `/`; Direct
+creates missing parent directories. Absolute paths, empty path components, and
+`.` or `..` components are refused; the final `/` remains the directory marker.
+After saving a nested path, Direct expands its parent directories and moves the
+cursor to the last added entry. If Direct can't tell what you meant, it refuses
+the save and leaves the filesystem unchanged.
 
 `yy` yanks the entry under the cursor and `p` pastes it.
 

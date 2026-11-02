@@ -83,9 +83,11 @@ local sync_plan = require('direct.buffer_sync_plan')({
   dirs_then_name = dirs_then_name,
   lstat = lstat,
   path_without_marker = path_without_marker,
+  fs = fs,
 })
 M.classify = sync_plan.classify
 M._component_reason = sync_plan.component_reason
+M._nested_path_reason = sync_plan.nested_path_reason
 local component_reason = sync_plan.component_reason
 local first_unsafe = sync_plan.first_unsafe
 local ambiguous_message = sync_plan.ambiguous_message
@@ -1038,7 +1040,29 @@ function Buffer:sync()
 
   -- refuse a path the history framing cannot represent, before any
   -- action or history write. The buffer is not re-listed and stays modified.
-  local unsafe = first_unsafe(self.root, actual) or first_unsafe(self.root, expected)
+  local nested_added = {}
+  -- Recognize a pure add without invoking the classifier: unsafe path checks
+  -- intentionally precede classification, and only new rows may use a nested
+  -- relative path. Renames and mixed edits retain the basename-only rule.
+  local actual_set, expected_set, unique = {}, {}, true
+  for _, line in ipairs(actual) do
+    if actual_set[line] then unique = false end
+    actual_set[line] = true
+  end
+  for _, line in ipairs(expected) do expected_set[line] = true end
+  local is_add = unique and #actual > #expected
+  if is_add then
+    for line in pairs(expected_set) do
+      if not actual_set[line] then is_add = false; break end
+    end
+  end
+  if is_add then
+    for line in pairs(actual_set) do
+      if not expected_set[line] then nested_added[line] = true end
+    end
+  end
+  local unsafe = first_unsafe(self.root, actual, nested_added)
+    or first_unsafe(self.root, expected)
   if unsafe ~= nil then
     vim.bo[bufnr].modified = true
     ui.notify('Unsafe entry in the buffer (' .. unsafe.reason
@@ -1054,7 +1078,46 @@ function Buffer:sync()
     return nil, plan.reason
   end
 
-  local actions, yanks = build_actions(self.root, plan)
+  local actions, yanks, build_err = build_actions(self.root, plan)
+  if not actions then
+    vim.bo[bufnr].modified = true
+    ui.notify('Refusing to sync: ' .. tostring(build_err)
+      .. '; nothing was changed.', vim.log.levels.ERROR)
+    return nil, build_err
+  end
+  local added_expand_paths, added_focus_path = {}, nil
+  if plan.kind == 'ADD' then
+    local added_set, expand_by_path = {}, {}
+    for _, line in ipairs(plan.added or {}) do added_set[line] = true end
+    -- Keep the cursor target in the user's row order, not the sorted action
+    -- order. Nested parent directories are expanded for every new nested path.
+    for _, line in ipairs(actual) do
+      if added_set[line] then
+        local relative = line:gsub('/+$', '')
+        added_focus_path = M.entry_path(self.root, line)
+        if relative:find('/', 1, true) then
+          local parts = vim.split(relative, '/', { plain = true })
+          local directory_count = #parts - (is_dir_line(line) and 0 or 1)
+          local parent = self.root
+          for index = 1, directory_count do
+            parent = fs.join(parent, parts[index])
+            local normalized_parent = parent:gsub('/+$', '')
+            local key = vim.fs.normalize(normalized_parent)
+            expand_by_path[key] = parent
+          end
+        end
+      end
+    end
+    for _, path in pairs(expand_by_path) do
+      added_expand_paths[#added_expand_paths + 1] = path
+    end
+    table.sort(added_expand_paths, function(a, b)
+      local depth_a, depth_b = select(2, a:gsub('/', '')), select(2, b:gsub('/', ''))
+      if depth_a ~= depth_b then return depth_a < depth_b end
+      return a < b
+    end)
+    if #added_expand_paths == 0 then added_focus_path = nil end
+  end
   if subtree_edit then
     if plan.kind == 'DELETE' then
       local removed_roots = {}
@@ -1350,6 +1413,27 @@ function Buffer:sync()
       elseif rec and rec.kind == 'root' and is_dir_line(rec.name)
         and fs.same_path(rec.path, target.path) then
         self:expand(row + 1)
+        break
+      end
+    end
+  end
+
+  -- Open every parent directory on newly added nested paths, including parents
+  -- that already existed, then put the cursor on the last added row.
+  for _, path in ipairs(added_expand_paths) do
+    for row = 0, vim.api.nvim_buf_line_count(bufnr) - 1 do
+      local rec = current_row_record(bufnr, row)
+      if rec and is_dir_line(rec.name) and fs.same_path(rec.path, path) then
+        self:expand(row + 1)
+        break
+      end
+    end
+  end
+  if added_focus_path then
+    for row = 0, vim.api.nvim_buf_line_count(bufnr) - 1 do
+      local rec = current_row_record(bufnr, row)
+      if rec and fs.same_path(rec.path, added_focus_path) then
+        pcall(vim.api.nvim_win_set_cursor, 0, { row + 1, (rec.depth or 0) * 2 })
         break
       end
     end
