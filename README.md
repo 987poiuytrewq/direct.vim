@@ -1,77 +1,66 @@
 # direct.vim
 
-Edit directories in Neovim.
+Edit your filesystem using ordinary Neovim buffer commands. Direct displays a
+directory as a list of files and folders; edit the list and save to apply the
+changes. Expand folders to browse and edit their contents in place.
 
-Load a directory into a buffer with each root-level line corresponding to a file
-or subdirectory. Edit those root rows to create, rename, or delete filesystem
-entries. Directories can also be expanded for browsing and editing; their child
-rows are materialized in the buffer and removed when collapsed.
-
-- navigate around the filesystem easily
-- rename, create and delete files and directories
-- yank and paste files and directories
-- full undo and redo history for every change that you make to the filesystem
-
-## Filename highlights
-
-Visible directories use the syntax group `DirectDirectory` (default link
-`Directory`) at any indentation depth. Hidden directories and files retain
-their `Comment` defaults. When icons are enabled, hidden directory and file icons
-also use the `Comment` style; visible directory and file icons retain their
-`Directory` and `Normal` defaults. Listing files receive no filename-,
-filetype-, or special-name-derived highlights; Git status styling is described below.
-
-Direct loads its listing syntax locally, including when Neovim's global syntax
-loader is disabled.
-
-The hidden icon groups are `DirectHiddenFolderIcon` and `DirectHiddenFileIcon`;
-both link to `Comment` by default and can be overridden independently.
-
-Highlight defaults are user-overridable and are reapplied after a `ColorScheme`
-event.
+- Create, rename, and delete files and directories
+- Copy and paste files and directory trees
+- Undo and redo filesystem actions made through Direct
+- Browse Git status, and optionally filter hidden or Git-ignored entries
 
 ## Requirements
 
 - Neovim >= 0.12
-- No Python: the plugin is pure Lua and needs nothing beyond the Neovim runtime.
+- No Python or Lua packages required. Git is needed only for Git-aware features.
 
 Run `:checkhealth direct` to confirm the version and the data home in use.
 
-## Development and coverage
-
-The test suite uses Neovim's embedded Lua and has no runtime test dependencies:
-
-```sh
-make test
-```
-
-To install the optional coverage tooling locally, install LuaRocks (configured
-for Lua 5.1, as used by Neovim's LuaJIT) and run:
-
-```sh
-make install
-make coverage
-make coverage-summary
-```
-
-`make install` checks for Neovim >= 0.12 and installs LuaCov and its summary
-reporter into the ignored `.rocks/` directory. Coverage reports are written to
-`coverage/index.html` and `coverage/summary.out`. Run `make coverage-summary`
-after `make coverage` to wrap the package-generated plain-text summary in
-`coverage/summary.md`; in GitHub Actions, it appends that report to the run
-summary. The normal `make test` run does not need LuaRocks or LuaCov. CI runs
-`make coverage` for each Neovim version, publishes each HTML report as a
-downloadable artifact, and displays the coverage summary directly in the run
-summary.
-
 ## Install
 
-Install with your favourite package manager. For example, with
-[vim-plug](https://github.com/junegunn/vim-plug):
+Install with your favourite package manager. For example:
+
+With Neovim 0.12+'s built-in `vim.pack`:
+
+```lua
+vim.pack.add({ 'https://github.com/987poiuytrewq/direct.vim' })
+```
+
+With [lazy.nvim](https://github.com/folke/lazy.nvim), load Direct during startup
+so it can open directories passed on the command line:
+
+```lua
+{ '987poiuytrewq/direct.vim', lazy = false }
+```
+
+With [vim-plug](https://github.com/junegunn/vim-plug):
 
 ```vim
 Plug '987poiuytrewq/direct.vim'
 ```
+
+Direct works with its defaults; calling `setup()` is optional.
+
+## Quick start
+
+1. Open a directory with `nvim .`, `:edit path/to/directory/`, or
+   `:DirectList path/to/directory`.
+2. Press `<Enter>` on a file to open it, or on a directory to list it. Press
+   `zo` on a directory to expand it in place, or `-` to go to the parent.
+3. Edit the listing like any other buffer. For a first try, press `o`, type
+   `notes.md`, press `<Esc>`, then run `:write` to create the file.
+4. Run `:DirectUndo` to undo that filesystem action or `:DirectRedo` to reapply
+   it. `u` and `<C-r>` undo and redo listing text only; they do not change the
+   filesystem.
+
+**Before saving:** a root-level edit must be unambiguously classifiable as a
+rename, create, or delete. Ambiguous mixtures and duplicate lines are refused
+without changing the filesystem. Directory names must end in `/` (for example,
+`archive/`); file names must not.
+
+With default mappings enabled, press `gh` to toggle dot-hidden entries in the
+current listing. For more, see [commands](#commands), [mappings](#mappings), or
+`:help direct.vim` inside Neovim.
 
 ## Setup
 
@@ -80,6 +69,8 @@ Plug '987poiuytrewq/direct.vim'
 ```lua
 require('direct').setup({
   map_default_keys = true, -- set false to install no default mappings
+  show_hidden = true, -- set false to hide dot-prefixed entries
+  respect_gitignore = false, -- opt in to Git's ignore rules
   show_folder_icons = false, -- opt in to Nerd Font folder icons
   show_file_icons = false, -- opt in to a generic Nerd Font file icon
   max_recursive_expand_depth = false, -- false means unlimited
@@ -89,6 +80,12 @@ require('direct').setup({
 
 It is idempotent, may be called more than once, and reports an unknown option
 name as an error instead of silently ignoring it.
+
+Dot-prefixed files and directories are visible by default. Set
+`show_hidden = false` to hide them; `:DirectToggleHidden` (also mapped to `gh`)
+switches the current direct buffer's view. The toggle is refused while the
+listing has unsaved edits. It refreshes from disk and collapses expanded
+subtrees so every visible level uses the same setting.
 
 ### File and folder icons
 
@@ -140,8 +137,36 @@ require('direct').setup({
 ```
 
 Icon overrides are optional; unspecified file/folder variants keep their regular
-glyphs. Gutter symbols are off unless configured. Set `enabled = false` to
-disable Git awareness.
+glyphs. Gutter symbols are off unless configured. Set `git.enabled = false` to
+disable Git status display; this is independent of `respect_gitignore`.
+
+Git ignore filtering is separate from status display and is off by default. Set
+`respect_gitignore = true` to use Git itself to apply root and nested
+`.gitignore` files, negations, anchoring, escaped patterns, `.git/info/exclude`,
+and the configured global excludes file. Tracked files remain visible, and a
+directory containing tracked descendants remains visible. Outside a repository
+this filter has no effect. Git must be available when the option is enabled; if
+an ignore query fails in a detected repository, the listing fails closed rather
+than guessing. Changing an effective ignore source after a listing makes sync
+refuse before filesystem or history effects; re-list to accept the new rules.
+The rule snapshot is intentionally conservative: a change to a nested repository's
+ignore source can require a re-list even when that source did not affect this view.
+
+### Filename highlights
+
+Visible directories use the syntax group `DirectDirectory` (default link
+`Directory`) at any indentation depth. Hidden directories and files retain
+their `Comment` defaults. When icons are enabled, hidden directory and file icons
+also use the `Comment` style; visible directory and file icons retain their
+`Directory` and `Normal` defaults. Listing files receive no filename-,
+filetype-, or special-name-derived highlights; Git status styling is described
+above.
+
+Direct loads its listing syntax locally, including when Neovim's global syntax
+loader is disabled. The hidden icon groups are `DirectHiddenFolderIcon` and
+`DirectHiddenFileIcon`; both link to `Comment` by default and can be overridden
+independently. Highlight defaults are user-overridable and are reapplied after a
+`ColorScheme` event.
 
 ## Navigate
 
@@ -191,15 +216,18 @@ duplicated line, is reported as ambiguous, naming both sides of the comparison.
 Nothing is changed, no history is written, and the buffer stays modified so you
 can fix it.
 
-`&wildignore` is honoured using the value captured when each directory is
-listed. Changing the option does not change an existing listing's sync rules;
-re-list after changing it. Filtered entries are excluded from sync, and a sync
-is refused before filesystem or history effects if an add/rename would use an
-occupied filtered path or a directory move would carry a filtered descendant or
-an entry the listing cannot represent, such as a dangling symlink or FIFO.
-Directory-only patterns such as `cache/` also protect matching nested directories.
-Directory symlinks are treated as leaves when renamed; their targets are not
-scanned or moved.
+`&wildignore`, dot-hidden visibility, and Git-ignore filtering are independent;
+enabled filters compose as a union. `&wildignore` keeps its existing behavior.
+Each directory captures the filter settings and matches used for that listing.
+Changing an option does not rewrite an existing listing's sync rules; re-list to
+refresh them. Filtered entries are excluded from sync, and sync is refused before
+filesystem or history effects if an add/rename would use an occupied filtered
+path or a directory move would carry a filtered descendant or an entry the
+listing cannot represent, such as a dangling symlink or FIFO. Newly appearing
+entries matching the captured filters are not treated as delete sources.
+Directory-only `&wildignore` patterns such as `cache/` also protect matching
+nested directories. Directory symlinks are treated as leaves when renamed; their
+targets are not scanned or moved.
 
 ### Expanded rows
 
@@ -298,13 +326,14 @@ use their existing synchronous staging path.
 | `:DirectListBuffer` | none | List the directory of the current file, or the working directory when the buffer is not tied to one (no file name, or a non-empty `&buftype`). |
 | `:DirectListCwd` | none | List the current working directory. |
 | `:DirectSync` | none | Classify and apply the current direct buffer's edits; also runs on `:write` in a direct buffer. |
+| `:DirectToggleHidden` | none | Toggle dot-hidden entries in the current direct listing and refresh its view. |
 | `:DirectUndo` | none | Undo the last filesystem action. |
 | `:DirectRedo` | none | Redo the last undone action. |
 | `:DirectYank` | range (default: current line) | Yank the ranged entries. |
 | `:DirectPaste [dir]` | optional `{dir}` (directory completion) | With no argument, paste into the directory under the cursor (or a file's parent) and refresh the listing; with `{dir}`, paste there without touching the current buffer. |
 | `:DirectPasteAs {name}` | `{name}` | Paste into the cursor row's directory (or a file's parent) under `{name}`. |
 
-`:DirectSync`, `:DirectUndo`, `:DirectRedo`, `:DirectYank`, `:DirectPaste` (no
+`:DirectSync`, `:DirectToggleHidden`, `:DirectUndo`, `:DirectRedo`, `:DirectYank`, `:DirectPaste` (no
 argument), `:DirectPasteAs`, and the public `open()` API report an error and do
 nothing when the current buffer is not a direct buffer. `open()` is also used by
 the direct-buffer entry mappings. `:DirectPaste {dir}` is the exception: it
@@ -337,6 +366,7 @@ Buffer-local, in a direct buffer (standard actions follow `map_default_keys`;
 | normal | `yy`, `Y` | `:DirectYank` (current line) |
 | visual | `y` | `:DirectYank` (selected range) |
 | normal | `p`, `P` | `:DirectPaste` |
+| normal | `gh` | `:DirectToggleHidden` |
 
 The buffer-local `-` wins over the global `-` inside a direct buffer.
 `zo`, `za`, and `zc` are installed for every direct listing, independently of
@@ -416,3 +446,30 @@ data:
   characters or invalid UTF-8 are skipped with an error.
 - **Trash** — Python-era trash entries are still read, so an entry removed
   before the upgrade can still be restored.
+
+## Development and coverage
+
+The test suite uses Neovim's embedded Lua and has no runtime test dependencies:
+
+```sh
+make test
+```
+
+To install the optional coverage tooling locally, install LuaRocks (configured
+for Lua 5.1, as used by Neovim's LuaJIT) and run:
+
+```sh
+make install
+make coverage
+make coverage-summary
+```
+
+`make install` checks for Neovim >= 0.12 and installs LuaCov and its summary
+reporter into the ignored `.rocks/` directory. Coverage reports are written to
+`coverage/index.html` and `coverage/summary.out`. Run `make coverage-summary`
+after `make coverage` to wrap the package-generated plain-text summary in
+`coverage/summary.md`; in GitHub Actions, it appends that report to the run
+summary. The normal `make test` run does not need LuaRocks or LuaCov. CI runs
+`make coverage` for each Neovim version, publishes each HTML report as a
+downloadable artifact, and displays the coverage summary directly in the run
+summary.
