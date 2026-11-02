@@ -78,6 +78,10 @@ vim.api.nvim_create_user_command('DirectSync', function()
   require('direct').sync()
 end, { nargs = 0, desc = 'direct: sync the listing with the filesystem' })
 
+vim.api.nvim_create_user_command('DirectToggleHidden', function()
+  require('direct').toggle_hidden()
+end, { nargs = 0, desc = 'direct: toggle hidden entries in this listing' })
+
 vim.api.nvim_create_user_command('DirectUndo', function()
   require('direct').undo()
 end, { nargs = 0, desc = 'direct: undo the last filesystem action' })

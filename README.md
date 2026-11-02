@@ -80,6 +80,8 @@ Plug '987poiuytrewq/direct.vim'
 ```lua
 require('direct').setup({
   map_default_keys = true, -- set false to install no default mappings
+  show_hidden = true, -- set false to hide dot-prefixed entries
+  respect_gitignore = false, -- opt in to Git's ignore rules
   show_folder_icons = false, -- opt in to Nerd Font folder icons
   show_file_icons = false, -- opt in to a generic Nerd Font file icon
   max_recursive_expand_depth = false, -- false means unlimited
@@ -89,6 +91,12 @@ require('direct').setup({
 
 It is idempotent, may be called more than once, and reports an unknown option
 name as an error instead of silently ignoring it.
+
+Dot-prefixed files and directories are visible by default. Set
+`show_hidden = false` to hide them; `:DirectToggleHidden` (also mapped to `gh`)
+switches the current direct buffer's view. The toggle is refused while the
+listing has unsaved edits. It refreshes from disk and collapses expanded
+subtrees so every visible level uses the same setting.
 
 ### File and folder icons
 
@@ -140,8 +148,23 @@ require('direct').setup({
 ```
 
 Icon overrides are optional; unspecified file/folder variants keep their regular
-glyphs. Gutter symbols are off unless configured. Set `enabled = false` to
-disable Git awareness.
+glyphs. Gutter symbols are off unless configured. Set `git.enabled = false` to
+disable Git status display; this is independent of `respect_gitignore`.
+
+Git ignore filtering is separate from status display and is off by default. Set
+`respect_gitignore = true` to use Git itself to apply root and nested
+`.gitignore` files, negations, anchoring, escaped patterns, `.git/info/exclude`,
+and the configured global excludes file. Tracked files remain visible, and a
+directory containing tracked descendants remains visible. Outside a repository
+this filter has no effect. Git must be available when the option is enabled; if
+an ignore query fails in a detected repository, the listing fails closed rather
+than guessing. Changing an effective ignore source or tracked index membership
+after a listing makes sync refuse before filesystem or history effects; re-list
+to accept the new state. The rule snapshot is intentionally conservative: it
+currently walks the full repository to fingerprint ignore sources, so large
+trees incur a full-tree scan when listing or validating sync. A change to a
+nested repository's ignore source can require a re-list even when that source
+did not affect this view.
 
 ## Navigate
 
@@ -191,15 +214,18 @@ duplicated line, is reported as ambiguous, naming both sides of the comparison.
 Nothing is changed, no history is written, and the buffer stays modified so you
 can fix it.
 
-`&wildignore` is honoured using the value captured when each directory is
-listed. Changing the option does not change an existing listing's sync rules;
-re-list after changing it. Filtered entries are excluded from sync, and a sync
-is refused before filesystem or history effects if an add/rename would use an
-occupied filtered path or a directory move would carry a filtered descendant or
-an entry the listing cannot represent, such as a dangling symlink or FIFO.
-Directory-only patterns such as `cache/` also protect matching nested directories.
-Directory symlinks are treated as leaves when renamed; their targets are not
-scanned or moved.
+`&wildignore`, dot-hidden visibility, and Git-ignore filtering are independent;
+enabled filters compose as a union. `&wildignore` keeps its existing behavior.
+Each directory captures the filter settings and matches used for that listing.
+Changing an option does not rewrite an existing listing's sync rules; re-list to
+refresh them. Filtered entries are excluded from sync, and sync is refused before
+filesystem or history effects if an add/rename would use an occupied filtered
+path or a directory move would carry a filtered descendant or an entry the
+listing cannot represent, such as a dangling symlink or FIFO. Newly appearing
+entries matching the captured filters are not treated as delete sources.
+Directory-only `&wildignore` patterns such as `cache/` also protect matching
+nested directories. Directory symlinks are treated as leaves when renamed; their
+targets are not scanned or moved.
 
 ### Expanded rows
 
@@ -298,13 +324,14 @@ use their existing synchronous staging path.
 | `:DirectListBuffer` | none | List the directory of the current file, or the working directory when the buffer is not tied to one (no file name, or a non-empty `&buftype`). |
 | `:DirectListCwd` | none | List the current working directory. |
 | `:DirectSync` | none | Classify and apply the current direct buffer's edits; also runs on `:write` in a direct buffer. |
+| `:DirectToggleHidden` | none | Toggle dot-hidden entries in the current direct listing and refresh its view. |
 | `:DirectUndo` | none | Undo the last filesystem action. |
 | `:DirectRedo` | none | Redo the last undone action. |
 | `:DirectYank` | range (default: current line) | Yank the ranged entries. |
 | `:DirectPaste [dir]` | optional `{dir}` (directory completion) | With no argument, paste into the directory under the cursor (or a file's parent) and refresh the listing; with `{dir}`, paste there without touching the current buffer. |
 | `:DirectPasteAs {name}` | `{name}` | Paste into the cursor row's directory (or a file's parent) under `{name}`. |
 
-`:DirectSync`, `:DirectUndo`, `:DirectRedo`, `:DirectYank`, `:DirectPaste` (no
+`:DirectSync`, `:DirectToggleHidden`, `:DirectUndo`, `:DirectRedo`, `:DirectYank`, `:DirectPaste` (no
 argument), `:DirectPasteAs`, and the public `open()` API report an error and do
 nothing when the current buffer is not a direct buffer. `open()` is also used by
 the direct-buffer entry mappings. `:DirectPaste {dir}` is the exception: it
@@ -337,6 +364,7 @@ Buffer-local, in a direct buffer (standard actions follow `map_default_keys`;
 | normal | `yy`, `Y` | `:DirectYank` (current line) |
 | visual | `y` | `:DirectYank` (selected range) |
 | normal | `p`, `P` | `:DirectPaste` |
+| normal | `gh` | `:DirectToggleHidden` |
 
 The buffer-local `-` wins over the global `-` inside a direct buffer.
 `zo`, `za`, and `zc` are installed for every direct listing, independently of
