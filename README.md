@@ -136,7 +136,7 @@ require('direct').setup({
     folder_open = '\u{f0770}',
   },
   max_recursive_expand_depth = false, -- false means unlimited
-  git = { enabled = true, display = 'both' }, -- icon, text, or both
+  git = { enabled = true, display = 'gutter' }, -- gutter, icon, text, or both
 })
 ```
 
@@ -163,7 +163,7 @@ Configuration defaults:
 | `icons.folder_open` | U+F0770 | Base expanded-folder glyph string. |
 | `max_recursive_expand_depth` | `false` | Positive integer limit for recursive expansion; `false` is unlimited. |
 | `git.enabled` | `true` | Show Git status in repositories. |
-| `git.display` | `'both'` | Status display: `'icon'`, `'text'`, or `'both'`. |
+| `git.display` | `'gutter'` | Status display: `'gutter'`, `'icon'`, `'text'`, or `'both'`. |
 | `git.statuses` | Four default styles | Configure status highlights, icons, and optional gutter symbols. |
 
 For complete command, safety, and data/history documentation, see `:help direct.vim`.
@@ -194,17 +194,18 @@ of changed descendants, in the order conflicted, renamed, added, then modified.
 Staged and unstaged changes use the same display; deleted entries have no listing
 row to mark. Re-list to refresh Git status.
 
-By default, `git.display` is `"both"`: status highlights the existing icon glyph
-(when icons are enabled) and the entry name. It does not change icon glyphs or
-add gutter symbols by default. The default groups link added entries to
-`DiffAdd`, modified and renamed entries to `DiffChange`, and conflicts to
-`ErrorMsg`. Highlight groups, optional icon overrides, and gutter symbols can be
+By default, `git.display` is `"gutter"`: changed entries show a `┃` in the sign
+column without changing their icon glyphs or highlighting their names. Added
+entries use `DiffAdd`, modified and renamed entries use `DiffChange`, and
+conflicts use `ErrorMsg`. Set `display` to `"icon"`, `"text"`, or `"both"` to
+add inline icon and/or name highlighting; gutter symbols remain configurable per
+status. Highlight groups, optional icon overrides, and gutter symbols can be
 customized per status:
 
 ```lua
 require('direct').setup({
   git = {
-    display = "both", -- "icon", "text", or "both"
+    display = "both", -- "gutter", "icon", "text", or "both"
     statuses = {
       added = {
         icon_hl = "MyGitAddedIcon",
@@ -222,8 +223,9 @@ require('direct').setup({
 ```
 
 Icon overrides are optional; unspecified file/folder variants keep their regular
-glyphs. Gutter symbols are off unless configured. Set `git.enabled = false` to
-disable Git status display; this is independent of `respect_gitignore`.
+glyphs. Gutter symbols default to `┃` and can be disabled per status with
+`gutter = false`. Set `git.enabled = false` to disable Git status display; this
+is independent of `respect_gitignore`.
 
 ## Run shell commands
 

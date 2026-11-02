@@ -12,12 +12,16 @@ local default_links = {
   DirectHiddenFileIcon = 'Comment',
   DirectGitAddedIcon = 'DiffAdd',
   DirectGitAdded = 'DiffAdd',
+  DirectGitAddedGutter = 'DiffAdd',
   DirectGitModifiedIcon = 'DiffChange',
   DirectGitModified = 'DiffChange',
+  DirectGitModifiedGutter = 'DiffChange',
   DirectGitRenamedIcon = 'DiffChange',
   DirectGitRenamed = 'DiffChange',
+  DirectGitRenamedGutter = 'DiffChange',
   DirectGitConflictedIcon = 'ErrorMsg',
   DirectGitConflicted = 'ErrorMsg',
+  DirectGitConflictedGutter = 'ErrorMsg',
 }
 
 local function define_highlight_defaults()

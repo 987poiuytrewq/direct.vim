@@ -90,7 +90,7 @@ H.describe('Git status display', function()
       'unmerged file is classified as conflicted')
   end)
 
-  H.it('uses the same icons by default and independently renders text and gutter styles', function()
+  H.it('defaults to colored gutter symbols and supports inline display overrides', function()
     local buffer = require('direct.buffer')
     local config = require('direct.config')
     local sb = H.sandbox()
@@ -106,15 +106,8 @@ H.describe('Git status display', function()
       map_default_keys = false,
       show_folder_icons = true,
       show_file_icons = true,
-      git = {
-        display = 'both',
-        statuses = {
-          added = { gutter = { symbol = 'A', highlight = 'DirectGitAddedGutter' } },
-        },
-      },
     })
-    H.assert_true(config.options.show_file_icons, 'file icons are enabled for this listing')
-    H.assert_true(config.options.show_folder_icons, 'folder icons are enabled for this listing')
+    H.assert_eq(config.options.git.display, 'gutter', 'gutter-only display is the default')
     local listing = buffer.list(root)
     local lines = H.buf_lines()
     local rows = {}
@@ -125,6 +118,45 @@ H.describe('Git status display', function()
 
     H.assert_eq(lines, { '.git/', 'nested/', 'tracked.txt' },
       'listing text remains ordinary paths')
+    H.assert_eq(vim.api.nvim_get_hl(0, { name = 'DirectGitAddedGutter', link = true }),
+      { default = true, link = 'DiffAdd' }, 'added gutter group links to DiffAdd')
+    H.assert_eq(vim.api.nvim_get_hl(0, { name = 'DirectGitModifiedGutter', link = true }),
+      { default = true, link = 'DiffChange' }, 'modified gutter group links to DiffChange')
+    H.assert_eq(vim.api.nvim_get_hl(0, { name = 'DirectGitConflictedGutter', link = true }),
+      { default = true, link = 'ErrorMsg' }, 'conflict gutter group links to ErrorMsg')
+    H.assert_eq(icons[rows['tracked.txt']][4].virt_text,
+      { { '\u{f0214} ', 'DirectFileIcon' } },
+      'default gutter display leaves the normal file icon unchanged')
+    H.assert_nil(highlights[rows['tracked.txt']],
+      'default gutter display leaves the entry name unhighlighted')
+    H.assert_eq(gutters[rows['tracked.txt']][4].sign_text, '┃ ',
+      'modified entry receives the gutter symbol')
+    H.assert_eq(gutters[rows['tracked.txt']][4].sign_hl_group, 'DirectGitModifiedGutter',
+      'modified gutter uses its status color')
+    H.assert_eq(gutters[rows['nested/']][4].sign_text, '┃ ',
+      'added directory receives the same gutter symbol')
+    H.assert_eq(gutters[rows['nested/']][4].sign_hl_group, 'DirectGitAddedGutter',
+      'added gutter uses its status color')
+
+    config.setup({
+      map_default_keys = false,
+      show_folder_icons = true,
+      show_file_icons = true,
+      git = {
+        display = 'both',
+        statuses = {
+          added = { gutter = { symbol = 'A', highlight = 'DirectGitAddedGutter' } },
+          modified = { gutter = false },
+        },
+      },
+    })
+    listing:list()
+    H.assert_true(config.options.show_file_icons, 'file icons are enabled for this listing')
+    H.assert_true(config.options.show_folder_icons, 'folder icons are enabled for this listing')
+    highlights = mark_by_row(0, 'direct-listing-highlights')
+    icons = mark_by_row(0, 'direct-listing-icons')
+    gutters = mark_by_row(0, 'direct-listing-git-gutter')
+
     H.assert_eq(vim.api.nvim_get_hl(0, { name = 'DirectGitAddedIcon', link = true }),
       { default = true, link = 'DiffAdd' }, 'added icon group links to DiffAdd')
     H.assert_eq(vim.api.nvim_get_hl(0, { name = 'DirectGitModified', link = true }),
@@ -145,7 +177,7 @@ H.describe('Git status display', function()
       'directory status is aggregated while its folder glyph remains unchanged')
     H.assert_eq(gutters[rows['nested/']][4].sign_text, 'A ',
       'optional custom gutter symbol is rendered for the added directory')
-    H.assert_nil(gutters[rows['tracked.txt']], 'gutter is omitted when not configured')
+    H.assert_nil(gutters[rows['tracked.txt']], 'disabled gutter is omitted')
 
     config.setup({
       map_default_keys = false,
@@ -154,8 +186,8 @@ H.describe('Git status display', function()
       git = {
         display = 'icon',
         statuses = {
-          modified = { icon = { file = '!' } },
-          added = { icon = { folder = '+' } },
+          modified = { icon = { file = '!' }, gutter = false },
+          added = { icon = { folder = '+' }, gutter = false },
         },
       },
     })
@@ -173,7 +205,9 @@ H.describe('Git status display', function()
       map_default_keys = false,
       show_folder_icons = true,
       show_file_icons = true,
-      git = { display = 'text' },
+      git = { display = 'text', statuses = {
+        modified = { gutter = false }, added = { gutter = false },
+      } },
     })
     listing:list()
     icons = mark_by_row(0, 'direct-listing-icons')
