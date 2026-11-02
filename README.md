@@ -45,9 +45,9 @@ as `archive/`); file names must not. At the root level, keep each save to one
 kind of change—create, rename, or delete. Ambiguous edits are refused without
 changing the filesystem.
 
-`yy` yanks the entry under the cursor and `p` pastes it. In a Direct listing,
-`u` and `<C-r>` undo and redo the listing. After `:write` or paste applies a
-filesystem change, use `:DirectUndo` and `:DirectRedo` to reverse or reapply it.
+`yy` yanks the entry under the cursor and `p` pastes it. Press `u` to undo the
+last filesystem operation or `<C-r>` to redo it. Use `:undo` and `:redo` for
+text changes in the listing.
 
 ## Optional setup
 
