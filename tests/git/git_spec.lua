@@ -145,8 +145,16 @@ H.describe('Git status display', function()
       git = {
         display = 'both',
         statuses = {
-          added = { gutter = { symbol = 'A', highlight = 'DirectGitAddedGutter' } },
-          modified = { gutter = false },
+          added = {
+            icon_hl = 'DirectGitAddedIcon',
+            text_hl = 'DirectGitAdded',
+            gutter = { symbol = 'A', highlight = 'DirectGitAddedGutter' },
+          },
+          modified = {
+            icon_hl = 'DirectGitModifiedIcon',
+            text_hl = 'DirectGitModified',
+            gutter = false,
+          },
         },
       },
     })
@@ -186,8 +194,12 @@ H.describe('Git status display', function()
       git = {
         display = 'icon',
         statuses = {
-          modified = { icon = { file = '!' }, gutter = false },
-          added = { icon = { folder = '+' }, gutter = false },
+          modified = {
+            icon = { file = '!' }, icon_hl = 'DirectGitModifiedIcon', gutter = false,
+          },
+          added = {
+            icon = { folder = '+' }, icon_hl = 'DirectGitAddedIcon', gutter = false,
+          },
         },
       },
     })
@@ -206,7 +218,8 @@ H.describe('Git status display', function()
       show_folder_icons = true,
       show_file_icons = true,
       git = { display = 'text', statuses = {
-        modified = { gutter = false }, added = { gutter = false },
+        modified = { text_hl = 'DirectGitModified', gutter = false },
+        added = { text_hl = 'DirectGitAdded', gutter = false },
       } },
     })
     listing:list()
