@@ -10,13 +10,20 @@ local history = require('direct.history')
 local config = require('direct.config')
 local ui = require('direct.ui')
 local constants = require('direct.constants')
+local pending = require('direct.pending')
 
--- Wired here so register.lua can request a destination-aware refresh without
--- depending on the direct-buffer model.
-register.relist = function(destination)
-  local b = require('direct.buffer').restore()
-  if destination then return b:refresh_after_paste(destination) end
-  return b:list()
+local function paste_and_refresh(destination, name)
+  return register.paste(destination, name, function(result, _, _, changed, pasted_entry)
+    if not changed then return end
+    local ok, refresh_err = pcall(function()
+      return buffer.restore():refresh_after_paste(destination,
+        pasted_entry or (type(result) == 'string' and result or nil))
+    end)
+    if not ok then
+      ui.notify('direct: re-list failed: ' .. tostring(refresh_err),
+        vim.log.levels.ERROR)
+    end
+  end)
 end
 
 function M.setup(opts)
@@ -67,6 +74,7 @@ function M.sync()
   if not guard('DirectSync') then
     return nil
   end
+  if pending.refuse('sync') then return nil end
   return buffer.restore():sync()
 end
 
@@ -74,16 +82,20 @@ function M.undo()
   if not guard('DirectUndo') then
     return nil
   end
-  history.undo()
-  return buffer.restore():list()
+  if pending.refuse('undo') then return nil end
+  return history.undo_async(function()
+    buffer.restore():list()
+  end)
 end
 
 function M.redo()
   if not guard('DirectRedo') then
     return nil
   end
-  history.redo()
-  return buffer.restore():list()
+  if pending.refuse('redo') then return nil end
+  return history.redo_async(function()
+    buffer.restore():list()
+  end)
 end
 
 -- The range is normalised so an upward visual selection works; a nil range means the current line.
@@ -111,6 +123,7 @@ end
 -- No argument pastes relative to the current row and refreshes the listing;
 -- `{dir}` pastes elsewhere, unguarded.
 function M.paste(dir)
+  if pending.refuse('paste') then return nil end
   if dir == nil or dir == '' then
     if not guard('DirectPaste') then
       return nil
@@ -121,12 +134,13 @@ function M.paste(dir)
       ui.notify('direct: cannot paste: ' .. tostring(path_err), vim.log.levels.ERROR)
       return nil, path_err
     end
-    return register.paste(destination, true)
+    return paste_and_refresh(destination)
   end
-  return register.paste(dir, false)
+  return register.paste(dir)
 end
 
 function M.paste_as(name)
+  if pending.refuse('paste') then return nil end
   if not guard('DirectPasteAs') then
     return nil
   end
@@ -136,7 +150,7 @@ function M.paste_as(name)
     ui.notify('direct: cannot paste: ' .. tostring(path_err), vim.log.levels.ERROR)
     return nil, path_err
   end
-  return register.paste(destination, true, name)
+  return paste_and_refresh(destination, name)
 end
 
 return M

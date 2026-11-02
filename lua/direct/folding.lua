@@ -4,6 +4,10 @@ local M = {}
 
 function M.install_mappings(bufnr, buffer)
   local maps = {
+    { '<LeftMouse>', function() return M._handle_mouse_click(buffer) end,
+      'Toggle a direct directory from its folder icon' },
+    { '<2-LeftMouse>', function() return M._handle_double_click(buffer) end,
+      'Open the direct entry under the double-click' },
     { 'zo', function() return buffer.expand() end,
       'Expand one direct directory level' },
     { 'za', function() return buffer.toggle() end,
@@ -28,6 +32,86 @@ function M.install_mappings(bufnr, buffer)
       desc = map[3],
     })
   end
+end
+
+-- Toggle only when the click lands on the rendered folder glyph. The icon is
+-- inline virtual text immediately before the directory name; screenpos()'s
+-- curscol includes that virtual text, while col is the underlying text column.
+function M._handle_mouse_click(buffer, mouse)
+  mouse = mouse or vim.fn.getmousepos()
+  local winid = mouse.winid
+  if not winid or winid == 0 or not vim.api.nvim_win_is_valid(winid) then
+    return
+  end
+
+  local target_buf = vim.api.nvim_win_get_buf(winid)
+  local context = buffer._folding_context(target_buf)
+  local rec = context and mouse.line and mouse.line > 0
+    and context.get_row_record(mouse.line) or nil
+  local is_icon_click = false
+  if rec and context.is_directory(rec)
+    and require('direct.config').options.show_folder_icons == true then
+    local text_col = (rec.depth or 0) * 2 + 1
+    local ok, icon_pos = pcall(vim.fn.screenpos, winid, mouse.line, text_col)
+    if ok and icon_pos and icon_pos.row == mouse.screenrow
+      and icon_pos.col and icon_pos.curscol then
+      -- The icon slot appends one alignment space after the glyph.
+      local glyph_width = icon_pos.curscol - icon_pos.col - 1
+      is_icon_click = glyph_width > 0
+        and mouse.screencol >= icon_pos.col
+        and mouse.screencol < icon_pos.col + glyph_width
+    end
+  end
+
+  -- A buffer-local mouse mapping replaces Neovim's default click action, so
+  -- retain its normal-mode cursor placement for clicks that are not on an icon.
+  if vim.api.nvim_get_current_win() ~= winid then
+    vim.api.nvim_set_current_win(winid)
+  end
+  if mouse.line and mouse.line > 0 then
+    local line = vim.api.nvim_buf_get_lines(target_buf, mouse.line - 1, mouse.line, false)[1]
+    if line then
+      local col = math.max(0, math.min((mouse.column or 1) - 1, #line))
+      vim.api.nvim_win_set_cursor(winid, { mouse.line, col })
+    end
+  end
+
+  if not is_icon_click then return end
+  return vim.api.nvim_win_call(winid, function()
+    local attached = buffer.restore()
+    if context.is_expanded(rec.id) then
+      return attached:collapse(mouse.line)
+    end
+    return attached:expand(mouse.line)
+  end)
+end
+
+-- Open the entry at the double-click position using the same path and identity
+-- validation as the normal <CR> action.
+function M._handle_double_click(buffer, mouse)
+  mouse = mouse or vim.fn.getmousepos()
+  local winid = mouse.winid
+  if not winid or winid == 0 or not vim.api.nvim_win_is_valid(winid) then
+    return
+  end
+
+  local target_buf = vim.api.nvim_win_get_buf(winid)
+  local context = buffer._folding_context(target_buf)
+  if not context or not mouse.line or mouse.line < 1
+    or not context.get_row_record(mouse.line) then
+    return
+  end
+
+  if vim.api.nvim_get_current_win() ~= winid then
+    vim.api.nvim_set_current_win(winid)
+  end
+  local line = vim.api.nvim_buf_get_lines(target_buf, mouse.line - 1, mouse.line, false)[1]
+  if not line then return end
+  local col = math.max(0, math.min((mouse.column or 1) - 1, #line))
+  vim.api.nvim_win_set_cursor(winid, { mouse.line, col })
+  return vim.api.nvim_win_call(winid, function()
+    return require('direct').open()
+  end)
 end
 
 local function expand_tree(buffer, context, start_ids)

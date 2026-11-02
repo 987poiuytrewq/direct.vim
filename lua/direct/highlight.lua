@@ -1,4 +1,4 @@
--- Listing filename highlights and Git display marks.
+-- Listing filenames use syntax groups; this module owns display highlight marks.
 
 local M = {}
 
@@ -6,28 +6,37 @@ local namespace = vim.api.nvim_create_namespace('direct-listing-highlights')
 local gutter_namespace = vim.api.nvim_create_namespace('direct-listing-git-gutter')
 
 local default_links = {
-  added = { icon = 'DiffAdd', text = 'DiffAdd' },
-  modified = { icon = 'DiffChange', text = 'DiffChange' },
-  renamed = { icon = 'DiffChange', text = 'DiffChange' },
-  conflicted = { icon = 'ErrorMsg', text = 'ErrorMsg' },
+  DirectFolderIcon = 'Directory',
+  DirectFileIcon = 'Normal',
+  DirectHiddenFolderIcon = 'Comment',
+  DirectHiddenFileIcon = 'Comment',
+  DirectGitAddedIcon = 'DiffAdd',
+  DirectGitAdded = 'DiffAdd',
+  DirectGitModifiedIcon = 'DiffChange',
+  DirectGitModified = 'DiffChange',
+  DirectGitRenamedIcon = 'DiffChange',
+  DirectGitRenamed = 'DiffChange',
+  DirectGitConflictedIcon = 'ErrorMsg',
+  DirectGitConflicted = 'ErrorMsg',
 }
 
-local function set_defaults()
-  for status, links in pairs(default_links) do
-    vim.api.nvim_set_hl(0, 'DirectGit' .. status:sub(1, 1):upper() .. status:sub(2) .. 'Icon',
-      { default = true, link = links.icon })
-    vim.api.nvim_set_hl(0, 'DirectGit' .. status:sub(1, 1):upper() .. status:sub(2),
-      { default = true, link = links.text })
+local function define_highlight_defaults()
+  for group, target in pairs(default_links) do
+    vim.api.nvim_set_hl(0, group, { default = true, link = target })
   end
 end
 
-set_defaults()
-local group = vim.api.nvim_create_augroup('direct_git_highlight_defaults', { clear = true })
-vim.api.nvim_create_autocmd('ColorScheme', {
-  group = group,
-  pattern = '*',
-  callback = set_defaults,
-})
+function M.setup()
+  define_highlight_defaults()
+  local group = vim.api.nvim_create_augroup('direct_icon_highlight_defaults', {
+    clear = true,
+  })
+  vim.api.nvim_create_autocmd('ColorScheme', {
+    group = group,
+    callback = define_highlight_defaults,
+    desc = 'direct: reapply default display highlight links',
+  })
+end
 
 -- render(bufnr, rows, options) clears stale Git marks and reapplies the selected
 -- display layers. `rows` is an ordered array of { row, depth, status }.

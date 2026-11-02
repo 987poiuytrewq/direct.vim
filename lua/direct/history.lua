@@ -7,6 +7,7 @@ local format = require('direct.history_format')
 M.action = require('direct.action')
 M.paths = require('direct.paths')
 M.ui = require('direct.ui')
+M.pending = require('direct.pending')
 
 M.HEADER = format.HEADER
 
@@ -175,6 +176,7 @@ end
 -- atomic stack rewrite narrows write failure windows, but cannot make those
 -- multiple operations one transaction.
 function M._reverse(which)
+  if M.pending.refuse(which) then return nil, 'another direct operation is pending' end
   local state, preflight_err = M.preflight()
   if not state then
     return nil, preflight_err
@@ -238,6 +240,141 @@ function M._reverse(which)
   end
   M.ui.notify(M.action.summarize({ reversal }), vim.log.levels.INFO)
   return reversal
+end
+
+local function finish_callback(callback, result, err)
+  if type(callback) ~= 'function' then return end
+  local ok, callback_err = pcall(callback, result, err)
+  if not ok then
+    M.ui.notify('direct: history completion callback failed: '
+      .. tostring(callback_err), vim.log.levels.ERROR)
+  end
+end
+
+function M.undo_async(callback)
+  return M._reverse_async('undo', callback)
+end
+
+function M.redo_async(callback)
+  return M._reverse_async('redo', callback)
+end
+
+function M._reverse_async(which, callback)
+  if M.pending.refuse(which) then return nil, 'another direct operation is pending' end
+  local state, preflight_err = M.preflight()
+  if not state then
+    finish_callback(callback, nil, preflight_err)
+    return nil, preflight_err
+  end
+  local src_path, dst_path, src_lines, dst_lines
+  if which == 'undo' then
+    src_path, dst_path = state.undo_path, state.redo_path
+    src_lines, dst_lines = state.undo_lines, state.redo_lines
+  elseif which == 'redo' then
+    src_path, dst_path = state.redo_path, state.undo_path
+    src_lines, dst_lines = state.redo_lines, state.undo_lines
+  else
+    return nil, 'history._reverse_async: expected undo or redo'
+  end
+  if #src_lines <= 1 then
+    M.ui.notify(which == 'undo' and 'Nothing to undo' or 'Nothing to redo',
+      vim.log.levels.INFO)
+    finish_callback(callback, nil, nil)
+    return nil
+  end
+
+  local record = src_lines[#src_lines]
+  local reversal, reverse_err = M.action.reverse(record)
+  if not reversal then
+    M.ui.notify('Failed to ' .. which .. ' action - ' .. tostring(reverse_err),
+      vim.log.levels.ERROR)
+    finish_callback(callback, nil, reverse_err)
+    return nil, reverse_err
+  end
+  local began, begin_err = M.pending.begin(which)
+  if not began then
+    M.ui.notify('direct: cannot ' .. which .. ': ' .. tostring(begin_err),
+      vim.log.levels.WARN)
+    finish_callback(callback, nil, begin_err)
+    return nil, begin_err
+  end
+
+  table.remove(src_lines)
+  local popped, pop_err = write_stack(src_path, src_lines)
+  if not popped then
+    src_lines[#src_lines + 1] = record
+    M.pending.finish()
+    M.ui.notify('Failed to ' .. which .. ' action - cannot update history: '
+      .. tostring(pop_err), vim.log.levels.ERROR)
+    finish_callback(callback, nil, pop_err)
+    return nil, pop_err
+  end
+
+  local settled = false
+  local function complete_inner(ok, result, execution_err)
+    local copied = reversal.name == 'p' and #(reversal.renames or {}) > 0
+    local all_skipped = reversal.name == 'p' and #(reversal.renames or {}) == 0
+      and result == nil
+    if (not ok and not copied) or all_skipped then
+      src_lines[#src_lines + 1] = record
+      local restored, restore_err = write_stack(src_path, src_lines)
+      local why = execution_err ~= nil and tostring(execution_err)
+        or 'action failed or all paste entries were skipped'
+      if not restored then why = why .. '; could not restore history: ' .. tostring(restore_err) end
+      if not all_skipped or not restored then
+        M.ui.notify('Failed to ' .. which .. ' action - '
+          .. M.action.summarize({ reversal }) .. ' (' .. why .. ')',
+          vim.log.levels.ERROR)
+      end
+      M.pending.finish()
+      finish_callback(callback, nil, all_skipped and nil or why)
+      return
+    end
+
+    local inverse, serialize_err = M.action.serialize(reversal)
+    if not inverse then
+      M.ui.notify('Failed to ' .. which .. ' action - cannot serialize reversal: '
+        .. tostring(serialize_err), vim.log.levels.ERROR)
+      M.pending.finish()
+      finish_callback(callback, nil, serialize_err)
+      return
+    end
+    dst_lines[#dst_lines + 1] = inverse
+    local appended, append_err = write_stack(dst_path, dst_lines)
+    if not appended then
+      M.ui.notify('Failed to ' .. which .. ' action - cannot write history: '
+        .. tostring(append_err), vim.log.levels.ERROR)
+    end
+    if not ok then
+      M.ui.notify('Partially completed ' .. which .. ' action: '
+        .. tostring(execution_err), vim.log.levels.ERROR)
+    end
+    M.ui.notify(M.action.summarize({ reversal }), vim.log.levels.INFO)
+    M.pending.finish()
+    finish_callback(callback, reversal, appended and nil or append_err)
+  end
+  local function complete(ok, result, execution_err)
+    if settled then return end
+    settled = true
+    local finished, completion_err = xpcall(function()
+      complete_inner(ok, result, execution_err)
+    end, debug.traceback)
+    if not finished then
+      M.pending.finish()
+      M.ui.notify('Failed to complete async ' .. which .. ' history action: '
+        .. tostring(completion_err), vim.log.levels.ERROR)
+      finish_callback(callback, nil, completion_err)
+    end
+  end
+
+  local called, start_result, start_err = pcall(
+    M.action.execute_async, reversal, complete)
+  if not called then
+    complete(false, nil, start_result)
+  elseif start_result == nil then
+    complete(false, nil, start_err or 'could not start action')
+  end
+  return true
 end
 
 return M

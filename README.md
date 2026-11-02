@@ -16,8 +16,16 @@ rows are materialized in the buffer and removed when collapsed.
 
 Visible directories use the syntax group `DirectDirectory` (default link
 `Directory`) at any indentation depth. Hidden directories and files retain
-their prior `Comment` defaults. Listing files receive no custom filename,
-filetype, or special-name highlights; Git status highlighting is described below.
+their `Comment` defaults. When icons are enabled, hidden directory and file icons
+also use the `Comment` style; visible directory and file icons retain their
+`Directory` and `Normal` defaults. Listing files receive no filename-,
+filetype-, or special-name-derived highlights; Git status styling is described below.
+
+Direct loads its listing syntax locally, including when Neovim's global syntax
+loader is disabled.
+
+The hidden icon groups are `DirectHiddenFolderIcon` and `DirectHiddenFileIcon`;
+both link to `Comment` by default and can be overridden independently.
 
 Highlight defaults are user-overridable and are reapplied after a `ColorScheme`
 event.
@@ -75,10 +83,7 @@ require('direct').setup({
   show_folder_icons = false, -- opt in to Nerd Font folder icons
   show_file_icons = false, -- opt in to a generic Nerd Font file icon
   max_recursive_expand_depth = false, -- false means unlimited
-  git = {
-    enabled = true,
-    display = "both", -- "icon", "text", or "both"
-  },
+  git = { enabled = true, display = "both" }, -- icon, text, or both
 })
 ```
 
@@ -95,22 +100,24 @@ and files use `nf-md-file` (U+F0214), regardless of filetype. When only one kind
 of icon is enabled, the other kind reserves a blank icon slot so entry names
 stay aligned. Icons are virtual text, so the listing lines and filesystem
 behavior are unchanged. No icon plugin or other dependency is required.
+With folder icons enabled, click an icon to expand or collapse that directory in
+place; mouse input must be enabled in Neovim (for example, `:set mouse=a`).
 
 ### Git status
 
-When a listing is inside a Git repository, direct reads the repository status
-once per listing refresh. Added (including untracked), modified, renamed, and
-conflicted entries are highlighted without changing the listing text. A
-directory inherits the strongest status of its changed descendants, in the order
-conflicted, renamed, added, then modified. Staged and unstaged changes use the
-same status display; deleted entries have no listing row to mark. Git status is
-refreshed by re-listing the directory.
+In a Git repository, direct reads status once per listing refresh. Added
+(including untracked), modified, Git-detected renamed, and conflicted entries are
+styled without changing listing text. Directories inherit the strongest status
+of changed descendants, in the order conflicted, renamed, added, then modified.
+Staged and unstaged changes use the same display; deleted entries have no listing
+row to mark. Re-list to refresh Git status.
 
-By default, Git status highlights both an enabled file/folder icon and the entry
-name; it does not change the icon glyph or add a gutter symbol. The built-in
-highlight groups link to `DiffAdd` for added entries, `DiffChange` for modified
-and renamed entries, and `ErrorMsg` for conflicts. Customize a display layer or
-add an optional gutter marker per status:
+By default, `git.display` is `"both"`: status highlights the existing icon glyph
+(when icons are enabled) and the entry name. It does not change icon glyphs or
+add gutter symbols by default. The default groups link added entries to
+`DiffAdd`, modified and renamed entries to `DiffChange`, and conflicts to
+`ErrorMsg`. Highlight groups, optional icon overrides, and gutter symbols can be
+customized per status:
 
 ```lua
 require('direct').setup({
@@ -132,9 +139,9 @@ require('direct').setup({
 })
 ```
 
-`icon` overrides are optional and can be set per file, closed folder, and open
-folder; omitted variants retain their regular file/folder glyph. Gutter markers
-are off unless configured. Set `enabled = false` to disable Git awareness.
+Icon overrides are optional; unspecified file/folder variants keep their regular
+glyphs. Gutter symbols are off unless configured. Set `enabled = false` to
+disable Git awareness.
 
 ## Navigate
 
@@ -144,8 +151,8 @@ non-empty `&buftype` such as a direct listing). You can also open a directory
 with `:edit foo/` or by starting Neovim on it.
 
 Once a directory is listed, `-` goes up to its parent directory and `<Enter>`
-opens the entry under the cursor: a directory line opens a new listing, a file
-line opens the file.
+opens the entry under the cursor. Double-clicking any entry does the same: a
+directory opens a new listing, and a file opens the file.
 
 Use `zo` or `za` on a directory to expand it in place. Children are read lazily,
 one level at a time; repeating an expansion does not re-read or duplicate them.
@@ -273,6 +280,15 @@ failure during deletion can leave quarantine debris, and an identical-content
 replacement cannot be distinguished from the original paste. Open file handles
 and competing same-user processes can still race content checks; there is no
 filesystem snapshot or inter-process lock.
+
+Paste name clashes use Neovim's callback-based `vim.ui.input`; there is no
+synchronous prompt fallback. Cancel, an empty answer, or an invalid name skips
+that entry. Answers that still clash are retried up to ten times. Entries copied
+before a later skip or error are retained and recorded; if every entry is
+skipped, no history action or success notice is produced. While a prompt is
+pending, sync, paste, undo, and redo are refused. History writes and listing
+refresh happen only after the callback flow completes. Grouped moves continue to
+use their existing synchronous staging path.
 
 ## Commands
 
