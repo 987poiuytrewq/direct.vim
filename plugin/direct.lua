@@ -1,4 +1,4 @@
--- plugin/direct.lua -- the command/autocmd surface: nine commands, the netrw
+-- plugin/direct.lua -- the command/autocmd surface: ten commands, the netrw
 -- neutralisation, the directory intercept and the deferred `-` mapping. Every
 -- registration is idempotent (the harness sources this at every spec boundary).
 
@@ -101,6 +101,10 @@ end, { nargs = '?', complete = 'dir', desc = 'direct: paste the register' })
 vim.api.nvim_create_user_command('DirectPasteAs', function(args)
   require('direct').paste_as(args.args)
 end, { nargs = 1, complete = 'file', desc = 'direct: paste as a given name' })
+
+vim.api.nvim_create_user_command('DirectRun', function(args)
+  require('direct').run(args.args)
+end, { nargs = '+', desc = 'direct: run a shell command for the current entry' })
 
 -- Under `nvim --headless -l` `v:vim_did_enter` is 1, so this installs the global
 -- `-` immediately; a real startup defers to a one-shot VimEnter handler (config).

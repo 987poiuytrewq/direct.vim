@@ -370,10 +370,17 @@ existing synchronous staging behavior.
         Paste into the cursor row's directory (or a file's parent directory) as
         {name}.
 
-`:DirectSync`, `:DirectToggleHidden`, `open()` (the public API used by the entry mappings),
-`:DirectUndo`, `:DirectRedo`, `:DirectYank`, `:DirectPaste` (no argument) and
-`:DirectPasteAs` report an error and do nothing when the current buffer is not a
-direct buffer. The listing commands `:DirectList`, `:DirectListBuffer` and
+    :DirectRun {command}
+        Run {command} asynchronously in the shell, with the listing directory
+        as the working directory. Each literal {} is replaced by the
+        shell-escaped absolute path of the current entry; leave {} unquoted.
+        The command must contain {} and the current row must name an existing
+        entry. Captured output and exit status are reported when it finishes.
+
+`:DirectSync`, `open()` (the public API used by the entry mappings),
+`:DirectUndo`, `:DirectRedo`, `:DirectYank`, `:DirectPaste` (no argument),
+`:DirectPasteAs` and `:DirectRun` report an error and do nothing when the current
+buffer is not a direct buffer. The listing commands `:DirectList`, `:DirectListBuffer` and
 `:DirectListCwd` remain available from ordinary buffers; they list a directory
 without operating on the current buffer's listing. `:DirectPaste {dir}` is also
 available from an ordinary buffer: it pastes into the explicitly named

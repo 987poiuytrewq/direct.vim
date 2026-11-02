@@ -225,6 +225,14 @@ Icon overrides are optional; unspecified file/folder variants keep their regular
 glyphs. Gutter symbols are off unless configured. Set `git.enabled = false` to
 disable Git status display; this is independent of `respect_gitignore`.
 
+## Run shell commands
+
+In a Direct listing, `:DirectRun git add {}` runs asynchronously from the listing
+directory. Each `{}` is replaced by the shell-escaped absolute path of the
+current entry. Leave `{}` unquoted so paths containing spaces or shell
+metacharacters remain one argument. Captured output and exit status are reported
+when the command finishes; the current row must name an existing entry.
+
 Git ignore filtering is separate from status display and is off by default. Set
 `respect_gitignore = true` to use Git itself to apply root and nested
 `.gitignore` files, negations, anchoring, escaped patterns, `.git/info/exclude`,
