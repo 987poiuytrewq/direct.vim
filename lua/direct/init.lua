@@ -40,10 +40,12 @@ local function guard(name)
 end
 
 function M.list(path)
+  if pending.refuse('list', 'willRenameFiles') then return nil end
   return buffer.list(path)
 end
 
 function M.list_buffer()
+  if pending.refuse('list', 'willRenameFiles') then return nil end
   local root
   if vim.bo.buftype ~= '' then
     root = vim.fn.getcwd()
@@ -57,10 +59,12 @@ function M.list_buffer()
 end
 
 function M.list_cwd()
+  if pending.refuse('list', 'willRenameFiles') then return nil end
   return buffer.list(vim.fn.getcwd())
 end
 
 function M.open(line)
+  if pending.refuse('open', 'willRenameFiles') then return nil end
   if not guard('open') then
     return nil
   end
@@ -100,6 +104,7 @@ end
 
 -- The range is normalised so an upward visual selection works; a nil range means the current line.
 function M.yank(first, last)
+  if pending.refuse('yank') then return nil end
   if not guard('DirectYank') then
     return nil
   end
@@ -116,7 +121,8 @@ function M.yank(first, last)
       vim.log.levels.ERROR)
     return nil, path_err
   end
-  register.yank(sources)
+  local yanked, yank_err = register.yank(sources)
+  if not yanked then return nil, yank_err end
   return b:list()
 end
 

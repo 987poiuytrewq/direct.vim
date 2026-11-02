@@ -10,6 +10,7 @@ M.history = require('direct.history')
 M.log = require('direct.log')
 M.ui = require('direct.ui')
 M.pending = require('direct.pending')
+local file_operations = require('direct.file_operations')
 
 -- content -> the absolute register path recorded in register/content (the
 -- yanked entry directory), or nil when no yank has happened, or nil, err when
@@ -28,7 +29,11 @@ function M.content()
 end
 
 -- yank(sources) -> true | nil, err. `sources` is a list of absolute paths.
-function M.yank(sources)
+function M.yank(sources, options)
+  options = options or {}
+  if not options.bypass_pending and M.pending.refuse('yank') then
+    return nil, 'another direct operation is pending'
+  end
   if type(sources) ~= 'table' then
     return nil, 'register.yank: a list of sources is required'
   end
@@ -231,6 +236,7 @@ function M.paste(dst, name, callback)
       local copied = #(paste_action.renames or {})
       changed = copied > 0
       if copied > 0 then
+        file_operations.emit_actions({ paste_action })
         pasted_entry = type(result) == 'string' and result or nil
         if pasted_entry == nil then
           local last = paste_action.renames[copied]

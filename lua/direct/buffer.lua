@@ -92,6 +92,8 @@ local ambiguous_message = sync_plan.ambiguous_message
 local result_entry = sync_plan.result_entry
 local build_actions = sync_plan.build_actions
 local pending = require('direct.pending')
+local file_operations = require('direct.file_operations')
+local pending_sync = {}
 local reconcile_undone_materialization
 local edited_subtrees
 local children_integrity
@@ -295,7 +297,14 @@ local function set_options(bufnr)
   vim.api.nvim_create_autocmd('BufWipeout', {
     group = group,
     buffer = bufnr,
-    callback = function() states[bufnr] = nil end,
+    callback = function()
+      local operation = pending_sync[bufnr]
+      if operation then
+        if operation.cancel then operation.cancel() end
+        operation.cleanup()
+      end
+      states[bufnr] = nil
+    end,
     desc = 'direct: release listing row state when the buffer is wiped',
   })
   vim.api.nvim_create_autocmd('BufWriteCmd', {
@@ -843,16 +852,19 @@ function Buffer:collapse(row)
 end
 
 function M.expand()
+  if pending.refuse('expand', 'willRenameFiles') then return nil end
   local buffer = M.restore()
   return buffer:expand(vim.api.nvim_win_get_cursor(0)[1])
 end
 
 function M.collapse()
+  if pending.refuse('collapse', 'willRenameFiles') then return nil end
   local buffer = M.restore()
   return buffer:collapse(vim.api.nvim_win_get_cursor(0)[1])
 end
 
 function M.toggle()
+  if pending.refuse('toggle', 'willRenameFiles') then return nil end
   local bufnr = vim.api.nvim_get_current_buf()
   local rec = current_row_record(bufnr, vim.api.nvim_win_get_cursor(0)[1] - 1)
   if rec and states[bufnr] and states[bufnr].expanded[rec.id] then
@@ -889,18 +901,22 @@ function M._folding_context(bufnr)
 end
 
 function M.expand_recursive()
+  if pending.refuse('expand', 'willRenameFiles') then return nil end
   return folding.expand_recursive(M)
 end
 
 function M.toggle_recursive()
+  if pending.refuse('toggle', 'willRenameFiles') then return nil end
   return folding.toggle_recursive(M)
 end
 
 function M.expand_all()
+  if pending.refuse('expand', 'willRenameFiles') then return nil end
   return folding.expand_all(M)
 end
 
 function M.collapse_all()
+  if pending.refuse('collapse', 'willRenameFiles') then return nil end
   return folding.collapse_all(M)
 end
 
@@ -937,12 +953,38 @@ local function log_applied(actions, applied)
   end
 end
 
+local function sync_signature(actions, yanks)
+  local function action_signature(action)
+    local result = {
+      name = action.name,
+      src = action.src,
+      dst = action.dst,
+      renames = vim.deepcopy(action.renames),
+    }
+    if action.actions then
+      result.actions = {}
+      for _, member in ipairs(action.actions) do
+        result.actions[#result.actions + 1] = action_signature(member)
+      end
+    end
+    return result
+  end
+  local signature = { actions = {}, yanks = vim.deepcopy(yanks or {}) }
+  for _, action in ipairs(actions or {}) do
+    signature.actions[#signature.actions + 1] = action_signature(action)
+  end
+  return signature
+end
+
 -- Buffer:sync -> true when all classified actions succeeded (the buffer was
 -- re-listed and marked nomodified), nil, reason when preflight refused the
 -- sync or any action failed. Failed action batches are still re-listed so the
 -- buffer reflects any independent actions that did succeed.
-function Buffer:sync()
-  if pending.refuse('sync') then return nil, 'another direct operation is pending' end
+function Buffer:sync(options)
+  options = options or {}
+  if not options.bypass_pending and pending.refuse('sync') then
+    return nil, 'another direct operation is pending'
+  end
   local bufnr = vim.api.nvim_get_current_buf()
   reconcile_undone_materialization(bufnr)
   local state = states[bufnr]
@@ -1198,6 +1240,87 @@ function Buffer:sync()
     end
   end
 
+  if options.expected_plan
+    and not vim.deep_equal(sync_signature(actions, yanks), options.expected_plan) then
+    vim.bo[bufnr].modified = true
+    local reason = 'sync plan changed while waiting for LSP willRenameFiles; review and save again'
+    ui.notify('Refusing to sync: ' .. reason .. '; nothing was changed.',
+      vim.log.levels.WARN)
+    return nil, reason
+  end
+
+  -- Ask workspace clients before the first history, register, staging, or
+  -- filesystem side effect. The callback re-enters the ordinary sync planner so
+  -- all path and snapshot checks run again after server edits have landed.
+  if not options.skip_will then
+    local files, changed_paths = {}, {}
+    for _, act in ipairs(actions) do
+      if act.name == 'mv' then
+        files[#files + 1] = {
+          oldUri = vim.uri_from_fname(fs.abspath(act.src)),
+          newUri = vim.uri_from_fname(fs.abspath(act.dst)),
+        }
+        changed_paths[#changed_paths + 1] = act.src
+        changed_paths[#changed_paths + 1] = act.dst
+      end
+    end
+    if #files > 0 and #file_operations.clients('workspace/willRenameFiles', changed_paths) > 0 then
+      local began, token = pending.begin('willRenameFiles')
+      if not began then
+        ui.notify('direct: cannot rename while another operation is pending',
+          vim.log.levels.WARN)
+        return nil, 'another direct operation is pending'
+      end
+      local requested_plan = sync_signature(actions, yanks)
+      local operation = { token = token, closed = false, guard_released = false }
+      pending_sync[bufnr] = operation
+      operation.cleanup = function()
+        operation.closed = true
+        if pending_sync[bufnr] == operation then pending_sync[bufnr] = nil end
+        if not operation.guard_released then
+          operation.guard_released = true
+          pending.finish(token)
+        end
+      end
+      local function finish(ok, suppressed_or_err)
+        if operation.closed then return end
+        local active = pending.is_active(token) and pending_sync[bufnr] == operation
+        operation.closed = true
+        if pending_sync[bufnr] == operation then pending_sync[bufnr] = nil end
+        local ran, callback_err = xpcall(function()
+          if not active then return end
+          if not vim.api.nvim_buf_is_valid(bufnr) then return end
+          if not ok then
+            vim.bo[bufnr].modified = true
+            ui.notify('Refusing to rename after LSP workspace edit failure '
+              .. '(earlier server edits may already have applied): '
+              .. tostring(suppressed_or_err), vim.log.levels.ERROR)
+            return
+          end
+          vim.api.nvim_buf_call(bufnr, function()
+            self:sync({ bypass_pending = true, skip_will = true,
+              suppress_operations = suppressed_or_err,
+              expected_plan = requested_plan })
+          end)
+        end, debug.traceback)
+        operation.cleanup()
+        if not ran then
+          ui.notify('direct: async rename completion failed: '
+            .. tostring(callback_err), vim.log.levels.ERROR)
+        end
+      end
+      local started, cancel = pcall(file_operations.will_rename, files, finish, nil,
+        function()
+          return pending.is_active(token) and pending_sync[bufnr] == operation
+        end)
+      if started and type(cancel) == 'function' and not operation.closed then
+        operation.cancel = cancel
+      end
+      if not started then finish(true, {}) end
+      return true
+    end
+  end
+
   -- Classify both raw history stacks only after the complete sync plan has
   -- passed its read-only checks, but before auto-yank or filesystem mutation.
   if #actions > 0 or #yanks > 0 then
@@ -1221,7 +1344,7 @@ function Buffer:sync()
   -- Yank removed paths before applying actions. If yanking is refused, leave
   -- the filesystem untouched.
   if #yanks > 0 then
-    local ok, yerr = register.yank(yanks)
+    local ok, yerr = register.yank(yanks, { bypass_pending = options.bypass_pending })
     if not ok then
       ui.notify('Action failed - could not yank deleted entries: '
         .. tostring(yerr), vim.log.levels.ERROR)
@@ -1287,6 +1410,7 @@ function Buffer:sync()
     end
   end
   log_applied(actions, applied)
+  file_operations.emit_actions(actions, applied, options.suppress_operations)
 
   -- Every staged temp is expected to be consumed by a successful no-replace
   -- move. If a temp path remains, preserve and report it; never recursively
