@@ -1602,6 +1602,25 @@ function Buffer:get_paths(firstline, lastline)
   return out
 end
 
+-- Buffer:get_entry_path(row) -> the existing row identity at one display row.
+-- Unlike get_paths(), this is for actions that must target the entry that was
+-- actually listed: it refuses blank rows and rows with unsaved name edits.
+function Buffer:get_entry_path(row)
+  local bufnr = vim.api.nvim_get_current_buf()
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local safe, integrity_err = children_integrity(bufnr, lines)
+  if not safe then return nil, integrity_err end
+  local line = lines[row]
+  local record = current_row_record(bufnr, row - 1)
+  if not line or not record then
+    return nil, 'row identity is unavailable'
+  end
+  if line ~= record.text then
+    return nil, 'current row has unsaved edits'
+  end
+  return record.path
+end
+
 -- Buffer:paste_destination([row]) -> the directory represented by the row.
 -- A directory row is itself the destination; a file row uses its parent.
 -- Resolve through the row record so expanded child rows never rely on their

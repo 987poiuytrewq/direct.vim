@@ -11,6 +11,7 @@ local config = require('direct.config')
 local ui = require('direct.ui')
 local constants = require('direct.constants')
 local pending = require('direct.pending')
+local run = require('direct.run')
 
 local function paste_and_refresh(destination, name)
   return register.paste(destination, name, function(result, _, _, changed, pasted_entry)
@@ -157,6 +158,14 @@ function M.paste_as(name)
     return nil, path_err
   end
   return paste_and_refresh(destination, name)
+end
+
+function M.run(command)
+  if not guard('DirectRun') then
+    return nil
+  end
+  if pending.refuse('run a shell command') then return nil end
+  return run.current_entry(command)
 end
 
 return M

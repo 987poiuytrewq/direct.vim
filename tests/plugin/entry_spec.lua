@@ -69,6 +69,7 @@ local EXPECTED_CMDS = {
   DirectYank = { nargs = '0', range = '.' },
   DirectPaste = { nargs = '?', complete = 'dir' },
   DirectPasteAs = { nargs = '1', complete = 'file' },
+  DirectRun = { nargs = '+' },
 }
 
 H.describe('entry: command surface', function()
@@ -167,7 +168,7 @@ H.describe('entry: direct-buffer guard', function()
   H.it('the public API exposes every facade function', function()
     local api = require('direct')
     local expected = { 'setup', 'list', 'list_buffer', 'list_cwd', 'open', 'toggle_hidden',
-      'sync', 'undo', 'redo', 'yank', 'paste', 'paste_as' }
+      'sync', 'undo', 'redo', 'yank', 'paste', 'paste_as', 'run' }
     local actual = {}
     for name, value in pairs(api) do
       actual[#actual + 1] = name
@@ -189,6 +190,7 @@ H.describe('entry: direct-buffer guard', function()
       { name = 'DirectToggleHidden', call = function(api) return api.toggle_hidden() end },
       { name = 'DirectPaste', call = function(api) return api.paste() end },
       { name = 'DirectPasteAs', call = function(api) return api.paste_as('x.txt') end },
+      { name = 'DirectRun', call = function(api) return api.run('echo {}') end },
     }
     for _, case in ipairs(cases) do
       clean_buffers()
