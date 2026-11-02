@@ -52,21 +52,87 @@ refuses the save and leaves the filesystem unchanged.
 **Undo keys are different in Direct:** `u` undoes the last filesystem operation
 and `<C-r>` redoes it. Use `:undo` and `:redo` for text changes in the listing.
 
-## Optional setup
+## Configuration
 
-You can use Direct without calling `setup()`. For example, to hide dotfiles by
-default and filter Git-ignored entries:
+Calling `setup()` is optional. These are all supported options and defaults:
+
+| Option | Default | Description |
+|---|---|---|
+| `map_default_keys` | `true` | Install Direct's default key mappings. |
+| `show_hidden` | `true` | Show dotfiles; `gh` toggles visibility in a listing. |
+| `respect_gitignore` | `false` | Apply Git ignore rules to listings; tracked files remain visible. |
+| `show_folder_icons` | `false` | Show folder icons. |
+| `show_file_icons` | `false` | Show generic file icons. |
+| `icons.file` | U+F0214 | File glyph string. |
+| `icons.folder` | U+F024B | Collapsed-folder glyph string. |
+| `icons.folder_open` | U+F0770 | Expanded-folder glyph string. |
+| `max_recursive_expand_depth` | `false` | Positive integer limit for recursive expansion; `false` is unlimited. |
+| `git.enabled` | `true` | Show Git status in repositories. |
+| `git.display` | `'both'` | Status display: `'icon'`, `'text'`, or `'both'`. |
+| `git.statuses` | Four default styles | Configure status highlights, icons, and optional gutter symbols. |
+
+Folder and file icons are enabled independently with `show_folder_icons` and
+`show_file_icons`. Built-in glyphs require a Nerd Font; set `icons.file`,
+`icons.folder`, and `icons.folder_open` to use your own glyphs. Git status icon
+overrides in `git.statuses` take precedence over these base glyphs. `git.enabled`
+controls status display; it does not control `respect_gitignore`.
+
+The groups below can be customized in your colorscheme or with
+`vim.api.nvim_set_hl()`. Direct's default links are reapplied after a colorscheme
+change, without overriding user-defined groups.
+
+For example, change the folder-icon color with:
+
+```lua
+vim.api.nvim_set_hl(0, 'DirectFolderIcon', { fg = '#e0af68' })
+```
+
+| Highlight group(s) | Applies to | Default link |
+|---|---|---|
+| `DirectDirectory` | Visible directory names | `Directory` |
+| `DirectHiddenDirectory`, `DirectHiddenFile` | Hidden names | `Comment` |
+| `DirectFolderIcon` | Visible folder icons | `Directory` |
+| `DirectFileIcon` | File icons | `Normal` |
+| `DirectHiddenFolderIcon`, `DirectHiddenFileIcon` | Hidden-entry icons | `Comment` |
+| `DirectGitAddedIcon`, `DirectGitAdded` | Added status icon and name | `DiffAdd` |
+| `DirectGitModifiedIcon`, `DirectGitModified` | Modified status icon and name | `DiffChange` |
+| `DirectGitRenamedIcon`, `DirectGitRenamed` | Renamed status icon and name | `DiffChange` |
+| `DirectGitConflictedIcon`, `DirectGitConflicted` | Conflicted status icon and name | `ErrorMsg` |
+
+<details>
+<summary>Git status styling options</summary>
+
+`git.statuses` supports these status keys and default highlight groups:
+
+| Status | `icon_hl` | `text_hl` | Default link |
+|---|---|---|---|
+| `added` | `DirectGitAddedIcon` | `DirectGitAdded` | `DiffAdd` |
+| `modified` | `DirectGitModifiedIcon` | `DirectGitModified` | `DiffChange` |
+| `renamed` | `DirectGitRenamedIcon` | `DirectGitRenamed` | `DiffChange` |
+| `conflicted` | `DirectGitConflictedIcon` | `DirectGitConflicted` | `ErrorMsg` |
+
+Each status also accepts `icon` (a glyph string or a table with `file`,
+`folder`, and `folder_open` glyphs; unspecified variants keep their defaults)
+and `gutter` (off by default, or `{ symbol = 'A', highlight = 'Group' }`). Set
+`gutter = false` to disable a configured gutter.
+
+</details>
 
 ```lua
 require('direct').setup({
   show_hidden = false,
   respect_gitignore = true,
+  show_folder_icons = true,
+  show_file_icons = true,
+  icons = { file = '·', folder = '▸', folder_open = '▾' },
+  git = {
+    display = 'text',
+    statuses = {
+      added = { text_hl = 'MyGitAdded' },
+    },
+  },
 })
 ```
-
-Dotfiles are shown by default; `gh` toggles their visibility. Git-ignore
-filtering is off by default. Folder and file icons are also available and
-require a Nerd Font.
 
 ## More help
 

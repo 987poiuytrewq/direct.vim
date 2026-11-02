@@ -378,6 +378,28 @@ H.describe('listing filename highlights', function()
     H.assert_eq(listing_icon_marks(0), {}, 'disabling both kinds clears all icon slots')
   end)
 
+  H.it('renders configured base glyphs for files, collapsed folders, and expanded folders', function()
+    clean_buffers()
+    local config = require('direct.config')
+    config.setup({
+      show_folder_icons = true,
+      show_file_icons = true,
+      icons = { file = 'F', folder = 'D', folder_open = 'O' },
+    })
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkdir(ws, 'folder')
+    H.mkfile(ws, 'file.txt', '')
+
+    local listing = buffer.list(ws)
+    assert_folder_icon(0, 0, 0, 'D')
+    H.assert_eq(icon_mark(0, 1)[4].virt_text,
+      { { 'F ', 'DirectFileIcon' } }, 'configured generic file glyph renders')
+
+    listing:expand(1)
+    assert_folder_icon(0, 0, 0, 'O')
+  end)
+
   H.it('styles hidden names and their optional icons with Comment', function()
     clean_buffers()
     vim.cmd('syntax off')

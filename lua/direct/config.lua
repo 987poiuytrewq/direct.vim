@@ -9,6 +9,11 @@ local defaults = {
   map_default_keys = true,
   show_folder_icons = false,
   show_file_icons = false,
+  icons = {
+    file = '\u{f0214}',
+    folder = '\u{f024b}',
+    folder_open = '\u{f0770}',
+  },
   max_recursive_expand_depth = false,
   git = {
     enabled = true,
@@ -36,6 +41,33 @@ local defaults = {
 
 local git_statuses = { added = true, modified = true, renamed = true, conflicted = true }
 local git_display_modes = { icon = true, text = true, both = true }
+local icon_variants = { file = true, folder = true, folder_open = true }
+
+local function report_invalid_icon_option(key, reason)
+  local option = key == '' and 'icons' or ('icons.' .. key)
+  require('direct.ui').notify(
+    string.format('direct: invalid %s: %s', option, reason),
+    vim.log.levels.ERROR)
+end
+
+local function resolve_icon_options(value)
+  if type(value) ~= 'table' then
+    report_invalid_icon_option('', 'expected a table')
+    return vim.deepcopy(defaults.icons)
+  end
+
+  local result = vim.deepcopy(defaults.icons)
+  for key, glyph in pairs(value) do
+    if not icon_variants[key] then
+      report_invalid_icon_option(tostring(key), 'unknown icon; expected file, folder, or folder_open')
+    elseif type(glyph) ~= 'string' or glyph == '' then
+      report_invalid_icon_option(key, 'expected a non-empty glyph string')
+    else
+      result[key] = glyph
+    end
+  end
+  return result
+end
 
 local function report_invalid_git_option(key, reason)
   require('direct.ui').notify(
@@ -323,6 +355,8 @@ function M.setup(opts)
       require('direct.ui').notify(
         'direct: max_recursive_expand_depth must be false or a positive integer',
         vim.log.levels.ERROR)
+    elseif key == 'icons' then
+      next_options.icons = resolve_icon_options(value)
     elseif key == 'git' then
       next_options.git = resolve_git_options(value)
     else
