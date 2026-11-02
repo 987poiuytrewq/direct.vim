@@ -83,17 +83,24 @@ H.describe('config', function()
     config.clear_mappings()
   end)
 
-  H.it('Git display defaults to both layers and accepts partial status overrides', function()
+  H.it('Git display defaults to colored gutters and accepts partial status overrides', function()
     local config = fresh_config()
     config.clear_mappings()
     H.assert_true(config.defaults.git.enabled, 'Git status is enabled by default')
-    H.assert_eq(config.defaults.git.display, 'both', 'both display layers are the default')
+    H.assert_eq(config.defaults.git.display, 'gutter', 'gutter-only display is the default')
     H.assert_eq(config.defaults.git.statuses.added.icon_hl, 'DirectGitAddedIcon',
       'added icons have a plugin highlight group')
     H.assert_nil(config.defaults.git.statuses.added.icon,
       'Git status does not replace the existing icon glyph by default')
-    H.assert_nil(config.defaults.git.statuses.added.gutter,
-      'gutter symbols are disabled by default')
+    H.assert_eq(config.defaults.git.statuses.added.gutter,
+      { symbol = '┃', highlight = 'DirectGitAddedGutter' },
+      'added entries use the colored gutter symbol by default')
+    H.assert_eq(config.defaults.git.statuses.modified.gutter.highlight,
+      'DirectGitModifiedGutter', 'modified entries have their own gutter highlight')
+    H.assert_eq(config.defaults.git.statuses.renamed.gutter.highlight,
+      'DirectGitRenamedGutter', 'renamed entries have their own gutter highlight')
+    H.assert_eq(config.defaults.git.statuses.conflicted.gutter.highlight,
+      'DirectGitConflictedGutter', 'conflicts have their own gutter highlight')
 
     local options = config.setup({ git = {
       display = 'icon',
@@ -120,7 +127,7 @@ H.describe('config', function()
       },
       show_file_icons = true,
     })
-    H.assert_eq(options.git.display, 'both', 'invalid mode keeps its default')
+    H.assert_eq(options.git.display, 'gutter', 'invalid mode keeps its default')
     H.assert_nil(options.git.statuses.changed, 'unknown status is not stored')
     H.assert_true(options.show_file_icons, 'valid sibling options still apply')
     H.assert_notified('git.display', vim.log.levels.ERROR)

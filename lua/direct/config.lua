@@ -19,30 +19,34 @@ local defaults = {
   max_recursive_expand_depth = false,
   git = {
     enabled = true,
-    display = 'both',
+    display = 'gutter',
     statuses = {
       added = {
         icon_hl = 'DirectGitAddedIcon',
         text_hl = 'DirectGitAdded',
+        gutter = { symbol = '┃', highlight = 'DirectGitAddedGutter' },
       },
       modified = {
         icon_hl = 'DirectGitModifiedIcon',
         text_hl = 'DirectGitModified',
+        gutter = { symbol = '┃', highlight = 'DirectGitModifiedGutter' },
       },
       renamed = {
         icon_hl = 'DirectGitRenamedIcon',
         text_hl = 'DirectGitRenamed',
+        gutter = { symbol = '┃', highlight = 'DirectGitRenamedGutter' },
       },
       conflicted = {
         icon_hl = 'DirectGitConflictedIcon',
         text_hl = 'DirectGitConflicted',
+        gutter = { symbol = '┃', highlight = 'DirectGitConflictedGutter' },
       },
     },
   },
 }
 
 local git_statuses = { added = true, modified = true, renamed = true, conflicted = true }
-local git_display_modes = { icon = true, text = true, both = true }
+local git_display_modes = { gutter = true, icon = true, text = true, both = true }
 local icon_variants = { file = true, folder = true, folder_open = true }
 
 local function report_invalid_icon_option(key, reason)
@@ -95,7 +99,7 @@ local function resolve_git_options(value)
       if type(option) == 'string' and git_display_modes[option] then
         result.display = option
       else
-        report_invalid_git_option(key, "expected 'icon', 'text', or 'both'")
+        report_invalid_git_option(key, "expected 'gutter', 'icon', 'text', or 'both'")
       end
     elseif key == 'statuses' then
       if type(option) ~= 'table' then
