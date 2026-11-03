@@ -175,8 +175,7 @@ Configuration defaults:
 | `max_recursive_expand_depth` | `false` | Positive integer limit for recursive expansion; `false` is unlimited. |
 | `git.enabled` | `true` | Show Git status in repositories. |
 | `git.show_deleted` | `true` | Show synthetic rows for tracked deletions when Git status is enabled. |
-| `git.gutter.index` | `'|'` | Symbol for the porcelain index (first) column. |
-| `git.gutter.worktree` | `'|'` | Symbol for the porcelain worktree (second) column. |
+| `git.symbols` | Neo-tree defaults | Configure status and stage glyphs shown at the right of each row. |
 
 For complete command, safety, and data/history documentation, see `:help direct.vim`.
 Run `:checkhealth direct` to check the Neovim version and data directory.
@@ -200,28 +199,26 @@ place; mouse input must be enabled in Neovim (for example, `:set mouse=a`).
 
 ### Git status
 
-In a Git repository, direct reads porcelain status once per listing refresh.
-Changed entries show two gutter cells in Git's porcelain `XY` order: index
-(staged) first, then worktree (unstaged). Each non-space code shows its gutter
-symbol (both default to `|`); a porcelain space shows a blank cell. `T` is
-normalized to `M`, and untracked `??` is displayed as `_A` (blank index cell,
-added worktree cell). The status letters map to highlights: `A` → `DiffAdd`,
-`M` and `T` → `DiffChange`, `D` → `DiffDelete`, `R`/`C` → `DiffChange`, and
-`U` → `ErrorMsg`. The two cells are highlighted independently. Directories
-aggregate the strongest changed status independently in each column, using the
-existing precedence: conflict, rename/copy, add, delete, then modification.
-Git status does not recolor entry names or file/folder icons. Re-list to refresh
-Git status.
+In a Git repository, Direct reads porcelain status once per listing refresh and
+shows a Neo-tree-style status component, right-aligned at the end of each row.
+The component is virtual text: it does not change the editable listing lines,
+icons, or entry-name colors. `T` is normalized to `M`, untracked `??` maps to
+the untracked symbol, and ignored `!!` entries use the ignored symbol.
 
-Direct temporarily reserves two sign-column cells in the listing window and
-restores that window's prior `signcolumn` setting when you leave the listing. An
-explicit `signcolumn=no` is respected, so it suppresses the gutter.
+The default glyphs are `✚` added, `✖` deleted, `` modified, `󰁕` renamed,
+`` untracked, `` ignored, `󰄱` unstaged, `` staged, and `` conflict. A
+single-column change shows its change-type glyph plus its staged/unstaged glyph;
+changes in both porcelain columns show both change-type glyphs. Untracked entries
+show only the untracked glyph. Copies use the added glyph, matching Neo-tree's
+status component. Directories aggregate changed descendants independently in
+the index and worktree columns. Re-list to refresh Git status.
 
-Missing tracked files and directories containing deleted tracked descendants
-appear as protected rows. Their names retain the dedicated deleted-row highlight.
-Set `git.show_deleted = false` to hide these synthetic rows while retaining Git
-status on entries that still exist. This option has no effect when Git status is
-disabled; it defaults to `true`.
+The status component is right-aligned in the window. Very long row text may leave
+less room for it. Missing tracked files and directories containing deleted
+tracked descendants appear as protected rows; their names retain the dedicated
+deleted-row highlight. Set `git.show_deleted = false` to hide these synthetic
+rows while retaining Git status on entries that still exist. This option has no
+effect when Git status is disabled; it defaults to `true`.
 
 Press `gs` or run `:DirectToggleGitStatus` to show only entries with a status;
 press it again to restore the normal listing. Directories inherit status from
@@ -229,22 +226,27 @@ changed descendants and remain visible in this view. This is a view filter, so
 entries it hides are not treated as deletion sources during sync. Outside a Git
 repository, or when `git.enabled = false`, the filtered view contains no entries.
 
-The gutter symbols can be configured independently by column:
+The symbols can be customized independently by status:
 
 ```lua
 require('direct').setup({
   git = {
-    gutter = { index = "│", worktree = "│" },
+    symbols = {
+      modified = "~",
+      staged = "+",
+      unstaged = "!",
+    },
   },
 })
 ```
 
-Both symbols must occupy one display cell. Status colors use the `DirectGitAddedGutter`,
-`DirectGitModifiedGutter`, `DirectGitDeletedGutter`, and
-`DirectGitConflictedGutter` highlight groups. Deleted rows can be targeted by
-`:DirectRun`, expanded and collapsed with the `z` commands, and staged/reset/
-restored with `ga`, `gr`, and `gc`. Other listing edits, opens, yanks, and pastes
-on those rows are ignored.
+Symbols can be set to an empty string to hide that marker. Colors use the
+`DirectGitAdded`, `DirectGitDeleted`, `DirectGitModified`, `DirectGitRenamed`,
+`DirectGitUntracked`, `DirectGitIgnored`, `DirectGitStaged`,
+`DirectGitUnstaged`, and `DirectGitConflict` highlight groups. Deleted rows can
+be targeted by `:DirectRun`, expanded and collapsed with the `z` commands, and
+staged/reset/restored with `ga`, `gr`, and `gc`. Other listing edits, opens,
+yanks, and pastes on those rows are ignored.
 
 ## Run shell and Git commands
 

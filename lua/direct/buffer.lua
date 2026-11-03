@@ -80,10 +80,13 @@ local function refresh_highlights(bufnr, state)
     local id = row_id_at(bufnr, row)
     local rec = id and state.rows[id]
     if rec then
+      local status, conflict
+      if snapshot then status, conflict = git.status_for(snapshot, rec.path) end
       display_rows[#display_rows + 1] = {
         row = row,
         depth = rec.depth or 0,
-        status = snapshot and git.status_for(snapshot, rec.path) or nil,
+        status = status,
+        conflict = conflict,
         deleted_kind = rec.deleted_kind,
       }
     end

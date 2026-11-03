@@ -20,9 +20,16 @@ local defaults = {
   git = {
     enabled = true,
     show_deleted = true,
-    gutter = {
-      index = '|',
-      worktree = '|',
+    symbols = {
+      added = '✚',
+      deleted = '✖',
+      modified = '',
+      renamed = '󰁕',
+      untracked = '',
+      ignored = '',
+      unstaged = '󰄱',
+      staged = '',
+      conflict = '',
     },
   },
 }
@@ -81,19 +88,17 @@ local function resolve_git_options(value)
       else
         report_invalid_git_option(key, 'expected a boolean')
       end
-    elseif key == 'gutter' then
+    elseif key == 'symbols' then
       if type(option) ~= 'table' then
         report_invalid_git_option(key, 'expected a table')
       else
-        for cell, symbol in pairs(option) do
-          if cell ~= 'index' and cell ~= 'worktree' then
-            report_invalid_git_option('gutter.' .. tostring(cell), 'unknown setting')
-          elseif type(symbol) ~= 'string' or symbol == ''
-            or vim.fn.strdisplaywidth(symbol) ~= 1 then
-            report_invalid_git_option('gutter.' .. cell,
-              'expected a non-empty one-cell symbol')
+        for status, symbol in pairs(option) do
+          if result.symbols[status] == nil then
+            report_invalid_git_option('symbols.' .. tostring(status), 'unknown status symbol')
+          elseif type(symbol) ~= 'string' then
+            report_invalid_git_option('symbols.' .. status, 'expected a string')
           else
-            result.gutter[cell] = symbol
+            result.symbols[status] = symbol
           end
         end
       end

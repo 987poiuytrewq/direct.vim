@@ -3,130 +3,126 @@
 local M = {}
 
 local namespace = vim.api.nvim_create_namespace('direct-listing-highlights')
-local gutter_namespace = vim.api.nvim_create_namespace('direct-listing-git-gutter')
-local saved_signcolumn = {}
+local git_namespace = vim.api.nvim_create_namespace('direct-listing-git-status')
 
-local default_links = {
-  DirectFolderIcon = 'Directory',
-  DirectFileIcon = 'Normal',
-  DirectHiddenFolderIcon = 'Comment',
-  DirectHiddenFileIcon = 'Comment',
-  DirectGitAddedGutter = 'DiffAdd',
-  DirectGitModifiedGutter = 'DiffChange',
-  DirectGitConflictedGutter = 'ErrorMsg',
-  DirectGitDeletedGutter = 'DiffDelete',
-  DirectGitDeletedFile = 'ErrorMsg',
-  DirectGitDeletedDirectory = 'ErrorMsg',
+local default_highlights = {
+  DirectFolderIcon = { link = 'Directory' },
+  DirectFileIcon = { link = 'Normal' },
+  DirectHiddenFolderIcon = { link = 'Comment' },
+  DirectHiddenFileIcon = { link = 'Comment' },
+  DirectGitAdded = { fg = '#5faf5f' },
+  DirectGitDeleted = { fg = '#ff5900' },
+  DirectGitModified = { fg = '#d7af5f' },
+  DirectGitRenamed = { link = 'DirectGitModified' },
+  DirectGitConflict = { fg = '#ff8700', italic = true, bold = true },
+  DirectGitIgnored = { fg = '#626262' },
+  DirectGitUntracked = { fg = '#ff8700', italic = true },
+  DirectGitStaged = { link = 'DirectGitAdded' },
+  DirectGitUnstaged = { link = 'DirectGitConflict' },
+  DirectGitDeletedFile = { link = 'ErrorMsg' },
+  DirectGitDeletedDirectory = { link = 'ErrorMsg' },
 }
 
-local status_highlights = {
-  A = 'DirectGitAddedGutter',
-  M = 'DirectGitModifiedGutter',
-  D = 'DirectGitDeletedGutter',
-  R = 'DirectGitModifiedGutter',
-  C = 'DirectGitModifiedGutter',
-  U = 'DirectGitConflictedGutter',
+local change_highlights = {
+  added = 'DirectGitAdded',
+  deleted = 'DirectGitDeleted',
+  modified = 'DirectGitModified',
+  renamed = 'DirectGitRenamed',
 }
 
-local function two_column_value(value)
-  if value == 'no' then return nil end
-  if value == 'number' then return 'auto:2' end
-  if value == 'auto' then return 'auto:2' end
-  if value == 'yes' then return 'yes:2' end
-  local count = value:match('^auto:(%d+)$') or value:match('^yes:(%d+)$')
-  if count then
-    if tonumber(count) < 2 then
-      return value:sub(1, 4) == 'auto' and 'auto:2' or 'yes:2'
-    end
-    return nil
-  end
-  local _, maximum = value:match('^auto:(%d+)%-(%d+)$')
-  if maximum and tonumber(maximum) < 2 then return 'auto:2' end
-  return nil
-end
-
-local function ensure_signcolumn(win)
-  local current = vim.wo[win].signcolumn
-  local previous = saved_signcolumn[win]
-  if previous and previous.applied == current then return end
-  saved_signcolumn[win] = nil
-  local replacement = two_column_value(current)
-  if replacement then
-    saved_signcolumn[win] = { original = current, applied = replacement }
-    vim.wo[win].signcolumn = replacement
-  end
-end
-
-local function restore_signcolumn(win)
-  local previous = saved_signcolumn[win]
-  saved_signcolumn[win] = nil
-  if not previous or not vim.api.nvim_win_is_valid(win) then return end
-  if vim.wo[win].signcolumn == previous.applied then
-    vim.wo[win].signcolumn = previous.original
-  end
-end
-
-local function ensure_signcolumn_for_buffer(bufnr)
-  for _, win in ipairs(vim.api.nvim_list_wins()) do
-    if vim.api.nvim_win_get_buf(win) == bufnr then ensure_signcolumn(win) end
-  end
-end
-
-local function restore_signcolumn_for_buffer(bufnr)
-  for _, win in ipairs(vim.api.nvim_list_wins()) do
-    if vim.api.nvim_win_get_buf(win) == bufnr then restore_signcolumn(win) end
-  end
-end
-
-local function needs_git_gutter()
-  if vim.bo.filetype ~= 'direct' then return false end
-  local config = package.loaded['direct.config']
-  return not config or config.options.git.enabled ~= false
-end
+local conflict_codes = {
+  AA = true,
+  DD = true,
+  AU = true,
+  UD = true,
+  UA = true,
+  DU = true,
+  UU = true,
+}
 
 local function define_highlight_defaults()
-  for group, target in pairs(default_links) do
-    vim.api.nvim_set_hl(0, group, { default = true, link = target })
+  for group, definition in pairs(default_highlights) do
+    vim.api.nvim_set_hl(0, group, vim.tbl_extend('force', { default = true }, definition))
   end
+end
+
+local function status_chunks(status, symbols, conflicted)
+  local chunks = {}
+  local function append(key, highlight)
+    local symbol = symbols[key]
+    if type(symbol) ~= 'string' or symbol == '' then return end
+    if vim.fn.strchars(symbol) == 1 then symbol = symbol .. ' ' end
+    chunks[#chunks + 1] = { symbol, highlight }
+  end
+
+  -- Direct's Git snapshot normalizes porcelain `??` to `_A` (a space and A).
+  if status == ' A' then
+    append('untracked', 'DirectGitUntracked')
+    return chunks
+  end
+  if status == '!!' then
+    append('ignored', 'DirectGitIgnored')
+    return chunks
+  end
+
+  local index, worktree = status:sub(1, 1), status:sub(2, 2)
+  local conflict = conflicted
+  if conflict == nil then conflict = conflict_codes[status] == true end
+  local stage, stage_highlight
+  if worktree == ' ' then
+    stage, stage_highlight = 'staged', 'DirectGitStaged'
+  elseif index == ' ' then
+    stage, stage_highlight = 'unstaged', 'DirectGitUnstaged'
+  elseif conflict then
+    stage, stage_highlight = 'conflict', 'DirectGitConflict'
+  end
+
+  local function append_change(code)
+    local change
+    if code == 'M' or code == 'U' then
+      change = 'modified'
+    elseif code == 'R' then
+      change = 'renamed'
+    elseif code == 'D' then
+      change = 'deleted'
+    else
+      -- Neo-tree treats status codes without a special change symbol (including
+      -- copied entries) as additions.
+      change = 'added'
+    end
+    append(change, change_highlights[change])
+  end
+
+  if index ~= ' ' then append_change(index) end
+  if not conflict and worktree ~= ' ' then append_change(worktree) end
+
+  -- Show the staged/unstaged marker for a single-column change. For a mixed
+  -- two-column change, the two change symbols already convey both states.
+  if (#chunks < 2 or conflict) and stage then append(stage, stage_highlight) end
+  return chunks
 end
 
 function M.setup()
   define_highlight_defaults()
-  local sign_group = vim.api.nvim_create_augroup('direct_git_signcolumn', { clear = true })
-  vim.api.nvim_create_autocmd({ 'BufEnter', 'WinEnter' }, {
-    group = sign_group,
-    callback = function()
-      if needs_git_gutter() then ensure_signcolumn(vim.api.nvim_get_current_win()) end
-    end,
-    desc = 'direct: reserve two sign cells for Git status',
-  })
-  vim.api.nvim_create_autocmd('BufLeave', {
-    group = sign_group,
-    callback = function() restore_signcolumn(vim.api.nvim_get_current_win()) end,
-    desc = 'direct: restore the window signcolumn after leaving a listing',
-  })
-  vim.api.nvim_create_autocmd('WinClosed', {
-    group = sign_group,
-    callback = function(args) saved_signcolumn[tonumber(args.match)] = nil end,
-    desc = 'direct: release saved signcolumn state for a closed window',
-  })
   local group = vim.api.nvim_create_augroup('direct_icon_highlight_defaults', {
     clear = true,
   })
   vim.api.nvim_create_autocmd('ColorScheme', {
     group = group,
     callback = define_highlight_defaults,
-    desc = 'direct: reapply default display highlight links',
+    desc = 'direct: reapply default display highlight groups',
   })
 end
 
 -- render(bufnr, rows, options) clears stale display marks and reapplies the
--- Git status gutter. `rows` is an ordered array of { row, depth, status }.
+-- Neo-tree-style right-aligned Git status component. Rows carry { row, depth,
+-- status, deleted_kind }.
 function M.render(bufnr, rows, options)
   vim.api.nvim_buf_clear_namespace(bufnr, namespace, 0, -1)
-  vim.api.nvim_buf_clear_namespace(bufnr, gutter_namespace, 0, -1)
+  vim.api.nvim_buf_clear_namespace(bufnr, git_namespace, 0, -1)
   options = options or {}
   local git_options = options.git or {}
+
   for _, item in ipairs(rows or {}) do
     local deleted_group = item.deleted_kind == 'directory'
       and 'DirectGitDeletedDirectory'
@@ -140,22 +136,16 @@ function M.render(bufnr, rows, options)
         priority = 150,
       })
     end
-  end
-  if git_options.enabled == false then
-    restore_signcolumn_for_buffer(bufnr)
-    return
-  end
-  ensure_signcolumn_for_buffer(bufnr)
-  local gutter = git_options.gutter or { index = '|', worktree = '|' }
 
-  for _, item in ipairs(rows or {}) do
-    if item.status then
-      for column, key in ipairs({ 'index', 'worktree' }) do
-        local code = item.status:sub(column, column)
-        vim.api.nvim_buf_set_extmark(bufnr, gutter_namespace, item.row, 0, {
-          sign_text = code == ' ' and ' ' or gutter[key],
-          sign_hl_group = status_highlights[code] or 'Normal',
-          priority = 120 - column,
+    if git_options.enabled ~= false and item.status then
+      local chunks = status_chunks(item.status, git_options.symbols or {}, item.conflict)
+      if #chunks > 0 then
+        local line = vim.api.nvim_buf_get_lines(bufnr, item.row, item.row + 1, false)[1] or ''
+        vim.api.nvim_buf_set_extmark(bufnr, git_namespace, item.row, #line, {
+          virt_text = chunks,
+          virt_text_pos = 'eol_right_align',
+          hl_mode = 'combine',
+          priority = 120,
         })
       end
     end
