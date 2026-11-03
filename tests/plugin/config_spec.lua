@@ -184,6 +184,21 @@ H.describe('config', function()
     config.clear_mappings()
   end)
 
+  H.it('git.show_deleted defaults on and validates a boolean override', function()
+    local config = fresh_config()
+    config.clear_mappings()
+    H.assert_true(config.defaults.git.show_deleted,
+      'deleted tracked rows are shown by default')
+    local options = config.setup({ git = { show_deleted = false } })
+    H.assert_false(options.git.show_deleted, 'deleted rows can be hidden')
+
+    H.capture_messages()
+    options = config.setup({ git = { show_deleted = 'false' } })
+    H.assert_true(options.git.show_deleted, 'an invalid override keeps the default')
+    H.assert_notified('git.show_deleted', vim.log.levels.ERROR)
+    config.clear_mappings()
+  end)
+
   H.it('Git display validates mode and status customization without rejecting other options', function()
     local config = fresh_config()
     config.clear_mappings()

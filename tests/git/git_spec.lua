@@ -240,6 +240,52 @@ H.describe('Git status display', function()
     H.assert_false(staged.unstaged, 'staged deletion is not reported as unstaged')
   end)
 
+  H.it('git.show_deleted hides synthetic rows without disabling Git status', function()
+    local buffer = require('direct.buffer')
+    local config = require('direct.config')
+    local sb = H.sandbox()
+    local root = H.mkdir(sb.root, 'deleted-option-repo')
+    H.mkfile(root, 'gone.txt', 'gone')
+    H.mkfile(root, 'live.txt', 'before')
+    H.mkfile(root, 'sub/gone-child.txt', 'gone child')
+    H.mkfile(root, 'sub/keep.txt', 'keep')
+    init_repo(root)
+    commit_all(root, 'base')
+    H.assert_true(vim.uv.fs_unlink(root .. '/gone.txt'), 'removes a tracked root file')
+    H.assert_true(vim.uv.fs_unlink(root .. '/sub/gone-child.txt'),
+      'removes a tracked child file')
+    H.mkfile(root, 'live.txt', 'after')
+
+    config.setup({ map_default_keys = false, git = { show_deleted = false } })
+    local listing = buffer.list(root)
+    H.assert_eq(H.buf_lines(), { '.git/', 'sub/', 'live.txt' },
+      'the option hides missing tracked rows')
+    local snapshot = buffer._state_for_test(vim.api.nvim_get_current_buf()).git_status
+    H.assert_eq(git_status.status_for(snapshot, root .. '/gone.txt'), 'deleted',
+      'hiding a row does not disable deleted status data')
+    H.assert_eq(git_status.status_for(snapshot, root .. '/live.txt'), 'modified',
+      'existing Git status remains available')
+    H.assert_true(listing:expand(2), 'the remaining real directory still expands')
+    H.assert_eq(H.buf_lines(), { '.git/', 'sub/', '  keep.txt', 'live.txt' },
+      'deleted children are hidden inside expanded directories too')
+
+    config.setup({ map_default_keys = false, git = { show_deleted = true } })
+    listing:list()
+    H.assert_eq(H.buf_lines(), { '.git/', 'sub/', 'gone.txt', 'live.txt' },
+      're-enabling the option restores root deleted rows')
+    H.assert_true(listing:expand(2), 'the real directory can be expanded again')
+    H.assert_eq(H.buf_lines(), {
+      '.git/', 'sub/', '  gone-child.txt', '  keep.txt', 'gone.txt', 'live.txt',
+    }, 're-enabling the option restores nested deleted rows')
+
+    config.setup({ map_default_keys = false, git = {
+      enabled = false, show_deleted = true,
+    } })
+    listing:list()
+    H.assert_eq(H.buf_lines(), { '.git/', 'sub/', 'live.txt' },
+      'deleted rows are not shown while Git status is disabled')
+  end)
+
   H.it('defaults to colored gutters and supports staged display overrides', function()
     local buffer = require('direct.buffer')
     local config = require('direct.config')

@@ -19,6 +19,7 @@ local defaults = {
   max_recursive_expand_depth = false,
   git = {
     enabled = true,
+    show_deleted = true,
     display = 'gutter',
     statuses = {
       added = {
@@ -118,6 +119,12 @@ local function resolve_git_options(value)
     if key == 'enabled' then
       if type(option) == 'boolean' then
         result.enabled = option
+      else
+        report_invalid_git_option(key, 'expected a boolean')
+      end
+    elseif key == 'show_deleted' then
+      if type(option) == 'boolean' then
+        result.show_deleted = option
       else
         report_invalid_git_option(key, 'expected a boolean')
       end
