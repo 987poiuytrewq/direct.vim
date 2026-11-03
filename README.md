@@ -99,6 +99,7 @@ Default keys:
 - `-` goes to the parent directory.
 - `zo` expands a directory in place.
 - `gh` shows or hides dotfiles.
+- `gs` shows only entries with a Git status; press it again to restore the listing.
 
 Edit the listing to rename, create, or delete entries, then save with `:write`.
 Directory names end in `/`; file names do not. At the root level, save one kind
@@ -149,6 +150,13 @@ switches the current direct buffer's view. The toggle is refused while the
 listing has unsaved edits. It refreshes from disk and collapses expanded
 subtrees so every visible level uses the same setting.
 
+In a direct listing, `gs` (or `:DirectToggleGitStatus`) toggles a view that shows
+only entries with a Git status. Directories with changed descendants are
+included, and expanding them applies the same filter to their children. The
+toggle is refused while the listing has unsaved edits. Outside a Git repository,
+or with `git.enabled = false`, the filtered view is empty. Hidden entries remain
+excluded from sync while this view is active; they are not treated as deletions.
+
 Configuration defaults:
 
 | Option | Default | Description |
@@ -197,6 +205,12 @@ The default gutter shows `┃` for unstaged changes (including untracked files) 
 default to the staged display, with independent `mixed_file` and `mixed_folder`
 overrides. Conflicts use their conflict styling instead. Deleted entries have no
 listing row to mark. Re-list to refresh Git status.
+
+Press `gs` or run `:DirectToggleGitStatus` to show only entries with a status;
+press it again to restore the normal listing. Directories inherit status from
+changed descendants and remain visible in this view. This is a view filter, so
+entries it hides are not treated as deletion sources during sync. Outside a Git
+repository, or when `git.enabled = false`, the filtered view contains no entries.
 
 By default, `git.display` is `"gutter"`: changed entries show a `┃` in the sign
 column without changing their icon glyphs or highlighting their names. Added
@@ -341,8 +355,9 @@ duplicated line, is reported as ambiguous, naming both sides of the comparison.
 Nothing is changed, no history is written, and the buffer stays modified so you
 can fix it.
 
-`&wildignore`, dot-hidden visibility, and Git-ignore filtering are independent;
-enabled filters compose as a union. `&wildignore` keeps its existing behavior.
+`&wildignore`, dot-hidden visibility, Git-ignore filtering, and the `gs`
+Git-status-only view are independent; entries hidden by any active filter are
+omitted. `&wildignore` keeps its existing behavior.
 Each directory captures the filter settings and matches used for that listing.
 Changing an option does not rewrite an existing listing's sync rules; re-list to
 refresh them. Filtered entries are excluded from sync, and sync is refused before
@@ -479,6 +494,7 @@ use their existing synchronous staging path.
 | `:DirectFoldAll` | none | Collapse all expanded directories in the current listing. |
 | `:DirectUnfoldAll` | none | Recursively expand all directories in the current listing. |
 | `:DirectToggleHidden` | none | Toggle dot-hidden entries in the current direct listing and refresh its view. |
+| `:DirectToggleGitStatus` | none | Toggle the Git-status-only view in the current direct listing. |
 | `:DirectUndo` | none | Undo the last filesystem action. |
 | `:DirectRedo` | none | Redo the last undone action. |
 | `:DirectYank` | range (default: current line) | Yank the ranged entries. |
@@ -486,7 +502,7 @@ use their existing synchronous staging path.
 | `:DirectPasteAs {name}` | `{name}` | Paste into the cursor row's directory (or a file's parent) under `{name}`. |
 
 `:DirectSync`, `:DirectFoldAll`, `:DirectUnfoldAll`, `:DirectToggleHidden`,
-`:DirectUndo`, `:DirectRedo`, `:DirectYank`, `:DirectPaste` (no argument),
+`:DirectToggleGitStatus`, `:DirectUndo`, `:DirectRedo`, `:DirectYank`, `:DirectPaste` (no argument),
 `:DirectPasteAs`, `:DirectRun`, and the public `open()` API report an error and do
 nothing when the current buffer is not a direct buffer. `open()` is also used by
 the direct-buffer entry mappings. `:DirectPaste {dir}` is the exception: it
@@ -527,6 +543,7 @@ Buffer-local, in a direct buffer (all mappings follow `map_default_keys`):
 | normal | `ga` | `:DirectGit git add -- {}` |
 | normal | `gr` | `:DirectGit git reset -- {}` |
 | normal | `gc` | `:DirectGit git checkout -- {}` |
+| normal | `gs` | `:DirectToggleGitStatus` |
 
 The buffer-local `-` wins over the global `-` inside a direct buffer. All
 buffer-local mappings, including fold and mouse mappings, are omitted when

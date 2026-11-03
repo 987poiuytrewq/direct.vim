@@ -12,6 +12,7 @@ return function(deps)
   local entry_path = deps.entry_path
   local ignore_set = deps.ignore_set
   local read_with_snapshot = deps.read_with_snapshot
+  local filter_git_status_lines = deps.filter_git_status_lines
   local action_mod = deps.action_mod
 
   local function children_integrity(bufnr, lines)
@@ -556,6 +557,9 @@ return function(deps)
           else
             local ignored = ignore_set(parent.path, expansion.wildignore or '')
             disk, read_err = fs.read_dir_lines(parent.path, ignored)
+          end
+          if disk and state.view_git_status_only and filter_git_status_lines then
+            disk = filter_git_status_lines(parent.path, disk, state.git_status)
           end
           if not disk or not same_lines(disk, expansion.listing_lines or {}) then
             return nil, 'expanded directory changed on disk since it was read'

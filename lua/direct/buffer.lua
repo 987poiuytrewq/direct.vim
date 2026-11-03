@@ -43,6 +43,19 @@ M.read = listing.read
 local function list_with_snapshot(root, show_hidden)
   return listing.list_with_snapshot(root, M.read, show_hidden)
 end
+
+-- Keep only entries represented by the list-time Git status snapshot. Directory
+-- statuses are already aggregated from changed descendants by direct.git.
+local function filter_git_status_lines(root, lines, snapshot)
+  local filtered = {}
+  for _, line in ipairs(lines or {}) do
+    if git.status_for(snapshot, M.entry_path(root, line)) then
+      filtered[#filtered + 1] = line
+    end
+  end
+  return filtered
+end
+
 local set_directory_snapshot = listing.set_directory_snapshot
 local get_directory_snapshot = listing.get_directory_snapshot
 local apply_snapshot = listing.apply_snapshot
@@ -242,6 +255,7 @@ local tree_planner = require('direct.buffer_tree')({
   entry_path = M.entry_path,
   ignore_set = M.ignore_set,
   read_with_snapshot = listing.read_with_snapshot,
+  filter_git_status_lines = filter_git_status_lines,
   action_mod = action_mod,
 })
 children_integrity = tree_planner.children_integrity
@@ -468,6 +482,8 @@ end
 function Buffer:list()
   local bufnr = vim.api.nvim_get_current_buf()
   local old_state = states[bufnr]
+  local view_git_status_only = old_state
+    and old_state.view_git_status_only == true or false
   local show_hidden_override
   if old_state and old_state.view_show_hidden_override
     and type(old_state.view_show_hidden) == 'boolean' then
@@ -489,6 +505,15 @@ function Buffer:list()
     else
       safe[#safe + 1] = line
     end
+  end
+
+  local git_options = require('direct.config').options.git
+  local git_snapshot = false
+  if git_options.enabled then
+    git_snapshot = git.read(self.root) or false
+  end
+  if view_git_status_only then
+    safe = filter_git_status_lines(self.root, safe, git_snapshot)
   end
 
   reconcile_undone_materialization(bufnr)
@@ -541,14 +566,11 @@ function Buffer:list()
       and vim.deepcopy(old_state.materialization_recoveries or {}) or {},
     collapse_undos = old_state
       and vim.deepcopy(old_state.collapse_undos or {}) or {},
-    git_status = nil,
     view_show_hidden = snapshot.show_hidden,
     view_show_hidden_override = old_state and old_state.view_show_hidden_override or false,
+    view_git_status_only = view_git_status_only,
+    git_status = git_snapshot,
   }
-  local git_options = require('direct.config').options.git
-  if git_options.enabled then
-    state.git_status = git.read(self.root) or false
-  end
   set_directory_snapshot(state, snapshot)
   local roots = {}
   local used_root = {}
@@ -660,6 +682,9 @@ function Buffer:expand(row)
     -- are hidden from the view but still make the directory non-empty.
     local known_children = fs.read_dir_lines(path)
     state.known_children[rec.id] = known_children or vim.deepcopy(children)
+    if state.view_git_status_only then
+      children = filter_git_status_lines(path, children, state.git_status)
+    end
     local materialized = {}
     for order, child_name in ipairs(children) do
       local child_path = M.entry_path(path, child_name)
@@ -951,6 +976,45 @@ function M.toggle_hidden()
   return listed
 end
 
+function M.toggle_git_status()
+  local bufnr = vim.api.nvim_get_current_buf()
+  if vim.bo[bufnr].modified then
+    local reason = 'cannot toggle the Git-status filter with unsaved edits; sync or discard them first'
+    ui.notify('direct: ' .. reason, vim.log.levels.ERROR)
+    return nil, reason
+  end
+  local state = states[bufnr]
+  if not state then
+    local reason = 'direct listing state is unavailable; re-list this directory'
+    ui.notify('direct: ' .. reason, vim.log.levels.ERROR)
+    return nil, reason
+  end
+  local previous = {
+    view_git_status_only = state.view_git_status_only,
+    expanded = state.expanded,
+    known_children = state.known_children,
+    directory_snapshots = state.directory_snapshots,
+    materialization_undos = state.materialization_undos,
+    materialization_recoveries = state.materialization_recoveries,
+    collapse_undos = state.collapse_undos,
+  }
+  state.view_git_status_only = not state.view_git_status_only
+  -- Rebuild at every level from a fresh Git snapshot; the view must not leave
+  -- stale child rows behind when the filter is enabled or disabled.
+  state.expanded = {}
+  state.known_children = {}
+  state.directory_snapshots = {}
+  state.materialization_undos = {}
+  state.materialization_recoveries = {}
+  state.collapse_undos = {}
+  local listed, err = M.restore():list()
+  if not listed then
+    for key, value in pairs(previous) do state[key] = value end
+    return nil, err
+  end
+  return listed
+end
+
 -- Internal adapter for the folding command module. Keep row marks and state
 -- owned by this buffer model; folding.lua only receives these narrow accessors.
 function M._folding_context(bufnr)
@@ -1169,6 +1233,9 @@ function Buffer:sync(options)
     return nil, reason
   end
   expected = filtered_expected
+  if state.view_git_status_only then
+    expected = filter_git_status_lines(self.root, expected, state.git_status)
+  end
   -- Neovim represents an empty buffer with one empty string. An empty listing
   -- denotes zero root entries, not an empty filename: this applies both to a
   -- clean listing of an empty directory and to deleting its final visible row.
