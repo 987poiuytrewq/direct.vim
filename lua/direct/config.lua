@@ -377,7 +377,7 @@ M._setup_called = false
 M._vim_enter_installed = false
 M._installed = vim.fn.maparg(M.GLOBAL_MAP.lhs, M.GLOBAL_MAP.mode) == M.GLOBAL_MAP.rhs
 
--- The thirteen buffer-local mappings for filetype=direct buffers, owned
+-- The fourteen buffer-local mappings for filetype=direct buffers, owned
 -- here so setup can clear and restore them in
 -- ALREADY-open direct buffers. Installed by `ftplugin/direct.lua` via
 -- `install_buffer_mappings(0)`. Built on `<Cmd>` (never a `:` command that
@@ -405,6 +405,7 @@ M.BUFFER_MAPS = {
   { mode = 'n', lhs = 'ga', rhs = '<Cmd>DirectGit git add -- {}<CR>' },
   { mode = 'n', lhs = 'gr', rhs = '<Cmd>DirectGit git reset -- {}<CR>' },
   { mode = 'n', lhs = 'gc', rhs = '<Cmd>DirectGit git checkout -- {}<CR>' },
+  { mode = 'n', lhs = 'gs', rhs = '<Cmd>DirectToggleGitStatus<CR>' },
 }
 
 -- The loaded buffers whose filetype is `direct`: the retrofit targets for
@@ -420,7 +421,7 @@ local function open_direct_buffers()
   return bufs
 end
 
--- install_buffer_mappings(bufnr) -> true. Installs the thirteen buffer-local
+-- install_buffer_mappings(bufnr) -> true. Installs the buffer-local
 -- mappings into `bufnr` (0 = the current buffer). Idempotent: re-setting a
 -- mapping replaces it in place, so repeated ftplugin runs cannot stack.
 function M.install_buffer_mappings(bufnr)

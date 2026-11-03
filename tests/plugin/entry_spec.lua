@@ -63,6 +63,7 @@ local EXPECTED_N = {
   ['ga'] = '<Cmd>DirectGit git add -- {}<CR>',
   ['gr'] = '<Cmd>DirectGit git reset -- {}<CR>',
   ['gc'] = '<Cmd>DirectGit git checkout -- {}<CR>',
+  ['gs'] = '<Cmd>DirectToggleGitStatus<CR>',
 }
 
 local EXPECTED_V = {
@@ -77,6 +78,7 @@ local EXPECTED_CMDS = {
   DirectFoldAll = { nargs = '0' },
   DirectUnfoldAll = { nargs = '0' },
   DirectToggleHidden = { nargs = '0' },
+  DirectToggleGitStatus = { nargs = '0' },
   DirectUndo = { nargs = '0' },
   DirectRedo = { nargs = '0' },
   DirectYank = { nargs = '0', range = '.' },
@@ -87,7 +89,7 @@ local EXPECTED_CMDS = {
 }
 
 H.describe('entry: command surface', function()
-  H.it('the fourteen commands exist with their exact nargs/range/complete', function()
+  H.it('the fifteen commands exist with their exact nargs/range/complete', function()
     local cmds = vim.api.nvim_get_commands({ builtin = false })
     for name, want in pairs(EXPECTED_CMDS) do
       local got = cmds[name]
@@ -182,6 +184,7 @@ H.describe('entry: direct-buffer guard', function()
   H.it('the public API exposes every facade function', function()
     local api = require('direct')
     local expected = { 'setup', 'list', 'list_buffer', 'list_cwd', 'open', 'toggle_hidden',
+      'toggle_git_status',
       'sync', 'fold_all', 'unfold_all', 'undo', 'redo', 'yank', 'paste', 'paste_as', 'run', 'git' }
     local actual = {}
     for name, value in pairs(api) do
@@ -204,6 +207,8 @@ H.describe('entry: direct-buffer guard', function()
       { name = 'DirectUnfoldAll', call = function(api) return api.unfold_all() end },
       { name = 'DirectYank', call = function(api) return api.yank(1, 1) end },
       { name = 'DirectToggleHidden', call = function(api) return api.toggle_hidden() end },
+      { name = 'DirectToggleGitStatus',
+        call = function(api) return api.toggle_git_status() end },
       { name = 'DirectPaste', call = function(api) return api.paste() end },
       { name = 'DirectPasteAs', call = function(api) return api.paste_as('x.txt') end },
       { name = 'DirectRun', call = function(api) return api.run('echo {}') end },

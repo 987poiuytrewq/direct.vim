@@ -99,6 +99,12 @@ function M.toggle_hidden()
   return buffer.toggle_hidden()
 end
 
+function M.toggle_git_status()
+  if not guard('DirectToggleGitStatus') then return nil end
+  if pending.refuse('toggle Git-status filter') then return nil end
+  return buffer.toggle_git_status()
+end
+
 function M.undo()
   if not guard('DirectUndo') then
     return nil

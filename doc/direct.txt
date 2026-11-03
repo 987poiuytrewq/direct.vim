@@ -113,6 +113,13 @@ switches the current direct buffer's view. It refuses while the listing has
 unsaved edits, refreshes from disk, and collapses expanded subtrees so every
 visible level uses the same filter.
 
+In a direct listing, `gs` (or `:DirectToggleGitStatus`) toggles a view showing
+only entries with a Git status. Directories with changed descendants are
+included, and expanding them applies the same filter to their children. It
+refuses while the listing has unsaved edits. Outside a Git repository, or when
+`git.enabled = false`, the filtered view is empty. Entries hidden by this view
+are not treated as deletion sources during sync.
+
 File and folder icons ~
 
 Set `show_folder_icons = true` to display inline directory glyphs, and
@@ -140,6 +147,12 @@ descendants use the staged display by default; `mixed_file` and `mixed_folder`
 can be configured independently. Conflicts are identified by their conflict
 styling instead. Deleted entries have no listing row to mark. Re-list to refresh
 Git status.
+
+Press `gs` or run `:DirectToggleGitStatus` to show only entries with a status;
+press it again to restore the normal listing. This filter composes with hidden,
+wildignore, and Git-ignore filtering. Entries it hides are not treated as
+deletion sources during sync. In directories with changed descendants, the
+directory remains visible and its expanded children use the same filter.
 
 By default, `git.display` is `gutter`: changed entries show a `┃` in the sign
 column without changing their icon glyphs or highlighting their names. Added
@@ -268,8 +281,9 @@ duplicated line, is reported as ambiguous, naming both sides of the comparison.
 Nothing is changed, no history is written, and the buffer stays modified so you
 can fix it.
 
-`&wildignore`, dot-hidden visibility, and Git-ignore filtering are independent;
-enabled filters compose as a union. `&wildignore` keeps its existing behavior.
+`&wildignore`, dot-hidden visibility, Git-ignore filtering, and the `gs`
+Git-status-only view are independent; entries hidden by any active filter are
+omitted. `&wildignore` keeps its existing behavior.
 Each directory captures the filters and matches used for that listing. Changing
 an option does not change an existing listing's sync rules; re-list to refresh
 them. Filtered entries are excluded from sync, and sync is refused before
@@ -400,6 +414,10 @@ existing synchronous staging behavior.
         Toggle dot-hidden entries in the current direct listing and refresh its
         view. Refuses if the listing has unsaved edits.
 
+    :DirectToggleGitStatus
+        Toggle the Git-status-only view in the current direct listing. Refuses
+        if the listing has unsaved edits.
+
     :DirectUndo
         Undo the last filesystem action.
 
@@ -470,6 +488,7 @@ Buffer-local, in a direct buffer (all mappings follow `map_default_keys`):
     normal      ga          :DirectGit git add -- {}
     normal      gr          :DirectGit git reset -- {}
     normal      gc          :DirectGit git checkout -- {}
+    normal      gs          :DirectToggleGitStatus
 
 The buffer-local `-` wins over the global `-` inside a direct buffer. All
 buffer-local mappings, including fold and mouse mappings, are omitted when
