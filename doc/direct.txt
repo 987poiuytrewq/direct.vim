@@ -98,7 +98,11 @@ Run `:checkhealth direct` to confirm the version and the data home in use:
         folder_open = '\u{f0770}',
       },
       max_recursive_expand_depth = false, -- false means unlimited
-      git = { enabled = true, display = 'gutter' }, -- gutter, icon, text, or both
+      git = {
+        enabled = true,
+        show_deleted = true,
+        display = 'gutter', -- gutter, icon, text, or both
+      },
     })
 
 `setup()` is idempotent, may be called more than once, and reports an unknown
@@ -217,6 +221,10 @@ does not affect Git-ignore filtering. Mixed-file and mixed-folder settings
 inherit the staged settings by default and can independently override
 `icon_hl`, `text_hl`, `icon`, and `gutter`. Set `git.staging.enabled = false`
 to disable staging-specific styling while retaining regular status display.
+
+Set `git.show_deleted = false` to hide synthetic deleted rows; it defaults to
+`true` and only applies when `git.enabled = true`. This affects the rows shown,
+not Git status data or styling on entries that still exist.
 
 Deleted tracked rows always use `DirectGitDeletedFile` or
 `DirectGitDeletedDirectory` for their names, even when staging text styles are

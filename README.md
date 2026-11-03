@@ -140,7 +140,7 @@ require('direct').setup({
     folder_open = '\u{f0770}',
   },
   max_recursive_expand_depth = false, -- false means unlimited
-  git = { enabled = true, display = 'gutter' }, -- gutter, icon, text, or both
+  git = { enabled = true, show_deleted = true, display = 'gutter' },
 })
 ```
 
@@ -174,6 +174,7 @@ Configuration defaults:
 | `icons.folder_open` | U+F0770 | Base expanded-folder glyph string. |
 | `max_recursive_expand_depth` | `false` | Positive integer limit for recursive expansion; `false` is unlimited. |
 | `git.enabled` | `true` | Show Git status in repositories. |
+| `git.show_deleted` | `true` | Show synthetic rows for tracked deletions when Git status is enabled. |
 | `git.display` | `'gutter'` | Status display: `'gutter'`, `'icon'`, `'text'`, or `'both'`. |
 | `git.statuses` | Four default styles | Configure status highlights, icons, and optional gutter symbols. |
 | `git.staging` | Enabled | Configure staged, unstaged, mixed-file, and mixed-folder styling. |
@@ -203,6 +204,9 @@ In a Git repository, direct reads status once per listing refresh. Added
 (including untracked), modified, Git-detected renamed, conflicted, and deleted
 entries are styled without changing listing text. Missing tracked files and
 directories containing deleted tracked descendants appear as protected rows.
+Set `git.show_deleted = false` to hide these synthetic rows while retaining Git
+status on entries that still exist. This option has no effect when Git status is
+disabled; it defaults to `true`.
 Directories inherit the strongest status of changed descendants, in the order
 conflicted, renamed, added, deleted, then modified. The default gutter shows `┃`
 for unstaged changes (including untracked files) and `┃•` for staged changes.

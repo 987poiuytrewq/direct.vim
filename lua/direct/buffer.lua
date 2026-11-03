@@ -143,6 +143,35 @@ local function merge_deleted_entries(directory, lines, git_snapshot, show_hidden
   return dirs_then_name(result), deleted
 end
 
+local function hide_deleted_expansions(expanded, records)
+  local function discard(id)
+    local expansion = expanded[id]
+    if not expansion then return end
+    for _, child in ipairs(expansion.children or {}) do discard(child.id) end
+    expanded[id] = nil
+  end
+  local parents = vim.tbl_keys(expanded)
+  for _, id in ipairs(parents) do
+    local parent = records[id]
+    if parent and parent.deleted_kind then discard(id) end
+  end
+  local function prune(parent_id)
+    local expansion = expanded[parent_id]
+    if not expansion then return end
+    local children = {}
+    for _, child in ipairs(expansion.children or {}) do
+      if child.deleted_kind then
+        discard(child.id)
+      else
+        children[#children + 1] = child
+        prune(child.id)
+      end
+    end
+    expansion.children = children
+  end
+  for id in pairs(expanded) do prune(id) end
+end
+
 local function capture_deleted_guard_snapshot(bufnr, state)
   state = state or states[bufnr]
   if not state then return end
@@ -643,6 +672,7 @@ function Buffer:list()
   end
 
   local git_options = require('direct.config').options.git
+  local show_deleted = git_options.enabled and git_options.show_deleted ~= false
   local git_snapshot = false
   if git_options.enabled then
     git_snapshot = git.read(self.root) or false
@@ -651,7 +681,7 @@ function Buffer:list()
     safe = filter_git_status_lines(self.root, safe, git_snapshot)
   end
   local merged, deleted_paths = merge_deleted_entries(self.root, safe,
-    git_snapshot, snapshot.show_hidden)
+    show_deleted and git_snapshot or nil, snapshot.show_hidden)
   safe = merged
   if view_git_status_only then
     safe = filter_git_status_lines(self.root, safe, git_snapshot)
@@ -681,9 +711,15 @@ function Buffer:list()
   old_state = states[bufnr]
   local old_expanded, old_deleted = {}, {}
   local old_known_children = {}
+  local deleted_visibility_changed = old_state
+    and old_state.view_show_deleted ~= show_deleted
   local old_index = { by_path = {}, by_inode = {}, unknown_by_path = {} }
-  if old_state then
+  if old_state and not deleted_visibility_changed then
     old_expanded = old_state.expanded or {}
+    if not show_deleted then
+      old_expanded = vim.deepcopy(old_expanded)
+      hide_deleted_expansions(old_expanded, old_state.rows)
+    end
     old_known_children = old_state.known_children or {}
     local old_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
     for row, line in ipairs(old_lines) do
@@ -724,12 +760,16 @@ function Buffer:list()
     display_ids = {},
     materialization_undos = {},
     directory_snapshots = old_state
+      and not deleted_visibility_changed
       and vim.deepcopy(old_state.directory_snapshots or {}) or {},
     materialization_recoveries = old_state
+      and not deleted_visibility_changed
       and vim.deepcopy(old_state.materialization_recoveries or {}) or {},
     collapse_undos = old_state
+      and not deleted_visibility_changed
       and vim.deepcopy(old_state.collapse_undos or {}) or {},
     view_show_hidden = snapshot.show_hidden,
+    view_show_deleted = show_deleted,
     view_show_hidden_override = old_state and old_state.view_show_hidden_override or false,
     view_git_status_only = view_git_status_only,
     git_status = git_snapshot or false,
@@ -857,8 +897,11 @@ function Buffer:expand(row)
         return nil, err
       end
     end
+    local options = require('direct.config').options
+    local git_snapshot = ensure_git_snapshot(state, options)
+    local show_deleted = options.git.enabled and options.git.show_deleted ~= false
     local children, deleted_children = merge_deleted_entries(path, physical_children,
-      ensure_git_snapshot(state, require('direct.config').options), state.view_show_hidden)
+      show_deleted and git_snapshot or nil, state.view_show_hidden)
     -- Keep an unfiltered snapshot for destructive sync preflight. Ignored names
     -- are hidden from the view but still make the directory non-empty.
     local known_children = rec.deleted_kind and {} or fs.read_dir_lines(path)
