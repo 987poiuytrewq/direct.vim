@@ -45,6 +45,9 @@ defaults. These highlight groups can be customized in a colorscheme or with
     DirectFileIcon              file icons (Normal)
     DirectHiddenFolderIcon      hidden folder icons (Comment)
     DirectHiddenFileIcon        hidden file icons (Comment)
+    DirectGitDeletedFile        deleted tracked file names (ErrorMsg)
+    DirectGitDeletedDirectory   deleted tracked directory names (ErrorMsg)
+    DirectGitDeletedGutter      deleted status gutter (ErrorMsg)
     DirectGitAddedIcon          added status icon (DiffAdd)
     DirectGitAdded              added status name (DiffAdd)
     DirectGitModifiedIcon       modified status icon (DiffChange)
@@ -138,15 +141,15 @@ placement.
 Git status ~
 
 In a Git repository, direct reads status once per listing refresh. Added
-(including untracked), modified, Git-detected renamed, and conflicted entries
-are styled without changing listing text. Directories inherit the strongest
-status of changed descendants, in the order conflicted, renamed, added, then
-modified. The default gutter uses `┃` for unstaged changes (including untracked
-files) and `┃•` for staged changes. Mixed files and mixed folders with staged
-descendants use the staged display by default; `mixed_file` and `mixed_folder`
-can be configured independently. Conflicts are identified by their conflict
-styling instead. Deleted entries have no listing row to mark. Re-list to refresh
-Git status.
+(including untracked), modified, Git-detected renamed, conflicted, and deleted
+entries are styled without changing listing text. Missing tracked files and
+directories containing deleted tracked descendants appear as protected rows.
+Directories inherit the strongest status of changed descendants, in the order
+conflicted, renamed, added, deleted, then modified. The default gutter uses `┃`
+for unstaged changes (including untracked files) and `┃•` for staged changes.
+Mixed files and mixed folders with staged descendants use the staged display by
+default; `mixed_file` and `mixed_folder` can be configured independently.
+Conflicts use their conflict styling instead. Re-list to refresh Git status.
 
 Press `gs` or run `:DirectToggleGitStatus` to show only entries with a status;
 press it again to restore the normal listing. This filter composes with hidden,
@@ -214,6 +217,14 @@ does not affect Git-ignore filtering. Mixed-file and mixed-folder settings
 inherit the staged settings by default and can independently override
 `icon_hl`, `text_hl`, `icon`, and `gutter`. Set `git.staging.enabled = false`
 to disable staging-specific styling while retaining regular status display.
+
+Deleted tracked rows always use `DirectGitDeletedFile` or
+`DirectGitDeletedDirectory` for their names, even when staging text styles are
+configured. Their Git gutter follows the regular status display and uses
+`DirectGitDeletedGutter` (default ErrorMsg). Deleted rows can be targeted with
+`:DirectRun` or `:DirectGit`, expanded/collapsed with the `z` commands, and
+staged/reset/restored with `ga`, `gr`, and `gc`. Other listing edits, opens,
+yanks, and pastes on these rows are ignored.
 
 Git-ignore filtering is separately opt-in with `respect_gitignore = true`. It
 uses Git's own matching for root and nested `.gitignore` files, negations,
@@ -441,14 +452,17 @@ existing synchronous staging behavior.
         as the working directory. Each literal {} is replaced by the
         shell-escaped absolute path of the current entry; leave {} unquoted.
         The command must contain {} and the current row must name an existing
-        entry. Captured output and exit status are reported when it finishes.
+        entry, except for a tracked Git-deleted row. Captured output and exit
+        status are reported when it finishes. DirectRun does not refresh Git
+        status.
 
-`:DirectSync`, `:DirectFoldAll`, `:DirectUnfoldAll`,
-`open()` (the public API used by the entry mappings),
     :DirectGit {command}
         Run {command} like :DirectRun, then refresh Git status decorations in
         the originating loaded listing when it completes. It does not re-list
         or change buffer text.
+
+`:DirectSync`, `:DirectFoldAll`, `:DirectUnfoldAll`,
+`open()` (the public API used by the entry mappings),
 `:DirectUndo`, `:DirectRedo`, `:DirectYank`, `:DirectPaste` (no argument),
 `:DirectPasteAs`, `:DirectRun`, and `:DirectGit` report an error and do nothing
 when the current buffer is not a direct buffer. `:DirectRun` does not refresh Git

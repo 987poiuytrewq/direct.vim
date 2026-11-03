@@ -33,12 +33,13 @@ function M.current_entry(command, on_complete)
   local bufnr = vim.api.nvim_get_current_buf()
   local row = vim.api.nvim_win_get_cursor(0)[1]
   local path, path_err = listing:get_entry_path(row)
+  local record = listing:get_entry_record(row)
   if not path then
     local err = 'cannot run command for current entry: ' .. tostring(path_err)
     ui.notify('direct: ' .. err, vim.log.levels.ERROR)
     return nil, err
   end
-  if not fs.taken(path) then
+  if not (record and record.deleted_kind) and not fs.taken(path) then
     local err = 'current row does not name an existing entry'
     ui.notify('direct: ' .. err, vim.log.levels.ERROR)
     return nil, err

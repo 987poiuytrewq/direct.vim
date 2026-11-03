@@ -144,6 +144,7 @@ function M.yank(first, last)
       vim.log.levels.ERROR)
     return nil, path_err
   end
+  if #sources == 0 then return true end
   local yanked, yank_err = register.yank(sources)
   if not yanked then return nil, yank_err end
   return b:list()
@@ -159,6 +160,7 @@ function M.paste(dir)
     end
     local b = buffer.restore()
     local destination, path_err = b:paste_destination()
+    if destination == false then return true end
     if not destination then
       ui.notify('direct: cannot paste: ' .. tostring(path_err), vim.log.levels.ERROR)
       return nil, path_err
@@ -175,6 +177,7 @@ function M.paste_as(name)
   end
   local b = buffer.restore()
   local destination, path_err = b:paste_destination()
+  if destination == false then return true end
   if not destination then
     ui.notify('direct: cannot paste: ' .. tostring(path_err), vim.log.levels.ERROR)
     return nil, path_err

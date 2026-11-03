@@ -33,6 +33,9 @@ local defaults = {
       conflicted = {
         gutter = { symbol = '┃', highlight = 'DirectGitConflictedGutter' },
       },
+      deleted = {
+        gutter = { symbol = '┃', highlight = 'DirectGitDeletedGutter' },
+      },
     },
     staging = {
       enabled = true,
@@ -60,7 +63,9 @@ local defaults = {
   },
 }
 
-local git_statuses = { added = true, modified = true, renamed = true, conflicted = true }
+local git_statuses = {
+  added = true, modified = true, renamed = true, conflicted = true, deleted = true,
+}
 local git_display_modes = { gutter = true, icon = true, text = true, both = true }
 local git_staging_states = {
   staged = true,
