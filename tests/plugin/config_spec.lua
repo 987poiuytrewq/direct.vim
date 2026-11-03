@@ -115,6 +115,9 @@ H.describe('config', function()
       'mixed folders default to the staged marker')
     H.assert_eq(config.defaults.git.staging.staged.icon_hl, 'DirectGitStagedIcon',
       'staged icons have their own highlight group')
+    H.assert_eq(config.defaults.git.statuses.deleted.gutter,
+      { symbol = '┃', highlight = 'DirectGitDeletedGutter' },
+      'deleted entries retain the regular Git gutter symbol')
 
     local options = config.setup({ git = {
       display = 'icon',
@@ -342,6 +345,12 @@ H.describe('config', function()
     local bufnr = open_direct_buffer()
     H.assert_true(buf_map_rhs('u', 'n') ~= nil, 'premise: buffer-local u installed')
     H.assert_true(buf_map_rhs('p', 'n') ~= nil, 'premise: buffer-local p installed')
+    H.assert_eq(buf_map_rhs('ga', 'n'), '<Cmd>DirectGit git add -- {}<CR>',
+      'ga stages the current entry')
+    H.assert_eq(buf_map_rhs('gr', 'n'), '<Cmd>DirectGit git reset -- {}<CR>',
+      'gr resets the current entry')
+    H.assert_eq(buf_map_rhs('gc', 'n'), '<Cmd>DirectGit git checkout -- {}<CR>',
+      'gc restores the current entry')
     H.assert_eq(buf_map_desc('zR', 'n'), 'direct: Expand all direct directories',
       'premise: fold mapping zR installed')
 
@@ -349,6 +358,7 @@ H.describe('config', function()
 
     H.assert_nil(buf_map_rhs('u', 'n'), 'the buffer-local u mapping is gone')
     H.assert_nil(buf_map_rhs('p', 'n'), 'the buffer-local p mapping is gone')
+    H.assert_nil(buf_map_rhs('ga', 'n'), 'the Git entry mappings are gone')
     H.assert_nil(buf_map_rhs('y', 'v'), 'the buffer-local visual y mapping is gone')
     H.assert_nil(buf_map_desc('zR', 'n'), 'the fold mapping zR is gone')
     H.assert_nil(buf_map_desc('<LeftMouse>', 'n'), 'the folder click mapping is gone')
@@ -394,6 +404,8 @@ H.describe('config', function()
     H.assert_true(buf_map_rhs('u', 'n') ~= nil,
       'the buffer-local u mapping is restored in the open direct buffer')
     H.assert_true(buf_map_rhs('p', 'n') ~= nil, 'the buffer-local p mapping is restored')
+    H.assert_eq(buf_map_rhs('ga', 'n'), '<Cmd>DirectGit git add -- {}<CR>',
+      'Git entry mappings are restored too')
     H.assert_eq(buf_map_desc('zR', 'n'), 'direct: Expand all direct directories',
       'fold mappings are restored too')
     pcall(vim.api.nvim_buf_delete, bufnr, { force = true })

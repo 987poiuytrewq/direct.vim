@@ -23,6 +23,7 @@ local listing = require('direct.buffer_listing')
 local rows = require('direct.buffer_rows')
 local states = rows.states
 local namespace = rows.namespace
+local deleted_guards = {}
 local next_id = rows.next_id
 local set_row_mark = rows.set_row_mark
 local row_id_at = rows.row_id_at
@@ -85,6 +86,7 @@ local function refresh_highlights(bufnr, state)
         status = snapshot and git.status_for(snapshot, rec.path) or nil,
         staging = snapshot and git.staging_style_for(snapshot, rec.path,
           rec.name:sub(-1) == '/') or nil,
+        deleted_kind = rec.deleted_kind,
       }
     end
   end
@@ -103,9 +105,135 @@ function M.refresh_git_status(bufnr, root)
   if not state or (root and state.root ~= root) then return false end
   state.git_status = nil
   ensure_git_snapshot(state, require('direct.config').options)
+  local restored = false
+  for _, record in pairs(state.rows) do
+    if record.deleted_kind and fs.taken(record.path) then
+      restored = true
+      break
+    end
+  end
+  if restored then
+    vim.api.nvim_buf_call(bufnr, function() M.list(state.root) end)
+    return true
+  end
   refresh_highlights(bufnr, state)
   refresh_icons(bufnr, state)
   return true
+end
+
+local function is_deleted_record(record)
+  return record ~= nil and record.deleted_kind ~= nil
+end
+
+local function merge_deleted_entries(directory, lines, git_snapshot, show_hidden)
+  local result, seen, deleted = {}, {}, {}
+  for _, line in ipairs(lines or {}) do
+    result[#result + 1] = line
+    seen[line:gsub('/+$', '')] = true
+  end
+  for _, entry in ipairs(git.deleted_children(git_snapshot, directory)) do
+    local basename = entry.name:gsub('/+$', '')
+    if not seen[basename]
+      and (show_hidden ~= false or basename:sub(1, 1) ~= '.') then
+      result[#result + 1] = entry.name
+      seen[basename] = true
+      deleted[vim.fs.normalize(entry.path)] = entry.kind
+    end
+  end
+  return dirs_then_name(result), deleted
+end
+
+local function capture_deleted_guard_snapshot(bufnr, state)
+  state = state or states[bufnr]
+  if not state then return end
+  state.edit_snapshot = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  state.edit_row_ids = {}
+  for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1,
+      { details = true })) do
+    if not (mark[4] and mark[4].invalid) then
+      state.edit_row_ids[mark[2]] = mark[1]
+    end
+  end
+end
+
+local function restore_deleted_rows(bufnr, state)
+  state = state or states[bufnr]
+  local pending_restore = state and state.pending_deleted_restore
+  if not pending_restore or state.restoring_deleted then return end
+  state.restoring_deleted = true
+  local ok = pcall(function()
+    vim.api.nvim_buf_set_lines(bufnr, pending_restore.firstline,
+      pending_restore.new_lastline, false, pending_restore.lines)
+    for row, id in pairs(pending_restore.row_ids) do
+      if state.rows[id] then set_row_mark(bufnr, row, id) end
+    end
+  end)
+  state.restoring_deleted = nil
+  state.pending_deleted_restore = nil
+  if ok then
+    refresh_display_ids(bufnr, state)
+    capture_deleted_guard_snapshot(bufnr, state)
+    refresh_highlights(bufnr, state)
+    refresh_icons(bufnr, state)
+  end
+end
+
+local function attach_deleted_guard(bufnr)
+  if deleted_guards[bufnr] then return end
+  local attached = vim.api.nvim_buf_attach(bufnr, false, {
+    on_lines = function(_, changed_buf, _, firstline, lastline, new_lastline)
+      local state = states[changed_buf]
+      if not state or state.restoring_deleted or state.suppress_deleted_guard then return end
+      local old_lines, old_ids = state.edit_snapshot or {}, state.edit_row_ids or {}
+      local deleted_touched = false
+      for row = firstline, lastline - 1 do
+        local id = old_ids[row]
+        if id and is_deleted_record(state.rows[id]) then
+          deleted_touched = true
+          break
+        end
+      end
+      if deleted_touched then
+        local original_lines = {}
+        for row = firstline, lastline - 1 do
+          if old_lines[row + 1] ~= nil then
+            original_lines[#original_lines + 1] = old_lines[row + 1]
+          end
+        end
+        local pending_restore = {
+          firstline = firstline,
+          new_lastline = new_lastline,
+          lines = original_lines,
+          row_ids = vim.deepcopy(old_ids),
+        }
+        state.pending_deleted_restore = pending_restore
+        vim.schedule(function()
+          if states[changed_buf] == state
+            and state.pending_deleted_restore == pending_restore then
+            restore_deleted_rows(changed_buf, state)
+          end
+        end)
+        return
+      end
+
+      local delta = new_lastline - lastline
+      local next_ids = {}
+      for row, id in pairs(old_ids) do
+        if row < firstline then
+          next_ids[row] = id
+        elseif row >= lastline then
+          local target = row + delta
+          next_ids[target] = id
+        end
+      end
+      state.edit_snapshot = vim.api.nvim_buf_get_lines(changed_buf, 0, -1, false)
+      state.edit_row_ids = next_ids
+    end,
+    on_detach = function(_, detached_buf)
+      deleted_guards[detached_buf] = nil
+    end,
+  })
+  if attached then deleted_guards[bufnr] = true end
 end
 
 local sync_plan = require('direct.buffer_sync_plan')({
@@ -248,6 +376,7 @@ local tree_planner = require('direct.buffer_tree')({
   fs = fs,
   states = states,
   namespace = namespace,
+  row_id_at = row_id_at,
   set_row_mark = set_row_mark,
   is_dir_line = is_dir_line,
   component_reason = component_reason,
@@ -341,6 +470,7 @@ local function set_options(bufnr)
         operation.cleanup()
       end
       states[bufnr] = nil
+      deleted_guards[bufnr] = nil
     end,
     desc = 'direct: release listing row state when the buffer is wiped',
   })
@@ -371,10 +501,12 @@ local function set_options(bufnr)
     group = group,
     buffer = bufnr,
     callback = function()
+      local state = states[bufnr]
+      if state then restore_deleted_rows(bufnr, state) end
       reconcile_undone_materialization(bufnr)
       -- Edits such as `J` can move display extmarks from a deleted row into
       -- the middle of the surviving line. Rebuild them from row identities.
-      local state = states[bufnr]
+      state = states[bufnr]
       if state then
         refresh_highlights(bufnr, state)
         refresh_icons(bufnr, state)
@@ -387,7 +519,8 @@ local function set_options(bufnr)
     buffer = bufnr,
     callback = function()
       local state = states[bufnr]
-      if state and state.icon_line_count ~= vim.api.nvim_buf_line_count(bufnr) then
+      if state then restore_deleted_rows(bufnr, state) end
+      if state then
         refresh_highlights(bufnr, state)
         refresh_icons(bufnr, state)
       end
@@ -397,6 +530,8 @@ local function set_options(bufnr)
   if require('direct.config').options.map_default_keys then
     folding.install_mappings(bufnr, M)
   end
+  attach_deleted_guard(bufnr)
+  capture_deleted_guard_snapshot(bufnr, states[bufnr])
 end
 
 -- ---------------------------------------------------------------------------
@@ -515,10 +650,36 @@ function Buffer:list()
   if view_git_status_only then
     safe = filter_git_status_lines(self.root, safe, git_snapshot)
   end
+  local merged, deleted_paths = merge_deleted_entries(self.root, safe,
+    git_snapshot, snapshot.show_hidden)
+  safe = merged
+  if view_git_status_only then
+    safe = filter_git_status_lines(self.root, safe, git_snapshot)
+  end
+  local unlistable_deleted = {}
+  for path in pairs(deleted_paths) do
+    local reason = action_mod.path_reason(path)
+    if reason then
+      deleted_paths[path] = nil
+      unlistable_deleted[vim.fs.normalize(path)] = true
+      ui.notify('direct: skipping unlistable Git-deleted entry (' .. reason .. '): '
+        .. path, vim.log.levels.ERROR)
+    end
+  end
+  if next(unlistable_deleted) then
+    local filtered = {}
+    for _, line in ipairs(safe) do
+      if not unlistable_deleted[vim.fs.normalize(M.entry_path(self.root, line))] then
+        filtered[#filtered + 1] = line
+      end
+    end
+    safe = filtered
+  end
+  if next(deleted_paths) == nil then deleted_paths = {} end
 
   reconcile_undone_materialization(bufnr)
   old_state = states[bufnr]
-  local old_expanded = {}
+  local old_expanded, old_deleted = {}, {}
   local old_known_children = {}
   local old_index = { by_path = {}, by_inode = {}, unknown_by_path = {} }
   if old_state then
@@ -532,7 +693,9 @@ function Buffer:list()
       -- row. `rec.path` is assigned from this row's entry path on every list;
       -- checking it against the same path again was redundant. Edited text may
       -- happen to equal another root's name; that is not an identity change.
-      if rec and rec.kind == 'root' and line == rec.text and line == rec.name
+      if rec and rec.kind == 'root' and rec.deleted_kind then
+        old_deleted[vim.fs.normalize(rec.path)] = rec
+      elseif rec and rec.kind == 'root' and line == rec.text and line == rec.name
         and rec.path then
         local candidate = { record = rec, identity = path_identity(rec.path) }
         add_identity(old_index, candidate.identity, candidate)
@@ -569,7 +732,7 @@ function Buffer:list()
     view_show_hidden = snapshot.show_hidden,
     view_show_hidden_override = old_state and old_state.view_show_hidden_override or false,
     view_git_status_only = view_git_status_only,
-    git_status = git_snapshot,
+    git_status = git_snapshot or false,
   }
   set_directory_snapshot(state, snapshot)
   local roots = {}
@@ -577,8 +740,14 @@ function Buffer:list()
   for line_index, line in ipairs(safe) do
     local path = M.entry_path(self.root, line)
     local identity = new_identities[line_index]
-    local candidate, candidate_count = matching_identity_values(old_index, identity)
-    local rec = candidate_count == 1 and candidate and candidate.record or nil
+    local deleted_kind = deleted_paths[vim.fs.normalize(path)]
+    local rec
+    if deleted_kind then
+      rec = old_deleted[vim.fs.normalize(path)]
+    else
+      local candidate, candidate_count = matching_identity_values(old_index, identity)
+      rec = candidate_count == 1 and candidate and candidate.record or nil
+    end
     -- Equivalent spellings may occur more than once (for example two symlink
     -- aliases). Reuse only a unique prior identity for a unique new row.
     if rec and not identity_is_duplicated(identity, new_counts) and not used_root[rec.id] then
@@ -587,6 +756,7 @@ function Buffer:list()
       rec = { id = next_id(state), kind = 'root' }
     end
     rec.kind, rec.name, rec.text, rec.depth = 'root', line, line, 0
+    rec.deleted_kind = deleted_kind
     rec.path = M.entry_path(self.root, line)
     state.rows[rec.id] = rec
     state.root_ids[#state.root_ids + 1] = rec.id
@@ -633,7 +803,9 @@ function Buffer:list()
   end
   local cursor = vim.api.nvim_win_get_cursor(0)
   vim.api.nvim_buf_clear_namespace(bufnr, namespace, 0, -1)
+  if old_state then old_state.suppress_deleted_guard = true end
   local ok, seterr = pcall(vim.api.nvim_buf_set_lines, bufnr, 0, -1, false, display)
+  if old_state then old_state.suppress_deleted_guard = nil end
   if not ok then
     ui.notify('direct: cannot list ' .. tostring(self.root) .. ': '
       .. tostring(seterr), vim.log.levels.ERROR)
@@ -672,16 +844,25 @@ function Buffer:expand(row)
   local just_materialized = false
   if not state.expanded[rec.id] then
     local path = row_path(self.root, rec, line)
-    local children, snapshot, err = list_with_snapshot(path, state.view_show_hidden)
-    if not children then
-      ui.notify('direct: cannot expand ' .. tostring(path) .. ': '
-        .. tostring(err), vim.log.levels.ERROR)
-      return nil, err
+    local physical_children, snapshot
+    if rec.deleted_kind then
+      physical_children = {}
+      snapshot = { wildignore = vim.o.wildignore or '', show_hidden = state.view_show_hidden }
+    else
+      local err
+      physical_children, snapshot, err = list_with_snapshot(path, state.view_show_hidden)
+      if not physical_children then
+        ui.notify('direct: cannot expand ' .. tostring(path) .. ': '
+          .. tostring(err), vim.log.levels.ERROR)
+        return nil, err
+      end
     end
+    local children, deleted_children = merge_deleted_entries(path, physical_children,
+      ensure_git_snapshot(state, require('direct.config').options), state.view_show_hidden)
     -- Keep an unfiltered snapshot for destructive sync preflight. Ignored names
     -- are hidden from the view but still make the directory non-empty.
-    local known_children = fs.read_dir_lines(path)
-    state.known_children[rec.id] = known_children or vim.deepcopy(children)
+    local known_children = rec.deleted_kind and {} or fs.read_dir_lines(path)
+    state.known_children[rec.id] = known_children or vim.deepcopy(physical_children)
     if state.view_git_status_only then
       children = filter_git_status_lines(path, children, state.git_status)
     end
@@ -692,6 +873,7 @@ function Buffer:expand(row)
       if not reason then
         materialized[#materialized + 1] = {
           id = next_id(state), kind = 'child', name = child_name,
+          deleted_kind = deleted_children[vim.fs.normalize(child_path)],
           text = string.rep('  ', (rec.depth or 0) + 1) .. child_name,
           parent = rec.id, order = order, depth = (rec.depth or 0) + 1,
           path = child_path, identity = path_identity(child_path),
@@ -703,11 +885,12 @@ function Buffer:expand(row)
     end
     state.expanded[rec.id] = {
       children = materialized,
-      listing_lines = vim.deepcopy(children),
+      listing_lines = vim.deepcopy(rec.deleted_kind and children or physical_children),
       wildignore = snapshot.wildignore,
       filter_snapshot = vim.deepcopy(snapshot),
+      deleted_parent = rec.deleted_kind ~= nil,
     }
-    set_directory_snapshot(state, snapshot)
+    if not rec.deleted_kind then set_directory_snapshot(state, snapshot) end
     just_materialized = true
     if #materialized > 0 then
       local insert_at, add = row, {}
@@ -731,7 +914,9 @@ function Buffer:expand(row)
       elseif undo_levels >= 0 then
         vim.bo[bufnr].undolevels = undo_levels
       end
+      state.suppress_deleted_guard = true
       vim.api.nvim_buf_set_lines(bufnr, insert_at, insert_at, false, add)
+      state.suppress_deleted_guard = nil
       for offset, child in ipairs(materialized) do
         set_row_mark(bufnr, insert_at + offset - 1, child.id)
       end
@@ -740,6 +925,7 @@ function Buffer:expand(row)
         local id = row_id_at(bufnr, display_row)
         if id then state.display_ids[#state.display_ids + 1] = id end
       end
+      capture_deleted_guard_snapshot(bufnr, state)
       refresh_highlights(bufnr, state)
       state.materialization_seq = vim.fn.undotree().seq_cur
       if state.materialization_seq ~= base_seq then
@@ -792,8 +978,10 @@ local function collapse_snapshot(bufnr, state, parent, parent_row)
       rows_by_id[child.id] = saved
       if state.expanded[child.id] then
         expansions[child.id] = vim.deepcopy(state.expanded[child.id])
-        directory_snapshots[child.id] = vim.deepcopy(
-          state.expanded[child.id].listing_lines or {})
+        if not state.expanded[child.id].deleted_parent then
+          directory_snapshots[child.id] = vim.deepcopy(
+            state.expanded[child.id].listing_lines or {})
+        end
       end
       if not visit(child.id) then return false end
     end
@@ -831,11 +1019,13 @@ local function collapse_snapshot(bufnr, state, parent, parent_row)
           complete = false
           break
         end
-        directory_snapshots[id] = {
-          listing_lines = vim.deepcopy(expanded.listing_lines or {}),
-          wildignore = expanded.wildignore or vim.o.wildignore or '',
-          filter_snapshot = vim.deepcopy(expanded.filter_snapshot),
-        }
+        if not expanded.deleted_parent then
+          directory_snapshots[id] = {
+            listing_lines = vim.deepcopy(expanded.listing_lines or {}),
+            wildignore = expanded.wildignore or vim.o.wildignore or '',
+            filter_snapshot = vim.deepcopy(expanded.filter_snapshot),
+          }
+        end
       end
     end
     if complete then
@@ -897,13 +1087,16 @@ function Buffer:collapse(row)
     elseif undo_levels >= 0 then
       vim.bo[bufnr].undolevels = undo_levels
     end
+    state.suppress_deleted_guard = true
     vim.api.nvim_buf_set_lines(bufnr, row, row + #snapshot.rows, false, {})
+    state.suppress_deleted_guard = nil
     snapshot.seq = vim.fn.undotree().seq_cur
     snapshot.status = 'collapsed'
     state.collapse_undos = state.collapse_undos or {}
     state.collapse_undos[#state.collapse_undos + 1] = snapshot
     remove_expanded_subtree(bufnr, state, parent.id)
     refresh_display_ids(bufnr, state)
+    capture_deleted_guard_snapshot(bufnr, state)
     refresh_highlights(bufnr, state)
     vim.bo[bufnr].modified = modified
   else
@@ -1128,6 +1321,7 @@ function Buffer:sync(options)
     return nil, 'another direct operation is pending'
   end
   local bufnr = vim.api.nvim_get_current_buf()
+  restore_deleted_rows(bufnr)
   reconcile_undone_materialization(bufnr)
   local state = states[bufnr]
   local snapshot = get_directory_snapshot(state, self.root)
@@ -1756,6 +1950,7 @@ end
 -- Child paths resolve from their row identities rather than their display text.
 function Buffer:open(line)
   local bufnr = vim.api.nvim_get_current_buf()
+  restore_deleted_rows(bufnr)
   local safe, integrity_err = children_integrity(bufnr,
     vim.api.nvim_buf_get_lines(bufnr, 0, -1, false))
   if not safe then return nil, integrity_err end
@@ -1771,6 +1966,7 @@ function Buffer:open(line)
     end
   end
   local record = target_row and current_row_record(bufnr, target_row - 1)
+  if is_deleted_record(record) then return false end
   local path = row_path(self.root, record, line)
   if not path and type(line) == 'string' and not line:match('^%s') then
     path = M.entry_path(self.root, line)
@@ -1793,6 +1989,7 @@ end
 -- the inclusive 1-based range (Python's buffer slice). Used by `:DirectYank`.
 function Buffer:get_paths(firstline, lastline)
   local bufnr = vim.api.nvim_get_current_buf()
+  restore_deleted_rows(bufnr)
   local safe, integrity_err = children_integrity(bufnr,
     vim.api.nvim_buf_get_lines(bufnr, 0, -1, false))
   if not safe then return nil, integrity_err end
@@ -1801,7 +1998,9 @@ function Buffer:get_paths(firstline, lastline)
   for offset, line in ipairs(lines) do
     local row = firstline + offset - 2
     local record = current_row_record(bufnr, row)
-    if record and record.kind == 'child' then
+    if is_deleted_record(record) then
+      -- Deleted Git rows are view-only and never enter the register.
+    elseif record and record.kind == 'child' then
       out[#out + 1] = record.path
     elseif record and record.kind == 'root' then
       out[#out + 1] = M.entry_path(self.root, line)
@@ -1819,6 +2018,7 @@ end
 -- actually listed: it refuses blank rows and rows with unsaved name edits.
 function Buffer:get_entry_path(row)
   local bufnr = vim.api.nvim_get_current_buf()
+  restore_deleted_rows(bufnr)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local safe, integrity_err = children_integrity(bufnr, lines)
   if not safe then return nil, integrity_err end
@@ -1833,12 +2033,22 @@ function Buffer:get_entry_path(row)
   return record.path
 end
 
+function Buffer:get_entry_record(row)
+  local bufnr = vim.api.nvim_get_current_buf()
+  restore_deleted_rows(bufnr)
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local safe = children_integrity(bufnr, lines)
+  if not safe then return nil end
+  return current_row_record(bufnr, row - 1)
+end
+
 -- Buffer:paste_destination([row]) -> the directory represented by the row.
 -- A directory row is itself the destination; a file row uses its parent.
 -- Resolve through the row record so expanded child rows never rely on their
 -- indented display text for filesystem paths.
 function Buffer:paste_destination(row)
   local bufnr = vim.api.nvim_get_current_buf()
+  restore_deleted_rows(bufnr)
   local safe, integrity_err = children_integrity(bufnr,
     vim.api.nvim_buf_get_lines(bufnr, 0, -1, false))
   if not safe then return nil, integrity_err end
@@ -1851,6 +2061,7 @@ function Buffer:paste_destination(row)
     if line == '' then return self.root end
     return nil, 'row identity is unavailable'
   end
+  if is_deleted_record(record) then return false, 'deleted Git entries are view-only' end
   if line ~= recorded_row_text(record) then
     return nil, 'cannot paste from a row with unsaved edits'
   end

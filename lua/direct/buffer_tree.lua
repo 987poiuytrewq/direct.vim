@@ -5,6 +5,7 @@ return function(deps)
   local fs = deps.fs
   local states = deps.states
   local namespace = deps.namespace
+  local row_id_at = deps.row_id_at
   local set_row_mark = deps.set_row_mark
   local is_dir_line = deps.is_dir_line
   local component_reason = deps.component_reason
@@ -41,7 +42,15 @@ return function(deps)
           return nil, 'child identity marks are invalid or duplicated'
         end
       end
-      return lines
+      local visible_roots = {}
+      for row, line in ipairs(lines) do
+        local id = row_id_at(bufnr, row - 1)
+        local rec = id and state.rows[id]
+        if not (rec and rec.deleted_kind) then
+          visible_roots[#visible_roots + 1] = line
+        end
+      end
+      return visible_roots
     end
     local mark_rows, seen_id, seen_row, invalid_child_ids = {}, {}, {}, {}
     for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1,
@@ -238,7 +247,7 @@ return function(deps)
     for row, line in ipairs(lines) do
       local id = row_ids[row - 1]
       local rec = id and state.rows[id]
-      if not rec or rec.kind ~= 'child' then
+      if (not rec or rec.kind ~= 'child') and not (rec and rec.deleted_kind) then
         root_lines[#root_lines + 1] = line
       end
     end
@@ -381,7 +390,9 @@ return function(deps)
     for _, id in ipairs(state.root_ids or {}) do
       root_ids[id] = true
       local rec, now = state.rows[id], nodes_by_id[id]
-      if now then roots[#roots + 1] = now.depth == 0 and now.name or rec.name end
+      if not rec.deleted_kind and now then
+        roots[#roots + 1] = now.depth == 0 and now.name or rec.name
+      end
     end
     for _, node in ipairs(nodes) do
       if node.depth == 0 and not node.id then roots[#roots + 1] = node.name end
@@ -527,7 +538,8 @@ return function(deps)
     local changed_parents = {}
     for parent_id, expansion in pairs(state.expanded or {}) do
       local parent = state.rows[parent_id]
-      if parent and nodes_by_id[parent_id] and expansion_is_live(parent_id) then
+      if parent and not parent.deleted_kind and nodes_by_id[parent_id]
+        and expansion_is_live(parent_id) then
         local current = children_by_parent[parent_id] or {}
         local current_by_id = {}
         local old_children = {}
@@ -591,7 +603,8 @@ return function(deps)
     local deleted_ids, moving_ids = {}, {}
     for id in pairs(root_ids) do
       local rec, node = state.rows[id], nodes_by_id[id]
-      if rec and node and is_dir_line(rec.name) and node.depth == 0
+      if rec and not rec.deleted_kind and node
+        and is_dir_line(rec.name) and node.depth == 0
         and rec.name ~= node.name then
         -- Root-directory moves are emitted by the root classifier. Mark them
         -- here so separate descendant edits cannot be staged against stale paths.
@@ -600,7 +613,8 @@ return function(deps)
     end
     for _, id in ipairs(state.display_ids or {}) do
       local rec = state.rows[id]
-      if rec and rec.kind == 'child' and not undone_ids[id] and not nodes_by_id[id] then
+      if rec and rec.kind == 'child' and not rec.deleted_kind
+        and not undone_ids[id] and not nodes_by_id[id] then
         deleted_ids[id] = true
       end
     end
@@ -623,8 +637,20 @@ return function(deps)
       end
     end
 
+    local function under_deleted_parent(node)
+      local parent_key = node.parent_key
+      while parent_key do
+        local parent = nodes_by_key[parent_key]
+        if parent and parent.rec and parent.rec.deleted_kind then return true end
+        parent_key = parent and parent.parent_key or nil
+      end
+      return false
+    end
+
     for _, node in ipairs(nodes) do
-      if not node.id then
+      if under_deleted_parent(node) or (node.rec and node.rec.deleted_kind) then
+        -- Virtual Git rows and anything nested beneath them are view-only.
+      elseif not node.id then
         if node.depth > 0 then
           local destination = node.path
           if is_dir_line(node.name) then

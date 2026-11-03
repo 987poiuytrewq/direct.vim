@@ -99,6 +99,7 @@ function M._handle_mouse_click(buffer, mouse)
     end
   end
 
+  if rec and rec.deleted_kind then return end
   if not is_icon_click then return end
   return vim.api.nvim_win_call(winid, function()
     local attached = buffer.restore()

@@ -4,9 +4,10 @@ local M = {}
 
 local status_priority = {
   modified = 1,
-  added = 2,
-  renamed = 3,
-  conflicted = 4,
+  deleted = 2,
+  added = 3,
+  renamed = 4,
+  conflicted = 5,
 }
 
 local function normalize(path)
@@ -51,12 +52,41 @@ local function classify(xy)
     return 'conflicted'
   end
   if xy:find('R', 1, true) then return 'renamed' end
+  if xy:find('D', 1, true) then return 'deleted' end
   if xy == '??' or xy:find('A', 1, true) then return 'added' end
   if xy:find('M', 1, true) or xy:find('T', 1, true)
     or xy:find('C', 1, true) then
     return 'modified'
   end
   return nil
+end
+
+local function path_is_missing(path)
+  local ok, stat = pcall(vim.uv.fs_lstat, path)
+  return ok and stat == nil
+end
+
+local function add_deleted(deleted, root, relative, xy)
+  local path = normalize(root .. '/' .. relative)
+  local staged, unstaged = xy:sub(1, 1) == 'D', xy:sub(2, 2) == 'D'
+  local function add(path, kind)
+    if not path_is_missing(path) then return end
+    local previous = deleted[path]
+    if previous then
+      previous.staged = previous.staged or staged
+      previous.unstaged = previous.unstaged or unstaged
+    else
+      deleted[path] = { kind = kind, staged = staged, unstaged = unstaged }
+    end
+  end
+
+  add(path, 'file')
+  local parent = path:match('^(.*)/[^/]+$')
+  while parent do
+    add(parent, 'directory')
+    if parent == root or parent == '/' then break end
+    parent = parent:match('^(.*)/[^/]+$')
+  end
 end
 
 local function add_path(paths, path, status)
@@ -102,7 +132,7 @@ function M.read(root)
   if not output then return nil end
 
   local fields = nul_fields(output)
-  local paths, staging = {}, {}
+  local paths, staging, deleted = {}, {}, {}
   local index = 1
   while index <= #fields do
     local record = fields[index]
@@ -123,10 +153,43 @@ function M.read(root)
         if status == 'conflicted' then staged, unstaged = false, false end
         add_with_parent_directories(paths, staging, repo_root, relative, status,
           staged, unstaged)
+        if xy:find('D', 1, true) then
+          add_deleted(deleted, repo_root, relative, xy)
+        end
       end
     end
   end
-  return { root = repo_root, paths = paths, staging = staging }
+  return { root = repo_root, paths = paths, staging = staging, deleted = deleted }
+end
+
+-- deleted_children(snapshot, directory) returns absent tracked entries directly
+-- below directory. Missing parent directories are included in `snapshot.deleted`
+-- so callers can display and expand a deleted subtree without touching disk.
+function M.deleted_children(snapshot, directory)
+  if not snapshot or type(snapshot.deleted) ~= 'table' then return {} end
+  directory = normalize(directory)
+  local prefix = directory == '/' and '/' or (directory .. '/')
+  local result = {}
+  for path, entry in pairs(snapshot.deleted) do
+    if path:sub(1, #prefix) == prefix and path_is_missing(path) then
+      local name = path:sub(#prefix + 1)
+      if name ~= '' and not name:find('/', 1, true) then
+        if entry.kind == 'directory' then name = name .. '/' end
+        result[#result + 1] = {
+          name = name,
+          path = path,
+          kind = entry.kind,
+          staged = entry.staged,
+          unstaged = entry.unstaged,
+        }
+      end
+    end
+  end
+  table.sort(result, function(a, b)
+    if a.kind ~= b.kind then return a.kind == 'directory' end
+    return a.name < b.name
+  end)
+  return result
 end
 
 local function absolute(root, path)

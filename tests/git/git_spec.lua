@@ -204,6 +204,42 @@ H.describe('Git status display', function()
       { 'committed content' }, 'gc restores the committed file contents')
   end)
 
+  H.it('captures deleted tracked files and missing directory ancestors', function()
+    local sb = H.sandbox()
+    local root = H.mkdir(sb.root, 'deleted-repo')
+    H.mkfile(root, 'gone.txt', 'gone')
+    H.mkfile(root, 'removed/nested/deep.txt', 'deep')
+    init_repo(root)
+    commit_all(root, 'base')
+
+    H.assert_true(vim.uv.fs_unlink(root .. '/gone.txt'), 'removes a tracked file')
+    H.assert_true(vim.uv.fs_unlink(root .. '/removed/nested/deep.txt'),
+      'removes a tracked descendant')
+    H.assert_true(vim.uv.fs_rmdir(root .. '/removed/nested'), 'removes its nested directory')
+    H.assert_true(vim.uv.fs_rmdir(root .. '/removed'), 'removes its parent directory')
+
+    local snapshot = git_status.read(root)
+    H.assert_eq(status_at(snapshot, root, 'gone.txt'), 'deleted',
+      'unstaged file deletion is classified')
+    H.assert_eq(status_at(snapshot, root, 'removed'), 'deleted',
+      'directory status aggregates its deleted descendants')
+    H.assert_eq(snapshot.deleted[vim.fs.joinpath(root, 'gone.txt')].kind, 'file',
+      'the deleted leaf is a file')
+    H.assert_eq(snapshot.deleted[vim.fs.joinpath(root, 'removed')].kind, 'directory',
+      'a missing tracked directory is derived from its descendants')
+    H.assert_eq(snapshot.deleted[vim.fs.joinpath(root, 'removed/nested')].kind,
+      'directory', 'nested missing directories are derived too')
+    local root_children = git_status.deleted_children(snapshot, root)
+    H.assert_eq(vim.tbl_map(function(entry) return entry.name end, root_children),
+      { 'removed/', 'gone.txt' }, 'deleted children use normal directory-first ordering')
+
+    git(root, 'add', '-u')
+    snapshot = git_status.read(root)
+    local staged = snapshot.deleted[vim.fs.joinpath(root, 'gone.txt')]
+    H.assert_true(staged.staged, 'staged deletion state is retained')
+    H.assert_false(staged.unstaged, 'staged deletion is not reported as unstaged')
+  end)
+
   H.it('defaults to colored gutters and supports staged display overrides', function()
     local buffer = require('direct.buffer')
     local config = require('direct.config')
@@ -405,6 +441,125 @@ H.describe('Git status display', function()
       'mixed files can override their text color independently')
     H.assert_eq(highlights[rows['nested/']][4].hl_group, 'DirectMixedFolderText',
       'mixed folders can override their text color independently')
+  end)
+
+  H.it('lists, highlights, expands, and protects Git-deleted entries', function()
+    local buffer = require('direct.buffer')
+    local config = require('direct.config')
+    local direct = require('direct')
+    local register = require('direct.register')
+    local sb = H.sandbox()
+    local root = H.mkdir(sb.root, 'deleted-display-repo')
+    H.mkfile(root, 'gone.txt', 'gone')
+    H.mkfile(root, 'removed/nested/deep.txt', 'deep')
+    H.mkfile(root, 'live.txt', 'live')
+    init_repo(root)
+    commit_all(root, 'base')
+    H.assert_true(vim.uv.fs_unlink(root .. '/gone.txt'), 'removes a tracked file')
+    H.assert_true(vim.uv.fs_unlink(root .. '/removed/nested/deep.txt'),
+      'removes a tracked descendant')
+    H.assert_true(vim.uv.fs_rmdir(root .. '/removed/nested'), 'removes its nested directory')
+    H.assert_true(vim.uv.fs_rmdir(root .. '/removed'), 'removes its parent directory')
+
+    config.setup({ map_default_keys = false, show_folder_icons = true, show_file_icons = true })
+    local listing = buffer.list(root)
+    local lines = H.buf_lines()
+    H.assert_eq(lines, { '.git/', 'removed/', 'gone.txt', 'live.txt' },
+      'deleted paths appear beside normal filesystem entries')
+    local row_for = function(text)
+      for row, line in ipairs(lines) do if line == text then return row end end
+    end
+    local namespace = vim.api.nvim_get_namespaces()['direct-listing-highlights']
+    local marks = {}
+    for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(0, namespace, 0, -1,
+        { details = true })) do
+      marks[mark[2]] = mark
+    end
+    H.assert_eq(vim.api.nvim_get_hl(0, { name = 'DirectGitDeletedFile', link = true }),
+      { default = true, link = 'ErrorMsg' }, 'deleted-file group defaults to ErrorMsg')
+    H.assert_eq(vim.api.nvim_get_hl(0, { name = 'DirectGitDeletedDirectory', link = true }),
+      { default = true, link = 'ErrorMsg' }, 'deleted-directory group defaults to ErrorMsg')
+    H.assert_eq(marks[row_for('removed/') - 1][4].hl_group, 'DirectGitDeletedDirectory',
+      'missing directory name uses its dedicated highlight')
+    H.assert_eq(marks[row_for('gone.txt') - 1][4].hl_group, 'DirectGitDeletedFile',
+      'missing file name uses its dedicated highlight')
+    local gutter_namespace = vim.api.nvim_get_namespaces()['direct-listing-git-gutter']
+    local gutters = {}
+    for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(0, gutter_namespace, 0, -1,
+        { details = true })) do
+      gutters[mark[2]] = mark
+    end
+    H.assert_eq(gutters[row_for('gone.txt') - 1][4].sign_text, '┃ ',
+      'deleted entries retain the regular Git gutter symbol')
+    H.assert_eq(gutters[row_for('gone.txt') - 1][4].sign_hl_group,
+      'DirectGitUnstagedGutter', 'deleted entries use the default unstaged gutter style')
+
+    config.setup({ map_default_keys = false, git = { staging = { enabled = false } } })
+    listing:list()
+    gutters = mark_by_row(0, 'direct-listing-git-gutter')
+    H.assert_eq(gutters[row_for('gone.txt') - 1][4].sign_hl_group,
+      'DirectGitDeletedGutter', 'deleted status has its own gutter when staging is disabled')
+
+    config.setup({ map_default_keys = false, git = {
+      display = 'both',
+      statuses = { deleted = { text_hl = 'DirectCustomDeletedText' } },
+    } })
+    listing:list()
+    marks = mark_by_row(0, 'direct-listing-highlights')
+    H.assert_eq(marks[row_for('gone.txt') - 1][4].hl_group, 'DirectGitDeletedFile',
+      'deleted name groups take precedence over Git status text overrides')
+
+    H.assert_true(listing:expand(row_for('removed/')), 'expands a missing Git directory')
+    lines = H.buf_lines()
+    H.assert_eq(lines, { '.git/', 'removed/', '  nested/', 'gone.txt', 'live.txt' },
+      'deleted directory exposes its deleted child directory')
+    H.assert_true(listing:expand(3), 'recursively expands a deleted directory child')
+    H.assert_eq(H.buf_lines(), {
+      '.git/', 'removed/', '  nested/', '    deep.txt', 'gone.txt', 'live.txt',
+    }, 'deleted descendants remain navigable by their rows')
+
+    local state = buffer._state_for_test(vim.api.nvim_get_current_buf())
+    local nested_id = state.display_ids[3]
+    H.assert_eq(state.rows[nested_id].deleted_kind, 'directory',
+      'expanded missing directory retains a protected row identity')
+    local deep_path = listing:get_entry_path(4)
+    H.assert_eq(deep_path, root .. '/removed/nested/deep.txt',
+      'the deleted row resolves to its tracked path')
+    H.assert_false(listing:open('removed/'), 'deleted entries cannot be opened')
+    H.assert_eq(listing:get_paths(4, 4), {}, 'deleted paths are excluded from yanks')
+    H.assert_eq(listing:paste_destination(4), false,
+      'pasting on a deleted file row is a silent no-op')
+    H.assert_true(listing:collapse(2), 'z-style collapse works on a deleted directory')
+    H.assert_eq(H.buf_lines(), { '.git/', 'removed/', 'gone.txt', 'live.txt' },
+      'collapsing removes only the virtual descendants')
+    H.assert_true(listing:expand(2), 'z-style expansion can reopen the deleted directory')
+    H.assert_true(listing:expand(3), 'nested deleted directories remain expandable')
+
+    local yank_calls = 0
+    local restore_yank = H.stub(register, 'yank', function()
+      yank_calls = yank_calls + 1
+      return true
+    end)
+    local deleted_row = 5
+    H.assert_true(direct.yank(deleted_row, deleted_row), 'yanking a deleted row is ignored')
+    restore_yank()
+    H.assert_eq(yank_calls, 0, 'deleted rows do not enter the yank register')
+    vim.api.nvim_win_set_cursor(0, { deleted_row, 0 })
+    H.assert_true(direct.paste(), 'pasting onto a deleted row is ignored')
+
+    vim.api.nvim_buf_set_lines(0, deleted_row - 1, deleted_row, false, { 'forged.txt' })
+    vim.api.nvim_exec_autocmds('TextChanged', { buffer = 0 })
+    H.assert_eq(vim.api.nvim_buf_get_lines(0, deleted_row - 1, deleted_row, false)[1],
+      'gone.txt', 'text edits to a deleted row are silently restored')
+    H.assert_true(listing:sync(), 'sync treats restored deleted rows as view-only')
+    H.assert_nil(vim.uv.fs_stat(root .. '/forged.txt'),
+      'sync never creates the edited tombstone name')
+    H.assert_nil(vim.uv.fs_stat(root .. '/gone.txt'),
+      'sync never turns the Git deletion into a filesystem action')
+    vim.api.nvim_buf_set_lines(0, deleted_row - 1, deleted_row, false, {})
+    vim.api.nvim_exec_autocmds('TextChanged', { buffer = 0 })
+    H.assert_eq(vim.api.nvim_buf_get_lines(0, deleted_row - 1, deleted_row, false)[1],
+      'gone.txt', 'deleting a tombstone row is silently undone')
   end)
 
   H.it('does not classify directories outside Git repositories', function()

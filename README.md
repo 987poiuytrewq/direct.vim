@@ -27,6 +27,9 @@ loader is disabled.
 The hidden icon groups are `DirectHiddenFolderIcon` and `DirectHiddenFileIcon`;
 both link to `Comment` by default and can be overridden independently.
 
+Git-deleted tracked entries use `DirectGitDeletedFile` and
+`DirectGitDeletedDirectory` for their names; both link to `ErrorMsg` by default.
+
 Highlight defaults are user-overridable and are reapplied after a `ColorScheme`
 event.
 
@@ -197,14 +200,15 @@ place; mouse input must be enabled in Neovim (for example, `:set mouse=a`).
 ### Git status
 
 In a Git repository, direct reads status once per listing refresh. Added
-(including untracked), modified, Git-detected renamed, and conflicted entries are
-styled without changing listing text. Directories inherit the strongest status
-of changed descendants, in the order conflicted, renamed, added, then modified.
-The default gutter shows `┃` for unstaged changes (including untracked files) and
-`┃•` for staged changes. Mixed files and mixed folders with staged descendants
-default to the staged display, with independent `mixed_file` and `mixed_folder`
-overrides. Conflicts use their conflict styling instead. Deleted entries have no
-listing row to mark. Re-list to refresh Git status.
+(including untracked), modified, Git-detected renamed, conflicted, and deleted
+entries are styled without changing listing text. Missing tracked files and
+directories containing deleted tracked descendants appear as protected rows.
+Directories inherit the strongest status of changed descendants, in the order
+conflicted, renamed, added, deleted, then modified. The default gutter shows `┃`
+for unstaged changes (including untracked files) and `┃•` for staged changes.
+Mixed files and mixed folders with staged descendants default to the staged
+display, with independent `mixed_file` and `mixed_folder` overrides. Conflicts
+use their conflict styling instead. Re-list to refresh Git status.
 
 Press `gs` or run `:DirectToggleGitStatus` to show only entries with a status;
 press it again to restore the normal listing. Directories inherit status from
@@ -270,6 +274,12 @@ is independent of `respect_gitignore`. Mixed-file and mixed-folder settings
 inherit the staged settings by default and can independently override
 `icon_hl`, `text_hl`, `icon`, and `gutter`. Set `git.staging.enabled = false`
 to disable staging-specific styling while retaining regular status display.
+Deleted row names always use their
+file/directory highlight groups, even when staging styles are configured; their
+Git gutter follows the regular status display and uses `DirectGitDeletedGutter`
+(default `ErrorMsg`). Deleted rows can be targeted by `:DirectRun`, expanded and
+collapsed with the `z` commands, and staged/reset/restored with `ga`, `gr`, and
+`gc`. Other listing edits, opens, yanks, and pastes on those rows are ignored.
 
 ## Run shell and Git commands
 
@@ -277,8 +287,9 @@ In a Direct listing, `:DirectRun {command}` runs asynchronously from the listing
 directory. Each `{}` is replaced by the shell-escaped absolute path of the
 current entry. Leave `{}` unquoted so paths containing spaces or shell
 metacharacters remain one argument. Captured output and exit status are reported
-when the command finishes; the current row must name an existing entry. `DirectRun`
-does not refresh Git status.
+when the command finishes. The current row must name an existing entry, except
+for a tracked Git-deleted row, which can be targeted to restore or stage it.
+`DirectRun` does not refresh Git status.
 
 Use `:DirectGit {command}` for a Git command that should also refresh the status
 decorations in the originating loaded listing when it completes. It uses the

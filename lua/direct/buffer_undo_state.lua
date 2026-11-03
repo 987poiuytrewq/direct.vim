@@ -44,7 +44,11 @@ return function(deps)
     -- than falling back to the current option.
     if type(materialization.wildignore) ~= 'string' then return false end
     local listed
-    if materialization.filter_snapshot and read_with_snapshot then
+    if parent.deleted_kind then
+      -- A deleted directory has no disk listing. Its saved Git-derived children
+      -- are the authoritative view snapshot for undo/redo materialization.
+      listed = vim.deepcopy(materialization.listing_lines or {})
+    elseif materialization.filter_snapshot and read_with_snapshot then
       listed = read_with_snapshot(parent.path, materialization.filter_snapshot)
     else
       local ignored = ignore_set(parent.path, materialization.wildignore)
@@ -103,6 +107,7 @@ return function(deps)
       listing_lines = vim.deepcopy(materialization.listing_lines or {}),
       wildignore = materialization.wildignore or '',
       filter_snapshot = vim.deepcopy(materialization.filter_snapshot),
+      deleted_parent = parent.deleted_kind ~= nil,
     }
     for _, child in ipairs(children) do
       local ok = pcall(set_row_mark, bufnr, expected_rows[child.id], child.id)
@@ -242,6 +247,7 @@ return function(deps)
         listing_lines = vim.deepcopy(expansion.listing_lines or {}),
         wildignore = expansion.wildignore or '',
         filter_snapshot = vim.deepcopy(expansion.filter_snapshot),
+        deleted_parent = expansion.deleted_parent == true,
       }
       for _, child in ipairs(expansion.children or {}) do
         local rec = records[child.id]

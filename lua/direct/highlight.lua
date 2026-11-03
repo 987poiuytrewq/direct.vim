@@ -28,6 +28,9 @@ local default_links = {
   DirectGitUnstagedIcon = 'DiffChange',
   DirectGitUnstaged = 'DiffChange',
   DirectGitUnstagedGutter = 'DiffChange',
+  DirectGitDeletedFile = 'ErrorMsg',
+  DirectGitDeletedDirectory = 'ErrorMsg',
+  DirectGitDeletedGutter = 'ErrorMsg',
 }
 
 local function define_highlight_defaults()
@@ -55,6 +58,20 @@ function M.render(bufnr, rows, options)
   vim.api.nvim_buf_clear_namespace(bufnr, gutter_namespace, 0, -1)
   options = options or {}
   local git_options = options.git or {}
+  for _, item in ipairs(rows or {}) do
+    local deleted_group = item.deleted_kind == 'directory'
+      and 'DirectGitDeletedDirectory'
+      or (item.deleted_kind == 'file' and 'DirectGitDeletedFile' or nil)
+    if deleted_group then
+      local line = vim.api.nvim_buf_get_lines(bufnr, item.row, item.row + 1, false)[1] or ''
+      vim.api.nvim_buf_set_extmark(bufnr, namespace, item.row, (item.depth or 0) * 2, {
+        end_row = item.row,
+        end_col = #line,
+        hl_group = deleted_group,
+        priority = 150,
+      })
+    end
+  end
   if git_options.enabled == false then return end
   local display = git_options.display or 'both'
   local statuses = git_options.statuses or {}
@@ -68,7 +85,8 @@ function M.render(bufnr, rows, options)
       local line = vim.api.nvim_buf_get_lines(bufnr, item.row, item.row + 1, false)[1] or ''
       local text_hl = stage_settings and stage_settings.text_hl
         or (settings and settings.text_hl)
-      if (display == 'text' or display == 'both') and text_hl then
+      if (display == 'text' or display == 'both') and text_hl
+        and not item.deleted_kind then
         vim.api.nvim_buf_set_extmark(bufnr, namespace, item.row, (item.depth or 0) * 2, {
           end_row = item.row,
           end_col = #line,
