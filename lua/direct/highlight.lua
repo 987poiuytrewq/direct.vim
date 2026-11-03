@@ -60,7 +60,7 @@ local function status_chunks(status, symbols, conflicted)
   end
 
   if status == '!!' then
-    return { slot('ignored', 'DirectGitIgnored'), { ' ', 'Normal' } }
+    return { slot('ignored', 'DirectGitIgnored'), { ' ', 'Normal' }, { ' ', 'Normal' } }
   end
 
   local index, worktree = status:sub(1, 1), status:sub(2, 2)
@@ -99,6 +99,7 @@ local function status_chunks(status, symbols, conflicted)
 
   return {
     slot(first_change, change_highlights[first_change]),
+    { ' ', 'Normal' },
     second_change
       and slot(second_change, change_highlights[second_change])
       or (second_symbol and slot(second_symbol, second_highlight) or { ' ', 'Normal' }),
@@ -130,7 +131,7 @@ function M.render(bufnr, rows, options)
     local deleted_group = item.deleted_kind == 'directory'
       and 'DirectGitDeletedDirectory'
       or (item.deleted_kind == 'file' and 'DirectGitDeletedFile' or nil)
-    if deleted_group and not (git_options.enabled ~= false and item.worktree_status) then
+    if deleted_group and not (git_options.enabled ~= false and item.first_status) then
       local line = vim.api.nvim_buf_get_lines(bufnr, item.row, item.row + 1, false)[1] or ''
       vim.api.nvim_buf_set_extmark(bufnr, namespace, item.row, (item.depth or 0) * 2, {
         end_row = item.row,
@@ -140,12 +141,12 @@ function M.render(bufnr, rows, options)
       })
     end
 
-    if git_options.enabled ~= false and item.worktree_status then
+    if git_options.enabled ~= false and item.first_status then
       local line = vim.api.nvim_buf_get_lines(bufnr, item.row, item.row + 1, false)[1] or ''
       vim.api.nvim_buf_set_extmark(bufnr, namespace, item.row, (item.depth or 0) * 2, {
         end_row = item.row,
         end_col = #line,
-        hl_group = change_highlights[item.worktree_status],
+        hl_group = change_highlights[item.first_status],
         priority = 160,
       })
     end

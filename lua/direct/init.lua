@@ -75,6 +75,12 @@ function M.open(line)
   return buffer.restore():open(line)
 end
 
+function M.open_parent_expanded()
+  local opened = M.open('../')
+  if not opened then return opened end
+  return buffer.expand()
+end
+
 function M.sync()
   if not guard('DirectSync') then
     return nil

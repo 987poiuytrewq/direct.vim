@@ -138,8 +138,8 @@ the other kind reserves a blank icon slot so entry names stay aligned. Icons are
 virtual text, so buffer lines and filesystem behavior are unchanged. No icon
 plugin or other dependency is required.
 Customize any of these glyphs with the corresponding key in the `icons` table.
-Git status colors icons and filenames from the worktree column; index-only
-changes leave their base colors unchanged.
+Git status colors icons and filenames to match the first (leftmost) status
+symbol: the index status when present, otherwise the worktree status.
 With folder icons enabled, click a folder icon to expand or collapse that
 directory in place. Mouse input must be enabled in Neovim (for example,
 `:set mouse=a`). Clicking elsewhere in the listing retains normal cursor
@@ -149,9 +149,11 @@ Git status ~
 
 In a Git repository, direct reads porcelain status once per listing refresh and
 shows a Neo-tree-style status component, right-aligned at the end of each row.
-It is virtual text and does not change buffer lines. Set `git.show_symbols =
-false` to hide the status component; it defaults to `true`. Worktree-based
-filename and icon colors remain active. `T` is normalized to `M`; untracked `??`
+It is virtual text and does not change buffer lines; its two status slots have
+one space between them. Set `git.show_symbols =
+false` to hide the status component; it defaults to `true`. Filename and icon
+colors still match the first (leftmost) status symbol, using the index status
+when present and otherwise the worktree status. `T` is normalized to `M`; untracked `??`
 maps to `_A` and displays the added symbol. Ignored `!!` entries display the
 ignored symbol.
 
@@ -169,8 +171,8 @@ edge of the window without reserving sign columns. Very long rows may leave less
 space for the component.
 
 Missing tracked files and directories containing deleted tracked descendants
-appear as protected rows. Their names use their worktree status color when one
-exists; staged-only tombstones retain the dedicated deleted-row highlight. Set
+appear as protected rows. Their names use the same color as the first status
+symbol, including staged-only tombstones. Set
 `git.show_deleted = false` to hide these synthetic rows while retaining Git
 status on entries that still exist. This option has no effect when Git status is
 disabled; it defaults to `true`.
@@ -232,6 +234,7 @@ Once a directory is listed, `-` goes up to its parent directory and `<Enter>`
 opens the entry under the cursor: a directory line opens a new listing, a file
 line opens the file. Double-clicking an entry opens it the same way. This is
 enough to move around the filesystem without remembering any extra command.
+Use `z-` to go up to the parent listing and expand the directory you came from.
 
 Use `zo` or `za` on a directory to expand it in place. Children are read lazily,
 one level at a time; repeating an expansion does not re-read or duplicate them.
@@ -442,7 +445,8 @@ existing synchronous staging behavior.
         or change buffer text.
 
 `:DirectSync`, `:DirectFoldAll`, `:DirectUnfoldAll`,
-`open()` (the public API used by the entry mappings),
+`open()` and `open_parent_expanded()` (the public APIs used by the entry
+mappings),
 `:DirectUndo`, `:DirectRedo`, `:DirectYank`, `:DirectPaste` (no argument),
 `:DirectPasteAs`, `:DirectRun`, and `:DirectGit` report an error and do nothing
 when the current buffer is not a direct buffer. `:DirectRun` does not refresh Git
@@ -473,6 +477,7 @@ Buffer-local, in a direct buffer (all mappings follow `map_default_keys`):
     normal      zR          recursively expand all root directories
     normal      zM          collapse all root directories
     normal      -           open ../ (the parent directory)
+    normal      z-          open ../ and expand the directory just left
     normal      u           undo the last filesystem action
     normal      <C-r>       redo the last filesystem action
     normal      yy, Y       :DirectYank (current line)

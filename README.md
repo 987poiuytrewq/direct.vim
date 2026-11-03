@@ -200,9 +200,9 @@ behavior are unchanged. No icon plugin or other dependency is required.
 Deleted tracked rows use the regular-outline `nf-fa-file-o` and
 `nf-fa-folder-o` glyphs; expanded deleted folders use `nf-fa-folder-open-o`.
 Set `icons.file`, `icons.folder`, `icons.folder_open`, and the `deleted_*`
-variants to customize every file and folder glyph. Git status colors regular
-filenames and icons according to each entry's worktree status; index-only changes
-leave their base colors unchanged.
+variants to customize every file and folder glyph. Git status colors filenames
+and icons to match the first (leftmost) status symbol: the index status when
+present, otherwise the worktree status.
 Highlight groups can be customized in your colorscheme or with
 `vim.api.nvim_set_hl()`.
 With folder icons enabled, click an icon to expand or collapse that directory in
@@ -213,8 +213,11 @@ place; mouse input must be enabled in Neovim (for example, `:set mouse=a`).
 In a Git repository, Direct reads porcelain status once per listing refresh and
 shows a Neo-tree-style status component, right-aligned at the end of each row.
 The component is virtual text: it does not change the editable listing lines.
-Set `git.show_symbols = false` to hide the component while keeping worktree-based
-filename and icon colors. `git.show_symbols` defaults to `true`. `T` is normalized to `M`;
+Its two status slots are separated by one space.
+Set `git.show_symbols = false` to hide the component while keeping filename and
+icon colors. Those colors match the first (leftmost) status symbol, using the
+index status when present and otherwise the worktree status.
+`git.show_symbols` defaults to `true`. `T` is normalized to `M`;
 untracked `??` maps to `_A` and uses the added symbol. Ignored `!!` entries use
 the ignored symbol.
 
@@ -229,9 +232,9 @@ Git status.
 
 The status component is right-aligned in the window. Very long row text may leave
 less room for it. Missing tracked files and directories containing deleted
-tracked descendants appear as protected rows. Their names use the worktree
-status color when one exists; staged-only tombstones retain the dedicated
-deleted-row highlight. Set `git.show_deleted = false` to hide these synthetic
+tracked descendants appear as protected rows. Their names use the same color as
+the first status symbol, including staged-only tombstones. Set
+`git.show_deleted = false` to hide these synthetic
 rows while retaining Git status on entries that still exist. This option has no
 effect when Git status is disabled; it defaults to `true`.
 
