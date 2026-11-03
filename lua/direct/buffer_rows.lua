@@ -121,7 +121,7 @@ local function refresh_icons(bufnr, state)
       if enabled then
         glyph, group = base_glyph, base_group
         if options.git.enabled and git_snapshot then
-          local status = git.worktree_status_for(git_snapshot, rec.path)
+          local status = git.first_status_for(git_snapshot, rec.path)
           group = highlight.git_status_highlight(status) or group
         end
       end
