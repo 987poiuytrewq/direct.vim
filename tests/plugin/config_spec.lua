@@ -83,23 +83,26 @@ H.describe('config', function()
     config.clear_mappings()
   end)
 
-  H.it('Git status uses two configurable gutter symbols only', function()
+  H.it('Git status uses Neo-tree-style configurable symbols', function()
     local config = fresh_config()
     config.clear_mappings()
     H.assert_true(config.defaults.git.enabled, 'Git status is enabled by default')
-    H.assert_eq(config.defaults.git.gutter, { index = '|', worktree = '|' },
-      'index and worktree columns default to bars')
+    H.assert_eq(config.defaults.git.symbols, {
+      added = '✚', deleted = '✖', modified = '', renamed = '󰁕',
+      untracked = '', ignored = '', unstaged = '󰄱', staged = '', conflict = '',
+    }, 'Neo-tree status symbols are the defaults')
 
     local options = config.setup({ git = {
-      gutter = { index = 'S', worktree = 'W' },
+      symbols = { modified = 'M', staged = 'S' },
     } })
-    H.assert_eq(options.git.gutter, { index = 'S', worktree = 'W' },
-      'both gutter symbols can be customized by column')
+    H.assert_eq(options.git.symbols.modified, 'M', 'change symbols can be customized')
+    H.assert_eq(options.git.symbols.staged, 'S', 'stage symbols can be customized')
+    H.assert_eq(options.git.symbols.added, '✚', 'omitted symbols retain defaults')
 
     H.capture_messages()
-    options = config.setup({ git = { gutter = { index = 'two' } } })
-    H.assert_eq(options.git.gutter.index, '|', 'invalid cell width retains its default')
-    H.assert_notified('git.gutter.index', vim.log.levels.ERROR)
+    options = config.setup({ git = { symbols = { modified = false } } })
+    H.assert_eq(options.git.symbols.modified, '', 'invalid symbols retain their defaults')
+    H.assert_notified('git.symbols.modified', vim.log.levels.ERROR)
     config.clear_mappings()
   end)
 
@@ -126,14 +129,14 @@ H.describe('config', function()
       git = {
         display = 'icon',
         statuses = { added = { text_hl = 'NoSuchStatus' } },
-        staging = { enabled = false },
+        gutter = { index = '|' },
       },
       show_file_icons = true,
     })
     H.assert_true(options.show_file_icons, 'valid sibling options still apply')
     H.assert_notified('git.display', vim.log.levels.ERROR)
     H.assert_notified('git.statuses', vim.log.levels.ERROR)
-    H.assert_notified('git.staging', vim.log.levels.ERROR)
+    H.assert_notified('git.gutter', vim.log.levels.ERROR)
     config.clear_mappings()
   end)
 

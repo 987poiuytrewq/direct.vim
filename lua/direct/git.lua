@@ -3,6 +3,7 @@
 local M = {}
 
 local status_priority = {
+  ['!'] = -1,
   M = 1,
   D = 2,
   A = 3,
@@ -57,6 +58,10 @@ local function status_priority_for(code)
   return status_priority[code] or 0
 end
 
+local function is_unmerged(xy)
+  return xy:find('U', 1, true) ~= nil or xy == 'AA' or xy == 'DD'
+end
+
 local function merge_status(previous, incoming)
   if not previous then return incoming end
   local merged = {}
@@ -88,17 +93,18 @@ local function add_deleted(deleted, root, relative)
   end
 end
 
-local function add_path(paths, path, status)
+local function add_path(paths, conflicts, path, status, conflicted)
   local key = normalize(path)
   paths[key] = merge_status(paths[key], status)
+  if conflicted then conflicts[key] = true end
 end
 
-local function add_with_parent_directories(paths, root, relative, status)
+local function add_with_parent_directories(paths, conflicts, root, relative, status, conflicted)
   local path = normalize(root .. '/' .. relative)
-  add_path(paths, path, status)
+  add_path(paths, conflicts, path, status, conflicted)
   local parent = path:match('^(.*)/[^/]+$')
   while parent do
-    add_path(paths, parent, status)
+    add_path(paths, conflicts, parent, status, conflicted)
     if parent == root or parent == '/' then break end
     parent = parent:match('^(.*)/[^/]+$')
   end
@@ -113,11 +119,11 @@ function M.read(root)
   if not root_output then return nil end
   local repo_root = normalize(root_output:gsub('[\r\n]+$', ''))
   local output = run({ 'git', '-C', repo_root, 'status', '--porcelain=v1', '-z',
-    '--untracked-files=all' })
+    '--untracked-files=all', '--ignored=matching' })
   if not output then return nil end
 
   local fields = nul_fields(output)
-  local paths, deleted = {}, {}
+  local paths, conflicts, deleted = {}, {}, {}
   local index = 1
   while index <= #fields do
     local record = fields[index]
@@ -132,14 +138,15 @@ function M.read(root)
         if xy:find('R', 1, true) or xy:find('C', 1, true) then
           index = index + 1
         end
-        add_with_parent_directories(paths, repo_root, relative, status)
+        add_with_parent_directories(paths, conflicts, repo_root, relative, status,
+          is_unmerged(xy))
         if xy:find('D', 1, true) then
           add_deleted(deleted, repo_root, relative)
         end
       end
     end
   end
-  return { root = repo_root, paths = paths, deleted = deleted }
+  return { root = repo_root, paths = paths, conflicts = conflicts, deleted = deleted }
 end
 
 -- deleted_children(snapshot, directory) returns absent tracked entries directly
@@ -427,7 +434,8 @@ end
 
 function M.status_for(snapshot, path)
   if not snapshot or type(path) ~= 'string' then return nil end
-  return snapshot.paths[normalize(path)]
+  local key = normalize(path)
+  return snapshot.paths[key], snapshot.conflicts and snapshot.conflicts[key] == true or false
 end
 
 return M
