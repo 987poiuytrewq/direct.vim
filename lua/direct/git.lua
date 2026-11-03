@@ -67,12 +67,23 @@ local function add_path(paths, path, status)
   end
 end
 
-local function add_with_parent_directories(paths, root, relative, status)
+local function add_staging(staging, path, staged, unstaged)
+  local key = normalize(path)
+  local previous = staging[key] or { staged = false, unstaged = false }
+  previous.staged = previous.staged or staged
+  previous.unstaged = previous.unstaged or unstaged
+  staging[key] = previous
+end
+
+local function add_with_parent_directories(paths, staging, root, relative, status,
+    staged, unstaged)
   local path = normalize(root .. '/' .. relative)
   add_path(paths, path, status)
+  add_staging(staging, path, staged, unstaged)
   local parent = path:match('^(.*)/[^/]+$')
   while parent do
     add_path(paths, parent, status)
+    add_staging(staging, parent, staged, unstaged)
     if parent == root or parent == '/' then break end
     parent = parent:match('^(.*)/[^/]+$')
   end
@@ -91,7 +102,7 @@ function M.read(root)
   if not output then return nil end
 
   local fields = nul_fields(output)
-  local paths = {}
+  local paths, staging = {}, {}
   local index = 1
   while index <= #fields do
     local record = fields[index]
@@ -106,11 +117,16 @@ function M.read(root)
         if xy:find('R', 1, true) or xy:find('C', 1, true) then
           index = index + 1
         end
-        add_with_parent_directories(paths, repo_root, relative, status)
+        local staged = xy:sub(1, 1) ~= ' ' and xy:sub(1, 1) ~= '?'
+        local unstaged = xy:sub(2, 2) ~= ' ' and xy:sub(2, 2) ~= '?'
+        if xy == '??' then unstaged = true end
+        if status == 'conflicted' then staged, unstaged = false, false end
+        add_with_parent_directories(paths, staging, repo_root, relative, status,
+          staged, unstaged)
       end
     end
   end
-  return { root = repo_root, paths = paths }
+  return { root = repo_root, paths = paths, staging = staging }
 end
 
 local function absolute(root, path)
@@ -371,6 +387,24 @@ end
 function M.status_for(snapshot, path)
   if not snapshot or type(path) ~= 'string' then return nil end
   return snapshot.paths[normalize(path)]
+end
+
+function M.staging_for(snapshot, path)
+  if not snapshot or type(path) ~= 'string' then return nil end
+  local state = snapshot.staging and snapshot.staging[normalize(path)]
+  if not state then return nil end
+  if state.staged and state.unstaged then return 'mixed' end
+  if state.staged then return 'staged' end
+  if state.unstaged then return 'unstaged' end
+  return nil
+end
+
+-- Mixed paths select file/directory-specific settings. Both configurations
+-- default to the staged style, including for directories with mixed descendants.
+function M.staging_style_for(snapshot, path, is_folder)
+  local state = M.staging_for(snapshot, path)
+  if state == 'mixed' then return is_folder and 'mixed_folder' or 'mixed_file' end
+  return state
 end
 
 return M

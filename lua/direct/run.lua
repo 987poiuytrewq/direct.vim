@@ -17,7 +17,7 @@ end
 
 -- current_entry(command) -> vim.SystemObj | nil, error. `{}` is replaced with
 -- the shell-escaped absolute path for the current direct-buffer row.
-function M.current_entry(command)
+function M.current_entry(command, on_complete)
   if type(command) ~= 'string' or command:match('^%s*$') then
     local err = 'DirectRun requires a shell command'
     ui.notify('direct: ' .. err, vim.log.levels.ERROR)
@@ -30,6 +30,7 @@ function M.current_entry(command)
   end
 
   local listing = buffer.restore()
+  local bufnr = vim.api.nvim_get_current_buf()
   local row = vim.api.nvim_win_get_cursor(0)[1]
   local path, path_err = listing:get_entry_path(row)
   if not path then
@@ -55,7 +56,16 @@ function M.current_entry(command)
     cwd = listing.root,
     text = true,
   }, function(result)
-    vim.schedule(function() report_result(result) end)
+    vim.schedule(function()
+      report_result(result)
+      if on_complete then
+        local completed, err = pcall(on_complete, result, bufnr, listing.root)
+        if not completed then
+          ui.notify('direct: command completion callback failed: ' .. tostring(err),
+            vim.log.levels.WARN)
+        end
+      end
+    end)
   end)
   if not ok then
     local err = 'could not start shell command: ' .. tostring(process)

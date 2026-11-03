@@ -70,10 +70,29 @@ local function refresh_highlights(bufnr, state)
         row = row,
         depth = rec.depth or 0,
         status = snapshot and git.status_for(snapshot, rec.path) or nil,
+        staging = snapshot and git.staging_style_for(snapshot, rec.path,
+          rec.name:sub(-1) == '/') or nil,
       }
     end
   end
   highlight.render(bufnr, display_rows, options)
+end
+
+-- Refresh Git-only decorations for a loaded direct buffer without changing its
+-- text or list-time filesystem snapshot.
+function M.refresh_git_status(bufnr, root)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  if not vim.api.nvim_buf_is_loaded(bufnr)
+    or vim.bo[bufnr].filetype ~= constants.FILETYPE then
+    return false
+  end
+  local state = states[bufnr]
+  if not state or (root and state.root ~= root) then return false end
+  state.git_status = nil
+  ensure_git_snapshot(state, require('direct.config').options)
+  refresh_highlights(bufnr, state)
+  refresh_icons(bufnr, state)
+  return true
 end
 
 local sync_plan = require('direct.buffer_sync_plan')({

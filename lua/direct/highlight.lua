@@ -22,6 +22,12 @@ local default_links = {
   DirectGitConflictedIcon = 'ErrorMsg',
   DirectGitConflicted = 'ErrorMsg',
   DirectGitConflictedGutter = 'ErrorMsg',
+  DirectGitStagedIcon = 'DiffAdd',
+  DirectGitStaged = 'DiffAdd',
+  DirectGitStagedGutter = 'DiffAdd',
+  DirectGitUnstagedIcon = 'DiffChange',
+  DirectGitUnstaged = 'DiffChange',
+  DirectGitUnstagedGutter = 'DiffChange',
 }
 
 local function define_highlight_defaults()
@@ -52,23 +58,30 @@ function M.render(bufnr, rows, options)
   if git_options.enabled == false then return end
   local display = git_options.display or 'both'
   local statuses = git_options.statuses or {}
+  local staging = git_options.staging or {}
 
   for _, item in ipairs(rows or {}) do
     local settings = item.status and statuses[item.status]
-    if settings then
+    local stage_settings = staging.enabled ~= false and item.staging
+      and staging[item.staging]
+    if settings or stage_settings then
       local line = vim.api.nvim_buf_get_lines(bufnr, item.row, item.row + 1, false)[1] or ''
-      if (display == 'text' or display == 'both') and settings.text_hl then
+      local text_hl = stage_settings and stage_settings.text_hl
+        or (settings and settings.text_hl)
+      if (display == 'text' or display == 'both') and text_hl then
         vim.api.nvim_buf_set_extmark(bufnr, namespace, item.row, (item.depth or 0) * 2, {
           end_row = item.row,
           end_col = #line,
-          hl_group = settings.text_hl,
+          hl_group = text_hl,
           priority = 120,
         })
       end
-      if settings.gutter then
+      local gutter = (stage_settings and stage_settings.gutter)
+        or (settings and settings.gutter)
+      if gutter then
         vim.api.nvim_buf_set_extmark(bufnr, gutter_namespace, item.row, 0, {
-          sign_text = settings.gutter.symbol,
-          sign_hl_group = settings.gutter.highlight,
+          sign_text = gutter.symbol,
+          sign_hl_group = gutter.highlight,
           priority = 120,
         })
       end

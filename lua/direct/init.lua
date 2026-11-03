@@ -184,4 +184,14 @@ function M.run(command)
   return run.current_entry(command)
 end
 
+function M.git(command)
+  if not guard('DirectGit') then
+    return nil
+  end
+  if pending.refuse('run a Git command') then return nil end
+  return run.current_entry(command, function(_, bufnr, root)
+    buffer.refresh_git_status(bufnr, root)
+  end)
+end
+
 return M

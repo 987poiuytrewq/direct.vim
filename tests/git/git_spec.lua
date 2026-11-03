@@ -50,23 +50,37 @@ H.describe('Git status display', function()
 
     H.mkfile(root, 'tracked.txt', 'staged modification')
     git(root, 'add', 'tracked.txt')
+    H.mkfile(root, 'tracked.txt', 'unstaged modification too')
     H.mkfile(root, 'staged-add.txt', 'added')
     git(root, 'add', 'staged-add.txt')
     H.mkfile(root, 'untracked.txt', 'untracked')
+    H.mkfile(root, 'nested/untracked.txt', 'nested untracked')
     git(root, 'mv', 'nested/deep.txt', 'nested/renamed.txt')
 
     local snapshot = git_status.read(root)
     H.assert_not_nil(snapshot, 'Git repository status is available')
     H.assert_eq(status_at(snapshot, root, 'tracked.txt'), 'modified',
       'staged modification is classified')
+    H.assert_eq(git_status.staging_for(snapshot, vim.fs.joinpath(root, 'tracked.txt')),
+      'mixed', 'staged and unstaged changes to one path are distinguished')
     H.assert_eq(status_at(snapshot, root, 'staged-add.txt'), 'added',
       'staged addition is classified')
+    H.assert_eq(git_status.staging_for(snapshot, vim.fs.joinpath(root, 'staged-add.txt')),
+      'staged', 'index-only changes are marked staged')
     H.assert_eq(status_at(snapshot, root, 'untracked.txt'), 'added',
       'untracked file is classified as added')
+    H.assert_eq(git_status.staging_for(snapshot, vim.fs.joinpath(root, 'untracked.txt')),
+      'unstaged', 'untracked files are marked unstaged')
     H.assert_eq(status_at(snapshot, root, 'nested/renamed.txt'), 'renamed',
       'Git-detected rename is classified at the destination')
     H.assert_eq(status_at(snapshot, root, 'nested'), 'renamed',
       'directory inherits a status from a changed descendant')
+    H.assert_eq(git_status.staging_for(snapshot, vim.fs.joinpath(root, 'nested')),
+      'mixed', 'directory aggregates staged and unstaged descendants')
+    H.assert_eq(git_status.staging_style_for(snapshot, vim.fs.joinpath(root, 'tracked.txt')),
+      'mixed_file', 'mixed files select their dedicated display settings')
+    H.assert_eq(git_status.staging_style_for(snapshot, vim.fs.joinpath(root, 'nested'), true),
+      'mixed_folder', 'mixed folders select their dedicated display settings')
   end)
 
   H.it('recognizes unmerged paths as conflicted', function()
@@ -90,7 +104,107 @@ H.describe('Git status display', function()
       'unmerged file is classified as conflicted')
   end)
 
-  H.it('defaults to colored gutter symbols and supports inline display overrides', function()
+  H.it('DirectRun leaves status snapshots alone while DirectGit refreshes them', function()
+    local buffer = require('direct.buffer')
+    local config = require('direct.config')
+    local sb = H.sandbox()
+    local root = H.mkdir(sb.root, 'command-repo')
+    H.mkfile(root, 'tracked.txt', 'committed content')
+    init_repo(root)
+    commit_all(root, 'base')
+    H.mkfile(root, 'tracked.txt', 'working tree change')
+
+    config.setup({ map_default_keys = false })
+    buffer.list(root)
+    local function select_file()
+      for row, line in ipairs(H.buf_lines()) do
+        if line == 'tracked.txt' then
+          vim.api.nvim_win_set_cursor(0, { row, 0 })
+          return
+        end
+      end
+      H.fail('tracked.txt should remain in the listing')
+    end
+    local function run_command(command)
+      H.capture_messages()
+      select_file()
+      vim.cmd(command)
+      H.assert_true(vim.wait(3000, function()
+        return H.messages():find('status 0', 1, true) ~= nil
+      end), command .. ' completes successfully')
+    end
+
+    local function marker()
+      for row, line in ipairs(H.buf_lines()) do
+        if line == 'tracked.txt' then
+          local mark = mark_by_row(0, 'direct-listing-git-gutter')[row - 1]
+          return mark and mark[4].sign_text
+        end
+      end
+    end
+
+    H.assert_eq(marker(), '┃ ', 'the initial worktree change is marked unstaged')
+    run_command('DirectRun git add -- {}')
+    H.assert_eq(marker(), '┃ ', 'DirectRun does not refresh cached Git status')
+
+    run_command('DirectGit git add -- {}')
+    H.assert_eq(marker(), '┃•', 'DirectGit refreshes the indicator after staging')
+  end)
+
+  H.it('ga, gr, and gc update the staged/unstaged gutter indicators', function()
+    local buffer = require('direct.buffer')
+    local config = require('direct.config')
+    local sb = H.sandbox()
+    local root = H.mkdir(sb.root, 'mapping-repo')
+    H.mkfile(root, 'tracked.txt', 'committed content')
+    init_repo(root)
+    commit_all(root, 'base')
+    H.mkfile(root, 'tracked.txt', 'working tree change')
+
+    config.setup({ map_default_keys = true })
+    buffer.list(root)
+    local function gutter_for(name)
+      local line_row
+      for row, line in ipairs(H.buf_lines()) do
+        if line == name then line_row = row - 1 end
+      end
+      H.assert_not_nil(line_row, 'the tracked file remains in the listing')
+      return mark_by_row(0, 'direct-listing-git-gutter')[line_row]
+    end
+    local function press_and_wait(lhs)
+      local file_row
+      for row, line in ipairs(H.buf_lines()) do
+        if line == 'tracked.txt' then file_row = row end
+      end
+      H.assert_not_nil(file_row, 'the tracked file remains selectable')
+      vim.api.nvim_win_set_cursor(0, { file_row, 0 })
+      H.capture_messages()
+      vim.api.nvim_feedkeys(lhs, 'mx', false)
+      H.assert_true(vim.wait(3000, function()
+        return H.messages():find('status 0', 1, true) ~= nil
+      end), lhs .. ' completes its DirectRun Git command')
+      H.assert_notified('status 0')
+    end
+
+    H.assert_eq(gutter_for('tracked.txt')[4].sign_text, '┃ ',
+      'an unstaged modification starts with the unstaged marker')
+
+    press_and_wait('ga')
+    H.assert_eq(gutter_for('tracked.txt')[4].sign_text, '┃•',
+      'ga stages the file and changes the indicator')
+
+    press_and_wait('gr')
+    H.assert_eq(gutter_for('tracked.txt')[4].sign_text, '┃ ',
+      'gr unstages the file and restores the unstaged indicator')
+
+    press_and_wait('gc')
+    H.assert_nil(gutter_for('tracked.txt'),
+      'gc discards the working-tree change and clears the Git indicator')
+    H.assert_eq(vim.fn.readfile(vim.fs.joinpath(root, 'tracked.txt')),
+      { 'committed content' }, 'gc restores the committed file contents')
+  end)
+
+  H.it('defaults to colored gutters and supports staged display overrides', function()
     local buffer = require('direct.buffer')
     local config = require('direct.config')
     local sb = H.sandbox()
@@ -100,6 +214,12 @@ H.describe('Git status display', function()
     init_repo(root)
     commit_all(root, 'base')
     H.mkfile(root, 'tracked.txt', 'after')
+    git(root, 'add', 'tracked.txt')
+    H.mkfile(root, 'tracked.txt', 'staged and modified again')
+    H.mkfile(root, 'nested/clean.txt', 'staged nested modification')
+    git(root, 'add', 'nested/clean.txt')
+    H.mkfile(root, 'staged.txt', 'staged')
+    git(root, 'add', 'staged.txt')
     H.mkfile(root, 'nested/new.txt', 'new')
 
     config.setup({
@@ -116,7 +236,7 @@ H.describe('Git status display', function()
     local icons = mark_by_row(0, 'direct-listing-icons')
     local gutters = mark_by_row(0, 'direct-listing-git-gutter')
 
-    H.assert_eq(lines, { '.git/', 'nested/', 'tracked.txt' },
+    H.assert_eq(lines, { '.git/', 'nested/', 'staged.txt', 'tracked.txt' },
       'listing text remains ordinary paths')
     H.assert_eq(vim.api.nvim_get_hl(0, { name = 'DirectGitAddedGutter', link = true }),
       { default = true, link = 'DiffAdd' }, 'added gutter group links to DiffAdd')
@@ -129,14 +249,14 @@ H.describe('Git status display', function()
       'default gutter display leaves the normal file icon unchanged')
     H.assert_nil(highlights[rows['tracked.txt']],
       'default gutter display leaves the entry name unhighlighted')
-    H.assert_eq(gutters[rows['tracked.txt']][4].sign_text, '┃ ',
-      'modified entry receives the gutter symbol')
-    H.assert_eq(gutters[rows['tracked.txt']][4].sign_hl_group, 'DirectGitModifiedGutter',
-      'modified gutter uses its status color')
-    H.assert_eq(gutters[rows['nested/']][4].sign_text, '┃ ',
-      'added directory receives the same gutter symbol')
-    H.assert_eq(gutters[rows['nested/']][4].sign_hl_group, 'DirectGitAddedGutter',
-      'added gutter uses its status color')
+    H.assert_eq(gutters[rows['tracked.txt']][4].sign_text, '┃•',
+      'partly staged file receives the staged gutter symbol')
+    H.assert_eq(gutters[rows['tracked.txt']][4].sign_hl_group, 'DirectGitStagedGutter',
+      'partly staged gutter uses its staged color')
+    H.assert_eq(gutters[rows['nested/']][4].sign_text, '┃•',
+      'mixed directory receives the staged gutter symbol')
+    H.assert_eq(gutters[rows['nested/']][4].sign_hl_group, 'DirectGitStagedGutter',
+      'mixed directory gutter uses its staged color')
 
     config.setup({
       map_default_keys = false,
@@ -173,19 +293,42 @@ H.describe('Git status display', function()
       { default = true, link = 'DiffChange' }, 'renamed text group links to DiffChange')
     H.assert_eq(vim.api.nvim_get_hl(0, { name = 'DirectGitConflictedIcon', link = true }),
       { default = true, link = 'ErrorMsg' }, 'conflict icon group links to ErrorMsg')
+    H.assert_eq(vim.api.nvim_get_hl(0, { name = 'DirectGitStagedIcon', link = true }),
+      { default = true, link = 'DiffAdd' }, 'staged icon group links to DiffAdd')
+    H.assert_eq(vim.api.nvim_get_hl(0, { name = 'DirectGitUnstaged', link = true }),
+      { default = true, link = 'DiffChange' }, 'unstaged text group links to DiffChange')
     H.assert_not_nil(icons[rows['tracked.txt']], 'modified file has an icon extmark')
     H.assert_not_nil(highlights[rows['tracked.txt']], 'modified file has a text highlight')
     H.assert_eq(icons[rows['tracked.txt']][4].virt_text,
-      { { '\u{f0214} ', 'DirectGitModifiedIcon' } },
+      { { '\u{f0214} ', 'DirectGitStagedIcon' } },
       'modified file keeps its regular icon glyph and uses the Git icon group')
-    H.assert_eq(highlights[rows['tracked.txt']][4].hl_group, 'DirectGitModified',
-      'modified entry receives the Git text highlight')
+    H.assert_eq(highlights[rows['tracked.txt']][4].hl_group, 'DirectGitStaged',
+      'partly staged entry uses the staged text highlight')
     H.assert_eq(icons[rows['nested/']][4].virt_text,
-      { { '\u{f024b} ', 'DirectGitAddedIcon' } },
+      { { '\u{f024b} ', 'DirectGitStagedIcon' } },
       'directory status is aggregated while its folder glyph remains unchanged')
+    H.assert_eq(gutters[rows['staged.txt']][4].sign_text, '┃•',
+      'staged files use the default pipe-and-bullet gutter symbol')
+    H.assert_eq(gutters[rows['tracked.txt']][4].sign_text, '┃•',
+      'partly staged files use the staged gutter symbol')
+    H.assert_eq(gutters[rows['nested/']][4].sign_text, '┃•',
+      'mixed directories use the staged gutter symbol')
+
+    config.setup({
+      map_default_keys = false,
+      git = {
+        staging = { enabled = false },
+        statuses = {
+          added = { gutter = { symbol = 'A', highlight = 'DirectGitAddedGutter' } },
+        },
+      },
+    })
+    listing:list()
+    gutters = mark_by_row(0, 'direct-listing-git-gutter')
     H.assert_eq(gutters[rows['nested/']][4].sign_text, 'A ',
-      'optional custom gutter symbol is rendered for the added directory')
-    H.assert_nil(gutters[rows['tracked.txt']], 'disabled gutter is omitted')
+      'status-specific gutter symbols remain available when staging markers are disabled')
+    H.assert_eq(gutters[rows['tracked.txt']][4].sign_text, '┃ ',
+      'the modified status retains its default gutter when staging is disabled')
 
     config.setup({
       map_default_keys = false,
@@ -201,15 +344,38 @@ H.describe('Git status display', function()
             icon = { folder = '+' }, icon_hl = 'DirectGitAddedIcon', gutter = false,
           },
         },
+        staging = {
+          mixed_file = {
+            icon_hl = 'DirectGitMixedFileIcon',
+            icon = { file = '!' },
+            gutter = { symbol = 'F', highlight = 'DirectGitMixedFileGutter' },
+          },
+          mixed_folder = {
+            icon_hl = 'DirectGitMixedFolderIcon',
+            icon = { folder = '+' },
+            gutter = { symbol = 'D', highlight = 'DirectGitMixedFolderGutter' },
+          },
+        },
       },
     })
     listing:list()
     icons = mark_by_row(0, 'direct-listing-icons')
     highlights = mark_by_row(0, 'direct-listing-highlights')
     H.assert_eq(icons[rows['tracked.txt']][4].virt_text,
-      { { '! ', 'DirectGitModifiedIcon' } }, 'custom icon override is applied')
+      { { '! ', 'DirectGitMixedFileIcon' } },
+      'mixed files apply their independent glyph and icon-color overrides')
     H.assert_eq(icons[rows['nested/']][4].virt_text,
-      { { '+ ', 'DirectGitAddedIcon' } }, 'directory icon variant can be overridden separately')
+      { { '+ ', 'DirectGitMixedFolderIcon' } },
+      'mixed folders apply their independent glyph and icon-color overrides')
+    gutters = mark_by_row(0, 'direct-listing-git-gutter')
+    H.assert_eq(gutters[rows['tracked.txt']][4].sign_text, 'F ',
+      'mixed files use their independent gutter style')
+    H.assert_eq(gutters[rows['nested/']][4].sign_text, 'D ',
+      'mixed folders use their independent gutter style')
+    H.assert_eq(gutters[rows['tracked.txt']][4].sign_hl_group, 'DirectGitMixedFileGutter',
+      'mixed-file gutter color is configurable')
+    H.assert_eq(gutters[rows['nested/']][4].sign_hl_group, 'DirectGitMixedFolderGutter',
+      'mixed-folder gutter color is configurable')
     H.assert_nil(highlights[rows['tracked.txt']],
       'icon-only display leaves entry text unhighlighted')
 
@@ -217,10 +383,17 @@ H.describe('Git status display', function()
       map_default_keys = false,
       show_folder_icons = true,
       show_file_icons = true,
-      git = { display = 'text', statuses = {
-        modified = { text_hl = 'DirectGitModified', gutter = false },
-        added = { text_hl = 'DirectGitAdded', gutter = false },
-      } },
+      git = {
+        display = 'text',
+        statuses = {
+          modified = { text_hl = 'DirectGitModified', gutter = false },
+          added = { text_hl = 'DirectGitAdded', gutter = false },
+        },
+        staging = {
+          mixed_file = { text_hl = 'DirectMixedFileText' },
+          mixed_folder = { text_hl = 'DirectMixedFolderText' },
+        },
+      },
     })
     listing:list()
     icons = mark_by_row(0, 'direct-listing-icons')
@@ -228,8 +401,10 @@ H.describe('Git status display', function()
     H.assert_eq(icons[rows['tracked.txt']][4].virt_text,
       { { '\u{f0214} ', 'DirectFileIcon' } },
       'text-only display leaves the regular icon and its highlight unchanged')
-    H.assert_eq(highlights[rows['tracked.txt']][4].hl_group, 'DirectGitModified',
-      'text-only display highlights the entry name')
+    H.assert_eq(highlights[rows['tracked.txt']][4].hl_group, 'DirectMixedFileText',
+      'mixed files can override their text color independently')
+    H.assert_eq(highlights[rows['nested/']][4].hl_group, 'DirectMixedFolderText',
+      'mixed folders can override their text color independently')
   end)
 
   H.it('does not classify directories outside Git repositories', function()
