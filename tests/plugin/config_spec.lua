@@ -36,13 +36,13 @@ H.describe('config', function()
     config.clear_mappings()
   end)
 
-  H.it('file and folder icon options default off and reject typos', function()
+  H.it('file and folder icons default on and reject typos', function()
     local config = fresh_config()
     config.clear_mappings()
-    H.assert_false(config.defaults.show_folder_icons == true,
-      'folder icons are off by default')
-    H.assert_false(config.defaults.show_file_icons == true,
-      'file icons are off by default')
+    H.assert_true(config.defaults.show_folder_icons,
+      'folder icons are on by default')
+    H.assert_true(config.defaults.show_file_icons,
+      'file icons are on by default')
     local options = config.setup({ show_folder_icons = true, show_file_icons = true })
     H.assert_true(options.show_folder_icons, 'the documented icon option is accepted')
     H.assert_true(options.show_file_icons, 'the documented file icon option is accepted')
@@ -62,15 +62,31 @@ H.describe('config', function()
   H.it('base icon glyphs have defaults, accept partial overrides, and validate variants', function()
     local config = fresh_config()
     config.clear_mappings()
-    H.assert_eq(config.defaults.icons.file, '\u{f0214}', 'default file glyph')
-    H.assert_eq(config.defaults.icons.folder, '\u{f024b}', 'default closed-folder glyph')
-    H.assert_eq(config.defaults.icons.folder_open, '\u{f0770}', 'default open-folder glyph')
+    H.assert_eq(config.defaults.icons.file, '\u{f15b}', 'default file glyph')
+    H.assert_eq(config.defaults.icons.folder, '\u{f07b}', 'default closed-folder glyph')
+    H.assert_eq(config.defaults.icons.folder_open, '\u{f07c}', 'default open-folder glyph')
+    H.assert_eq(config.defaults.icons.deleted_file, '\u{f016}', 'deleted-file outline glyph')
+    H.assert_eq(config.defaults.icons.deleted_folder, '\u{f114}', 'deleted-folder outline glyph')
+    H.assert_eq(config.defaults.icons.deleted_folder_open, '\u{f115}',
+      'expanded deleted-folder outline glyph')
 
-    local options = config.setup({ icons = { file = 'F', folder = 'D' } })
+    local options = config.setup({
+      icons = { file = 'F', folder = 'D', deleted_file = 'd' },
+    })
     H.assert_eq(options.icons.file, 'F', 'file glyph override is applied')
     H.assert_eq(options.icons.folder, 'D', 'folder glyph override is applied')
     H.assert_eq(options.icons.folder_open, config.defaults.icons.folder_open,
       'omitted variant retains its default')
+    H.assert_eq(options.icons.deleted_file, 'd', 'deleted-file glyph is configurable')
+
+    options = config.setup({ icons = {
+      file = 'f', folder = 'd', folder_open = 'D', deleted_file = 'o',
+      deleted_folder = 'O', deleted_folder_open = 'P',
+    } })
+    H.assert_eq(options.icons, {
+      file = 'f', folder = 'd', folder_open = 'D', deleted_file = 'o',
+      deleted_folder = 'O', deleted_folder_open = 'P',
+    }, 'every file and folder glyph can be customized')
 
     H.capture_messages()
     options = config.setup({ icons = { file = false, folder_closed = 'x' } })
@@ -88,20 +104,31 @@ H.describe('config', function()
     config.clear_mappings()
     H.assert_true(config.defaults.git.enabled, 'Git status is enabled by default')
     H.assert_eq(config.defaults.git.symbols, {
-      added = '✚', deleted = '✖', modified = '', renamed = '󰁕',
-      untracked = '', ignored = '', unstaged = '󰄱', staged = '', conflict = '',
-    }, 'Neo-tree status symbols are the defaults')
+      added = '\u{f067}', deleted = '\u{f068}', modified = '\u{f01f}',
+      renamed = '\u{f061}', ignored = '\u{f070}', staged = '\u{f00c}',
+      conflict = '\u{f00d}',
+    }, 'Font Awesome symbols are the defaults')
 
     local options = config.setup({ git = {
       symbols = { modified = 'M', staged = 'S' },
     } })
     H.assert_eq(options.git.symbols.modified, 'M', 'change symbols can be customized')
     H.assert_eq(options.git.symbols.staged, 'S', 'stage symbols can be customized')
-    H.assert_eq(options.git.symbols.added, '✚', 'omitted symbols retain defaults')
+    H.assert_eq(options.git.symbols.added, '\u{f067}', 'omitted symbols retain defaults')
+
+    options = config.setup({ git = { symbols = {
+      added = 'A', deleted = 'D', modified = 'M', renamed = 'R',
+      ignored = 'I', staged = 'S', conflict = 'C',
+    } } })
+    H.assert_eq(options.git.symbols, {
+      added = 'A', deleted = 'D', modified = 'M', renamed = 'R',
+      ignored = 'I', staged = 'S', conflict = 'C',
+    }, 'every Git status glyph can be customized')
 
     H.capture_messages()
     options = config.setup({ git = { symbols = { modified = false } } })
-    H.assert_eq(options.git.symbols.modified, '', 'invalid symbols retain their defaults')
+    H.assert_eq(options.git.symbols.modified, '\u{f01f}',
+      'invalid symbols retain their defaults')
     H.assert_notified('git.symbols.modified', vim.log.levels.ERROR)
     config.clear_mappings()
   end)
@@ -118,6 +145,21 @@ H.describe('config', function()
     options = config.setup({ git = { show_deleted = 'false' } })
     H.assert_true(options.git.show_deleted, 'an invalid override keeps the default')
     H.assert_notified('git.show_deleted', vim.log.levels.ERROR)
+    config.clear_mappings()
+  end)
+
+  H.it('git.show_symbols defaults on and validates a boolean override', function()
+    local config = fresh_config()
+    config.clear_mappings()
+    H.assert_true(config.defaults.git.show_symbols,
+      'Git status symbols are shown by default')
+    local options = config.setup({ git = { show_symbols = false } })
+    H.assert_false(options.git.show_symbols, 'Git status symbols can be hidden')
+
+    H.capture_messages()
+    options = config.setup({ git = { show_symbols = 'false' } })
+    H.assert_true(options.git.show_symbols, 'an invalid override keeps the default')
+    H.assert_notified('git.show_symbols', vim.log.levels.ERROR)
     config.clear_mappings()
   end)
 

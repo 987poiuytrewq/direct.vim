@@ -10,15 +10,13 @@ local default_highlights = {
   DirectFileIcon = { link = 'Normal' },
   DirectHiddenFolderIcon = { link = 'Comment' },
   DirectHiddenFileIcon = { link = 'Comment' },
-  DirectGitAdded = { fg = '#5faf5f' },
-  DirectGitDeleted = { fg = '#ff5900' },
-  DirectGitModified = { fg = '#d7af5f' },
+  DirectGitAdded = { link = 'DiffAdd' },
+  DirectGitDeleted = { link = 'DiffDelete' },
+  DirectGitModified = { link = 'DiffChange' },
   DirectGitRenamed = { link = 'DirectGitModified' },
-  DirectGitConflict = { fg = '#ff8700', italic = true, bold = true },
-  DirectGitIgnored = { fg = '#626262' },
-  DirectGitUntracked = { fg = '#ff8700', italic = true },
+  DirectGitConflict = { link = 'ErrorMsg' },
+  DirectGitIgnored = { link = 'Comment' },
   DirectGitStaged = { link = 'DirectGitAdded' },
-  DirectGitUnstaged = { link = 'DirectGitConflict' },
   DirectGitDeletedFile = { link = 'ErrorMsg' },
   DirectGitDeletedDirectory = { link = 'ErrorMsg' },
 }
@@ -28,6 +26,8 @@ local change_highlights = {
   deleted = 'DirectGitDeleted',
   modified = 'DirectGitModified',
   renamed = 'DirectGitRenamed',
+  conflict = 'DirectGitConflict',
+  ignored = 'DirectGitIgnored',
 }
 
 local conflict_codes = {
@@ -46,38 +46,28 @@ local function define_highlight_defaults()
   end
 end
 
+function M.git_status_highlight(status)
+  return change_highlights[status]
+end
+
 local function status_chunks(status, symbols, conflicted)
-  local chunks = {}
-  local function append(key, highlight)
+  local function slot(key, highlight)
     local symbol = symbols[key]
-    if type(symbol) ~= 'string' or symbol == '' then return end
-    if vim.fn.strchars(symbol) == 1 then symbol = symbol .. ' ' end
-    chunks[#chunks + 1] = { symbol, highlight }
+    if type(symbol) ~= 'string' or symbol == '' then
+      return { ' ', 'Normal' }
+    end
+    return { symbol, highlight }
   end
 
-  -- Direct's Git snapshot normalizes porcelain `??` to `_A` (a space and A).
-  if status == ' A' then
-    append('untracked', 'DirectGitUntracked')
-    return chunks
-  end
   if status == '!!' then
-    append('ignored', 'DirectGitIgnored')
-    return chunks
+    return { slot('ignored', 'DirectGitIgnored'), { ' ', 'Normal' } }
   end
 
   local index, worktree = status:sub(1, 1), status:sub(2, 2)
   local conflict = conflicted
   if conflict == nil then conflict = conflict_codes[status] == true end
-  local stage, stage_highlight
-  if worktree == ' ' then
-    stage, stage_highlight = 'staged', 'DirectGitStaged'
-  elseif index == ' ' then
-    stage, stage_highlight = 'unstaged', 'DirectGitUnstaged'
-  elseif conflict then
-    stage, stage_highlight = 'conflict', 'DirectGitConflict'
-  end
 
-  local function append_change(code)
+  local function change_for(code)
     local change
     if code == 'M' or code == 'U' then
       change = 'modified'
@@ -90,16 +80,29 @@ local function status_chunks(status, symbols, conflicted)
       -- copied entries) as additions.
       change = 'added'
     end
-    append(change, change_highlights[change])
+    return change
   end
 
-  if index ~= ' ' then append_change(index) end
-  if not conflict and worktree ~= ' ' then append_change(worktree) end
+  if index == ' ' and worktree == ' ' then return {} end
+  local first_code = index ~= ' ' and index or worktree
+  local first_change = change_for(first_code)
+  local second_change
+  local second_symbol, second_highlight
 
-  -- Show the staged/unstaged marker for a single-column change. For a mixed
-  -- two-column change, the two change symbols already convey both states.
-  if (#chunks < 2 or conflict) and stage then append(stage, stage_highlight) end
-  return chunks
+  if conflict then
+    second_symbol, second_highlight = 'conflict', 'DirectGitConflict'
+  elseif index ~= ' ' and worktree == ' ' then
+    second_symbol, second_highlight = 'staged', 'DirectGitStaged'
+  elseif index ~= ' ' and worktree ~= ' ' then
+    second_change = change_for(worktree)
+  end
+
+  return {
+    slot(first_change, change_highlights[first_change]),
+    second_change
+      and slot(second_change, change_highlights[second_change])
+      or (second_symbol and slot(second_symbol, second_highlight) or { ' ', 'Normal' }),
+  }
 end
 
 function M.setup()
@@ -127,7 +130,7 @@ function M.render(bufnr, rows, options)
     local deleted_group = item.deleted_kind == 'directory'
       and 'DirectGitDeletedDirectory'
       or (item.deleted_kind == 'file' and 'DirectGitDeletedFile' or nil)
-    if deleted_group then
+    if deleted_group and not (git_options.enabled ~= false and item.worktree_status) then
       local line = vim.api.nvim_buf_get_lines(bufnr, item.row, item.row + 1, false)[1] or ''
       vim.api.nvim_buf_set_extmark(bufnr, namespace, item.row, (item.depth or 0) * 2, {
         end_row = item.row,
@@ -137,7 +140,17 @@ function M.render(bufnr, rows, options)
       })
     end
 
-    if git_options.enabled ~= false and item.status then
+    if git_options.enabled ~= false and item.worktree_status then
+      local line = vim.api.nvim_buf_get_lines(bufnr, item.row, item.row + 1, false)[1] or ''
+      vim.api.nvim_buf_set_extmark(bufnr, namespace, item.row, (item.depth or 0) * 2, {
+        end_row = item.row,
+        end_col = #line,
+        hl_group = change_highlights[item.worktree_status],
+        priority = 160,
+      })
+    end
+
+    if git_options.enabled ~= false and git_options.show_symbols ~= false and item.status then
       local chunks = status_chunks(item.status, git_options.symbols or {}, item.conflict)
       if #chunks > 0 then
         local line = vim.api.nvim_buf_get_lines(bufnr, item.row, item.row + 1, false)[1] or ''

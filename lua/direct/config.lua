@@ -9,32 +9,41 @@ local defaults = {
   map_default_keys = true,
   show_hidden = true,
   respect_gitignore = false,
-  show_folder_icons = false,
-  show_file_icons = false,
+  show_folder_icons = true,
+  show_file_icons = true,
   icons = {
-    file = '\u{f0214}',
-    folder = '\u{f024b}',
-    folder_open = '\u{f0770}',
+    file = '\u{f15b}',
+    folder = '\u{f07b}',
+    folder_open = '\u{f07c}',
+    deleted_file = '\u{f016}',
+    deleted_folder = '\u{f114}',
+    deleted_folder_open = '\u{f115}',
   },
   max_recursive_expand_depth = false,
   git = {
     enabled = true,
+    show_symbols = true,
     show_deleted = true,
     symbols = {
-      added = '✚',
-      deleted = '✖',
-      modified = '',
-      renamed = '󰁕',
-      untracked = '',
-      ignored = '',
-      unstaged = '󰄱',
-      staged = '',
-      conflict = '',
+      added = '\u{f067}',
+      deleted = '\u{f068}',
+      modified = '\u{f01f}',
+      renamed = '\u{f061}',
+      ignored = '\u{f070}',
+      staged = '\u{f00c}',
+      conflict = '\u{f00d}',
     },
   },
 }
 
-local icon_variants = { file = true, folder = true, folder_open = true }
+local icon_variants = {
+  file = true,
+  folder = true,
+  folder_open = true,
+  deleted_file = true,
+  deleted_folder = true,
+  deleted_folder_open = true,
+}
 
 local function report_invalid_icon_option(key, reason)
   local option = key == '' and 'icons' or ('icons.' .. key)
@@ -52,7 +61,8 @@ local function resolve_icon_options(value)
   local result = vim.deepcopy(defaults.icons)
   for key, glyph in pairs(value) do
     if not icon_variants[key] then
-      report_invalid_icon_option(tostring(key), 'unknown icon; expected file, folder, or folder_open')
+      report_invalid_icon_option(tostring(key),
+        'unknown icon; expected file, folder, folder_open, deleted_file, deleted_folder, or deleted_folder_open')
     elseif type(glyph) ~= 'string' or glyph == '' then
       report_invalid_icon_option(key, 'expected a non-empty glyph string')
     else
@@ -82,6 +92,12 @@ local function resolve_git_options(value)
       else
         report_invalid_git_option(key, 'expected a boolean')
       end
+    elseif key == 'show_symbols' then
+      if type(option) == 'boolean' then
+        result.show_symbols = option
+      else
+        report_invalid_git_option(key, 'expected a boolean')
+      end
     elseif key == 'show_deleted' then
       if type(option) == 'boolean' then
         result.show_deleted = option
@@ -95,8 +111,9 @@ local function resolve_git_options(value)
         for status, symbol in pairs(option) do
           if result.symbols[status] == nil then
             report_invalid_git_option('symbols.' .. tostring(status), 'unknown status symbol')
-          elseif type(symbol) ~= 'string' then
-            report_invalid_git_option('symbols.' .. status, 'expected a string')
+          elseif type(symbol) ~= 'string' or vim.fn.strdisplaywidth(symbol) > 1 then
+            report_invalid_git_option('symbols.' .. status,
+              'expected an empty string or one display cell')
           else
             result.symbols[status] = symbol
           end
