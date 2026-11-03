@@ -206,7 +206,7 @@ function M.git(command)
   if pending.refuse('run a Git command') then return nil end
   return run.current_entry(command, function(_, bufnr, root)
     buffer.refresh_git_status(bufnr, root)
-  end)
+  end, { quiet_success = true })
 end
 
 return M

@@ -228,15 +228,6 @@ H.describe('Git status display', function()
       end
       H.fail('tracked.txt should remain in the listing')
     end
-    local function run_command(command)
-      H.capture_messages()
-      select_file()
-      vim.cmd(command)
-      H.assert_true(vim.wait(3000, function()
-        return H.messages():find('status 0', 1, true) ~= nil
-      end), command .. ' completes successfully')
-    end
-
     local function marker()
       for row, line in ipairs(H.buf_lines()) do
         if line == 'tracked.txt' then
@@ -246,13 +237,26 @@ H.describe('Git status display', function()
       end
     end
 
+    local function run_command(command, completed)
+      H.capture_messages()
+      select_file()
+      vim.cmd(command)
+      H.assert_true(vim.wait(3000, completed), command .. ' completes successfully')
+    end
+
     H.assert_eq(marker(), '\u{f01f}  ', 'worktree modification leaves the state slot blank')
-    run_command('DirectRun git add -- {}')
+    run_command('DirectRun git add -- {}', function()
+      return H.messages():find('status 0', 1, true) ~= nil
+    end)
     H.assert_eq(marker(), '\u{f01f}  ', 'DirectRun does not refresh cached Git status')
 
-    run_command('DirectGit git add -- {}')
+    run_command('DirectGit git add -- {}', function()
+      return marker() == '\u{f01f} \u{f00c}'
+    end)
     H.assert_eq(marker(), '\u{f01f} \u{f00c}',
       'DirectGit refreshes the indicator after staging')
+    H.assert_eq(H.messages():find('status 0', 1, true), nil,
+      'successful DirectGit commands do not notify in the command area')
   end)
 
   H.it('ga, gr, and gc update the staged/unstaged status symbols', function()
@@ -275,7 +279,7 @@ H.describe('Git status display', function()
       H.assert_not_nil(line_row, 'the tracked file remains in the listing')
       return marks_by_row(0, 'direct-listing-git-status')[line_row]
     end
-    local function press_and_wait(lhs)
+    local function press_and_wait(lhs, expected_status)
       local file_row
       for row, line in ipairs(H.buf_lines()) do
         if line == 'tracked.txt' then file_row = row end
@@ -285,23 +289,26 @@ H.describe('Git status display', function()
       H.capture_messages()
       vim.api.nvim_feedkeys(lhs, 'mx', false)
       H.assert_true(vim.wait(3000, function()
-        return H.messages():find('status 0', 1, true) ~= nil
-      end), lhs .. ' completes its DirectRun Git command')
-      H.assert_notified('status 0')
+        local status = status_for_line('tracked.txt')
+        if expected_status == nil then return status == nil end
+        return status_text(status) == expected_status
+      end), lhs .. ' completes its DirectGit command')
+      H.assert_eq(H.messages():find('status 0', 1, true), nil,
+        lhs .. ' succeeds without a command-area notification')
     end
 
     H.assert_eq(status_text(status_for_line('tracked.txt')), '\u{f01f}  ',
       'an unstaged modification leaves the state slot blank')
 
-    press_and_wait('ga')
+    press_and_wait('ga', '\u{f01f} \u{f00c}')
     H.assert_eq(status_text(status_for_line('tracked.txt')), '\u{f01f} \u{f00c}',
       'ga moves the modification to the staged state')
 
-    press_and_wait('gr')
+    press_and_wait('gr', '\u{f01f}  ')
     H.assert_eq(status_text(status_for_line('tracked.txt')), '\u{f01f}  ',
       'gr moves the modification back to the blank worktree state')
 
-    press_and_wait('gc')
+    press_and_wait('gc', nil)
     H.assert_nil(status_for_line('tracked.txt'),
       'gc discards the working-tree change and clears the Git indicator')
     H.assert_eq(vim.fn.readfile(vim.fs.joinpath(root, 'tracked.txt')),

@@ -6,7 +6,8 @@ local buffer = require('direct.buffer')
 local fs = require('direct.fs')
 local ui = require('direct.ui')
 
-local function report_result(result)
+local function report_result(result, quiet_success)
+  if quiet_success and result.code == 0 then return end
   local message = string.format('direct: command exited with status %d', result.code)
   local stdout = (result.stdout or ''):gsub('%s+$', '')
   local stderr = (result.stderr or ''):gsub('%s+$', '')
@@ -15,9 +16,11 @@ local function report_result(result)
   ui.notify(message, result.code == 0 and vim.log.levels.INFO or vim.log.levels.ERROR)
 end
 
--- current_entry(command) -> vim.SystemObj | nil, error. `{}` is replaced with
--- the shell-escaped absolute path for the current direct-buffer row.
-function M.current_entry(command, on_complete)
+-- current_entry(command[, on_complete[, opts]]) -> vim.SystemObj | nil, error.
+-- `{}` is replaced with the shell-escaped absolute path for the current row.
+-- opts.quiet_success suppresses the completion notification for successful runs.
+function M.current_entry(command, on_complete, opts)
+  opts = opts or {}
   if type(command) ~= 'string' or command:match('^%s*$') then
     local err = 'DirectRun requires a shell command'
     ui.notify('direct: ' .. err, vim.log.levels.ERROR)
@@ -58,7 +61,7 @@ function M.current_entry(command, on_complete)
     text = true,
   }, function(result)
     vim.schedule(function()
-      report_result(result)
+      report_result(result, opts.quiet_success)
       if on_complete then
         local completed, err = pcall(on_complete, result, bufnr, listing.root)
         if not completed then

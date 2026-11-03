@@ -75,6 +75,54 @@ H.describe('DirectRun', function()
     H.assert_notified('status 7')
   end)
 
+  H.it('keeps successful DirectGit commands quiet but reports failures', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'workspace')
+    local name = 'tracked.txt'
+    H.mkfile(ws, name, { 'content' })
+    require('direct').list(ws)
+    vim.api.nvim_win_set_cursor(0, { find_line(name), 0 })
+
+    local notifications, refreshes = {}, 0
+    local ui = require('direct.ui')
+    local buffer = require('direct.buffer')
+    local restore_notify = H.stub(ui, 'notify', function(message, level)
+      notifications[#notifications + 1] = { message = message, level = level }
+    end)
+    local restore_refresh = H.stub(buffer, 'refresh_git_status', function()
+      refreshes = refreshes + 1
+    end)
+    local exit_result = { code = 0, stdout = 'staged output\n', stderr = 'warning\n' }
+    local restore_system = H.stub(vim, 'system', function(_, _, on_exit)
+      on_exit(exit_result)
+      return { wait = function() return exit_result end }
+    end)
+
+    local success = require('direct').git('git add -- {}')
+    H.assert_not_nil(success, 'starts the Git command')
+    H.assert_true(vim.wait(1000, function() return refreshes == 1 end),
+      'refreshes Git status after a successful command')
+    H.assert_eq(notifications, {}, 'does not notify successful Git output')
+
+    exit_result = { code = 1, stdout = '', stderr = 'permission denied\n' }
+    local failure = require('direct').git('git add -- {}')
+    H.assert_not_nil(failure, 'starts the failing Git command')
+    H.assert_true(vim.wait(1000, function() return refreshes == 2 end),
+      'still refreshes after a failed command')
+    H.assert_eq(#notifications, 1, 'reports the failed Git command once')
+    H.assert_true(notifications[1].message:find('status 1', 1, true) ~= nil,
+      'failure notification includes the exit status')
+    H.assert_true(notifications[1].message:find('permission denied', 1, true) ~= nil,
+      'failure notification includes stderr')
+    H.assert_eq(notifications[1].level, vim.log.levels.ERROR,
+      'failure notification uses the error level')
+
+    restore_system()
+    restore_refresh()
+    restore_notify()
+  end)
+
   H.it('rejects commands without a placeholder and rows without an entry', function()
     clean_buffers()
     local sb = H.sandbox()
