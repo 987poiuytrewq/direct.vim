@@ -8,7 +8,7 @@ local constants = require('direct.constants')
 local defaults = {
   map_default_keys = true,
   show_hidden = true,
-  respect_gitignore = false,
+  respect_gitignore = true,
   show_folder_icons = true,
   show_file_icons = true,
   icons = {
@@ -149,7 +149,7 @@ M._setup_called = false
 M._vim_enter_installed = false
 M._installed = vim.fn.maparg(M.GLOBAL_MAP.lhs, M.GLOBAL_MAP.mode) == M.GLOBAL_MAP.rhs
 
--- The fifteen buffer-local mappings for filetype=direct buffers, owned
+-- The sixteen buffer-local mappings for filetype=direct buffers, owned
 -- here so setup can clear and restore them in
 -- ALREADY-open direct buffers. Installed by `ftplugin/direct.lua` via
 -- `install_buffer_mappings(0)`. Built on `<Cmd>` (never a `:` command that
@@ -176,6 +176,7 @@ M.BUFFER_MAPS = {
   { mode = 'n', lhs = 'p', rhs = '<Cmd>DirectPaste<CR>' },
   { mode = 'n', lhs = 'P', rhs = '<Cmd>DirectPaste<CR>' },
   { mode = 'n', lhs = 'gh', rhs = '<Cmd>DirectToggleHidden<CR>' },
+  { mode = 'n', lhs = 'gi', rhs = '<Cmd>DirectToggleGitIgnore<CR>' },
   { mode = 'n', lhs = 'ga', rhs = '<Cmd>DirectGit git add -- {}<CR>' },
   { mode = 'n', lhs = 'gr', rhs = '<Cmd>DirectGit git reset -- {}<CR>' },
   { mode = 'n', lhs = 'gc', rhs = '<Cmd>DirectGit git checkout -- {}<CR>' },

@@ -41,8 +41,8 @@ M._state_for_test = rows.state_for_test
 M.entry_path = listing.entry_path
 M.ignore_set = listing.ignore_set
 M.read = listing.read
-local function list_with_snapshot(root, show_hidden)
-  return listing.list_with_snapshot(root, M.read, show_hidden)
+local function list_with_snapshot(root, show_hidden, respect_gitignore)
+  return listing.list_with_snapshot(root, M.read, show_hidden, respect_gitignore)
 end
 
 -- Keep only entries represented by the list-time Git status snapshot. Directory
@@ -655,7 +655,13 @@ function Buffer:list()
     and type(old_state.view_show_hidden) == 'boolean' then
     show_hidden_override = old_state.view_show_hidden
   end
-  local lines, snapshot, err = list_with_snapshot(self.root, show_hidden_override)
+  local respect_gitignore_override
+  if old_state and old_state.view_respect_gitignore_override
+    and type(old_state.view_respect_gitignore) == 'boolean' then
+    respect_gitignore_override = old_state.view_respect_gitignore
+  end
+  local lines, snapshot, err = list_with_snapshot(self.root, show_hidden_override,
+    respect_gitignore_override)
   if not lines then
     ui.notify('direct: cannot list ' .. tostring(self.root) .. ': '
       .. tostring(err), vim.log.levels.ERROR)
@@ -771,8 +777,11 @@ function Buffer:list()
       and not deleted_visibility_changed
       and vim.deepcopy(old_state.collapse_undos or {}) or {},
     view_show_hidden = snapshot.show_hidden,
+    view_respect_gitignore = snapshot.respect_gitignore,
     view_show_deleted = show_deleted,
     view_show_hidden_override = old_state and old_state.view_show_hidden_override or false,
+    view_respect_gitignore_override = old_state
+      and old_state.view_respect_gitignore_override or false,
     view_git_status_only = view_git_status_only,
     git_status = git_snapshot or false,
   }
@@ -889,10 +898,14 @@ function Buffer:expand(row)
     local physical_children, snapshot
     if rec.deleted_kind then
       physical_children = {}
-      snapshot = { wildignore = vim.o.wildignore or '', show_hidden = state.view_show_hidden }
+      snapshot = {
+        wildignore = vim.o.wildignore or '', show_hidden = state.view_show_hidden,
+        respect_gitignore = state.view_respect_gitignore,
+      }
     else
       local err
-      physical_children, snapshot, err = list_with_snapshot(path, state.view_show_hidden)
+      physical_children, snapshot, err = list_with_snapshot(path,
+        state.view_show_hidden, state.view_respect_gitignore)
       if not physical_children then
         ui.notify('direct: cannot expand ' .. tostring(path) .. ': '
           .. tostring(err), vim.log.levels.ERROR)
@@ -1239,6 +1252,46 @@ function M.toggle_git_status()
   state.view_git_status_only = not state.view_git_status_only
   -- Rebuild at every level from a fresh Git snapshot; the view must not leave
   -- stale child rows behind when the filter is enabled or disabled.
+  state.expanded = {}
+  state.known_children = {}
+  state.directory_snapshots = {}
+  state.materialization_undos = {}
+  state.materialization_recoveries = {}
+  state.collapse_undos = {}
+  local listed, err = M.restore():list()
+  if not listed then
+    for key, value in pairs(previous) do state[key] = value end
+    return nil, err
+  end
+  return listed
+end
+
+function M.toggle_gitignore()
+  local bufnr = vim.api.nvim_get_current_buf()
+  if vim.bo[bufnr].modified then
+    local reason = 'cannot toggle Git-ignore filtering with unsaved edits; sync or discard them first'
+    ui.notify('direct: ' .. reason, vim.log.levels.ERROR)
+    return nil, reason
+  end
+  local state = states[bufnr]
+  if not state then
+    local reason = 'direct listing state is unavailable; re-list this directory'
+    ui.notify('direct: ' .. reason, vim.log.levels.ERROR)
+    return nil, reason
+  end
+  local previous = {
+    view_respect_gitignore = state.view_respect_gitignore,
+    view_respect_gitignore_override = state.view_respect_gitignore_override,
+    expanded = state.expanded,
+    known_children = state.known_children,
+    directory_snapshots = state.directory_snapshots,
+    materialization_undos = state.materialization_undos,
+    materialization_recoveries = state.materialization_recoveries,
+    collapse_undos = state.collapse_undos,
+  }
+  state.view_respect_gitignore = not state.view_respect_gitignore
+  state.view_respect_gitignore_override = true
+  -- Rebuild from the root so every expanded level uses the same Git rules.
   state.expanded = {}
   state.known_children = {}
   state.directory_snapshots = {}

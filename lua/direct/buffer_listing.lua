@@ -86,14 +86,15 @@ end
 -- list_with_snapshot(root) returns the current filtered listing and the names
 -- omitted by that exact list-time wildignore value. Sync uses the captured names
 -- later instead of consulting a possibly changed option.
-local function capture_filter(root, show_hidden_override)
+local function capture_filter(root, show_hidden_override, respect_gitignore_override)
   local config = require('direct.config').options
   local snapshot = {
     path = root,
     wildignore = vim.o.wildignore or '',
     show_hidden = show_hidden_override == nil and config.show_hidden ~= false
       or show_hidden_override == true,
-    respect_gitignore = config.respect_gitignore == true,
+    respect_gitignore = respect_gitignore_override == nil
+      and config.respect_gitignore == true or respect_gitignore_override == true,
   }
   if snapshot.respect_gitignore then
     local git_snapshot, git_err = git.ignore_snapshot(root)
@@ -139,8 +140,8 @@ local function read_with_snapshot(root, snapshot, read)
   return (read or M.read)(root, ignored)
 end
 
-local function list_with_snapshot(root, read, show_hidden_override)
-  local snapshot, filter_err = capture_filter(root, show_hidden_override)
+local function list_with_snapshot(root, read, show_hidden_override, respect_gitignore_override)
+  local snapshot, filter_err = capture_filter(root, show_hidden_override, respect_gitignore_override)
   if not snapshot then return nil, nil, filter_err end
   local visible, err = read_with_snapshot(root, snapshot, read)
   if not visible then return nil, nil, err end

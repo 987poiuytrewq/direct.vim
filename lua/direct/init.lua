@@ -111,6 +111,12 @@ function M.toggle_git_status()
   return buffer.toggle_git_status()
 end
 
+function M.toggle_gitignore()
+  if not guard('DirectToggleGitIgnore') then return nil end
+  if pending.refuse('toggle Git-ignore filtering') then return nil end
+  return buffer.toggle_gitignore()
+end
+
 function M.undo()
   if not guard('DirectUndo') then
     return nil
