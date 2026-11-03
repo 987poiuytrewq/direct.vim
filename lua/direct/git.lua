@@ -3,11 +3,12 @@
 local M = {}
 
 local status_priority = {
-  modified = 1,
-  deleted = 2,
-  added = 3,
-  renamed = 4,
-  conflicted = 5,
+  M = 1,
+  D = 2,
+  A = 3,
+  R = 4,
+  C = 4,
+  U = 5,
 }
 
 local function normalize(path)
@@ -47,18 +48,23 @@ local function nul_fields(output)
   return fields
 end
 
-local function classify(xy)
-  if xy:find('U', 1, true) or xy == 'AA' or xy == 'DD' then
-    return 'conflicted'
+local function normalize_status(xy)
+  if xy == '??' then return ' A' end
+  return (xy:gsub('T', 'M'))
+end
+
+local function status_priority_for(code)
+  return status_priority[code] or 0
+end
+
+local function merge_status(previous, incoming)
+  if not previous then return incoming end
+  local merged = {}
+  for column = 1, 2 do
+    local old, new = previous:sub(column, column), incoming:sub(column, column)
+    merged[column] = status_priority_for(new) > status_priority_for(old) and new or old
   end
-  if xy:find('R', 1, true) then return 'renamed' end
-  if xy:find('D', 1, true) then return 'deleted' end
-  if xy == '??' or xy:find('A', 1, true) then return 'added' end
-  if xy:find('M', 1, true) or xy:find('T', 1, true)
-    or xy:find('C', 1, true) then
-    return 'modified'
-  end
-  return nil
+  return table.concat(merged)
 end
 
 local function path_is_missing(path)
@@ -66,18 +72,11 @@ local function path_is_missing(path)
   return ok and stat == nil
 end
 
-local function add_deleted(deleted, root, relative, xy)
+local function add_deleted(deleted, root, relative)
   local path = normalize(root .. '/' .. relative)
-  local staged, unstaged = xy:sub(1, 1) == 'D', xy:sub(2, 2) == 'D'
   local function add(path, kind)
     if not path_is_missing(path) then return end
-    local previous = deleted[path]
-    if previous then
-      previous.staged = previous.staged or staged
-      previous.unstaged = previous.unstaged or unstaged
-    else
-      deleted[path] = { kind = kind, staged = staged, unstaged = unstaged }
-    end
+    if not deleted[path] then deleted[path] = { kind = kind } end
   end
 
   add(path, 'file')
@@ -91,35 +90,21 @@ end
 
 local function add_path(paths, path, status)
   local key = normalize(path)
-  local previous = paths[key]
-  if not previous or status_priority[status] > status_priority[previous] then
-    paths[key] = status
-  end
+  paths[key] = merge_status(paths[key], status)
 end
 
-local function add_staging(staging, path, staged, unstaged)
-  local key = normalize(path)
-  local previous = staging[key] or { staged = false, unstaged = false }
-  previous.staged = previous.staged or staged
-  previous.unstaged = previous.unstaged or unstaged
-  staging[key] = previous
-end
-
-local function add_with_parent_directories(paths, staging, root, relative, status,
-    staged, unstaged)
+local function add_with_parent_directories(paths, root, relative, status)
   local path = normalize(root .. '/' .. relative)
   add_path(paths, path, status)
-  add_staging(staging, path, staged, unstaged)
   local parent = path:match('^(.*)/[^/]+$')
   while parent do
     add_path(paths, parent, status)
-    add_staging(staging, parent, staged, unstaged)
     if parent == root or parent == '/' then break end
     parent = parent:match('^(.*)/[^/]+$')
   end
 end
 
--- read(root) -> { root = repository root, paths = absolute path -> status }
+-- read(root) -> { root = repository root, paths = absolute path -> porcelain XY }
 -- or nil when Git is unavailable / root is not in a repository. One status
 -- query covers the repository; directory status is aggregated from descendants.
 function M.read(root)
@@ -132,7 +117,7 @@ function M.read(root)
   if not output then return nil end
 
   local fields = nul_fields(output)
-  local paths, staging, deleted = {}, {}, {}
+  local paths, deleted = {}, {}
   local index = 1
   while index <= #fields do
     local record = fields[index]
@@ -140,26 +125,21 @@ function M.read(root)
     if #record >= 4 then
       local xy = record:sub(1, 2)
       local relative = record:sub(4)
-      local status = classify(xy)
-      if status and relative ~= '' then
+      local status = normalize_status(xy)
+      if status ~= '  ' and relative ~= '' then
         -- In -z output, a rename record is followed by the original path; the
         -- first path is the destination and is the one present in the listing.
         if xy:find('R', 1, true) or xy:find('C', 1, true) then
           index = index + 1
         end
-        local staged = xy:sub(1, 1) ~= ' ' and xy:sub(1, 1) ~= '?'
-        local unstaged = xy:sub(2, 2) ~= ' ' and xy:sub(2, 2) ~= '?'
-        if xy == '??' then unstaged = true end
-        if status == 'conflicted' then staged, unstaged = false, false end
-        add_with_parent_directories(paths, staging, repo_root, relative, status,
-          staged, unstaged)
+        add_with_parent_directories(paths, repo_root, relative, status)
         if xy:find('D', 1, true) then
-          add_deleted(deleted, repo_root, relative, xy)
+          add_deleted(deleted, repo_root, relative)
         end
       end
     end
   end
-  return { root = repo_root, paths = paths, staging = staging, deleted = deleted }
+  return { root = repo_root, paths = paths, deleted = deleted }
 end
 
 -- deleted_children(snapshot, directory) returns absent tracked entries directly
@@ -179,8 +159,6 @@ function M.deleted_children(snapshot, directory)
           name = name,
           path = path,
           kind = entry.kind,
-          staged = entry.staged,
-          unstaged = entry.unstaged,
         }
       end
     end
@@ -450,24 +428,6 @@ end
 function M.status_for(snapshot, path)
   if not snapshot or type(path) ~= 'string' then return nil end
   return snapshot.paths[normalize(path)]
-end
-
-function M.staging_for(snapshot, path)
-  if not snapshot or type(path) ~= 'string' then return nil end
-  local state = snapshot.staging and snapshot.staging[normalize(path)]
-  if not state then return nil end
-  if state.staged and state.unstaged then return 'mixed' end
-  if state.staged then return 'staged' end
-  if state.unstaged then return 'unstaged' end
-  return nil
-end
-
--- Mixed paths select file/directory-specific settings. Both configurations
--- default to the staged style, including for directories with mixed descendants.
-function M.staging_style_for(snapshot, path, is_folder)
-  local state = M.staging_for(snapshot, path)
-  if state == 'mixed' then return is_folder and 'mixed_folder' or 'mixed_file' end
-  return state
 end
 
 return M

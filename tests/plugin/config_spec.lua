@@ -83,104 +83,23 @@ H.describe('config', function()
     config.clear_mappings()
   end)
 
-  H.it('Git display defaults to colored gutters and accepts partial status overrides', function()
+  H.it('Git status uses two configurable gutter symbols only', function()
     local config = fresh_config()
     config.clear_mappings()
     H.assert_true(config.defaults.git.enabled, 'Git status is enabled by default')
-    H.assert_eq(config.defaults.git.display, 'gutter', 'gutter-only display is the default')
-    H.assert_nil(config.defaults.git.statuses.added.icon_hl,
-      'Git status does not color icons by default')
-    H.assert_nil(config.defaults.git.statuses.added.text_hl,
-      'Git status does not color entry names by default')
-    H.assert_nil(config.defaults.git.statuses.added.icon,
-      'Git status does not replace the existing icon glyph by default')
-    H.assert_eq(config.defaults.git.statuses.added.gutter,
-      { symbol = '┃', highlight = 'DirectGitAddedGutter' },
-      'added entries use the colored gutter symbol by default')
-    H.assert_eq(config.defaults.git.statuses.modified.gutter.highlight,
-      'DirectGitModifiedGutter', 'modified entries have their own gutter highlight')
-    H.assert_eq(config.defaults.git.statuses.renamed.gutter.highlight,
-      'DirectGitRenamedGutter', 'renamed entries have their own gutter highlight')
-    H.assert_eq(config.defaults.git.statuses.conflicted.gutter.highlight,
-      'DirectGitConflictedGutter', 'conflicts have their own gutter highlight')
-    H.assert_true(config.defaults.git.staging.enabled,
-      'staging state markers are enabled by default')
-    H.assert_eq(config.defaults.git.staging.staged.gutter.symbol, '┃•',
-      'staged files use the pipe-and-bullet gutter marker')
-    H.assert_eq(config.defaults.git.staging.unstaged.gutter.symbol, '┃',
-      'unstaged files use the pipe gutter marker')
-    H.assert_eq(config.defaults.git.staging.mixed_file.gutter.symbol, '┃•',
-      'mixed files default to the staged marker')
-    H.assert_eq(config.defaults.git.staging.mixed_folder.gutter.symbol, '┃•',
-      'mixed folders default to the staged marker')
-    H.assert_eq(config.defaults.git.staging.staged.icon_hl, 'DirectGitStagedIcon',
-      'staged icons have their own highlight group')
-    H.assert_eq(config.defaults.git.statuses.deleted.gutter,
-      { symbol = '┃', highlight = 'DirectGitDeletedGutter' },
-      'deleted entries retain the regular Git gutter symbol')
+    H.assert_eq(config.defaults.git.gutter, { index = '|', worktree = '|' },
+      'index and worktree columns default to bars')
 
     local options = config.setup({ git = {
-      display = 'icon',
-      statuses = { added = { icon = { folder = '+' } } },
-      staging = {
-        staged = {
-          icon_hl = 'MyStagedIcon',
-          text_hl = 'MyStagedText',
-          icon = { file = '+' },
-          gutter = { symbol = 'S', highlight = 'MyStagedGutter' },
-        },
-        mixed_file = {
-          icon_hl = 'MyMixedFileIcon',
-          text_hl = 'MyMixedFileText',
-          icon = { file = 'F' },
-          gutter = { symbol = 'F', highlight = 'MyMixedFileGutter' },
-        },
-        mixed_folder = {
-          icon_hl = 'MyMixedFolderIcon',
-          text_hl = 'MyMixedFolderText',
-          icon = { folder = 'D' },
-          gutter = { symbol = 'D', highlight = 'MyMixedFolderGutter' },
-        },
-      },
+      gutter = { index = 'S', worktree = 'W' },
     } })
-    H.assert_eq(options.git.display, 'icon', 'icon-only display is accepted')
-    H.assert_eq(options.git.statuses.added.icon, { folder = '+' },
-      'folder glyph can be overridden independently')
-    H.assert_nil(options.git.statuses.added.text_hl,
-      'omitted inline highlight options remain disabled')
-    H.assert_nil(options.git.statuses.modified.text_hl,
-      'omitted statuses do not enable inline highlights')
-    H.assert_eq(options.git.staging.staged.icon_hl, 'MyStagedIcon',
-      'staging icon highlight overrides are accepted')
-    H.assert_eq(options.git.staging.staged.text_hl, 'MyStagedText',
-      'staging text highlight overrides are accepted')
-    H.assert_eq(options.git.staging.staged.icon, { file = '+' },
-      'staging glyph overrides are accepted')
-    H.assert_eq(options.git.staging.staged.gutter.symbol, 'S',
-      'staging gutter overrides are accepted')
-    H.assert_eq(options.git.staging.unstaged.gutter.symbol, '┃',
-      'omitted staging states retain their defaults')
-    H.assert_eq(options.git.staging.mixed_file.icon, { file = 'F' },
-      'mixed-file glyph options are independently configurable')
-    H.assert_eq(options.git.staging.mixed_folder.icon, { file = '+', folder = 'D' },
-      'mixed-folder glyph overrides inherit other staged icon variants')
-    H.assert_eq(options.git.staging.mixed_folder.text_hl, 'MyMixedFolderText',
-      'mixed-folder text color is configurable')
+    H.assert_eq(options.git.gutter, { index = 'S', worktree = 'W' },
+      'both gutter symbols can be customized by column')
 
-    options = config.setup({ git = { staging = {
-      staged = {
-        text_hl = 'InheritedStagedText',
-        gutter = { symbol = 'S', highlight = 'InheritedStagedGutter' },
-      },
-      mixed_file = { gutter = { symbol = 'F' } },
-    } } })
-    H.assert_eq(options.git.staging.mixed_file.text_hl, 'InheritedStagedText',
-      'mixed-file styles inherit staged settings unless overridden')
-    H.assert_eq(options.git.staging.mixed_folder.text_hl, 'InheritedStagedText',
-      'mixed-folder styles inherit staged settings unless overridden')
-    H.assert_eq(options.git.staging.mixed_file.gutter,
-      { symbol = 'F', highlight = 'InheritedStagedGutter' },
-      'partial mixed-file gutter overrides retain inherited settings')
+    H.capture_messages()
+    options = config.setup({ git = { gutter = { index = 'two' } } })
+    H.assert_eq(options.git.gutter.index, '|', 'invalid cell width retains its default')
+    H.assert_notified('git.gutter.index', vim.log.levels.ERROR)
     config.clear_mappings()
   end)
 
@@ -199,22 +118,22 @@ H.describe('config', function()
     config.clear_mappings()
   end)
 
-  H.it('Git display validates mode and status customization without rejecting other options', function()
+  H.it('rejects removed Git display modes and styling options', function()
     local config = fresh_config()
     config.clear_mappings()
     H.capture_messages()
     local options = config.setup({
       git = {
-        display = 'glyphs',
-        statuses = { changed = { text_hl = 'NoSuchStatus' } },
+        display = 'icon',
+        statuses = { added = { text_hl = 'NoSuchStatus' } },
+        staging = { enabled = false },
       },
       show_file_icons = true,
     })
-    H.assert_eq(options.git.display, 'gutter', 'invalid mode keeps its default')
-    H.assert_nil(options.git.statuses.changed, 'unknown status is not stored')
     H.assert_true(options.show_file_icons, 'valid sibling options still apply')
     H.assert_notified('git.display', vim.log.levels.ERROR)
-    H.assert_notified('git.statuses.changed', vim.log.levels.ERROR)
+    H.assert_notified('git.statuses', vim.log.levels.ERROR)
+    H.assert_notified('git.staging', vim.log.levels.ERROR)
     config.clear_mappings()
   end)
 
