@@ -84,8 +84,6 @@ local function refresh_highlights(bufnr, state)
         row = row,
         depth = rec.depth or 0,
         status = snapshot and git.status_for(snapshot, rec.path) or nil,
-        staging = snapshot and git.staging_style_for(snapshot, rec.path,
-          rec.name:sub(-1) == '/') or nil,
         deleted_kind = rec.deleted_kind,
       }
     end

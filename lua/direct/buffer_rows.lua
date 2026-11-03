@@ -112,38 +112,6 @@ local function refresh_icons(bufnr, state)
       end
       if enabled then
         glyph, group = base_glyph, base_group
-        local status = options.git.enabled and git_snapshot
-          and git.status_for(git_snapshot, rec.path)
-        local status_settings = status and options.git.statuses[status]
-        local staging = options.git.staging
-        local stage_state = options.git.enabled and staging.enabled ~= false
-          and git_snapshot and git.staging_style_for(git_snapshot, rec.path, is_folder)
-        local stage_settings = stage_state and staging[stage_state]
-        if (status_settings or stage_settings)
-          and (options.git.display == 'icon' or options.git.display == 'both') then
-          group = stage_settings and stage_settings.icon_hl
-            or (status_settings and status_settings.icon_hl) or group
-          local variant = is_folder
-            and (state.expanded[id] and 'folder_open' or 'folder') or 'file'
-          local base_variant = is_folder and 'folder' or 'file'
-          local stage_icon = stage_settings and stage_settings.icon
-          local status_icon = status_settings and status_settings.icon
-          if type(stage_icon) == 'string' then
-            glyph = stage_icon
-          elseif type(stage_icon) == 'table' then
-            glyph = stage_icon[variant] or stage_icon[base_variant]
-            if not glyph and type(status_icon) == 'string' then
-              glyph = status_icon
-            elseif not glyph and type(status_icon) == 'table' then
-              glyph = status_icon[variant] or status_icon[base_variant]
-            end
-            glyph = glyph or base_glyph
-          elseif type(status_icon) == 'string' then
-            glyph = status_icon
-          elseif type(status_icon) == 'table' then
-            glyph = status_icon[variant] or status_icon[base_variant] or base_glyph
-          end
-        end
       end
       vim.api.nvim_buf_set_extmark(bufnr, icon_namespace, row,
         (rec.depth or 0) * 2, {

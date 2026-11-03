@@ -47,21 +47,12 @@ defaults. These highlight groups can be customized in a colorscheme or with
     DirectHiddenFileIcon        hidden file icons (Comment)
     DirectGitDeletedFile        deleted tracked file names (ErrorMsg)
     DirectGitDeletedDirectory   deleted tracked directory names (ErrorMsg)
-    DirectGitDeletedGutter      deleted status gutter (ErrorMsg)
-    DirectGitAddedIcon          added status icon (DiffAdd)
-    DirectGitAdded              added status name (DiffAdd)
-    DirectGitModifiedIcon       modified status icon (DiffChange)
-    DirectGitModified           modified status name (DiffChange)
-    DirectGitRenamedIcon        renamed status icon (DiffChange)
-    DirectGitRenamed            renamed status name (DiffChange)
-    DirectGitConflictedIcon     conflicted status icon (ErrorMsg)
-    DirectGitConflicted         conflicted status name (ErrorMsg)
-    DirectGitStagedIcon         staged icon color (DiffAdd)
-    DirectGitStaged             staged filename color (DiffAdd)
-    DirectGitStagedGutter       staged gutter color (DiffAdd)
-    DirectGitUnstagedIcon       unstaged icon color (DiffChange)
-    DirectGitUnstaged           unstaged filename color (DiffChange)
-    DirectGitUnstagedGutter     unstaged gutter color (DiffChange)
+    DirectGitAddedGutter        added status cell (DiffAdd)
+    DirectGitModifiedGutter     modified/renamed/copied cell (DiffChange)
+    DirectGitDeletedGutter      deleted status cell (DiffDelete)
+    DirectGitConflictedGutter   unmerged status cell (ErrorMsg)
+    DirectGitDeletedFile        deleted tracked file name (ErrorMsg)
+    DirectGitDeletedDirectory   deleted tracked directory name (ErrorMsg)
 
 Defaults are reapplied after a ColorScheme event without replacing
 user-defined groups. Listing files receive no filename-, filetype-, or
@@ -101,7 +92,7 @@ Run `:checkhealth direct` to confirm the version and the data home in use:
       git = {
         enabled = true,
         show_deleted = true,
-        display = 'gutter', -- gutter, icon, text, or both
+        gutter = { index = '|', worktree = '|' },
       },
     })
 
@@ -144,16 +135,27 @@ placement.
 
 Git status ~
 
-In a Git repository, direct reads status once per listing refresh. Added
-(including untracked), modified, Git-detected renamed, conflicted, and deleted
-entries are styled without changing listing text. Missing tracked files and
-directories containing deleted tracked descendants appear as protected rows.
-Directories inherit the strongest status of changed descendants, in the order
-conflicted, renamed, added, deleted, then modified. The default gutter uses `┃`
-for unstaged changes (including untracked files) and `┃•` for staged changes.
-Mixed files and mixed folders with staged descendants use the staged display by
-default; `mixed_file` and `mixed_folder` can be configured independently.
-Conflicts use their conflict styling instead. Re-list to refresh Git status.
+In a Git repository, direct reads porcelain status once per listing refresh.
+Changed entries show two gutter cells in Git's porcelain `XY` order: index
+(staged) first, then worktree (unstaged). Each non-space code shows its gutter
+symbol (both default to `|`); a porcelain space shows a blank cell. `T` is
+normalized to `M`, and untracked `??` is displayed as `_A` (blank index cell,
+added worktree cell). The status letters map to highlights: `A` to DiffAdd, `M`
+and `T` to DiffChange, `D` to DiffDelete, `R` and `C` to DiffChange, and `U` to
+ErrorMsg. Each cell is highlighted independently. Directories aggregate the
+strongest changed status independently in each column, using the precedence
+conflict, rename/copy, add, delete, then modification. Git status does not
+recolor entry names or file/folder icons. Re-list to refresh Git status.
+
+Direct temporarily reserves two sign-column cells in the listing window and
+restores that window's previous `signcolumn` setting when leaving the listing.
+An explicit `signcolumn=no` is respected and suppresses the gutter.
+
+Missing tracked files and directories containing deleted tracked descendants
+appear as protected rows. Their names retain the dedicated deleted-row highlight.
+Set `git.show_deleted = false` to hide these synthetic rows while retaining Git
+status on entries that still exist. This option has no effect when Git status is
+disabled; it defaults to `true`.
 
 Press `gs` or run `:DirectToggleGitStatus` to show only entries with a status;
 press it again to restore the normal listing. This filter composes with hidden,
@@ -161,75 +163,25 @@ wildignore, and Git-ignore filtering. Entries it hides are not treated as
 deletion sources during sync. In directories with changed descendants, the
 directory remains visible and its expanded children use the same filter.
 
-By default, `git.display` is `gutter`: changed entries show a `┃` in the sign
-column without changing their icon glyphs or highlighting their names. Added
-entries use DiffAdd, modified and renamed entries use DiffChange, and conflicts
-use ErrorMsg. Choose `icon`, `text`, or `both` to select inline icon and/or name
-highlighting; gutter symbols remain configurable per status. Icon and entry-name
-highlighting are unset by default; set `icon_hl` and/or `text_hl` per status to
-opt in. Configure highlight groups, optional icon overrides, and gutter symbols
-per status:
+The two gutter symbols can be configured independently by column:
 
     require('direct').setup({
       git = {
-        display = 'both',
-        staging = {
-          enabled = true,
-          staged = {
-            icon_hl = 'MyStagedIcon',
-            text_hl = 'MyStagedText',
-            icon = { file = '+' },
-            gutter = { symbol = '┃•', highlight = 'MyStagedGutter' },
-          },
-          unstaged = {
-            icon_hl = 'MyUnstagedIcon',
-            text_hl = 'MyUnstagedText',
-            gutter = { symbol = '┃', highlight = 'MyUnstagedGutter' },
-          },
-          mixed_file = {
-            icon_hl = 'MyMixedFileIcon',
-            text_hl = 'MyMixedFileText',
-            icon = { file = '±' },
-            gutter = { symbol = 'F', highlight = 'MyMixedFileGutter' },
-          },
-          mixed_folder = {
-            icon_hl = 'MyMixedFolderIcon',
-            text_hl = 'MyMixedFolderText',
-            icon = { folder = '±', folder_open = '±' },
-            gutter = { symbol = 'D', highlight = 'MyMixedFolderGutter' },
-          },
-        },
-        statuses = {
-          added = {
-            icon_hl = 'MyGitAddedIcon',
-            text_hl = 'MyGitAdded',
-            icon = { file = '+', folder = '+', folder_open = '+' },
-            gutter = { symbol = 'A', highlight = 'MyGitAddedGutter' },
-          },
-          modified = {
-            icon_hl = 'MyGitModifiedIcon',
-            text_hl = 'MyGitModified',
-          },
-        },
+        gutter = { index = '│', worktree = '│' },
       },
     })
 
-Icon overrides are optional; unspecified file/folder variants keep their base
-`icons` glyphs. Gutter symbols default to `┃` and can be disabled per status with
-`gutter = false`. Set `git.enabled = false` to disable Git status display; this
-does not affect Git-ignore filtering. Mixed-file and mixed-folder settings
-inherit the staged settings by default and can independently override
-`icon_hl`, `text_hl`, `icon`, and `gutter`. Set `git.staging.enabled = false`
-to disable staging-specific styling while retaining regular status display.
+Both symbols must occupy one display cell. Status colors use the
+`DirectGitAddedGutter`, `DirectGitModifiedGutter`, `DirectGitDeletedGutter`, and
+`DirectGitConflictedGutter` highlight groups. Set `git.enabled = false` to
+disable Git status display; this does not affect Git-ignore filtering.
 
 Set `git.show_deleted = false` to hide synthetic deleted rows; it defaults to
 `true` and only applies when `git.enabled = true`. This affects the rows shown,
 not Git status data or styling on entries that still exist.
 
 Deleted tracked rows always use `DirectGitDeletedFile` or
-`DirectGitDeletedDirectory` for their names, even when staging text styles are
-configured. Their Git gutter follows the regular status display and uses
-`DirectGitDeletedGutter` (default ErrorMsg). Deleted rows can be targeted with
+`DirectGitDeletedDirectory` for their names. Deleted rows can be targeted with
 `:DirectRun` or `:DirectGit`, expanded/collapsed with the `z` commands, and
 staged/reset/restored with `ga`, `gr`, and `gc`. Other listing edits, opens,
 yanks, and pastes on these rows are ignored.

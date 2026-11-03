@@ -149,8 +149,7 @@ H.describe('DirectRun', function()
     add:wait()
     local staged = vim.wait(3000, function()
       local state = require('direct.buffer')._state_for_test(vim.api.nvim_get_current_buf())
-      return state and state.git_status and state.git_status.deleted[path]
-        and state.git_status.deleted[path].staged
+      return state and state.git_status and state.git_status.paths[path] == 'D '
     end)
     local state = require('direct.buffer')._state_for_test(vim.api.nvim_get_current_buf())
     H.assert_true(staged, 'ga-style Git add updates the row status: '
@@ -161,8 +160,7 @@ H.describe('DirectRun', function()
     reset:wait()
     H.assert_true(vim.wait(3000, function()
       local state = require('direct.buffer')._state_for_test(vim.api.nvim_get_current_buf())
-      return state and state.git_status and state.git_status.deleted[path]
-        and state.git_status.deleted[path].unstaged
+      return state and state.git_status and state.git_status.paths[path] == ' D'
     end), 'gr-style Git reset updates the row status')
 
     local directory_row = find_line('gone-dir/')
@@ -173,8 +171,7 @@ H.describe('DirectRun', function()
     add_directory:wait()
     H.assert_true(vim.wait(3000, function()
       local state = require('direct.buffer')._state_for_test(vim.api.nvim_get_current_buf())
-      local deleted = state and state.git_status and state.git_status.deleted[child]
-      return deleted and deleted.staged
+      return state and state.git_status and state.git_status.paths[child] == 'D '
     end), 'ga stages a deleted directory through its pathspec')
 
     vim.api.nvim_win_set_cursor(0, { find_line('gone-dir/'), 0 })
@@ -183,8 +180,7 @@ H.describe('DirectRun', function()
     reset_directory:wait()
     H.assert_true(vim.wait(3000, function()
       local state = require('direct.buffer')._state_for_test(vim.api.nvim_get_current_buf())
-      local deleted = state and state.git_status and state.git_status.deleted[child]
-      return deleted and deleted.unstaged
+      return state and state.git_status and state.git_status.paths[child] == ' D'
     end), 'gr unstages a deleted directory through its pathspec')
 
     vim.api.nvim_win_set_cursor(0, { find_line('gone-dir/'), 0 })
