@@ -279,8 +279,9 @@ for a tracked Git-deleted row, which can be targeted to restore or stage it.
 
 Use `:DirectGit {command}` for a Git command that should also refresh the status
 decorations in the originating loaded listing when it completes. It uses the
-same placeholder and output behavior as `DirectRun`, and refreshes without
-re-listing or changing buffer text.
+same placeholder behavior as `DirectRun`, and refreshes without re-listing or
+changing buffer text. Successful Git commands are quiet; failures report their
+exit status and captured output.
 The default `ga`, `gr`, and `gc` mappings run `git add -- {}`, `git reset -- {}`,
 and `git checkout -- {}` for the current entry through `:DirectGit`.
 
