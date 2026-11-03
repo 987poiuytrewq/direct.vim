@@ -7,6 +7,7 @@ local constants = require('direct.constants')
 
 local defaults = {
   map_default_keys = true,
+  directory_separator = package.config:sub(1, 1),
   show_hidden = true,
   respect_gitignore = false,
   show_folder_icons = true,
@@ -307,6 +308,10 @@ function M.setup(opts)
       require('direct.ui').notify(
         'direct: max_recursive_expand_depth must be false or a positive integer',
         vim.log.levels.ERROR)
+    elseif key == 'directory_separator'
+      and value ~= '/' and value ~= '\\' then
+      require('direct.ui').notify(
+        'direct: directory_separator must be "/" or "\\\\"', vim.log.levels.ERROR)
     elseif key == 'icons' then
       next_options.icons = resolve_icon_options(value)
     elseif (key == 'show_hidden' or key == 'respect_gitignore')

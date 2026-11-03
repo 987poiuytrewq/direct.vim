@@ -24,6 +24,23 @@ local function global_dash_count()
 end
 
 H.describe('config', function()
+  H.it('defaults the directory row marker to the filesystem separator and validates overrides', function()
+    local config = fresh_config()
+    config.clear_mappings()
+    H.assert_eq(config.defaults.directory_separator, package.config:sub(1, 1),
+      'native path separator is the default display marker')
+    H.assert_eq(config.setup({ directory_separator = '\\' }).directory_separator, '\\',
+      'backslash override is accepted')
+    H.assert_eq(config.setup({ directory_separator = '/' }).directory_separator, '/',
+      'slash override is accepted')
+    H.capture_messages()
+    local options = config.setup({ directory_separator = '|' })
+    H.assert_eq(options.directory_separator, config.defaults.directory_separator,
+      'invalid marker leaves the platform default')
+    H.assert_notified('directory_separator', vim.log.levels.ERROR)
+    config.clear_mappings()
+  end)
+
   H.it('two setup() calls converge on the same options', function()
     local config = fresh_config()
     config.clear_mappings()

@@ -5,6 +5,14 @@ repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/direct-live.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 
+native_path() {
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -w "$1"
+  else
+    printf '%s' "$1"
+  fi
+}
+
 workspace="$tmp/workspace"
 mkdir -p "$workspace/sub" "$tmp/config" "$tmp/data" "$tmp/state" "$tmp/cache"
 printf 'alpha contents\n' > "$workspace/alpha.txt"
@@ -14,19 +22,22 @@ run_smoke() {
   local map_default="$1"
   local expected="$2"
   local output
+  local native_workspace native_smoke
+  native_workspace=$(native_path "$workspace")
+  native_smoke=$(native_path "$repo/tests/fixtures/live_smoke.lua")
 
   if output=$(\
-    XDG_DATA_HOME="$tmp/data" \
-    XDG_CONFIG_HOME="$tmp/config" \
-    XDG_STATE_HOME="$tmp/state" \
-    XDG_CACHE_HOME="$tmp/cache" \
-    DIRECT_LIVE_WORKSPACE="$workspace" \
-    DIRECT_LIVE_SMOKE="$repo/tests/fixtures/live_smoke.lua" \
+    XDG_DATA_HOME="$(native_path "$tmp/data")" \
+    XDG_CONFIG_HOME="$(native_path "$tmp/config")" \
+    XDG_STATE_HOME="$(native_path "$tmp/state")" \
+    XDG_CACHE_HOME="$(native_path "$tmp/cache")" \
+    DIRECT_LIVE_WORKSPACE="$native_workspace" \
+    DIRECT_LIVE_SMOKE="$native_smoke" \
     DIRECT_LIVE_MAP_DEFAULT_KEYS="$map_default" \
     nvim --headless \
       -n -i NONE \
-      -u "$repo/tests/fixtures/live_init.lua" \
-      "$workspace" 2>&1); then
+      -u "$(native_path "$repo/tests/fixtures/live_init.lua")" \
+      "$native_workspace" 2>&1); then
     printf '%s\n' "$output"
   else
     local status=$?

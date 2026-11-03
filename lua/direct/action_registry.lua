@@ -33,9 +33,7 @@ return function(M)
     if type(moves) ~= 'table' or #moves < 2 then return false end
     local endpoints, visited = {}, { [1] = true }
     local function key(path)
-      local trimmed = path:gsub('/+$', '')
-      if trimmed == '' then trimmed = '/' end
-      return vim.fs.normalize(trimmed)
+      return M.paths.canonical(path)
     end
     for i, move in ipairs(moves) do
       endpoints[i] = { key(move.src), key(move.dst) }
@@ -66,8 +64,7 @@ return function(M)
     local reason = M.path_reason(value)
     if not reason then
       local canonical = M.paths.root(value)
-      local spelling = value:gsub('/+$', '')
-      if spelling == '' then spelling = '/' end
+      local spelling = M.paths.strip_trailing_separator(value)
       if canonical ~= spelling then reason = 'path must be absolute and canonical' end
     end
     if reason then
@@ -448,8 +445,7 @@ return function(M)
         local reason = M.path_reason(record[field])
         if not reason then
           local canonical = M.paths.root(record[field])
-          local spelling = record[field]:gsub('/+$', '')
-          if spelling == '' then spelling = '/' end
+          local spelling = M.paths.strip_trailing_separator(record[field])
           if canonical ~= spelling then reason = 'path must be absolute and canonical' end
         end
         if reason then return nil, reason .. ': ' .. tostring(record[field]) end
@@ -478,8 +474,7 @@ return function(M)
           local reason = M.path_reason(move[field])
           if not reason then
             local canonical = M.paths.root(move[field])
-            local spelling = move[field]:gsub('/+$', '')
-            if spelling == '' then spelling = '/' end
+            local spelling = M.paths.strip_trailing_separator(move[field])
             if canonical ~= spelling then reason = 'path must be absolute and canonical' end
           end
           if reason then return nil, reason .. ': ' .. tostring(move[field]) end

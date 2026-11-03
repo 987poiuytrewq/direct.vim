@@ -105,8 +105,9 @@ Default keys:
 - `gs` shows only entries with a Git status; press it again to restore the listing.
 
 Edit the listing to rename, create, or delete entries, then save with `:write`.
-Directory names end in `/`; file names do not. At the root level, save one kind
-of change at a time. `yy` yanks the entry under the cursor and `p` pastes it.
+Directory names end in the platform's filesystem separator by default; file
+names do not. At the root level, save one kind of change at a time. `yy` yanks
+the entry under the cursor and `p` pastes it.
 
 | To… | Edit the listing |
 |---|---|
@@ -114,11 +115,13 @@ of change at a time. `yy` yanks the entry under the cursor and `p` pastes it.
 | Create | Add a line, e.g. `notes.md` or `reports/2026/summary.md` |
 | Delete | Remove the line |
 
-Save with `:write` to apply your change. Directory names must end in `/` (such
-as `archive/`); file names must not. At the root level, save one kind of change
-at a time—create, rename, or delete. A new relative path may contain `/`; Direct
-creates missing parent directories. Absolute paths, empty path components, and
-`.` or `..` components are refused; the final `/` remains the directory marker.
+Save with `:write` to apply your change. Directory names must end in the
+configured directory separator (such as `archive/` on POSIX or `archive\\` on
+Windows); file names must not. At the root level, save one kind of change at a
+time—create, rename, or delete. A new relative path may contain the platform's
+separator; Direct creates missing parent directories. Absolute paths, empty
+path components, and `.` or `..` components are refused; the final separator
+remains the directory marker.
 After saving a nested path, Direct expands its parent directories and moves the
 cursor to the last added entry. If Direct can't tell what you meant, it refuses
 the save and leaves the filesystem unchanged.
@@ -129,6 +132,7 @@ the save and leaves the filesystem unchanged.
 
 ```lua
 require('direct').setup({
+  directory_separator = package.config:sub(1, 1), -- '/' or '\\'; defaults to the filesystem separator
   map_default_keys = true, -- set false to install no default mappings
   show_hidden = true, -- set false to hide dot-prefixed entries
   respect_gitignore = false, -- opt in to Git's ignore rules
@@ -344,12 +348,14 @@ At the root level, a save is classified as exactly one of *rename*, *create* or
 - **Delete** — delete the lines for the entries you want to remove, and save.
   Deleted entries are yanked automatically, so you can paste them back.
 
-### The trailing-slash rule
+### The directory-separator rule
 
-A directory must always be written with a trailing slash, and a file must never
-have one: the line, not the filesystem, decides what will be created or
-renamed. Renaming `foo/` to `foo` therefore replaces the directory `foo` with a
-file, and adding a line `bar` creates a file while `bar/` creates a directory.
+A directory must always be written with a trailing configured separator, and a
+file must never have one: the line, not the filesystem, decides what will be
+created or renamed. By default, the marker is the platform's filesystem
+separator; `directory_separator` can override it with `/` or `\\`. The selected
+marker is reserved inside entry names, so names containing it are omitted from
+the editable listing to avoid ambiguity.
 
 At the root level, an edit that both adds and deletes entries, or that leaves a
 duplicated line, is reported as ambiguous, naming both sides of the comparison.

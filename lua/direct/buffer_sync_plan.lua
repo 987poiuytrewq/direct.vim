@@ -1,8 +1,10 @@
 -- Pure classification and validation for converting edited listing rows to actions.
 return function(deps)
+  local paths = require('direct.paths')
   local action_mod = deps.action_mod
   local entry_path = deps.entry_path
   local is_dir_line = deps.is_dir_line
+  local directory_separator = deps.directory_separator
   local dirs_then_name = deps.dirs_then_name
   local lstat = deps.lstat
   local path_without_marker = deps.path_without_marker
@@ -81,7 +83,8 @@ return function(deps)
     local component = line
     if is_dir_line(component) then component = component:sub(1, -2) end
     if component == '' or component == '.' or component == '..'
-      or component:find('/', 1, true) then
+      or component:find('/', 1, true)
+      or component:find(directory_separator(), 1, true) then
       return 'invalid path component'
     end
     local windows = path_style == 'win32'
@@ -104,15 +107,16 @@ return function(deps)
     return nil
   end
 
-  -- A nested entry is still one root-buffer row, but its forward-slash
-  -- separated components must each be safe filenames. A single trailing slash
-  -- is the existing directory marker; empty, absolute, and dot components are
+  -- A nested entry is still one root-buffer row, but its separator-delimited
+  -- components must each be safe filenames. The configured trailing separator
+  -- is the directory marker; empty, absolute, and dot components are
   -- never accepted.
   local function nested_path_reason(line, path_style)
     if type(line) ~= 'string' then return 'invalid path component' end
     local control_reason = action_mod.path_reason(line)
     if control_reason then return control_reason end
-    local path = is_dir_line(line) and line:sub(1, -2) or line
+    local path = paths.strip_directory_marker(line)
+    if directory_separator() == '\\' then path = path:gsub('\\', '/') end
     if path == '' or path:sub(1, 1) == '/' then return 'invalid path component' end
     local start = 1
     while true do
@@ -166,18 +170,17 @@ return function(deps)
     return nil
   end
   -- build_actions returns actions and yanks. ADD/DELETE follow dirs-then-name
-  -- order; deleted directory paths retain their trailing slash in the auto-yank.
+  -- order; deleted directory paths retain their trailing native separator in the auto-yank.
   local function build_actions(root, plan)
     local actions, yanks = {}, {}
     if plan.kind == 'ADD' then
       local planned, create_dirs, touches = {}, {}, {}
       local function normalized(path)
-        path = path:gsub('/+$', '')
-        if path == '' then path = '/' end
-        return vim.fs.normalize(path)
+        return paths.canonical(path)
       end
       local function components(line)
-        local path = is_dir_line(line) and line:sub(1, -2) or line
+        local path = paths.strip_directory_marker(line)
+        if directory_separator() == '\\' then path = path:gsub('\\', '/') end
         local out, start = {}, 1
         while true do
           local slash = path:find('/', start, true)

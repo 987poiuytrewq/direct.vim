@@ -20,7 +20,7 @@ M.PASTE_CLASH_ATTEMPTS = 10
 -- equivalent of Python's os.path.relpath. `:p:.` resolves the path first so a
 -- lexical mismatch (e.g. /tmp vs /private/tmp) cannot suppress the relative
 -- form; a path equal to the cwd yields '.', matching Python's relpath(cwd).
--- `:p` appends a trailing slash to directories, which Python's relpath never
+-- `:p` appends a trailing filesystem separator to directories, which Python's relpath never
 -- does, so it is stripped: a directory description is 'Removed tree', never
 -- 'Removed tree/' (Paste's describe adds its own separator).
 function M.rel(path)
@@ -31,16 +31,16 @@ function M.rel(path)
   if rel == '' then
     return '.'
   end
-  rel = rel:gsub('/+$', '')
+  rel = M.paths.strip_trailing_separator(rel)
   if rel == '' then
-    return '/'
+    return M.paths.separator
   end
   return rel
 end
 
 -- Close buffers for the resolved pathname before destructive actions. Do not
 -- use inode identity: that would also close buffers for distinct hard links.
--- realpath normalizes symlink prefixes, `..`, and trailing slashes while keeping
+-- realpath normalizes symlink prefixes, `..`, and trailing separators while keeping
 -- different hard-link names distinct.
 -- Pure defence and parity: nothing here may raise, so every buffer API call is
 -- pcall-guarded.
@@ -486,7 +486,7 @@ function M.Paste(src, dst, src_names, dst_names)
   end
   self['do'] = function() return M.execute(self) end
   function self.describe()
-    return 'Pasted into ' .. M.rel(self.dst) .. '/'
+    return 'Pasted into ' .. M.rel(self.dst) .. M.paths.separator
   end
   return self
 end
@@ -680,7 +680,7 @@ function M.Unpaste(src, dst, src_names, dst_names)
   end
   self['do'] = function() return M.execute(self) end
   function self.describe()
-    return 'Reversed paste into ' .. M.rel(self.src) .. '/'
+    return 'Reversed paste into ' .. M.rel(self.src) .. M.paths.separator
   end
   return self
 end

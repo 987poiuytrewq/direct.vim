@@ -6,19 +6,16 @@ return function(M)
   -- ---------------------------------------------------------------------------
 
   -- parent_dir(path) -> the directory the staging temp for `path` belongs in. The
-  -- trailing slash of a directory line is stripped BEFORE the parent is taken
+  -- trailing filesystem separator of a directory path is stripped BEFORE the
+  -- parent is taken
   -- `vim.fs.dirname('/ws/old/')` is '/ws/old', not '/ws' (measured on 0.12.5), so
   -- it cannot be used here. Every entry staged for one sync belongs to the sync
   -- root, so the temp spelling is exactly the `<root>/.direct-tmp-<n>` the save
   -- has always used -- and because the temp is created in the entry's OWN
   -- directory, the staging rename can never cross a filesystem.
   local function parent_dir(path)
-    local trimmed = tostring(path):gsub('/+$', '')
-    local dir = trimmed:match('^(.*)/[^/]*$')
-    if dir == nil or dir == '' then
-      return '/'
-    end
-    return dir
+    local trimmed = M.paths.strip_trailing_separator(tostring(path))
+    return M.paths.dirname(trimmed)
   end
 
   -- first_free_temp(dir) -> the first free `<dir>/.direct-tmp-<n>`.
@@ -51,7 +48,7 @@ return function(M)
   function M.stage_moves(actions)
     actions = actions or {}
     local function move_key(path)
-      return type(path) == 'string' and path:gsub('/+$', '') or path
+      return type(path) == 'string' and M.paths.strip_trailing_separator(path) or path
     end
     local destinations, destinations_by_inode = {}, {}
     for _, act in ipairs(actions) do
@@ -133,7 +130,7 @@ return function(M)
   function M.move_groups(actions)
     actions = actions or {}
     local function move_key(path)
-      return type(path) == 'string' and path:gsub('/+$', '') or path
+      return type(path) == 'string' and M.paths.strip_trailing_separator(path) or path
     end
     local parent = {}
     for i = 1, #actions do

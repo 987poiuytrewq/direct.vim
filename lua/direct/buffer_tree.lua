@@ -8,6 +8,7 @@ return function(deps)
   local row_id_at = deps.row_id_at
   local set_row_mark = deps.set_row_mark
   local is_dir_line = deps.is_dir_line
+  local strip_directory_marker = deps.strip_directory_marker
   local component_reason = deps.component_reason
   local same_lines = deps.same_lines
   local entry_path = deps.entry_path
@@ -400,7 +401,7 @@ return function(deps)
     for _, siblings in pairs(children_by_parent) do
       local seen_names = {}
       for _, node in ipairs(siblings) do
-        local basename = node.name:gsub('/+$', '')
+        local basename = strip_directory_marker(node.name)
         if seen_names[basename] then
           return nil, 'duplicate child entry: ' .. basename
         end
