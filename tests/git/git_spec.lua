@@ -193,7 +193,7 @@ H.describe('Git status display', function()
     H.assert_eq(status_at(snapshot, root, 'ignored.txt'), '!!',
       'Git reports ignored entries in porcelain output')
 
-    config.setup({ map_default_keys = false })
+    config.setup({ map_default_keys = false, respect_gitignore = false })
     buffer.list(root)
     local row
     for index, line in ipairs(H.buf_lines()) do

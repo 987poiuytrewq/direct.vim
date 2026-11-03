@@ -94,6 +94,10 @@ vim.api.nvim_create_user_command('DirectToggleGitStatus', function()
   require('direct').toggle_git_status()
 end, { nargs = 0, desc = 'direct: show only entries with Git status' })
 
+vim.api.nvim_create_user_command('DirectToggleGitIgnore', function()
+  require('direct').toggle_gitignore()
+end, { nargs = 0, desc = 'direct: toggle Git-ignore filtering in this listing' })
+
 vim.api.nvim_create_user_command('DirectUndo', function()
   require('direct').undo()
 end, { nargs = 0, desc = 'direct: undo the last filesystem action' })

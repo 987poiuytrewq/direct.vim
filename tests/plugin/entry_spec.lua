@@ -186,6 +186,7 @@ H.describe('entry: direct-buffer guard', function()
     local api = require('direct')
     local expected = { 'setup', 'list', 'list_buffer', 'list_cwd', 'open', 'open_parent_expanded',
       'toggle_hidden',
+      'toggle_gitignore',
       'toggle_git_status',
       'sync', 'fold_all', 'unfold_all', 'undo', 'redo', 'yank', 'paste', 'paste_as', 'run', 'git' }
     local actual = {}
@@ -211,6 +212,8 @@ H.describe('entry: direct-buffer guard', function()
       { name = 'DirectToggleHidden', call = function(api) return api.toggle_hidden() end },
       { name = 'DirectToggleGitStatus',
         call = function(api) return api.toggle_git_status() end },
+      { name = 'DirectToggleGitIgnore',
+        call = function(api) return api.toggle_gitignore() end },
       { name = 'DirectPaste', call = function(api) return api.paste() end },
       { name = 'DirectPasteAs', call = function(api) return api.paste_as('x.txt') end },
       { name = 'DirectRun', call = function(api) return api.run('echo {}') end },
