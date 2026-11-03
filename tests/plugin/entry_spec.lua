@@ -53,6 +53,7 @@ end
 local EXPECTED_N = {
   ['<CR>'] = '<Cmd>lua require("direct").open()<CR>',
   ['-'] = '<Cmd>lua require("direct").open("../")<CR>',
+  ['z-'] = '<Cmd>lua require("direct").open_parent_expanded()<CR>',
   ['u'] = '<Cmd>DirectUndo<CR>',
   ['<C-R>'] = '<Cmd>DirectRedo<CR>',
   ['yy'] = '<Cmd>DirectYank<CR>',
@@ -183,7 +184,8 @@ end)
 H.describe('entry: direct-buffer guard', function()
   H.it('the public API exposes every facade function', function()
     local api = require('direct')
-    local expected = { 'setup', 'list', 'list_buffer', 'list_cwd', 'open', 'toggle_hidden',
+    local expected = { 'setup', 'list', 'list_buffer', 'list_cwd', 'open', 'open_parent_expanded',
+      'toggle_hidden',
       'toggle_git_status',
       'sync', 'fold_all', 'unfold_all', 'undo', 'redo', 'yank', 'paste', 'paste_as', 'run', 'git' }
     local actual = {}
@@ -459,7 +461,7 @@ H.describe('entry: default mappings', function()
     end
   end)
 
-  H.it('all thirteen buffer-local mappings resolve to their commands and none call the retired Vimscript', function()
+  H.it('all default buffer-local mappings resolve to their commands and none call the retired Vimscript', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -503,6 +505,29 @@ H.describe('entry: default mappings', function()
           'the rhs of ' .. lhs .. ' must not call the retired Vimscript function')
       end
     end
+  end)
+
+  H.it('z- opens the parent listing and expands the directory just left', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local parent = H.mkdir(sb.root, 'parent')
+    local child = H.mkdir(parent, 'child')
+    H.mkfile(child, 'inside.txt', { 'inside' })
+    H.mkfile(parent, 'sibling.txt', { 'sibling' })
+
+    require('direct.config').setup({ map_default_keys = true })
+    require('direct').list(child)
+    local buf = vim.api.nvim_get_current_buf()
+    local maps = buf_maps(buf, 'n')
+    H.assert_eq(maps['z-'], EXPECTED_N['z-'], 'z- is installed buffer-locally')
+
+    H.assert_true(require('direct').open_parent_expanded(), 'z- navigation succeeds')
+
+    H.assert_true(require('direct.fs').same_path(vim.api.nvim_buf_get_name(0), parent),
+      'the parent directory listing is current')
+    H.assert_buf_eq({ 'child/', '  inside.txt', 'sibling.txt' })
+    H.assert_eq(vim.api.nvim_win_get_cursor(0)[1], 1,
+      'the cursor remains on the directory that was just left')
   end)
 
   H.it('map_default_keys=false installs no global, standard, or fold mappings', function()

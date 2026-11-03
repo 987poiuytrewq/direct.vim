@@ -234,6 +234,7 @@ Once a directory is listed, `-` goes up to its parent directory and `<Enter>`
 opens the entry under the cursor: a directory line opens a new listing, a file
 line opens the file. Double-clicking an entry opens it the same way. This is
 enough to move around the filesystem without remembering any extra command.
+Use `z-` to go up to the parent listing and expand the directory you came from.
 
 Use `zo` or `za` on a directory to expand it in place. Children are read lazily,
 one level at a time; repeating an expansion does not re-read or duplicate them.
@@ -444,7 +445,8 @@ existing synchronous staging behavior.
         or change buffer text.
 
 `:DirectSync`, `:DirectFoldAll`, `:DirectUnfoldAll`,
-`open()` (the public API used by the entry mappings),
+`open()` and `open_parent_expanded()` (the public APIs used by the entry
+mappings),
 `:DirectUndo`, `:DirectRedo`, `:DirectYank`, `:DirectPaste` (no argument),
 `:DirectPasteAs`, `:DirectRun`, and `:DirectGit` report an error and do nothing
 when the current buffer is not a direct buffer. `:DirectRun` does not refresh Git
@@ -475,6 +477,7 @@ Buffer-local, in a direct buffer (all mappings follow `map_default_keys`):
     normal      zR          recursively expand all root directories
     normal      zM          collapse all root directories
     normal      -           open ../ (the parent directory)
+    normal      z-          open ../ and expand the directory just left
     normal      u           undo the last filesystem action
     normal      <C-r>       redo the last filesystem action
     normal      yy, Y       :DirectYank (current line)
