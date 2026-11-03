@@ -165,6 +165,7 @@ Configuration defaults:
 | `git.enabled` | `true` | Show Git status in repositories. |
 | `git.display` | `'gutter'` | Status display: `'gutter'`, `'icon'`, `'text'`, or `'both'`. |
 | `git.statuses` | Four default styles | Configure status highlights, icons, and optional gutter symbols. |
+| `git.staging` | Enabled | Configure staged, unstaged, mixed-file, and mixed-folder styling. |
 
 For complete command, safety, and data/history documentation, see `:help direct.vim`.
 Run `:checkhealth direct` to check the Neovim version and data directory.
@@ -191,8 +192,11 @@ In a Git repository, direct reads status once per listing refresh. Added
 (including untracked), modified, Git-detected renamed, and conflicted entries are
 styled without changing listing text. Directories inherit the strongest status
 of changed descendants, in the order conflicted, renamed, added, then modified.
-Staged and unstaged changes use the same display; deleted entries have no listing
-row to mark. Re-list to refresh Git status.
+The default gutter shows `┃` for unstaged changes (including untracked files) and
+`┃•` for staged changes. Mixed files and mixed folders with staged descendants
+default to the staged display, with independent `mixed_file` and `mixed_folder`
+overrides. Conflicts use their conflict styling instead. Deleted entries have no
+listing row to mark. Re-list to refresh Git status.
 
 By default, `git.display` is `"gutter"`: changed entries show a `┃` in the sign
 column without changing their icon glyphs or highlighting their names. Added
@@ -219,6 +223,28 @@ require('direct').setup({
         text_hl = "MyGitModified",
       },
     },
+    staging = {
+      enabled = true,
+      staged = {
+        icon_hl = "MyStagedIcon", text_hl = "MyStagedText",
+        icon = { file = "+" },
+        gutter = { symbol = "┃•", highlight = "MyStagedGutter" },
+      },
+      unstaged = {
+        icon_hl = "MyUnstagedIcon", text_hl = "MyUnstagedText",
+        gutter = { symbol = "┃", highlight = "MyUnstagedGutter" },
+      },
+      mixed_file = {
+        icon_hl = "MyMixedFileIcon", text_hl = "MyMixedFileText",
+        icon = { file = "±" },
+        gutter = { symbol = "F", highlight = "MyMixedFileGutter" },
+      },
+      mixed_folder = {
+        icon_hl = "MyMixedFolderIcon", text_hl = "MyMixedFolderText",
+        icon = { folder = "±", folder_open = "±" },
+        gutter = { symbol = "D", highlight = "MyMixedFolderGutter" },
+      },
+    },
   },
 })
 ```
@@ -226,15 +252,26 @@ require('direct').setup({
 Icon overrides are optional; unspecified file/folder variants keep their regular
 glyphs. Gutter symbols default to `┃` and can be disabled per status with
 `gutter = false`. Set `git.enabled = false` to disable Git status display; this
-is independent of `respect_gitignore`.
+is independent of `respect_gitignore`. Mixed-file and mixed-folder settings
+inherit the staged settings by default and can independently override
+`icon_hl`, `text_hl`, `icon`, and `gutter`. Set `git.staging.enabled = false`
+to disable staging-specific styling while retaining regular status display.
 
-## Run shell commands
+## Run shell and Git commands
 
-In a Direct listing, `:DirectRun git add {}` runs asynchronously from the listing
+In a Direct listing, `:DirectRun {command}` runs asynchronously from the listing
 directory. Each `{}` is replaced by the shell-escaped absolute path of the
 current entry. Leave `{}` unquoted so paths containing spaces or shell
 metacharacters remain one argument. Captured output and exit status are reported
-when the command finishes; the current row must name an existing entry.
+when the command finishes; the current row must name an existing entry. `DirectRun`
+does not refresh Git status.
+
+Use `:DirectGit {command}` for a Git command that should also refresh the status
+decorations in the originating loaded listing when it completes. It uses the
+same placeholder and output behavior as `DirectRun`, and refreshes without
+re-listing or changing buffer text.
+The default `ga`, `gr`, and `gc` mappings run `git add -- {}`, `git reset -- {}`,
+and `git checkout -- {}` for the current entry through `:DirectGit`.
 
 Git ignore filtering is separate from status display and is off by default. Set
 `respect_gitignore = true` to use Git itself to apply root and nested
@@ -487,6 +524,9 @@ Buffer-local, in a direct buffer (all mappings follow `map_default_keys`):
 | visual | `y` | `:DirectYank` (selected range) |
 | normal | `p`, `P` | `:DirectPaste` |
 | normal | `gh` | `:DirectToggleHidden` |
+| normal | `ga` | `:DirectGit git add -- {}` |
+| normal | `gr` | `:DirectGit git reset -- {}` |
+| normal | `gc` | `:DirectGit git checkout -- {}` |
 
 The buffer-local `-` wins over the global `-` inside a direct buffer. All
 buffer-local mappings, including fold and mouse mappings, are omitted when

@@ -60,6 +60,9 @@ local EXPECTED_N = {
   ['p'] = '<Cmd>DirectPaste<CR>',
   ['P'] = '<Cmd>DirectPaste<CR>',
   ['gh'] = '<Cmd>DirectToggleHidden<CR>',
+  ['ga'] = '<Cmd>DirectGit git add -- {}<CR>',
+  ['gr'] = '<Cmd>DirectGit git reset -- {}<CR>',
+  ['gc'] = '<Cmd>DirectGit git checkout -- {}<CR>',
 }
 
 local EXPECTED_V = {
@@ -80,10 +83,11 @@ local EXPECTED_CMDS = {
   DirectPaste = { nargs = '?', complete = 'dir' },
   DirectPasteAs = { nargs = '1', complete = 'file' },
   DirectRun = { nargs = '+' },
+  DirectGit = { nargs = '+' },
 }
 
 H.describe('entry: command surface', function()
-  H.it('the twelve commands exist with their exact nargs/range/complete', function()
+  H.it('the fourteen commands exist with their exact nargs/range/complete', function()
     local cmds = vim.api.nvim_get_commands({ builtin = false })
     for name, want in pairs(EXPECTED_CMDS) do
       local got = cmds[name]
@@ -178,7 +182,7 @@ H.describe('entry: direct-buffer guard', function()
   H.it('the public API exposes every facade function', function()
     local api = require('direct')
     local expected = { 'setup', 'list', 'list_buffer', 'list_cwd', 'open', 'toggle_hidden',
-      'sync', 'fold_all', 'unfold_all', 'undo', 'redo', 'yank', 'paste', 'paste_as', 'run' }
+      'sync', 'fold_all', 'unfold_all', 'undo', 'redo', 'yank', 'paste', 'paste_as', 'run', 'git' }
     local actual = {}
     for name, value in pairs(api) do
       actual[#actual + 1] = name
@@ -203,6 +207,7 @@ H.describe('entry: direct-buffer guard', function()
       { name = 'DirectPaste', call = function(api) return api.paste() end },
       { name = 'DirectPasteAs', call = function(api) return api.paste_as('x.txt') end },
       { name = 'DirectRun', call = function(api) return api.run('echo {}') end },
+      { name = 'DirectGit', call = function(api) return api.git('git status -- {}') end },
     }
     for _, case in ipairs(cases) do
       clean_buffers()
@@ -449,7 +454,7 @@ H.describe('entry: default mappings', function()
     end
   end)
 
-  H.it('default buffer-local mappings are installed and do not call the retired Vimscript', function()
+  H.it('all thirteen buffer-local mappings resolve to their commands and none call the retired Vimscript', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')

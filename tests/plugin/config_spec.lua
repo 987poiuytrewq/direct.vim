@@ -103,10 +103,42 @@ H.describe('config', function()
       'DirectGitRenamedGutter', 'renamed entries have their own gutter highlight')
     H.assert_eq(config.defaults.git.statuses.conflicted.gutter.highlight,
       'DirectGitConflictedGutter', 'conflicts have their own gutter highlight')
+    H.assert_true(config.defaults.git.staging.enabled,
+      'staging state markers are enabled by default')
+    H.assert_eq(config.defaults.git.staging.staged.gutter.symbol, '┃•',
+      'staged files use the pipe-and-bullet gutter marker')
+    H.assert_eq(config.defaults.git.staging.unstaged.gutter.symbol, '┃',
+      'unstaged files use the pipe gutter marker')
+    H.assert_eq(config.defaults.git.staging.mixed_file.gutter.symbol, '┃•',
+      'mixed files default to the staged marker')
+    H.assert_eq(config.defaults.git.staging.mixed_folder.gutter.symbol, '┃•',
+      'mixed folders default to the staged marker')
+    H.assert_eq(config.defaults.git.staging.staged.icon_hl, 'DirectGitStagedIcon',
+      'staged icons have their own highlight group')
 
     local options = config.setup({ git = {
       display = 'icon',
       statuses = { added = { icon = { folder = '+' } } },
+      staging = {
+        staged = {
+          icon_hl = 'MyStagedIcon',
+          text_hl = 'MyStagedText',
+          icon = { file = '+' },
+          gutter = { symbol = 'S', highlight = 'MyStagedGutter' },
+        },
+        mixed_file = {
+          icon_hl = 'MyMixedFileIcon',
+          text_hl = 'MyMixedFileText',
+          icon = { file = 'F' },
+          gutter = { symbol = 'F', highlight = 'MyMixedFileGutter' },
+        },
+        mixed_folder = {
+          icon_hl = 'MyMixedFolderIcon',
+          text_hl = 'MyMixedFolderText',
+          icon = { folder = 'D' },
+          gutter = { symbol = 'D', highlight = 'MyMixedFolderGutter' },
+        },
+      },
     } })
     H.assert_eq(options.git.display, 'icon', 'icon-only display is accepted')
     H.assert_eq(options.git.statuses.added.icon, { folder = '+' },
@@ -115,6 +147,37 @@ H.describe('config', function()
       'omitted inline highlight options remain disabled')
     H.assert_nil(options.git.statuses.modified.text_hl,
       'omitted statuses do not enable inline highlights')
+    H.assert_eq(options.git.staging.staged.icon_hl, 'MyStagedIcon',
+      'staging icon highlight overrides are accepted')
+    H.assert_eq(options.git.staging.staged.text_hl, 'MyStagedText',
+      'staging text highlight overrides are accepted')
+    H.assert_eq(options.git.staging.staged.icon, { file = '+' },
+      'staging glyph overrides are accepted')
+    H.assert_eq(options.git.staging.staged.gutter.symbol, 'S',
+      'staging gutter overrides are accepted')
+    H.assert_eq(options.git.staging.unstaged.gutter.symbol, '┃',
+      'omitted staging states retain their defaults')
+    H.assert_eq(options.git.staging.mixed_file.icon, { file = 'F' },
+      'mixed-file glyph options are independently configurable')
+    H.assert_eq(options.git.staging.mixed_folder.icon, { file = '+', folder = 'D' },
+      'mixed-folder glyph overrides inherit other staged icon variants')
+    H.assert_eq(options.git.staging.mixed_folder.text_hl, 'MyMixedFolderText',
+      'mixed-folder text color is configurable')
+
+    options = config.setup({ git = { staging = {
+      staged = {
+        text_hl = 'InheritedStagedText',
+        gutter = { symbol = 'S', highlight = 'InheritedStagedGutter' },
+      },
+      mixed_file = { gutter = { symbol = 'F' } },
+    } } })
+    H.assert_eq(options.git.staging.mixed_file.text_hl, 'InheritedStagedText',
+      'mixed-file styles inherit staged settings unless overridden')
+    H.assert_eq(options.git.staging.mixed_folder.text_hl, 'InheritedStagedText',
+      'mixed-folder styles inherit staged settings unless overridden')
+    H.assert_eq(options.git.staging.mixed_file.gutter,
+      { symbol = 'F', highlight = 'InheritedStagedGutter' },
+      'partial mixed-file gutter overrides retain inherited settings')
     config.clear_mappings()
   end)
 
@@ -251,6 +314,26 @@ H.describe('config', function()
   local function buf_map_desc(lhs, mode)
     return vim.fn.maparg(lhs, mode, false, true).desc
   end
+
+  H.it('installs the default Git actions through DirectGit', function()
+    local config = fresh_config()
+    config.clear_mappings()
+    config.setup({ map_default_keys = true })
+    local bufnr = open_direct_buffer()
+
+    H.assert_eq(buf_map_rhs('ga', 'n'), '<Cmd>DirectGit git add -- {}<CR>',
+      'ga stages the current entry through DirectGit')
+    H.assert_eq(buf_map_rhs('gr', 'n'), '<Cmd>DirectGit git reset -- {}<CR>',
+      'gr unstages the current entry through DirectGit')
+    H.assert_eq(buf_map_rhs('gc', 'n'), '<Cmd>DirectGit git checkout -- {}<CR>',
+      'gc checks out the current entry through DirectGit')
+
+    config.setup({ map_default_keys = false })
+    H.assert_nil(buf_map_rhs('ga', 'n'), 'ga is removed when default mappings are disabled')
+    H.assert_nil(buf_map_rhs('gr', 'n'), 'gr is removed when default mappings are disabled')
+    H.assert_nil(buf_map_rhs('gc', 'n'), 'gc is removed when default mappings are disabled')
+    pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+  end)
 
   H.it('setup({ map_default_keys = false }) clears buffer-local maps in already-open direct buffers', function()
     local config = fresh_config()

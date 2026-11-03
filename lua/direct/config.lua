@@ -34,11 +34,40 @@ local defaults = {
         gutter = { symbol = '┃', highlight = 'DirectGitConflictedGutter' },
       },
     },
+    staging = {
+      enabled = true,
+      staged = {
+        icon_hl = 'DirectGitStagedIcon',
+        text_hl = 'DirectGitStaged',
+        gutter = { symbol = '┃•', highlight = 'DirectGitStagedGutter' },
+      },
+      unstaged = {
+        icon_hl = 'DirectGitUnstagedIcon',
+        text_hl = 'DirectGitUnstaged',
+        gutter = { symbol = '┃', highlight = 'DirectGitUnstagedGutter' },
+      },
+      mixed_file = {
+        icon_hl = 'DirectGitStagedIcon',
+        text_hl = 'DirectGitStaged',
+        gutter = { symbol = '┃•', highlight = 'DirectGitStagedGutter' },
+      },
+      mixed_folder = {
+        icon_hl = 'DirectGitStagedIcon',
+        text_hl = 'DirectGitStaged',
+        gutter = { symbol = '┃•', highlight = 'DirectGitStagedGutter' },
+      },
+    },
   },
 }
 
 local git_statuses = { added = true, modified = true, renamed = true, conflicted = true }
 local git_display_modes = { gutter = true, icon = true, text = true, both = true }
+local git_staging_states = {
+  staged = true,
+  unstaged = true,
+  mixed_file = true,
+  mixed_folder = true,
+}
 local icon_variants = { file = true, folder = true, folder_open = true }
 
 local function report_invalid_icon_option(key, reason)
@@ -174,8 +203,152 @@ local function resolve_git_options(value)
           end
         end
       end
+    elseif key == 'staging' then
+      if type(option) ~= 'table' then
+        report_invalid_git_option(key, 'expected a table')
+      else
+        for staging_key, settings in pairs(option) do
+          if staging_key == 'enabled' then
+            if type(settings) == 'boolean' then
+              result.staging.enabled = settings
+            else
+              report_invalid_git_option('staging.enabled', 'expected a boolean')
+            end
+          elseif git_staging_states[staging_key] then
+            if type(settings) ~= 'table' then
+              report_invalid_git_option('staging.' .. staging_key, 'expected a table')
+            else
+              local resolved = result.staging[staging_key]
+              for setting, setting_value in pairs(settings) do
+                if setting == 'icon_hl' or setting == 'text_hl' then
+                  if type(setting_value) == 'string' and setting_value ~= '' then
+                    resolved[setting] = setting_value
+                  else
+                    report_invalid_git_option('staging.' .. staging_key .. '.' .. setting,
+                      'expected a non-empty highlight group name')
+                  end
+                elseif setting == 'icon' then
+                  if type(setting_value) == 'string' then
+                    resolved.icon = setting_value
+                  elseif type(setting_value) == 'table' then
+                    resolved.icon = resolved.icon or {}
+                    for kind, glyph in pairs(setting_value) do
+                      if kind == 'file' or kind == 'folder' or kind == 'folder_open' then
+                        if type(glyph) == 'string' then
+                          resolved.icon[kind] = glyph
+                        else
+                          report_invalid_git_option('staging.' .. staging_key .. '.icon.' .. kind,
+                            'expected a string')
+                        end
+                      else
+                        report_invalid_git_option('staging.' .. staging_key .. '.icon.'
+                          .. tostring(kind), 'expected file, folder, or folder_open')
+                      end
+                    end
+                  else
+                    report_invalid_git_option('staging.' .. staging_key .. '.icon',
+                      'expected a string or a table of icon variants')
+                  end
+                elseif setting == 'gutter' then
+                  if setting_value == false then
+                    resolved.gutter = nil
+                  elseif type(setting_value) == 'table' then
+                    local gutter = vim.deepcopy(resolved.gutter or {})
+                    for gutter_key, gutter_value in pairs(setting_value) do
+                      if gutter_key == 'symbol' or gutter_key == 'highlight' then
+                        if type(gutter_value) == 'string' and gutter_value ~= ''
+                          and (gutter_key ~= 'symbol'
+                            or vim.fn.strdisplaywidth(gutter_value) <= 2) then
+                          gutter[gutter_key] = gutter_value
+                        else
+                          report_invalid_git_option('staging.' .. staging_key .. '.gutter.'
+                            .. gutter_key, gutter_key == 'symbol'
+                              and 'expected a non-empty symbol no wider than two cells'
+                              or 'expected a non-empty highlight group name')
+                        end
+                      else
+                        report_invalid_git_option('staging.' .. staging_key .. '.gutter.'
+                          .. tostring(gutter_key), 'unknown setting')
+                      end
+                    end
+                    if gutter.symbol and gutter.highlight then
+                      resolved.gutter = gutter
+                    else
+                      report_invalid_git_option('staging.' .. staging_key .. '.gutter',
+                        'symbol and highlight are both required')
+                    end
+                  else
+                    report_invalid_git_option('staging.' .. staging_key .. '.gutter',
+                      'expected a table or false')
+                  end
+                elseif setting == 'highlight' then
+                  report_invalid_git_option('staging.' .. staging_key .. '.highlight',
+                    'use icon_hl, text_hl, or gutter.highlight')
+                else
+                  report_invalid_git_option('staging.' .. staging_key .. '.' .. tostring(setting),
+                    'unknown setting')
+                end
+              end
+            end
+          else
+            report_invalid_git_option('staging.' .. tostring(staging_key), 'unknown setting')
+          end
+        end
+      end
     else
       report_invalid_git_option(tostring(key), 'unknown setting')
+    end
+  end
+  local staging_options = value.staging
+  if type(staging_options) == 'table' then
+    for _, state in ipairs({ 'mixed_file', 'mixed_folder' }) do
+      local override = staging_options[state]
+      local resolved = result.staging[state]
+      local inherited = vim.deepcopy(result.staging.staged)
+      if type(override) == 'table' then
+        for setting, setting_value in pairs(override) do
+          if setting == 'icon_hl' or setting == 'text_hl' then
+            if type(setting_value) == 'string' and setting_value ~= '' then
+              inherited[setting] = resolved[setting]
+            end
+          elseif setting == 'icon' then
+            if type(setting_value) == 'string' then
+              inherited.icon = resolved.icon
+            elseif type(setting_value) == 'table' then
+              if type(inherited.icon) == 'string' then
+                local glyph = inherited.icon
+                inherited.icon = {
+                  file = glyph,
+                  folder = glyph,
+                  folder_open = glyph,
+                }
+              else
+                inherited.icon = vim.deepcopy(inherited.icon or {})
+              end
+              for kind, glyph in pairs(setting_value) do
+                if (kind == 'file' or kind == 'folder' or kind == 'folder_open')
+                  and type(glyph) == 'string' then
+                  inherited.icon[kind] = resolved.icon[kind]
+                end
+              end
+            end
+          elseif setting == 'gutter' then
+            if setting_value == false then
+              inherited.gutter = nil
+            elseif type(setting_value) == 'table' then
+              inherited.gutter = vim.deepcopy(inherited.gutter or resolved.gutter or {})
+              for key, gutter_value in pairs(setting_value) do
+                if type(gutter_value) == 'string' and gutter_value ~= ''
+                  and (key == 'highlight' or (key == 'symbol'
+                    and vim.fn.strdisplaywidth(gutter_value) <= 2)) then
+                  inherited.gutter[key] = resolved.gutter[key]
+                end
+              end
+            end
+          end
+        end
+      end
+      result.staging[state] = inherited
     end
   end
   return result
@@ -204,7 +377,7 @@ M._setup_called = false
 M._vim_enter_installed = false
 M._installed = vim.fn.maparg(M.GLOBAL_MAP.lhs, M.GLOBAL_MAP.mode) == M.GLOBAL_MAP.rhs
 
--- The ten buffer-local mappings for filetype=direct buffers, owned
+-- The thirteen buffer-local mappings for filetype=direct buffers, owned
 -- here so setup can clear and restore them in
 -- ALREADY-open direct buffers. Installed by `ftplugin/direct.lua` via
 -- `install_buffer_mappings(0)`. Built on `<Cmd>` (never a `:` command that
@@ -229,6 +402,9 @@ M.BUFFER_MAPS = {
   { mode = 'n', lhs = 'p', rhs = '<Cmd>DirectPaste<CR>' },
   { mode = 'n', lhs = 'P', rhs = '<Cmd>DirectPaste<CR>' },
   { mode = 'n', lhs = 'gh', rhs = '<Cmd>DirectToggleHidden<CR>' },
+  { mode = 'n', lhs = 'ga', rhs = '<Cmd>DirectGit git add -- {}<CR>' },
+  { mode = 'n', lhs = 'gr', rhs = '<Cmd>DirectGit git reset -- {}<CR>' },
+  { mode = 'n', lhs = 'gc', rhs = '<Cmd>DirectGit git checkout -- {}<CR>' },
 }
 
 -- The loaded buffers whose filetype is `direct`: the retrofit targets for
@@ -244,7 +420,7 @@ local function open_direct_buffers()
   return bufs
 end
 
--- install_buffer_mappings(bufnr) -> true. Installs the ten buffer-local
+-- install_buffer_mappings(bufnr) -> true. Installs the thirteen buffer-local
 -- mappings into `bufnr` (0 = the current buffer). Idempotent: re-setting a
 -- mapping replaces it in place, so repeated ftplugin runs cannot stack.
 function M.install_buffer_mappings(bufnr)
