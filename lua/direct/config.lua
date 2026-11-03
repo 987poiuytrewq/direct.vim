@@ -149,7 +149,7 @@ M._setup_called = false
 M._vim_enter_installed = false
 M._installed = vim.fn.maparg(M.GLOBAL_MAP.lhs, M.GLOBAL_MAP.mode) == M.GLOBAL_MAP.rhs
 
--- The fourteen buffer-local mappings for filetype=direct buffers, owned
+-- The fifteen buffer-local mappings for filetype=direct buffers, owned
 -- here so setup can clear and restore them in
 -- ALREADY-open direct buffers. Installed by `ftplugin/direct.lua` via
 -- `install_buffer_mappings(0)`. Built on `<Cmd>` (never a `:` command that
@@ -161,6 +161,8 @@ M.BUFFER_MAPS = {
     rhs = '<Cmd>lua require("direct").open()<CR>' },
   { mode = 'n', lhs = '-',
     rhs = '<Cmd>lua require("direct").open("../")<CR>' },
+  { mode = 'n', lhs = 'z-',
+    rhs = '<Cmd>lua require("direct").open_parent_expanded()<CR>' },
   { mode = 'n', lhs = 'u', rhs = '<Cmd>DirectUndo<CR>' },
   { mode = 'n', lhs = '<C-r>', rhs = '<Cmd>DirectRedo<CR>' },
   { mode = 'n', lhs = 'yy', rhs = '<Cmd>DirectYank<CR>' },

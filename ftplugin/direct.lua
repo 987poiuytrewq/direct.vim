@@ -1,4 +1,4 @@
--- ftplugin/direct.lua -- installs the thirteen buffer-local mappings into the
+-- ftplugin/direct.lua -- installs the default buffer-local mappings into the
 -- current buffer when `map_default_keys` is true. The table itself lives in
 -- `direct.config` so setup() can clear and restore already-open buffers.
 
