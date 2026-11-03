@@ -438,4 +438,20 @@ function M.status_for(snapshot, path)
   return snapshot.paths[key], snapshot.conflicts and snapshot.conflicts[key] == true or false
 end
 
+-- worktree_status_for returns the change type represented by porcelain's Y
+-- column. Staged-only paths intentionally have no worktree status decoration.
+function M.worktree_status_for(snapshot, path)
+  local status, conflicted = M.status_for(snapshot, path)
+  if not status then return nil end
+  if status == '!!' then return 'ignored' end
+  if conflicted then return 'conflict' end
+  local code = status:sub(2, 2)
+  if code == ' ' then return nil end
+  if code == 'A' or code == 'C' then return 'added' end
+  if code == 'M' or code == 'T' or code == 'U' then return 'modified' end
+  if code == 'D' then return 'deleted' end
+  if code == 'R' then return 'renamed' end
+  return nil
+end
+
 return M

@@ -13,6 +13,7 @@ end
 local fs = require('direct.fs')
 local listing = require('direct.buffer_listing')
 local git = require('direct.git')
+local highlight = require('direct.highlight')
 
 local function path_identity(path)
   return fs.path_identity(path, fs.stat(path))
@@ -103,7 +104,14 @@ local function refresh_icons(bufnr, state)
       local hidden = rec.name:sub(1, 1) == '.'
       local base_glyph
       local base_group
-      if enabled and is_folder then
+      if enabled and rec.deleted_kind == 'file' then
+        base_glyph = options.icons.deleted_file
+        base_group = hidden and 'DirectHiddenFileIcon' or 'DirectFileIcon'
+      elseif enabled and rec.deleted_kind == 'directory' then
+        base_glyph = state.expanded[id]
+          and options.icons.deleted_folder_open or options.icons.deleted_folder
+        base_group = hidden and 'DirectHiddenFolderIcon' or 'DirectFolderIcon'
+      elseif enabled and is_folder then
         base_glyph = state.expanded[id] and options.icons.folder_open or options.icons.folder
         base_group = hidden and 'DirectHiddenFolderIcon' or 'DirectFolderIcon'
       elseif enabled then
@@ -112,6 +120,10 @@ local function refresh_icons(bufnr, state)
       end
       if enabled then
         glyph, group = base_glyph, base_group
+        if options.git.enabled and git_snapshot then
+          local status = git.worktree_status_for(git_snapshot, rec.path)
+          group = highlight.git_status_highlight(status) or group
+        end
       end
       vim.api.nvim_buf_set_extmark(bufnr, icon_namespace, row,
         (rec.depth or 0) * 2, {

@@ -45,15 +45,13 @@ defaults. These highlight groups can be customized in a colorscheme or with
     DirectFileIcon              file icons (Normal)
     DirectHiddenFolderIcon      hidden folder icons (Comment)
     DirectHiddenFileIcon        hidden file icons (Comment)
-    DirectGitAdded              added status symbol (#5faf5f)
-    DirectGitDeleted            deleted status symbol (#ff5900)
-    DirectGitModified           modified status symbol (#d7af5f)
-    DirectGitRenamed            renamed status symbol (links to modified)
-    DirectGitConflict           conflict status symbol (#ff8700, bold/italic)
-    DirectGitUntracked          untracked status symbol (#ff8700)
-    DirectGitIgnored            ignored status symbol (#626262)
-    DirectGitStaged             staged status symbol (links to added)
-    DirectGitUnstaged           unstaged status symbol (links to conflict)
+    DirectGitAdded              added status symbol (DiffAdd)
+    DirectGitDeleted            deleted status symbol (DiffDelete)
+    DirectGitModified           modified status symbol (DiffChange)
+    DirectGitRenamed            renamed status symbol (DirectGitModified)
+    DirectGitConflict           conflict status symbol (ErrorMsg)
+    DirectGitIgnored            ignored status symbol (Comment)
+    DirectGitStaged             staged status symbol (DirectGitAdded)
     DirectGitDeletedFile        deleted tracked file name (ErrorMsg)
     DirectGitDeletedDirectory   deleted tracked directory name (ErrorMsg)
 
@@ -84,18 +82,25 @@ Run `:checkhealth direct` to confirm the version and the data home in use:
       map_default_keys = true, -- set false to install no default mappings
       show_hidden = true, -- set false to hide dot-prefixed entries
       respect_gitignore = false, -- opt in to Git ignore filtering
-      show_folder_icons = false, -- opt in to Nerd Font folder icons
-      show_file_icons = false, -- opt in to a generic Nerd Font file icon
+      show_folder_icons = true, -- show Font Awesome folder icons
+      show_file_icons = true, -- show a generic Font Awesome file icon
       icons = {
-        file = '\u{f0214}',
-        folder = '\u{f024b}',
-        folder_open = '\u{f0770}',
+        file = '\u{f15b}',
+        folder = '\u{f07b}',
+        folder_open = '\u{f07c}',
+        deleted_file = '\u{f016}',
+        deleted_folder = '\u{f114}',
+        deleted_folder_open = '\u{f115}',
       },
       max_recursive_expand_depth = false, -- false means unlimited
       git = {
         enabled = true,
+        show_symbols = true,
         show_deleted = true,
-        symbols = { modified = '', staged = '', unstaged = '󰄱' },
+        symbols = {
+          added = '\u{f067}', modified = '\u{f01f}', deleted = '\u{f068}',
+          renamed = '\u{f061}', staged = '\u{f00c}', conflict = '\u{f00d}',
+        },
       },
     })
 
@@ -123,14 +128,18 @@ are not treated as deletion sources during sync.
 
 File and folder icons ~
 
-Set `show_folder_icons = true` to display inline directory glyphs, and
-`show_file_icons = true` to display one generic icon for every file; both options
-default to `false`. Built-in glyphs require a Nerd Font. Customize them with the
-`icons` table: `file` defaults to U+F0214, `folder` to U+F024B, and `folder_open`
-to U+F0770. These glyphs are used regardless of filetype. When only one kind of
-icon is enabled, the other kind reserves a blank icon slot so entry names stay
-aligned. Icons are virtual text, so buffer lines and filesystem behavior are
-unchanged. No icon plugin or other dependency is required.
+`show_folder_icons` and `show_file_icons` both default to `true`. The default
+Font Awesome Nerd Font glyphs are U+F15B (`file`), U+F07B (`folder`), and U+F07C
+(`folder_open`). Deleted tracked rows use the regular-outline U+F016
+(`deleted_file`), U+F114 (`deleted_folder`), and U+F115
+(`deleted_folder_open`) variants. These glyphs are used regardless of filetype.
+When only one kind of icon is enabled,
+the other kind reserves a blank icon slot so entry names stay aligned. Icons are
+virtual text, so buffer lines and filesystem behavior are unchanged. No icon
+plugin or other dependency is required.
+Customize any of these glyphs with the corresponding key in the `icons` table.
+Git status colors icons and filenames from the worktree column; index-only
+changes leave their base colors unchanged.
 With folder icons enabled, click a folder icon to expand or collapse that
 directory in place. Mouse input must be enabled in Neovim (for example,
 `:set mouse=a`). Clicking elsewhere in the listing retains normal cursor
@@ -140,26 +149,29 @@ Git status ~
 
 In a Git repository, direct reads porcelain status once per listing refresh and
 shows a Neo-tree-style status component, right-aligned at the end of each row.
-It is virtual text: buffer lines, file/folder icons, and entry-name colors do
-not change. `T` is normalized to `M`; untracked `??` displays the untracked
-symbol, and ignored `!!` entries display the ignored symbol.
+It is virtual text and does not change buffer lines. Set `git.show_symbols =
+false` to hide the status component; it defaults to `true`. Worktree-based
+filename and icon colors remain active. `T` is normalized to `M`; untracked `??`
+maps to `_A` and displays the added symbol. Ignored `!!` entries display the
+ignored symbol.
 
-Default glyphs are `✚` added, `✖` deleted, `` modified, `󰁕` renamed, ``
-untracked, `` ignored, `󰄱` unstaged, `` staged, and `` conflict. A one-column
-change shows its change-type glyph and its staged/unstaged glyph. If both
-porcelain columns have changes, both change-type glyphs are shown without a
-separate stage glyph. Untracked entries show only the untracked glyph. Copies
-use the added glyph, matching Neo-tree's status component. Directories aggregate
-changed descendants independently in the index and worktree columns. Re-list to
-refresh Git status.
+Default glyphs are `` added, `` modified, `` deleted, `` renamed, ``
+ignored, `` staged, and `` conflict. A staged-only change shows its type
+glyph and the staged check; a worktree-only change leaves the second slot blank.
+When both porcelain columns have changes, both change-type glyphs are shown.
+Untracked `??` displays the added glyph followed by a blank slot. Copies use the
+added glyph, matching Neo-tree's status component. Directories aggregate changed
+descendants independently in the index and worktree columns. Re-list to refresh
+Git status.
 
 Status text uses `virt_text_pos = 'eol_right_align'`, so it aligns to the right
 edge of the window without reserving sign columns. Very long rows may leave less
 space for the component.
 
 Missing tracked files and directories containing deleted tracked descendants
-appear as protected rows. Their names retain the dedicated deleted-row highlight.
-Set `git.show_deleted = false` to hide these synthetic rows while retaining Git
+appear as protected rows. Their names use their worktree status color when one
+exists; staged-only tombstones retain the dedicated deleted-row highlight. Set
+`git.show_deleted = false` to hide these synthetic rows while retaining Git
 status on entries that still exist. This option has no effect when Git status is
 disabled; it defaults to `true`.
 
@@ -173,16 +185,20 @@ Status symbols can be configured independently by category:
 
     require('direct').setup({
       git = {
-        symbols = { modified = '~', staged = '+', unstaged = '!' },
+        symbols = {
+          added = '+', deleted = '-', modified = '~', renamed = '>',
+          ignored = 'i', staged = '✓', conflict = '!',
+        },
       },
     })
 
-Set a symbol to an empty string to hide that marker. Status colors use the
-`DirectGitAdded`, `DirectGitDeleted`, `DirectGitModified`, `DirectGitRenamed`,
-`DirectGitUntracked`, `DirectGitIgnored`, `DirectGitStaged`,
-`DirectGitUnstaged`, and `DirectGitConflict` highlight groups. Set
-`git.enabled = false` to disable Git status display; this does not affect
-Git-ignore filtering.
+Every `icons` entry and each `git.symbols` category can be customized through
+`setup()`. Set a status symbol to an empty string to hide that marker. The status
+highlight groups link to `DiffAdd`, `DiffDelete`, `DiffChange`, `ErrorMsg`, and
+`Comment` by default, so they follow the colorscheme. Override a `DirectGit*`
+group to customize it. Set `git.enabled = false` to disable Git status display; this does
+not affect Git-ignore filtering. `git.show_symbols = false` hides only the
+right-aligned symbols, leaving filename/icon coloring and Git-aware views active.
 
 Deleted tracked rows always use `DirectGitDeletedFile` or
 `DirectGitDeletedDirectory` for their names. Deleted rows can be targeted with

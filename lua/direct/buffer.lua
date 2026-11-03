@@ -87,6 +87,7 @@ local function refresh_highlights(bufnr, state)
         depth = rec.depth or 0,
         status = status,
         conflict = conflict,
+        worktree_status = snapshot and git.worktree_status_for(snapshot, rec.path) or nil,
         deleted_kind = rec.deleted_kind,
       }
     end

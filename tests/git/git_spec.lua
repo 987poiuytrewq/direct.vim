@@ -137,7 +137,8 @@ H.describe('Git status display', function()
     end
     H.assert_not_nil(row, 'conflict file remains in the listing')
     local status = marks_by_row(0, 'direct-listing-git-status')[row]
-    H.assert_eq(status_text(status), '  ', 'unmerged status uses modified and conflict symbols')
+    H.assert_eq(status_text(status), '\u{f01f}\u{f00d}',
+      'unmerged status uses the pen and conflict symbols')
     H.assert_eq(status_chunks(status)[1][2], 'DirectGitModified',
       'the change symbol uses the modified highlight')
     H.assert_eq(status_chunks(status)[2][2], 'DirectGitConflict',
@@ -194,7 +195,7 @@ H.describe('Git status display', function()
     end
     H.assert_not_nil(row, 'ignored file remains listed when ignore filtering is disabled')
     local status = marks_by_row(0, 'direct-listing-git-status')[row]
-    H.assert_eq(status_text(status), ' ', 'ignored entry uses the ignored symbol')
+    H.assert_eq(status_text(status), '\u{f070} ', 'ignored entry uses the eye-slash symbol')
     H.assert_eq(status_chunks(status)[1][2], 'DirectGitIgnored',
       'ignored entry uses the ignored highlight')
   end)
@@ -238,12 +239,13 @@ H.describe('Git status display', function()
       end
     end
 
-    H.assert_eq(marker(), ' 󰄱 ', 'the initial worktree change shows modified and unstaged')
+    H.assert_eq(marker(), '\u{f01f} ', 'worktree modification leaves the state slot blank')
     run_command('DirectRun git add -- {}')
-    H.assert_eq(marker(), ' 󰄱 ', 'DirectRun does not refresh cached Git status')
+    H.assert_eq(marker(), '\u{f01f} ', 'DirectRun does not refresh cached Git status')
 
     run_command('DirectGit git add -- {}')
-    H.assert_eq(marker(), '  ', 'DirectGit refreshes the indicator after staging')
+    H.assert_eq(marker(), '\u{f01f}\u{f00c}',
+      'DirectGit refreshes the indicator after staging')
   end)
 
   H.it('ga, gr, and gc update the staged/unstaged status symbols', function()
@@ -281,16 +283,16 @@ H.describe('Git status display', function()
       H.assert_notified('status 0')
     end
 
-    H.assert_eq(status_text(status_for_line('tracked.txt')), ' 󰄱 ',
-      'an unstaged modification uses modified and unstaged symbols')
+    H.assert_eq(status_text(status_for_line('tracked.txt')), '\u{f01f} ',
+      'an unstaged modification leaves the state slot blank')
 
     press_and_wait('ga')
-    H.assert_eq(status_text(status_for_line('tracked.txt')), '  ',
+    H.assert_eq(status_text(status_for_line('tracked.txt')), '\u{f01f}\u{f00c}',
       'ga moves the modification to the staged state')
 
     press_and_wait('gr')
-    H.assert_eq(status_text(status_for_line('tracked.txt')), ' 󰄱 ',
-      'gr moves the modification back to the unstaged state')
+    H.assert_eq(status_text(status_for_line('tracked.txt')), '\u{f01f} ',
+      'gr moves the modification back to the blank worktree state')
 
     press_and_wait('gc')
     H.assert_nil(status_for_line('tracked.txt'),
@@ -416,7 +418,7 @@ H.describe('Git status display', function()
       show_folder_icons = true,
       show_file_icons = true,
     })
-    H.assert_eq(config.options.git.symbols.modified, '',
+    H.assert_eq(config.options.git.symbols.modified, '\u{f01f}',
       'modified symbol uses the Neo-tree default')
     local previous_signcolumn = vim.wo.signcolumn
     local listing = buffer.list(root)
@@ -427,39 +429,85 @@ H.describe('Git status display', function()
     local icons = mark_by_row(0, 'direct-listing-icons')
     local statuses = marks_by_row(0, 'direct-listing-git-status')
 
+    for group, target in pairs({
+      DirectGitAdded = 'DiffAdd',
+      DirectGitDeleted = 'DiffDelete',
+      DirectGitModified = 'DiffChange',
+      DirectGitRenamed = 'DirectGitModified',
+      DirectGitStaged = 'DirectGitAdded',
+      DirectGitConflict = 'ErrorMsg',
+      DirectGitIgnored = 'Comment',
+    }) do
+      H.assert_eq(vim.api.nvim_get_hl(0, { name = group, link = true }),
+        { default = true, link = target }, group .. ' follows its colorscheme group')
+    end
+
     H.assert_eq(lines, { '.git/', 'mixed-deletions/', 'nested/', 'index-only.txt',
       'staged-add.txt', 'tracked.txt',
       'untracked.txt', 'worktree-only.txt' },
       'listing text remains ordinary paths')
     H.assert_eq(icons[rows['tracked.txt']][4].virt_text,
-      { { '\u{f0214} ', 'DirectFileIcon' } },
-      'Git status does not change the normal file icon')
-    H.assert_nil(highlights[rows['tracked.txt']],
-      'Git status never highlights entry names')
-    H.assert_eq(status_text(statuses[rows['tracked.txt']]), '  ',
+      { { '\u{f15b} ', 'DirectGitModified' } },
+      'the worktree status colors the normal file icon')
+    H.assert_eq(highlights[rows['tracked.txt']][4].hl_group, 'DirectGitModified',
+      'the worktree status colors the entry name')
+    H.assert_eq(status_text(statuses[rows['tracked.txt']]), '\u{f01f}\u{f01f}',
       'MM displays both change symbols without a separate stage marker')
     H.assert_eq(status_chunks(statuses[rows['tracked.txt']])[1][2], 'DirectGitModified',
       'index change uses the modified highlight')
     H.assert_eq(status_chunks(statuses[rows['tracked.txt']])[2][2], 'DirectGitModified',
       'worktree change uses the modified highlight')
-    H.assert_eq(status_text(statuses[rows['index-only.txt']]), '  ',
+    H.assert_eq(status_text(statuses[rows['index-only.txt']]), '\u{f01f}\u{f00c}',
       'index-only changes show modified and staged symbols')
-    H.assert_eq(status_text(statuses[rows['staged-add.txt']]), '✚  ',
+    H.assert_nil(highlights[rows['index-only.txt']],
+      'an index-only status does not color the filename')
+    H.assert_eq(icons[rows['index-only.txt']][4].virt_text,
+      { { '\u{f15b} ', 'DirectFileIcon' } },
+      'an index-only status leaves the icon in its base color')
+    H.assert_eq(status_text(statuses[rows['staged-add.txt']]), '\u{f067}\u{f00c}',
       'staged additions show added and staged symbols')
-    H.assert_eq(status_text(statuses[rows['worktree-only.txt']]), ' 󰄱 ',
-      'worktree-only changes show modified and unstaged symbols')
-    H.assert_eq(status_text(statuses[rows['untracked.txt']]), ' ',
-      'untracked files show only the untracked symbol')
-    H.assert_eq(status_chunks(statuses[rows['untracked.txt']])[1][2], 'DirectGitUntracked',
-      'untracked entries use their dedicated highlight')
-    H.assert_eq(status_text(statuses[rows['nested/']]), ' ✚ ',
+    H.assert_eq(status_text(statuses[rows['worktree-only.txt']]), '\u{f01f} ',
+      'worktree-only changes leave the state slot blank')
+    H.assert_eq(highlights[rows['worktree-only.txt']][4].hl_group, 'DirectGitModified',
+      'worktree-only status colors the filename')
+    H.assert_eq(icons[rows['worktree-only.txt']][4].virt_text,
+      { { '\u{f15b} ', 'DirectGitModified' } },
+      'worktree-only status colors the icon')
+    H.assert_eq(status_text(statuses[rows['untracked.txt']]), '\u{f067} ',
+      'untracked ?? maps to added in the first slot')
+    H.assert_eq(status_chunks(statuses[rows['untracked.txt']])[1][2], 'DirectGitAdded',
+      'untracked entries use the added highlight')
+    H.assert_eq(highlights[rows['untracked.txt']][4].hl_group, 'DirectGitAdded',
+      'untracked worktree status colors the filename as added')
+    H.assert_eq(status_text(statuses[rows['nested/']]), '\u{f01f}\u{f067}',
       'directories aggregate index and worktree change types')
-    H.assert_eq(status_text(statuses[rows['mixed-deletions/']]), '✖ ✖ ',
+    H.assert_eq(highlights[rows['nested/']][4].hl_group, 'DirectGitAdded',
+      'directory filename color follows its aggregated worktree status')
+    H.assert_eq(status_text(statuses[rows['mixed-deletions/']]), '\u{f068}\u{f068}',
       'a directory DD aggregate is two deletions, not a conflict')
+    H.assert_eq(highlights[rows['mixed-deletions/']][4].hl_group, 'DirectGitDeleted',
+      'directory filename color follows the worktree deletion status')
     H.assert_eq(statuses[rows['tracked.txt']][1][4].virt_text_pos, 'eol_right_align',
       'Git status is right-aligned virtual text at the row end')
     H.assert_eq(vim.wo.signcolumn, previous_signcolumn,
       'Git status does not change the window signcolumn')
+
+    config.setup({ git = { show_symbols = false } })
+    listing:list()
+    H.assert_eq(marks_by_row(0, 'direct-listing-git-status'), {},
+      'show_symbols=false removes all Git status symbols')
+    highlights = mark_by_row(0, 'direct-listing-highlights')
+    icons = mark_by_row(0, 'direct-listing-icons')
+    H.assert_eq(highlights[rows['worktree-only.txt']][4].hl_group, 'DirectGitModified',
+      'hiding symbols keeps worktree filename colors')
+    H.assert_eq(icons[rows['worktree-only.txt']][4].virt_text,
+      { { '\u{f15b} ', 'DirectGitModified' } },
+      'hiding symbols keeps worktree icon colors')
+
+    config.setup({ git = { show_symbols = true } })
+    listing:list()
+    H.assert_true(#marks_by_row(0, 'direct-listing-git-status') > 0,
+      'show_symbols=true restores Git status symbols')
     listing:list()
   end)
 
@@ -489,6 +537,13 @@ H.describe('Git status display', function()
     local row_for = function(text)
       for row, line in ipairs(lines) do if line == text then return row end end
     end
+    local icons = mark_by_row(0, 'direct-listing-icons')
+    H.assert_eq(icons[row_for('removed/') - 1][4].virt_text,
+      { { '\u{f114} ', 'DirectGitDeleted' } },
+      'collapsed deleted directories use the outlined folder glyph')
+    H.assert_eq(icons[row_for('gone.txt') - 1][4].virt_text,
+      { { '\u{f016} ', 'DirectGitDeleted' } },
+      'deleted files use the outlined file glyph')
     local namespace = vim.api.nvim_get_namespaces()['direct-listing-highlights']
     local marks = {}
     for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(0, namespace, 0, -1,
@@ -499,19 +554,22 @@ H.describe('Git status display', function()
       { default = true, link = 'ErrorMsg' }, 'deleted-file group defaults to ErrorMsg')
     H.assert_eq(vim.api.nvim_get_hl(0, { name = 'DirectGitDeletedDirectory', link = true }),
       { default = true, link = 'ErrorMsg' }, 'deleted-directory group defaults to ErrorMsg')
-    H.assert_eq(marks[row_for('removed/') - 1][4].hl_group, 'DirectGitDeletedDirectory',
-      'missing directory name uses its dedicated highlight')
-    H.assert_eq(marks[row_for('gone.txt') - 1][4].hl_group, 'DirectGitDeletedFile',
-      'missing file name uses its dedicated highlight')
+    H.assert_eq(marks[row_for('removed/') - 1][4].hl_group, 'DirectGitDeleted',
+      'deleted directory name uses its worktree status highlight')
+    H.assert_eq(marks[row_for('gone.txt') - 1][4].hl_group, 'DirectGitDeleted',
+      'deleted file name uses its worktree status highlight')
     local statuses = marks_by_row(0, 'direct-listing-git-status')
     local deleted_status = statuses[row_for('gone.txt') - 1]
-    H.assert_eq(status_text(deleted_status), '✖ 󰄱 ',
-      'deleted worktree entries show deleted and unstaged symbols')
+    H.assert_eq(status_text(deleted_status), '\u{f068} ',
+      'deleted worktree entries leave the state slot blank')
     H.assert_eq(status_chunks(deleted_status)[1][2], 'DirectGitDeleted',
       'deleted status uses its dedicated highlight')
 
     H.assert_true(listing:expand(row_for('removed/')), 'expands a missing Git directory')
     lines = H.buf_lines()
+    icons = mark_by_row(0, 'direct-listing-icons')
+    H.assert_eq(icons[1][4].virt_text, { { '\u{f115} ', 'DirectGitDeleted' } },
+      'expanded deleted directories use the outlined open-folder glyph and worktree color')
     H.assert_eq(lines, { '.git/', 'removed/', '  nested/', 'gone.txt', 'live.txt' },
       'deleted directory exposes its deleted child directory')
     H.assert_true(listing:expand(3), 'recursively expands a deleted directory child')

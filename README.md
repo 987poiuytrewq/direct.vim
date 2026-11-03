@@ -132,15 +132,18 @@ require('direct').setup({
   map_default_keys = true, -- set false to install no default mappings
   show_hidden = true, -- set false to hide dot-prefixed entries
   respect_gitignore = false, -- opt in to Git's ignore rules
-  show_folder_icons = false, -- opt in to Nerd Font folder icons
-  show_file_icons = false, -- opt in to a generic Nerd Font file icon
+  show_folder_icons = true, -- show Font Awesome folder icons
+  show_file_icons = true, -- show a generic Font Awesome file icon
   icons = {
-    file = '\u{f0214}',
-    folder = '\u{f024b}',
-    folder_open = '\u{f0770}',
+    file = '\u{f15b}',
+    folder = '\u{f07b}',
+    folder_open = '\u{f07c}',
+    deleted_file = '\u{f016}',
+    deleted_folder = '\u{f114}',
+    deleted_folder_open = '\u{f115}',
   },
   max_recursive_expand_depth = false, -- false means unlimited
-  git = { enabled = true, show_deleted = true },
+  git = { enabled = true, show_symbols = true, show_deleted = true },
 })
 ```
 
@@ -167,13 +170,17 @@ Configuration defaults:
 | `map_default_keys` | `true` | Install Direct's default key mappings. |
 | `show_hidden` | `true` | Show dotfiles; `gh` toggles visibility in a listing. |
 | `respect_gitignore` | `false` | Apply Git ignore rules to listings; tracked files remain visible. |
-| `show_folder_icons` | `false` | Show folder icons. |
-| `show_file_icons` | `false` | Show generic file icons. |
-| `icons.file` | U+F0214 | Base file glyph string. |
-| `icons.folder` | U+F024B | Base collapsed-folder glyph string. |
-| `icons.folder_open` | U+F0770 | Base expanded-folder glyph string. |
+| `show_folder_icons` | `true` | Show folder icons. |
+| `show_file_icons` | `true` | Show generic file icons. |
+| `icons.file` | U+F15B | Font Awesome file glyph. |
+| `icons.folder` | U+F07B | Font Awesome folder glyph. |
+| `icons.folder_open` | U+F07C | Font Awesome open-folder glyph. |
+| `icons.deleted_file` | U+F016 | Outlined file glyph for deleted rows. |
+| `icons.deleted_folder` | U+F114 | Outlined folder glyph for deleted rows. |
+| `icons.deleted_folder_open` | U+F115 | Outlined open-folder glyph for expanded deleted rows. |
 | `max_recursive_expand_depth` | `false` | Positive integer limit for recursive expansion; `false` is unlimited. |
-| `git.enabled` | `true` | Show Git status in repositories. |
+| `git.enabled` | `true` | Enable Git status data and worktree filename/icon colors. |
+| `git.show_symbols` | `true` | Show the right-aligned Git status symbols. |
 | `git.show_deleted` | `true` | Show synthetic rows for tracked deletions when Git status is enabled. |
 | `git.symbols` | Neo-tree defaults | Configure status and stage glyphs shown at the right of each row. |
 
@@ -182,16 +189,20 @@ Run `:checkhealth direct` to check the Neovim version and data directory.
 
 ### File and folder icons
 
-Set `show_folder_icons = true` to show inline directory glyphs, and
-`show_file_icons = true` to show one generic icon for every file; both default
-to `false`. A Nerd Font is required to render them. Collapsed directories use
-`nf-md-folder` (U+F024B), expanded directories use `nf-md-folder_open` (U+F0770),
-and files use `nf-md-file` (U+F0214), regardless of filetype. When only one kind
+Set `show_folder_icons = false` to hide inline directory glyphs, and
+`show_file_icons = false` to hide generic file icons; both default to `true`.
+A Font Awesome Nerd Font is required to render them. Collapsed directories use
+`nf-fa-folder` (U+F07B), expanded directories use `nf-fa-folder-open` (U+F07C),
+and files use `nf-fa-file` (U+F15B), regardless of filetype. When only one kind
 of icon is enabled, the other kind reserves a blank icon slot so entry names
 stay aligned. Icons are virtual text, so the listing lines and filesystem
 behavior are unchanged. No icon plugin or other dependency is required.
-Set `icons.file`, `icons.folder`, and `icons.folder_open` to customize the base
-glyphs. Git status does not change file/folder icons or entry-name colors.
+Deleted tracked rows use the regular-outline `nf-fa-file-o` and
+`nf-fa-folder-o` glyphs; expanded deleted folders use `nf-fa-folder-open-o`.
+Set `icons.file`, `icons.folder`, `icons.folder_open`, and the `deleted_*`
+variants to customize every file and folder glyph. Git status colors regular
+filenames and icons according to each entry's worktree status; index-only changes
+leave their base colors unchanged.
 Highlight groups can be customized in your colorscheme or with
 `vim.api.nvim_set_hl()`.
 With folder icons enabled, click an icon to expand or collapse that directory in
@@ -201,21 +212,25 @@ place; mouse input must be enabled in Neovim (for example, `:set mouse=a`).
 
 In a Git repository, Direct reads porcelain status once per listing refresh and
 shows a Neo-tree-style status component, right-aligned at the end of each row.
-The component is virtual text: it does not change the editable listing lines,
-icons, or entry-name colors. `T` is normalized to `M`, untracked `??` maps to
-the untracked symbol, and ignored `!!` entries use the ignored symbol.
+The component is virtual text: it does not change the editable listing lines.
+Set `git.show_symbols = false` to hide the component while keeping worktree-based
+filename and icon colors. `git.show_symbols` defaults to `true`. `T` is normalized to `M`;
+untracked `??` maps to `_A` and uses the added symbol. Ignored `!!` entries use
+the ignored symbol.
 
-The default glyphs are `✚` added, `✖` deleted, `` modified, `󰁕` renamed,
-`` untracked, `` ignored, `󰄱` unstaged, `` staged, and `` conflict. A
-single-column change shows its change-type glyph plus its staged/unstaged glyph;
-changes in both porcelain columns show both change-type glyphs. Untracked entries
-show only the untracked glyph. Copies use the added glyph, matching Neo-tree's
-status component. Directories aggregate changed descendants independently in
-the index and worktree columns. Re-list to refresh Git status.
+The default glyphs are `` added, `` modified, `` deleted, `` renamed,
+`` ignored, `` staged, and `` conflict. A staged-only change shows its type
+glyph and the staged check; a worktree-only change has a blank second slot. When
+both porcelain columns have changes, both change-type glyphs are shown. Untracked
+`??` displays the added glyph followed by a blank slot. Copies use the added
+glyph, matching Neo-tree's status component. Directories aggregate changed
+descendants independently in the index and worktree columns. Re-list to refresh
+Git status.
 
 The status component is right-aligned in the window. Very long row text may leave
 less room for it. Missing tracked files and directories containing deleted
-tracked descendants appear as protected rows; their names retain the dedicated
+tracked descendants appear as protected rows. Their names use the worktree
+status color when one exists; staged-only tombstones retain the dedicated
 deleted-row highlight. Set `git.show_deleted = false` to hide these synthetic
 rows while retaining Git status on entries that still exist. This option has no
 effect when Git status is disabled; it defaults to `true`.
@@ -232,18 +247,22 @@ The symbols can be customized independently by status:
 require('direct').setup({
   git = {
     symbols = {
+      added = "+",
+      deleted = "-",
       modified = "~",
-      staged = "+",
-      unstaged = "!",
+      renamed = ">",
+      ignored = "i",
+      staged = "✓",
+      conflict = "!",
     },
   },
 })
 ```
 
-Symbols can be set to an empty string to hide that marker. Colors use the
-`DirectGitAdded`, `DirectGitDeleted`, `DirectGitModified`, `DirectGitRenamed`,
-`DirectGitUntracked`, `DirectGitIgnored`, `DirectGitStaged`,
-`DirectGitUnstaged`, and `DirectGitConflict` highlight groups. Deleted rows can
+Symbols can be set to an empty string to hide that marker. The status highlight
+groups link to `DiffAdd`, `DiffDelete`, `DiffChange`, `ErrorMsg`, and `Comment`
+by default, so they follow the colorscheme. Override the `DirectGit*` groups to
+customize them. Deleted rows can
 be targeted by `:DirectRun`, expanded and collapsed with the `z` commands, and
 staged/reset/restored with `ga`, `gr`, and `gc`. Other listing edits, opens,
 yanks, and pastes on those rows are ignored.
