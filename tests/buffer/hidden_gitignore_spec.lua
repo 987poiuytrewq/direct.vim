@@ -695,7 +695,7 @@ H.describe('hidden and Git-ignore filtering', function()
     H.mkfile(root, 'visible', 'preserve')
     init_repo(root)
     local alias = vim.fs.joinpath(sb.root, 'repo-alias')
-    H.assert_true(vim.uv.fs_symlink(root, alias), 'repository alias symlink is created')
+    H.assert_true(H.symlink(root, alias), 'repository alias symlink is created')
 
     local listing = require('direct').list(alias)
     H.assert_false(contains(H.buf_lines(), 'hidden.tmp'),
@@ -715,7 +715,9 @@ H.describe('hidden and Git-ignore filtering', function()
   end)
 
   H.it('matches a literal backslash filename in Git ignore rules on POSIX', function()
-    if vim.fn.has('win32') == 1 or vim.fn.has('win64') == 1 then return end
+    if vim.fn.has('win32') == 1 or vim.fn.has('win64') == 1 then
+      H.skip('backslashes are path separators on Windows, not literal filename bytes')
+    end
     require('direct.config').setup({ map_default_keys = false, respect_gitignore = true })
     local sb = H.sandbox()
     local root = H.mkdir(sb.root, 'backslash-repo')

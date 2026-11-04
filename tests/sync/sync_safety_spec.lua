@@ -288,7 +288,7 @@ H.describe('sync: safety guards', function()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
     local target = ws .. '/target.log'
-    H.assert_true(vim.uv.fs_symlink(ws .. '/missing', target) == true,
+    H.assert_true(H.symlink(ws .. '/missing', target) == true,
       'dangling symlink created')
     local listing
     H.with_option('wildignore', '*.log', function()
@@ -422,7 +422,7 @@ H.describe('sync: safety guards', function()
     local ws = H.mkdir(sb.root, 'ws')
     local parent = H.mkdir(ws, 'parent')
     local hidden = parent .. '/hidden.log'
-    H.assert_true(vim.uv.fs_symlink(parent .. '/missing-target', hidden) == true,
+    H.assert_true(H.symlink(parent .. '/missing-target', hidden) == true,
       'filtered dangling symlink created')
     H.mkfile(ws, 'keep.txt', { 'keep visible sibling' })
     local listing
@@ -452,8 +452,8 @@ H.describe('sync: safety guards', function()
     local ws = H.mkdir(sb.root, 'ws')
     local parent = H.mkdir(ws, 'parent')
     local hidden = parent .. '/hidden.log'
-    vim.fn.system({ 'mkfifo', hidden })
-    H.assert_eq(vim.v.shell_error, 0, 'FIFO fixture created')
+    local created, reason = H.mkfifo(hidden)
+    if not created then H.skip(reason) end
     H.assert_eq(vim.uv.fs_lstat(hidden).type, 'fifo', 'fixture is an unsupported raw entry')
     H.mkfile(ws, 'keep.txt', { 'keep visible sibling' })
     local listing
@@ -513,11 +513,11 @@ H.describe('sync: safety guards', function()
     local ws = H.mkdir(sb.root, 'ws')
     local parent = H.mkdir(ws, 'parent')
     local dangling = parent .. '/dangling'
-    H.assert_true(vim.uv.fs_symlink(parent .. '/missing-target', dangling) == true,
+    H.assert_true(H.symlink(parent .. '/missing-target', dangling) == true,
       'dangling symlink created')
     local fifo = parent .. '/pipe'
-    vim.fn.system({ 'mkfifo', fifo })
-    H.assert_eq(vim.v.shell_error, 0, 'FIFO fixture created')
+    local created, reason = H.mkfifo(fifo)
+    if not created then H.skip(reason) end
     H.mkfile(ws, 'keep.txt', { 'keep visible sibling' })
     local listing
     H.with_option('wildignore', '', function()
@@ -547,8 +547,8 @@ H.describe('sync: safety guards', function()
     local parent = H.mkdir(ws, 'parent')
     H.mkfile(parent, 'pipe', { 'ordinary descendant file' })
     local fifo = ws .. '/pipe'
-    vim.fn.system({ 'mkfifo', fifo })
-    H.assert_eq(vim.v.shell_error, 0, 'root FIFO fixture created')
+    local created, reason = H.mkfifo(fifo)
+    if not created then H.skip(reason) end
     local listing
     H.with_option('wildignore', '', function()
       listing = buffer.list(ws)
@@ -608,7 +608,7 @@ H.describe('sync: safety guards', function()
     local target = H.mkdir(sb.root, 'target')
     H.mkfile(target, 'hidden.log', { 'target stays untouched' })
     local link = ws .. '/visible-link'
-    H.assert_true(vim.uv.fs_symlink(target, link) == true, 'directory symlink created')
+    H.assert_true(H.symlink(target, link) == true, 'directory symlink created')
     local listing
     H.with_option('wildignore', '*.log', function()
       listing = buffer.list(ws)
@@ -678,7 +678,7 @@ H.describe('sync: safety guards', function()
     if vim.uv.fs_lstat(ws .. '/FOO.TXT') == nil then
       -- Linux and other case-sensitive filesystems correctly treat this as a
       -- different, absent pathname; the rename behavior is platform-specific.
-      return
+      H.skip('the filesystem is case-sensitive')
     end
 
     local _, ok, reason = list_edit_and_sync(ws, { 'Foo.txt' })
@@ -702,7 +702,7 @@ H.describe('sync: safety guards', function()
     H.mkfile(ws, 'Foo.txt', { 'destination' })
     if vim.uv.fs_lstat(ws .. '/FOO.TXT') ~= nil then
       -- On an insensitive filesystem these names are the same directory entry.
-      return
+      H.skip('the filesystem is case-insensitive')
     end
 
     local listing
@@ -747,7 +747,7 @@ H.describe('sync: safety guards', function()
     local target = H.mkdir(sb.root, 'symlink-target')
     H.mkfile(target, 'target.txt', { 'symlink target' })
     local link = ws .. '/b'
-    H.assert_true(vim.uv.fs_symlink(target, link) == true, 'directory symlink created')
+    H.assert_true(H.symlink(target, link) == true, 'directory symlink created')
     local listing = buffer.list(ws)
     vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'b/', 'c/' })
 

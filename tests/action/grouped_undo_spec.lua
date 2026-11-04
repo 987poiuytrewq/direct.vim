@@ -449,7 +449,7 @@ local function swap_line(ws)
     local ws = H.mkdir(sb.root, 'ws')
     local link = ws .. '/a.txt'
     local target = 'missing-target'
-    H.assert_true(vim.uv.fs_symlink(target, link) ~= nil,
+    H.assert_true(H.symlink(target, link) ~= nil,
       'create the dangling symlink fixture')
     H.mkfile(ws, 'b.txt', { 'CONTENT-B' })
     local group = action.Group({

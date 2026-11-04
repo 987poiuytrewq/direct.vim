@@ -41,7 +41,7 @@ H.describe('paths', function()
   H.it('root() absolutises relative inputs', function()
     for _, input in ipairs({ '.', '..', 'a/b' }) do
       local resolved = paths.root(input)
-      H.assert_true(resolved:sub(1, 1) == '/',
+      H.assert_true(H.is_absolute_path(resolved),
         string.format('root(%q) is absolute: %s', input, resolved))
     end
     -- vim.fs.normalize alone leaves 'a/b' relative, so root() must not be just
@@ -131,6 +131,9 @@ H.describe('paths', function()
   end)
 
   H.it('data_dir() returns nil, err on a read-only data home', function()
+    if vim.fn.has('win32') == 1 or vim.fn.has('win64') == 1 then
+      H.skip('Windows does not enforce POSIX directory mode bits')
+    end
     local sb = H.sandbox()
     H.assert_true(vim.uv.fs_chmod(sb.data_home, tonumber('500', 8)) == true,
       'precondition: data home chmod 0500')
@@ -154,8 +157,10 @@ H.describe('paths', function()
   end)
 
   H.it('basename() strips a trailing slash', function()
-    H.assert_eq(paths.basename('/a/b/'), 'b', 'trailing slash stripped')
-    H.assert_eq(paths.basename('/a/b'), 'b', 'no trailing slash')
-    H.assert_eq(paths.basename('dir1/'), 'dir1', 'bare directory')
+    local separator = package.config:sub(1, 1)
+    local nested = vim.fs.joinpath('a', 'b')
+    H.assert_eq(paths.basename(nested .. separator), 'b', 'trailing separator stripped')
+    H.assert_eq(paths.basename(nested), 'b', 'no trailing separator')
+    H.assert_eq(paths.basename('dir1' .. separator), 'dir1', 'bare directory')
   end)
 end)

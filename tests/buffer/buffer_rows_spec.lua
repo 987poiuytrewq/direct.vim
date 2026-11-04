@@ -13,7 +13,7 @@ end
 -- Symlink helper: luv returns true|nil, err from fs_symlink, so existence is
 -- checked through lstat instead of the return value.
 local function make_symlink(target, link)
-  pcall(vim.uv.fs_symlink, target, link)
+  pcall(H.symlink, target, link)
   return vim.uv.fs_lstat(link) ~= nil
 end
 

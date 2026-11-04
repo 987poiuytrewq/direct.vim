@@ -107,12 +107,12 @@ H.describe('content-proof Unpaste', function()
     local outside_b = H.mkfile(sb.root, 'outside-b.txt', { 'B' })
     local reg_root = paths.ensure_data_dir('register')
     local reg = H.mkdir(reg_root, 'symlink-fixture')
-    H.assert_true(vim.uv.fs_symlink(outside_a, reg .. '/link') == true,
+    H.assert_true(H.symlink(outside_a, reg .. '/link') == true,
       'register symlink created')
     vim.fn.writefile({ reg }, paths.join(reg_root, 'content'))
     local dest = H.mkdir(sb.root, 'dest')
     local pasted = dest .. '/link'
-    H.assert_true(vim.uv.fs_symlink(outside_b, pasted) == true,
+    H.assert_true(H.symlink(outside_b, pasted) == true,
       'same-name symlink replacement points elsewhere')
     local record = action.Paste(reg, dest, { 'link' }, { 'link' })
     H.assert_true(history.log(record) == true, 'paste record fixture')

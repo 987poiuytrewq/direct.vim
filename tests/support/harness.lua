@@ -16,6 +16,7 @@
 -- The runner drives these boundaries through the private lifecycle hooks.
 
 local M = {}
+local skip_tag = {}
 
 -- ---------------------------------------------------------------------------
 -- Configuration and per-run state
@@ -112,6 +113,19 @@ function M.fail(msg)
   error(msg or 'assertion failed', 0)
 end
 
+-- skip(reason) marks a test as unavailable on this host without counting it as
+-- a pass. The test still goes through teardown so any sandbox is cleaned up.
+function M.skip(reason)
+  error({ _direct_test_skip = skip_tag, reason = tostring(reason or 'not available') }, 0)
+end
+
+local function test_error(err)
+  if type(err) == 'table' and err._direct_test_skip == skip_tag then
+    return err
+  end
+  return debug.traceback(err, 2)
+end
+
 local function pass(label, msg)
   trace('ok   ' .. label .. (msg and (': ' .. msg) or ''))
 end
@@ -150,6 +164,14 @@ function M.assert_eq(actual, expected, msg)
     M.fail(msg and (msg .. '\n' .. format_mismatch('assert_eq failed', actual, expected))
       or format_mismatch('assert_eq failed', actual, expected))
   end
+end
+
+function M.is_absolute_path(path)
+  if type(path) ~= 'string' then return false end
+  if package.config:sub(1, 1) == '\\' then
+    return path:match('^%a:[/\\]') ~= nil or path:match('^[/\\][/\\]') ~= nil
+  end
+  return path:sub(1, 1) == '/'
 end
 
 function M.assert_true(value, msg)
@@ -242,6 +264,34 @@ function M.mkdir(root, rel)
   local path = vim.fs.joinpath(root, rel)
   vim.fn.mkdir(path, 'p')
   return path
+end
+
+-- mkfifo is a POSIX-only fixture. Return an explanatory error instead of
+-- assuming the command exists; callers can explicitly skip only the test that
+-- depends on this filesystem feature.
+function M.mkfifo(path)
+  if vim.fn.has('win32') == 1 or vim.fn.has('win64') == 1 then
+    return nil, 'POSIX FIFOs are unavailable on Windows'
+  end
+  vim.fn.system({ 'mkfifo', path })
+  local stat = vim.uv.fs_lstat(path)
+  if stat and stat.type == 'fifo' then
+    return true
+  end
+  return nil, 'mkfifo is unavailable or could not create a FIFO'
+end
+
+-- Create a symbolic link with the Windows directory flag when its target is
+-- an existing directory. POSIX platforms ignore this distinction.
+function M.symlink(target, link)
+  local flags
+  if vim.fn.has('win32') == 1 or vim.fn.has('win64') == 1 then
+    local stat = vim.uv.fs_stat(target)
+    if stat and stat.type == 'directory' then
+      flags = { dir = true }
+    end
+  end
+  return vim.uv.fs_symlink(target, link, flags)
 end
 
 function M.ls(root)
@@ -593,7 +643,7 @@ end
 -- of aborting the whole test file.
 function M.run_all()
   local lines = {}
-  local total_passed, total_failed, total_specs = 0, 0, 0
+  local total_passed, total_skipped, total_failed, total_specs = 0, 0, 0, 0
 
   local begin_ok, begin_err = xpcall(M._begin_file, debug.traceback)
   if not begin_ok then
@@ -601,12 +651,12 @@ function M.run_all()
     lines[#lines + 1] = string.format('  FAIL <setup> :: _begin_file\n%s', begin_err)
   else
     for _, suite in ipairs(M._suites) do
-      local passed, failed = 0, 0
+      local passed, skipped, failed = 0, 0, 0
       for _, test in ipairs(suite.tests) do
         total_specs = total_specs + 1
         M._begin_test()
         M._assert_log = {}
-        local ok, err = xpcall(test.fn, debug.traceback)
+        local ok, err = xpcall(test.fn, test_error)
         -- Contain a throwing teardown: report it against this spec instead of
         -- aborting the remaining tests in the file.
         local end_ok, end_err = xpcall(M._end_test, debug.traceback)
@@ -620,6 +670,10 @@ function M.run_all()
         if ok then
           passed = passed + 1
           lines[#lines + 1] = string.format('  ok   %s :: %s', suite.name, test.name)
+        elseif type(err) == 'table' and err._direct_test_skip == skip_tag then
+          skipped = skipped + 1
+          lines[#lines + 1] = string.format('  SKIP %s :: %s (%s)',
+            suite.name, test.name, err.reason)
         else
           failed = failed + 1
           lines[#lines + 1] = string.format('  FAIL %s :: %s\n%s', suite.name, test.name, err)
@@ -629,9 +683,10 @@ function M.run_all()
         end
       end
       total_passed = total_passed + passed
+      total_skipped = total_skipped + skipped
       total_failed = total_failed + failed
-      lines[#lines + 1] = string.format('%s: %d spec, %d passed, %d failed',
-        suite.name, passed + failed, passed, failed)
+      lines[#lines + 1] = string.format('%s: %d spec, %d passed, %d skipped, %d failed',
+        suite.name, passed + skipped + failed, passed, skipped, failed)
     end
   end
 
@@ -646,6 +701,7 @@ function M.run_all()
     suites = #M._suites,
     specs = total_specs,
     passed = total_passed,
+    skipped = total_skipped,
     failed = total_failed,
   }
 end

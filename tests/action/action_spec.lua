@@ -37,7 +37,7 @@ H.describe('action', function()
     if vim.uv.fs_lstat(alternate) == nil then
       -- Case-sensitive filesystems have two distinct names here; this specific
       -- action contract applies only when the alternate spelling aliases src.
-      return
+      H.skip('the filesystem is case-sensitive')
     end
 
     local ok, err = M.Move(source, alternate)['do']()
@@ -54,7 +54,9 @@ H.describe('action', function()
     local sb = H.sandbox()
     local source = H.mkfile(sb.root, 'foo.txt', { 'preserve both names' })
     local destination = sb.root .. '/Foo.txt'
-    if vim.uv.fs_link(source, destination) ~= true then return end
+    if vim.uv.fs_link(source, destination) ~= true then
+      H.skip('hard links are unavailable on this filesystem')
+    end
 
     local ok, err = M.Move(source, destination)['do']()
 
@@ -100,7 +102,7 @@ H.describe('action', function()
       local sb = H.sandbox()
       H.mkdir(sb.root, 'realdir')
       H.mkfile(sb.root, 'realdir/file.txt', { 'x' })
-      pcall(vim.uv.fs_symlink, sb.root .. '/realdir', sb.root .. '/linkdir')
+      pcall(H.symlink, sb.root .. '/realdir', sb.root .. '/linkdir')
       H.assert_true(vim.uv.fs_lstat(sb.root .. '/linkdir') ~= nil, 'prefix symlink created')
 
       local buf = vim.api.nvim_create_buf(true, false)
@@ -167,7 +169,7 @@ H.describe('action', function()
     H.mkfile(sb.root, 'f.txt', { 'f' })
     local src = sb.root .. '/f.txt'
     local base = M.paths.digest(src)
-    H.assert_true(vim.uv.fs_symlink(trash .. '/nowhere', trash .. '/' .. base) == true,
+    H.assert_true(H.symlink(trash .. '/nowhere', trash .. '/' .. base) == true,
       'dangling symlink occupying the base trash name')
     H.assert_false(vim.uv.fs_stat(trash .. '/' .. base) ~= nil,
       'the following check reports the name free')
@@ -445,7 +447,7 @@ H.describe('action', function()
     local sb = H.sandbox()
     H.mkfile(sb.root, 'source.txt', { 'source' })
     local occupied = sb.root .. '/target.log'
-    H.assert_true(vim.uv.fs_symlink(sb.root .. '/missing', occupied) == true,
+    H.assert_true(H.symlink(sb.root .. '/missing', occupied) == true,
       'dangling symlink created')
     H.assert_true(M.fs.taken(occupied .. '/'),
       'occupancy checks preserve the directory marker while finding the link')

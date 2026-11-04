@@ -63,7 +63,7 @@ H.describe('register', function()
     H.mkfile(root, 'a.txt', { 'a' })
     H.mkdir(root, 'sub')
     H.mkfile(root, 'sub/b.txt', { 'b' })
-    pcall(vim.uv.fs_symlink, root .. '/a.txt', root .. '/sub/link')
+  pcall(H.symlink, root .. '/a.txt', root .. '/sub/link')
     H.assert_true(vim.uv.fs_lstat(root .. '/sub/link') ~= nil, 'nested symlink created')
 
     H.capture_messages()
@@ -378,7 +378,7 @@ H.describe('register', function()
     H.mkfile(sb.root, 'f.txt', { 'reg-f' })
     H.assert_true(reg.yank({ sb.root .. '/f.txt' }) == true, 'yank')
     local ws = H.mkdir(sb.root, 'ws')
-    H.assert_true(vim.uv.fs_symlink(ws .. '/nowhere', ws .. '/f.txt') == true,
+    H.assert_true(H.symlink(ws .. '/nowhere', ws .. '/f.txt') == true,
       'dangling symlink occupying the paste destination name')
     H.assert_false(fs.exists(ws .. '/f.txt'),
       'the following check reports the name free')

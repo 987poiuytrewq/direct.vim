@@ -52,13 +52,9 @@ jobs:
         if: matrix.os == 'macos-latest'
         run: nvim --headless -l tests/run.lua
 
-      - name: Run Windows compatibility tests
+      - name: Run full test suite on Windows
         if: matrix.os == 'windows-latest'
-        # Focus on portable fixtures; the full suite has POSIX-only fixtures and
-        # path-spelling assumptions not yet suitable for Windows.
-        run: >-
-          nvim --headless -l tests/run.lua config_spec sync_plan_spec
-          history_format_spec history_preflight_spec platform_compat_spec
+        run: nvim --headless -l tests/run.lua
 
       - name: Add coverage to the run summary
         if: runner.os == 'Linux' && always() && hashFiles('coverage/summary.out') != ''

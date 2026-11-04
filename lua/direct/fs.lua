@@ -31,6 +31,19 @@ local function identity_key(stat)
   return tostring(stat.dev) .. ':' .. tostring(stat.ino)
 end
 
+-- libuv needs the Windows directory-symlink flag when recreating a link whose
+-- target is a directory. Resolve through the source link so relative targets
+-- are interpreted relative to the link's parent, not the process cwd.
+local function symlink_flags(source_link)
+  if M.uv.os_uname().sysname == 'Windows_NT' then
+    local target_stat = M.uv.fs_stat(source_link)
+    if target_stat and target_stat.type == 'directory' then
+      return { dir = true }
+    end
+  end
+  return nil
+end
+
 local function remove_file_if_same(path, identity)
   local now = M.uv.fs_lstat(path)
   if identity ~= nil and identity_key(now) == identity then
@@ -743,7 +756,8 @@ local function copy_dir(from, to, ctx)
       if not target then
         return nil, 'cannot read symlink: ' .. tostring(read_err)
       end
-      local linked, link_err, link_code = M.uv.fs_symlink(target, child_to)
+      local linked, link_err, link_code = M.uv.fs_symlink(
+        target, child_to, symlink_flags(child_from))
       if not linked then
         return nil, tostring(link_err or link_code or 'cannot recreate symlink')
       end
@@ -1178,7 +1192,7 @@ local function move_exdev_link(src, dst, source_identity)
     if not temp_dir then return nil, temp_dir_identity or link_err, link_code end
     temp = M.join(temp_dir, 'payload')
     local linked
-    linked, link_err, link_code = M.uv.fs_symlink(target, temp)
+    linked, link_err, link_code = M.uv.fs_symlink(target, temp, symlink_flags(src))
     if linked then break end
     cleanup_private_dir(temp_dir, temp_dir_identity)
     if not is_eexist(link_err, link_code) then return nil, link_err, link_code end

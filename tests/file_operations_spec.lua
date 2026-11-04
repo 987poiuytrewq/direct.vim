@@ -996,7 +996,7 @@ H.describe('LSP file operations', function()
     H.mkfile(directory, 'nested.txt', 'nested')
     local target = H.mkfile(root, 'symlink-target.txt', 'target')
     local link = root .. '/symlink.txt'
-    H.assert_true(vim.uv.fs_symlink(target, link) == true, 'symlink fixture is available')
+    H.assert_true(H.symlink(target, link) == true, 'symlink fixture is available')
     local opted = client(1, { willRename = true }, root,
       function(_, _, _, callback)
         vim.schedule(function()
