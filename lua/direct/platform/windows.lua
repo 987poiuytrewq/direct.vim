@@ -136,7 +136,10 @@ function M.create_symlink(target, link, source_link)
   return vim.uv.fs_symlink(target, link, options)
 end
 
-function M.rename_noreplace(src, dst)
+function M.rename_noreplace(src, dst, sysname)
+  if sysname and sysname ~= 'Windows_NT' then
+    return nil, 'atomic no-replace rename is unavailable on ' .. tostring(sysname)
+  end
   local lib, api = windows_api()
   if not lib then return nil, api or 'LuaJIT FFI unavailable' end
   local src_wide, src_err = wide_path(src, lib, api)
@@ -161,7 +164,10 @@ function M.shellescape_path(path, shell)
     or shell:find('fish', 1, true) then
     return "'" .. path:gsub("'", "'\\''") .. "'"
   end
-  return vim.fn.shellescape(path)
+  -- cmd.exe passes quoted arguments through the Windows CRT, where a trailing
+  -- backslash would escape the closing quote unless doubled first.
+  local escaped = path:gsub('"', '\\"'):gsub('(\\+)$', '%1%1')
+  return '"' .. escaped .. '"'
 end
 
 local function write_cmd_script(command)
