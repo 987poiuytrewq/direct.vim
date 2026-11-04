@@ -4,6 +4,7 @@ local M = {}
 
 local log_mod = require('direct.log')
 local format = require('direct.history_format')
+local platform = require('direct.platform')
 M.action = require('direct.action')
 M.paths = require('direct.paths')
 M.ui = require('direct.ui')
@@ -134,7 +135,7 @@ end
 
 local function identity_path_matches(identity, path)
   if identity == nil or identity == vim.NIL then return true end
-  return path_key(identity.path) == path_key(path)
+  return platform.identity_path(identity.path) == platform.identity_path(path)
 end
 
 local function is_array(value)

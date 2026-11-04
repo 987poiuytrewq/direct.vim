@@ -15,6 +15,10 @@ function M.canonical_path(path)
   return vim.fs.normalize(tostring(path))
 end
 
+function M.identity_path(path)
+  return M.canonical_path(path)
+end
+
 function M.validation_path(path)
   return path
 end

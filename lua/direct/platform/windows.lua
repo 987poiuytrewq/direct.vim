@@ -75,6 +75,10 @@ function M.canonical_path(path)
   return vim.fs.normalize(tostring(path)):gsub('\\', '/')
 end
 
+function M.identity_path(path)
+  return M.canonical_path(path):lower()
+end
+
 function M.validation_path(path)
   return path:gsub('\\', '/')
 end
