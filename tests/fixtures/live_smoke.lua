@@ -61,9 +61,11 @@ local function run()
     '<CR> did not open the selected directory: '
       .. vim.inspect(vim.api.nvim_buf_get_name(0)) .. ' != ' .. vim.inspect(child))
   feed('-')
-  assert(is_same_path(vim.api.nvim_buf_get_name(0), root),
+  local parent_result = vim.api.nvim_buf_get_name(0)
+  assert(is_same_path(parent_result, root),
     'buffer-local - did not navigate to the parent directory: '
-      .. vim.inspect(vim.api.nvim_buf_get_name(0)) .. ' != ' .. vim.inspect(root))
+      .. vim.inspect(parent_result) .. ' != ' .. vim.inspect(root)
+      .. '; mapping=' .. vim.inspect(vim.fn.maparg('-', 'n', false, true)))
 
   -- Exercise the user-facing write path rather than calling Buffer:sync().
   local rows = lines()
