@@ -1314,7 +1314,7 @@ end
 -- reversal would pass through a colliding name (the reported defect), and
 -- already never records a reversal for entries that were never written (the
 -- Paste precedent). A singleton group is logged only when its action applied.
-local function log_applied(actions, applied)
+local function log_applied(actions, applied, already_logged)
   for _, group in ipairs(action_mod.move_groups(actions)) do
     local members, complete = {}, true
     for _, index in ipairs(group) do
@@ -1323,7 +1323,7 @@ local function log_applied(actions, applied)
       end
       members[#members + 1] = actions[index]
     end
-    if complete then
+    if complete and not (#group == 1 and already_logged and already_logged[group[1]]) then
       if #members == 1 then
         history.log(members[1])
       else
@@ -1360,7 +1360,7 @@ end
 -- re-listed and marked nomodified), nil, reason when preflight refused the
 -- sync or any action failed. Failed action batches are still re-listed so the
 -- buffer reflects any independent actions that did succeed.
-function Buffer:sync(options)
+local function sync_locked(self, options)
   options = options or {}
   if not options.bypass_pending and pending.refuse('sync') then
     return nil, 'another direct operation is pending'
@@ -1856,28 +1856,61 @@ function Buffer:sync(options)
 
   -- Apply each action and record successful work in history, grouping dependent
   -- moves into one entry. `history.log` reports write failures without raising.
-  local failed, applied, failure_reason = {}, {}, nil
+  local singleton = {}
+  for _, group in ipairs(action_mod.move_groups(actions)) do
+    if #group == 1 then singleton[group[1]] = true end
+  end
+  local failed, applied, failure_reason, already_logged = {}, {}, nil, {}
   for i, act in ipairs(actions) do
     local exec_action = act
     if staging ~= nil and act.name == 'mv'
       and staging.overrides[act.src] ~= nil then
       exec_action = action_mod.Move(staging.overrides[act.src], act.dst)
     end
-    local ok, res, aerr = pcall(action_mod.execute, exec_action)
+    local prepared, journaled = true, false
+    if singleton[i] then
+      prepared, journaled = history.prepare(act)
+      if not prepared then
+        local prepare_err = journaled
+        ui.notify('Action failed - could not prepare recovery for '
+          .. action_mod.describe_action(act) .. ': ' .. tostring(prepare_err),
+          vim.log.levels.ERROR)
+        failed[#failed + 1] = act
+        if failure_reason == nil then failure_reason = prepare_err end
+      end
+    end
+    local ok, res, aerr
+    if prepared then
+      ok, res, aerr = pcall(action_mod.execute, exec_action)
+    end
     if ok and res then
       applied[i] = true
       self.current_entry = result_entry(act)
+      if journaled then
+        already_logged[i] = true
+        local logged, log_err = history.log(act)
+        if not logged then
+          ui.notify('Action completed but its history transaction is pending recovery: '
+            .. tostring(log_err), vim.log.levels.ERROR)
+          if failure_reason == nil then failure_reason = log_err end
+          failed[#failed + 1] = act
+          break
+        end
+      end
     else
-      ui.notify('Action failed - ' .. action_mod.describe_action(act),
-        vim.log.levels.ERROR)
-      failed[#failed + 1] = act
-      if failure_reason == nil then
-        failure_reason = (ok and aerr) or res
-          or ('action failed: ' .. action_mod.describe_action(act))
+      if prepared then
+        if journaled then history.abort(act) end
+        ui.notify('Action failed - ' .. action_mod.describe_action(act),
+          vim.log.levels.ERROR)
+        failed[#failed + 1] = act
+        if failure_reason == nil then
+          failure_reason = (ok and aerr) or res
+            or ('action failed: ' .. action_mod.describe_action(act))
+        end
       end
     end
   end
-  log_applied(actions, applied)
+  log_applied(actions, applied, already_logged)
   file_operations.emit_actions(actions, applied, options.suppress_operations)
 
   -- Every staged temp is expected to be consumed by a successful no-replace
@@ -1983,6 +2016,12 @@ function Buffer:sync(options)
     return nil, failure_reason
   end
   return true
+end
+
+function Buffer:sync(options)
+  return history.with_lock(function()
+    return sync_locked(self, options)
+  end)
 end
 
 -- ---------------------------------------------------------------------------

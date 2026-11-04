@@ -60,6 +60,7 @@ function M.yank(sources, options)
       return nil, msg
     end
   end
+  return M.history.with_lock(function()
   local preflight, preflight_err = M.history.preflight(sources)
   if not preflight then return nil, preflight_err end
   local dir, err = M.paths.ensure_data_dir('register')
@@ -98,6 +99,7 @@ function M.yank(sources, options)
     return nil, werr
   end
   return true
+  end)
 end
 
 -- _yank_one(dst, src) -> true[, skipped] | nil, err. Copies one source into the
@@ -226,6 +228,31 @@ function M.paste(dst, name, callback)
     M.ui.notify('direct: cannot paste: ' .. tostring(begin_err), vim.log.levels.WARN)
     return nil, begin_err
   end
+  local locked, lock_err = M.history.lock.acquire()
+  if not locked then
+    M.pending.finish()
+    M.ui.notify('direct: cannot paste: ' .. tostring(lock_err), vim.log.levels.ERROR)
+    return nil, lock_err
+  end
+  local lock_released = false
+  local function release_history_lock()
+    if lock_released then return end
+    lock_released = true
+    local released, release_err = M.history.lock.release()
+    if not released then
+      M.ui.notify('direct: could not release history lock: '
+        .. tostring(release_err), vim.log.levels.ERROR)
+    end
+  end
+  local current_register = M.content()
+  local current_names = current_register == src and M.fs.list_dir(src) or nil
+  if current_register ~= src or not vim.deep_equal(current_names, names) then
+    release_history_lock()
+    M.pending.finish()
+    local message = 'register changed while preparing paste; retry the operation'
+    M.ui.notify('direct: cannot paste: ' .. message, vim.log.levels.WARN)
+    return nil, message
+  end
   local completed, immediate_result, immediate_err = false, nil, nil
   local function finish(ok, result, execution_err)
     if completed then return end
@@ -257,6 +284,7 @@ function M.paste(dst, name, callback)
         M.ui.notify('Failed to paste: ' .. tostring(execution_err), vim.log.levels.ERROR)
       end
     end, debug.traceback)
+    release_history_lock()
     M.pending.finish()
     if not final_ok then
       M.ui.notify('direct: paste completion failed: ' .. tostring(final_err),

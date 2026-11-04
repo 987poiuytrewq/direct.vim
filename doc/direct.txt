@@ -506,29 +506,38 @@ State has no cache and is resolved on every use:
 
 Run `:checkhealth direct` to print the resolved data home. Inside it:
 
-    history/    undo.log and redo.log, the filesystem undo/redo history
+    .direct-history.lock   persistent same-host advisory lock file
+    history/    undo.log and redo.log, plus the paired transaction journal
     trash/      removed entries, kept so an undo can restore them
     register/   the most recent yank, and its content pointer
 
     Undo and redo use JSONL. Each stack begins with the exact header
     {"format":"direct-history","version":1}, followed by one canonical JSON
     action record per line. Paste/unpaste names are JSON arrays. Before reading
-    the register or changing the filesystem, direct validates path inputs and
-    classifies both history files from raw bytes. Invalid UTF-8, control
-    characters, malformed JSON, and unknown history formats are refused without
-    changing history, the register, or the filesystem.
+    the register or changing the filesystem, Direct validates path inputs and
+    classifies both history files from raw bytes. Unreadable files fail closed.
+    Unsupported, malformed, legacy, or future history bytes are silently
+    discarded and both stacks are reset; history is not migrated or backed up.
 
-    Recognized Python-era tab logs and Lua v2/v3 logs are reset to empty
-    current-format history with a warning. They are never replayed or migrated,
-    and no backup is created. Unknown, future, malformed, unreadable, and
-    pre-2018 space-framed logs are preserved byte-for-byte and block the
-    triggering operation.
+    Every stack rewrite uses an exclusive same-directory temporary file, syncs
+    the file, closes it, atomically renames it, and syncs the containing
+    directory. A durable transaction snapshot coordinates updates to both
+    stacks; an interrupted stack rewrite is replayed on the next history access.
+    Direct keeps an undo/redo source record until its filesystem reversal
+    succeeds. It journals simple sync actions and simple rename/trash/restore
+    reversals before executing them. On restart, when identity checks prove the
+    before/after state, Direct retries an action that did not start or commits
+    history for one that completed. If the filesystem state is ambiguous, Direct
+    keeps the journal and refuses further history operations until the paths are
+    inspected. Grouped moves and asynchronous paste/unpaste still have partial
+    crash windows and may require manual recovery.
 
-    Each history-file rewrite uses an exclusive same-directory temporary file,
-    flushes and closes it, then atomically renames it over the owned log. This
-    does not make the full pop -> filesystem action -> append sequence atomic:
-    a crash between those steps can leave the log and filesystem out of sync.
-    There is no multi-operation journal or inter-process lock.
+    A persistent advisory lock coordinates Direct instances on the same host
+    that share a data home. Direct holds it across its synchronous filesystem
+    mutations and their history updates, and across asynchronous paste/undo
+    actions. The OS releases the lock if Neovim exits or crashes. Other tools do
+    not participate in this lock, so external filesystem changes can still race
+    Direct. Network filesystems and cross-host lock behavior are not guaranteed.
 
     Filesystem destinations use atomic no-replace placement. Darwin and Linux
     use their native exclusive-rename primitive; unsupported platforms or
@@ -545,9 +554,10 @@ Run `:checkhealth direct` to print the resolved data home. Inside it:
     symlink targets. If they differ or cannot be verified, direct restores the
     source with no-replace or preserves and reports its temporary path. A crash
     in this brief capture/verify/remove window can leave a
-    `.direct-exdev-source-*` recovery directory. Concurrent writers can still
-    change open files after comparison; there is no snapshot or inter-process
-    lock. The final destination rename is atomic no-replace, but source/temp
+    `.direct-exdev-source-*` recovery directory. Concurrent external writers can
+    still change open files after comparison; there is no content snapshot. The
+    same-host Direct lock does not coordinate external tools or other hosts. The
+    final destination rename is atomic no-replace, but source/temp
     inode checks and cleanup remain pathname operations. A same-user process can
     race a replacement after a check; in that narrow window direct may preserve
     and report a stranded temp or quarantine path for manual recovery.
@@ -558,11 +568,9 @@ Run `:checkhealth direct` to print the resolved data home. Inside it:
 The Lua rewrite uses a new on-disk format and does not migrate the Python-era
 data:
 
-    - History: recognized Python-era tab logs and Lua v2/v3 logs are discarded
-      and reset to empty JSONL history with a warning and no backup. They are
-      never replayed or migrated, so their undo history does not survive. Old
-      space-framed Python logs and any unknown, malformed, or unreadable log are
-      preserved byte-for-byte and block the triggering operation.
+    - History: any unsupported, malformed, legacy, or future history bytes are
+      silently discarded and reset to empty current-format stacks, without
+      migration or backup. Unreadable history still blocks the operation.
     - Register: entries written by the Python version are still listed. Names
       with spaces are supported by the JSONL format; names with control
       characters or invalid UTF-8 are skipped with an error.

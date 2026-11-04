@@ -317,7 +317,8 @@ H.describe('async paste prompts', function()
     H.assert_true(live_pending.is_pending(), 'redo waits for clash input')
     H.assert_eq(vim.fn.readfile(dst .. '/f.txt'), { 'FOREIGN' }, 'foreign occupant is untouched')
     local undo_path, redo_path = stack_paths(sb)
-    H.assert_eq(#vim.fn.readfile(redo_path), 1, 'redo source popped while pending')
+    H.assert_eq(#vim.fn.readfile(redo_path), 2,
+      'redo source stays durable while the async action is pending')
     answer_next(calls, 'f-redo.txt')
     restore()
 

@@ -66,7 +66,7 @@ H.describe('history preflight', function()
       'invalid yank creates no redo log')
   end)
 
-  H.it('an unknown redo stack blocks paste before reading the register or changing files', function()
+  H.it('an unknown redo stack is silently discarded before paste reads the register', function()
     local sb = H.sandbox()
     local hist = history_dir(sb)
     H.mkdir(sb.root, '')
@@ -87,15 +87,17 @@ H.describe('history preflight', function()
     restore()
 
     H.assert_nil(result, 'paste is refused by preflight')
-    H.assert_eq(content_calls, 0, 'register pointer was not read')
-    H.assert_eq(log.read_raw(redo_path), original, 'unknown redo bytes remain exact')
-    H.assert_eq(vim.uv.fs_stat(vim.fs.joinpath(hist, 'undo.log')), nil,
-      'the reset-eligible undo stack was not rewritten before the other stack was checked')
+    H.assert_eq(content_calls, 1, 'paste reads the register after history reset')
+    H.assert_eq(log.read_raw(redo_path), fixtures.header .. '\n',
+      'unknown redo bytes are discarded')
+    H.assert_eq(log.read_raw(vim.fs.joinpath(hist, 'undo.log')),
+      fixtures.header .. '\n', 'both stacks reset together')
     H.assert_fs_eq(dest, {}, 'the destination tree is untouched')
-    H.assert_notified('history was preserved')
+    H.assert_false(H.messages():find('resetting legacy', 1, true) ~= nil,
+      'unsupported history is discarded silently')
   end)
 
-  H.it('malformed history blocks sync before auto-yank or filesystem mutation', function()
+  H.it('sync silently discards unsupported history before applying the requested edit', function()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
     H.mkfile(ws, 'keep.txt', { 'keep' })
@@ -120,19 +122,21 @@ H.describe('history preflight', function()
     local ok, err = listing:sync()
     restore()
 
-    H.assert_nil(ok, 'sync is refused')
-    H.assert_true(type(err) == 'string', 'sync carries the refusal reason')
-    H.assert_eq(yank_calls, 0, 'auto-yank did not run')
-    H.assert_eq(vim.fn.readfile(ws .. '/delete.txt'), { 'delete' },
-      'the deleted entry remains on disk')
-    H.assert_nil(register.content(), 'the register pointer was not changed')
-    H.assert_eq(log.read_raw(redo_path), original, 'unknown redo bytes remain exact')
-    H.assert_eq(vim.uv.fs_stat(vim.fs.joinpath(hist, 'undo.log')), nil,
-      'the other reset-eligible stack was not changed')
-    H.assert_true(vim.bo.modified, 'the rejected edit remains in the buffer')
+    H.assert_true(ok == true, 'sync proceeds after unsupported history is discarded')
+    H.assert_nil(err, 'sync has no error')
+    H.assert_eq(yank_calls, 1, 'the deletion is auto-yanked')
+    H.assert_nil(vim.uv.fs_stat(ws .. '/delete.txt'), 'the requested deletion applied')
+    H.assert_true(type(register.content()) == 'string', 'the register pointer was written')
+    H.assert_eq(log.read_raw(redo_path), fixtures.header .. '\n',
+      'unsupported redo bytes were replaced')
+    H.assert_true(log.read_raw(vim.fs.joinpath(hist, 'undo.log')):find(fixtures.header, 1, true) == 1,
+      'the new action is recorded in the reset undo stack')
+    H.assert_false(vim.bo.modified, 'successful sync clears the buffer')
+    H.assert_false(H.messages():find('resetting legacy', 1, true) ~= nil,
+      'unsupported history is discarded silently')
   end)
 
-  H.it('undo classifies both stacks before popping or executing either one', function()
+  H.it('unsupported redo history silently resets both stacks before undo', function()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
     H.mkfile(ws, 'a.txt', { 'A' })
@@ -147,13 +151,16 @@ H.describe('history preflight', function()
       'unknown redo fixture')
 
     H.capture_messages()
-    H.assert_nil(history.undo(), 'both stacks are preflighted before pop')
+    H.assert_nil(history.undo(), 'the unsupported redo causes both histories to reset')
 
     H.assert_eq(vim.fn.readfile(ws .. '/a.txt'), { 'A' }, 'filesystem is untouched')
     H.assert_nil(vim.uv.fs_stat(ws .. '/b.txt'), 'the reversal did not run')
-    H.assert_eq(log.read_raw(undo_path), fixtures.header .. '\n' .. valid .. '\n',
-      'undo bytes are not popped')
-    H.assert_eq(log.read_raw(redo_path), unknown, 'unknown redo bytes remain exact')
+    H.assert_eq(log.read_raw(undo_path), fixtures.header .. '\n',
+      'the valid sibling stack is discarded too')
+    H.assert_eq(log.read_raw(redo_path), fixtures.header .. '\n',
+      'unsupported redo is discarded')
+    H.assert_false(H.messages():find('resetting legacy', 1, true) ~= nil,
+      'unsupported history is discarded silently')
   end)
 
   H.it('reset failure aborts before auto-yank and leaves legacy bytes intact', function()

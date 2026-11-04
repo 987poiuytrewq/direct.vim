@@ -11,8 +11,7 @@
 -- not grouped in memory: the critical test below performs the swap in THIS
 -- process and undoes it in a real second `nvim --headless -l` process.
 --
--- Legacy logs are reset only when their framing is recognized; unknown and
--- malformed logs are preserved without executing entries.
+-- Unsupported and malformed history is reset silently without executing entries.
 
 local H = require('tests.support.harness')
 local fixtures = require('tests.support.history_fixtures')
@@ -298,7 +297,8 @@ local function swap_line(ws)
 
     H.capture_messages()
     H.assert_nil(history.undo(), 'a superseded log yields no undo step')
-    H.assert_notified('resetting legacy or empty undo history')
+    H.assert_false(H.messages():find('resetting legacy', 1, true) ~= nil,
+      'unsupported history is discarded silently')
 
     -- Nothing was half-applied and no content was destroyed.
     H.assert_eq(vim.fn.readfile(ws .. '/a.txt'), { 'CONTENT-B' },
@@ -711,7 +711,7 @@ local function swap_line(ws)
     }), { { 1 }, { 2, 3 }, { 4 } }, 'a non-move action is its own singleton')
   end)
 
-  H.it('a malformed JSON group record is refused and preserved, never executed', function()
+  H.it('a malformed JSON group record is discarded silently, never executed', function()
     local _, history, fs = modules()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -723,14 +723,14 @@ local function swap_line(ws)
     H.mkfile(sb.data_home, 'direct/history/undo.log', { MARKER, bad })
 
     H.capture_messages()
-    H.assert_nil(history.undo(), 'malformed history refuses undo')
-    H.assert_notified('history was preserved')
+    H.assert_nil(history.undo(), 'discarded history has no undo entry')
+    H.assert_eq(H.messages(), 'Nothing to undo', 'discarding is silent')
     H.assert_eq(vim.fn.readfile(ws .. '/a.txt'), { 'CONTENT-A' },
       'nothing was moved')
     H.assert_eq(vim.fn.readfile(ws .. '/b.txt'), { 'CONTENT-B' },
       'nothing was moved')
     H.assert_false(fs.exists(ws .. '/.direct-tmp-1'), 'no staging happened')
-    H.assert_eq(history_lines('undo.log'), { MARKER, bad },
-      'the malformed record is preserved exactly')
+    H.assert_eq(history_lines('undo.log'), { MARKER },
+      'the malformed record is discarded')
   end)
 end)
