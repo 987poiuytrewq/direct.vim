@@ -109,7 +109,7 @@ H.describe('action', function()
       vim.api.nvim_buf_set_name(buf, sb.root .. '/linkdir/file.txt')
       local stored_name = vim.api.nvim_buf_get_name(buf)
       if vim.fn.has('win32') == 1 or vim.fn.has('win64') == 1 then
-        H.assert_true(fs.same_path(stored_name, sb.root .. '/realdir/file.txt'),
+        H.assert_true(M.fs.same_path(stored_name, sb.root .. '/realdir/file.txt'),
           'the stored symlink spelling denotes the target file')
       else
         H.assert_eq(stored_name, sb.root .. '/realdir/file.txt',

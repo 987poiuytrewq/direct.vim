@@ -597,6 +597,9 @@ H.describe('register', function()
   -- clash answer. Before the fix a TAB-named entry yanked fine and undid as a
   -- silent no-op (no data loss, but inconsistent).
   H.it('a TAB-named entry is refused at the yank boundary with an error', function()
+    if vim.fn.has('win32') == 1 or vim.fn.has('win64') == 1 then
+      H.skip('Windows filenames cannot contain tab characters')
+    end
     local sb = H.sandbox()
     H.mkfile(sb.root, 'f\to.txt', { 'tabby' })
 
@@ -644,6 +647,9 @@ H.describe('register', function()
 
   -- A destination containing a control byte is refused before copy or history.
   H.it('a control-char destination is refused before any copy and writes no corrupted undo line', function()
+    if vim.fn.has('win32') == 1 or vim.fn.has('win64') == 1 then
+      H.skip('Windows filenames cannot contain control characters')
+    end
     local sb = H.sandbox()
     H.mkfile(sb.root, 'f.txt', { 'f' })
     H.assert_true(reg.yank({ sb.root .. '/f.txt' }) == true, 'yank')

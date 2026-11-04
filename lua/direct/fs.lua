@@ -259,18 +259,11 @@ end
 function M.path_identity(path, st)
   if type(path) ~= 'string' then return nil end
   local paths = require('direct.paths')
-  local spelling = path
   if package.config:sub(1, 1) == '\\' then
-    -- Windows stat providers can reuse inode values across unrelated entries.
-    -- Keep both lexical and resolved spelling for directories; lstat symlinks
-    -- retain their own spelling so entry_identity distinguishes a link name
-    -- from its target. File IDs remain useful for hardlinks.
-    if not st or st.type ~= 'link' then
-      spelling = M.uv.fs_realpath(path) or path
-    end
+    -- Windows stat providers can reuse inode values; use the native file ID
+    -- while keeping the canonical lexical spelling for transaction validation.
+    -- lstat symlinks request the reparse-point ID, distinct from their target.
     local identity = { path = paths.canonical(path) }
-    local resolved = paths.canonical(spelling)
-    if resolved ~= identity.path then identity.resolved = resolved end
     identity.inode = windows_file_identity(path, st and st.type == 'link')
     if not identity.inode and st and st.type == 'file' and st.dev ~= nil and st.ino ~= nil
       and st.dev ~= 0 and st.ino ~= 0 then
@@ -278,7 +271,7 @@ function M.path_identity(path, st)
     end
     return identity
   end
-  local identity = { path = paths.canonical(spelling) }
+  local identity = { path = paths.canonical(path) }
   if st and st.dev ~= nil and st.ino ~= nil and st.dev ~= 0 and st.ino ~= 0 then
     identity.inode = tostring(st.dev) .. ':' .. tostring(st.ino)
   end
@@ -288,14 +281,12 @@ end
 function M.path_identities_match(a, b)
   if not a or not b then return false end
   if a.path == b.path then return true end
-  if a.inode and b.inode and a.inode == b.inode then return true end
-  return (a.resolved ~= nil and (a.resolved == b.path or a.resolved == b.resolved))
-    or (b.resolved ~= nil and b.resolved == a.path)
+  if a.inode and b.inode then return a.inode == b.inode end
+  return false
 end
 
 local function index_identity(index, identity)
   index.by_path[identity.path] = true
-  if identity.resolved then index.by_resolved[identity.resolved] = true end
   if identity.inode then
     index.by_inode[identity.inode] = true
   else
@@ -305,19 +296,15 @@ end
 
 local function index_contains_identity(index, identity)
   if identity.inode and index.by_inode[identity.inode] then return true end
-  if index.by_path[identity.path] or index.by_resolved[identity.path] then return true end
-  if identity.resolved
-    and (index.by_path[identity.resolved] or index.by_resolved[identity.resolved]) then
-    return true
-  end
-  return index.unknown_by_path[identity.path] == true
+  if identity.inode then return index.unknown_by_path[identity.path] == true end
+  return index.by_path[identity.path] == true
 end
 
 -- A lookup index for same_path-style membership checks. This keeps aliases
 -- matched by device/inode while preserving normalized-path fallback whenever
 -- either side cannot be stat'ed.
 function M.path_identity_index(paths)
-  local index = { by_path = {}, by_resolved = {}, by_inode = {}, unknown_by_path = {} }
+  local index = { by_path = {}, by_inode = {}, unknown_by_path = {} }
   for _, path in ipairs(paths or {}) do
     M.path_identity_index_add(index, path)
   end
@@ -339,7 +326,7 @@ end
 
 local function index_identities(paths)
   if not paths or #paths == 0 then return nil end
-  local index = { by_path = {}, by_resolved = {}, unknown_by_path = {}, by_inode = {} }
+  local index = { by_path = {}, unknown_by_path = {}, by_inode = {} }
   for _, path in ipairs(paths) do
     local identity = M.path_identity(path, M.stat(path))
     if identity then
