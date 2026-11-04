@@ -405,12 +405,18 @@ function M.ignored_paths(snapshot, paths)
   local relative, rel_to_absolute = {}, {}
   local scope_path = normalize(snapshot.scope_path or snapshot.root)
   local prefix = scope_path:gsub('/+$', '') .. '/'
+  local tracked = snapshot.tracked or {}
   for _, path in ipairs(paths) do
     local normalized = normalize(path)
     if normalized:sub(1, #prefix) == prefix then
       local name = (snapshot.repo_prefix or '') .. normalized:sub(#prefix + 1)
-      relative[#relative + 1] = name
-      rel_to_absolute[name] = normalized
+      -- Git does not report tracked paths as ignored. The snapshot already
+      -- carries tracked files and their parent directories, so omit them from
+      -- check-ignore's input rather than sending the whole listing to Git.
+      if not tracked[name] then
+        relative[#relative + 1] = name
+        rel_to_absolute[name] = normalized
+      end
     end
   end
   if #relative == 0 then return {} end

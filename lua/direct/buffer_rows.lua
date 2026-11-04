@@ -40,13 +40,31 @@ local function row_id_at(bufnr, row)
   return nil
 end
 
+-- Read row identities in one API call for operations that visit most or all
+-- rows. Calling row_id_at in a line-count loop crosses the Lua/C API boundary
+-- once per row, which is costly for large directory listings.
+local function row_ids_by_row(bufnr)
+  local ids = {}
+  if not states[bufnr] then return ids end
+  for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, namespace,
+      0, -1, { details = true })) do
+    local row, details = mark[2], mark[4] or {}
+    if not details.invalid and ids[row] == nil then
+      ids[row] = mark[1]
+    end
+  end
+  return ids
+end
+
 local function refresh_display_ids(bufnr, state)
   local display_ids = {}
+  local row_ids = row_ids_by_row(bufnr)
   for row = 0, vim.api.nvim_buf_line_count(bufnr) - 1 do
-    local id = row_id_at(bufnr, row)
+    local id = row_ids[row]
     if id then display_ids[#display_ids + 1] = id end
   end
   state.display_ids = display_ids
+  return row_ids
 end
 
 local function row_path(root, record, line)
@@ -73,7 +91,7 @@ end
 -- Refresh display-only icons. When either kind is enabled, every row gets an
 -- icon slot: rows whose icon is disabled receive a two-cell spacer so names
 -- remain aligned. Buffer text and row identities are never changed here.
-local function refresh_icons(bufnr, state)
+local function refresh_icons(bufnr, state, row_ids)
   local options = require('direct.config').options
   local show_folders = options.show_folder_icons == true
   local show_files = options.show_file_icons == true
@@ -83,6 +101,7 @@ local function refresh_icons(bufnr, state)
   local git_snapshot = state.git_status
   local line_count = vim.api.nvim_buf_line_count(bufnr)
   state.icon_line_count = line_count
+  state.decorations_dirty = nil
   if not show_folders and not show_files then
     local existing = icon_namespace
       or vim.api.nvim_get_namespaces()[ICON_NAMESPACE]
@@ -93,8 +112,9 @@ local function refresh_icons(bufnr, state)
     icon_namespace = vim.api.nvim_create_namespace(ICON_NAMESPACE)
   end
   vim.api.nvim_buf_clear_namespace(bufnr, icon_namespace, 0, -1)
+  row_ids = row_ids or row_ids_by_row(bufnr)
   for row = 0, line_count - 1 do
-    local id = row_id_at(bufnr, row)
+    local id = row_ids[row]
     local rec = id and state.rows[id]
     if rec then
       local is_folder = is_dir_line(rec.name)
@@ -190,6 +210,7 @@ M.state_for_test = function(bufnr) return states[bufnr] end
 M.next_id = next_id
 M.set_row_mark = set_row_mark
 M.row_id_at = row_id_at
+M.row_ids_by_row = row_ids_by_row
 M.refresh_display_ids = refresh_display_ids
 M.row_path = row_path
 M.current_row_record = current_row_record

@@ -6,7 +6,7 @@ return function(deps)
   local fs = deps.fs
   local path_identity = deps.path_identity
   local same_lines = deps.same_lines
-  local row_id_at = deps.row_id_at
+  local row_ids_by_row = deps.row_ids_by_row
   local set_row_mark = deps.set_row_mark
   local refresh_display_ids = deps.refresh_display_ids
   local is_dir_line = deps.is_dir_line
@@ -25,9 +25,9 @@ return function(deps)
   local function restore_redone_materialization(bufnr, state, materialization, lines)
     local parent = state.rows[materialization.parent_id]
     if not parent or state.expanded[parent.id] then return false end
-    local parent_row
+    local parent_row, row_ids = nil, row_ids_by_row(bufnr)
     for row = 0, #lines - 1 do
-      if row_id_at(bufnr, row) == parent.id then
+      if row_ids[row] == parent.id then
         parent_row = row
         break
       end
@@ -273,8 +273,9 @@ return function(deps)
     state.expanded = restored_expanded
     state.display_ids = vim.deepcopy(expected_order)
     state.materialization_seq = vim.fn.undotree(bufnr).seq_cur
-    refresh_highlights(bufnr, state)
-    refresh_icons(bufnr, state)
+    local row_ids = row_ids_by_row(bufnr)
+    refresh_highlights(bufnr, state, row_ids)
+    refresh_icons(bufnr, state, row_ids)
     return true
   end
 

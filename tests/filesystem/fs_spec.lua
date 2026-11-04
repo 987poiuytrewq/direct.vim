@@ -98,6 +98,58 @@ H.describe('fs', function()
     H.assert_false(different, 'different normalized names do not match after stat failure')
   end)
 
+  H.it('path identity indexes preserve same_path matching without pairwise scans', function()
+    local sb = H.sandbox()
+    local target = H.mkfile(sb.root, 'target.txt', '')
+    local alias = sb.root .. '/alias.txt'
+    if not vim.uv.fs_symlink(target, alias) then return end
+
+    local index = fs.path_identity_index({ target })
+    H.assert_true(fs.path_identity_index_contains(index, alias),
+      'filesystem aliases match through device/inode identity')
+    H.assert_false(fs.path_identity_index_contains(index, sb.root .. '/missing.txt'),
+      'a distinct path does not match')
+
+    local original_stat = vim.uv.fs_stat
+    vim.uv.fs_stat = function(path, ...)
+      if vim.fs.normalize(path) == vim.fs.normalize(target) then
+        return nil, 'EACCES'
+      end
+      return original_stat(path, ...)
+    end
+    local unknown_index = fs.path_identity_index({ target })
+    local fallback = fs.path_identity_index_contains(unknown_index, target .. '/./')
+    vim.uv.fs_stat = original_stat
+    H.assert_true(fallback, 'unknown identities still match normalized spellings')
+  end)
+
+  H.it('path identity index membership uses a linear number of stats', function()
+    local sb = H.sandbox()
+    local root = H.mkdir(sb.root, 'indexed')
+    local paths = {}
+    for index = 1, 300 do
+      paths[index] = H.mkfile(root, string.format('file-%03d.txt', index), '')
+    end
+    local original_stat = vim.uv.fs_stat
+    local stat_calls = 0
+    vim.uv.fs_stat = function(...)
+      stat_calls = stat_calls + 1
+      return original_stat(...)
+    end
+    local index = fs.path_identity_index(paths)
+    local all_found = true
+    for _, path in ipairs(paths) do
+      if not fs.path_identity_index_contains(index, path) then
+        all_found = false
+        break
+      end
+    end
+    vim.uv.fs_stat = original_stat
+    H.assert_true(all_found, 'every indexed path is found')
+    H.assert_true(stat_calls <= #paths * 2,
+      'index build and lookup use O(N) stats, got ' .. stat_calls)
+  end)
+
   H.it('treats missing or zero device/inode values as unknown identity', function()
     local sb = H.sandbox()
     H.mkfile(sb.root, 'one.txt', '')
@@ -138,6 +190,17 @@ H.describe('fs', function()
     H.assert_eq(fs.read_dir_lines(root),
       { 'adir/', 'linkdir/', 'zdir/', 'a.txt', 'b.txt', 'linkfile' },
       'dirs first (trailing /), then files; links resolved; broken omitted')
+
+    local scan = vim.uv.fs_scandir(root)
+    local entries = {}
+    while true do
+      local name, kind = vim.uv.fs_scandir_next(scan)
+      if name == nil then break end
+      entries[#entries + 1] = { name = name, type = kind }
+    end
+    H.assert_eq(fs.read_dir_lines(root, nil, entries),
+      { 'adir/', 'linkdir/', 'zdir/', 'a.txt', 'b.txt', 'linkfile' },
+      'a pre-scanned entry list gives the same filtered and sorted result')
 
     -- wildignore ignore_set: an entry is dropped when same_path matches.
     H.assert_eq(fs.read_dir_lines(root, { root .. '/b.txt' }),

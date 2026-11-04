@@ -74,13 +74,14 @@ end
 -- An explicit `ignored` argument is the exact list-time match set; explicit nil
 -- means no entries are ignored. With no second argument, use current &wildignore.
 function M.read(root, ...)
-  local ignored
+  local ignored, entries
   if select('#', ...) == 0 then
     ignored = M.ignore_set(root)
   else
     ignored = select(1, ...)
+    entries = select(2, ...)
   end
-  return fs.read_dir_lines(root, ignored)
+  return fs.read_dir_lines(root, ignored, entries)
 end
 
 -- list_with_snapshot(root) returns the current filtered listing and the names
@@ -128,30 +129,26 @@ end
 local function read_with_snapshot(root, snapshot, read)
   local scan, scan_err = vim.uv.fs_scandir(root)
   if not scan then return nil, scan_err end
-  local paths = {}
+  local paths, entries, names = {}, {}, {}
   while true do
-    local name = vim.uv.fs_scandir_next(scan)
+    local name, kind = vim.uv.fs_scandir_next(scan)
     if name == nil then break end
     paths[#paths + 1] = M.entry_path(root, name)
+    entries[#entries + 1] = { name = name, type = kind }
+    names[#names + 1] = name
   end
   local ignored, filter_err = filtered_paths(root, paths, snapshot)
   if not ignored then return nil, filter_err end
-  return (read or M.read)(root, ignored)
+  local visible, err = (read or M.read)(root, ignored, entries)
+  if not visible then return nil, err end
+  return visible, nil, names
 end
 
 local function list_with_snapshot(root, read, show_hidden_override)
   local snapshot, filter_err = capture_filter(root, show_hidden_override)
   if not snapshot then return nil, nil, filter_err end
-  local visible, err = read_with_snapshot(root, snapshot, read)
+  local visible, err, all_names = read_with_snapshot(root, snapshot, read)
   if not visible then return nil, nil, err end
-  local scan, scan_err = vim.uv.fs_scandir(root)
-  if not scan then return nil, nil, scan_err end
-  local all_names = {}
-  while true do
-    local name = vim.uv.fs_scandir_next(scan)
-    if name == nil then break end
-    all_names[#all_names + 1] = name
-  end
   local visible_set = {}
   for _, line in ipairs(visible) do
     visible_set[line:gsub('/+$', '')] = true

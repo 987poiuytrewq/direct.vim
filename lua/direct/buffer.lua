@@ -26,7 +26,7 @@ local namespace = rows.namespace
 local deleted_guards = {}
 local next_id = rows.next_id
 local set_row_mark = rows.set_row_mark
-local row_id_at = rows.row_id_at
+local row_ids_by_row = rows.row_ids_by_row
 local refresh_display_ids = rows.refresh_display_ids
 local row_path = rows.row_path
 local current_row_record = rows.current_row_record
@@ -72,12 +72,13 @@ local function ensure_git_snapshot(state, options)
   return state.git_status
 end
 
-local function refresh_highlights(bufnr, state)
+local function refresh_highlights(bufnr, state, row_ids)
   local options = require('direct.config').options
   local snapshot = ensure_git_snapshot(state, options)
   local display_rows = {}
+  row_ids = row_ids or row_ids_by_row(bufnr)
   for row = 0, vim.api.nvim_buf_line_count(bufnr) - 1 do
-    local id = row_id_at(bufnr, row)
+    local id = row_ids[row]
     local rec = id and state.rows[id]
     if rec then
       local status, conflict
@@ -118,8 +119,9 @@ function M.refresh_git_status(bufnr, root)
     vim.api.nvim_buf_call(bufnr, function() M.list(state.root) end)
     return true
   end
-  refresh_highlights(bufnr, state)
-  refresh_icons(bufnr, state)
+  local row_ids = row_ids_by_row(bufnr)
+  refresh_highlights(bufnr, state, row_ids)
+  refresh_icons(bufnr, state, row_ids)
   return true
 end
 
@@ -187,6 +189,23 @@ local function capture_deleted_guard_snapshot(bufnr, state)
   end
 end
 
+local function changed_rows_need_decoration_refresh(bufnr, firstline,
+    lastline, new_lastline, old_ids)
+  if new_lastline ~= lastline then return true end
+  local active_by_row = {}
+  for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, namespace,
+      { firstline, 0 }, { new_lastline, -1 }, { details = true })) do
+    local row, id, details = mark[2], mark[1], mark[4] or {}
+    if details.invalid then return true end
+    active_by_row[row] = id
+  end
+  for row = firstline, lastline - 1 do
+    local expected = old_ids[row]
+    if expected and active_by_row[row] ~= expected then return true end
+  end
+  return false
+end
+
 local function restore_deleted_rows(bufnr, state)
   state = state or states[bufnr]
   local pending_restore = state and state.pending_deleted_restore
@@ -202,10 +221,10 @@ local function restore_deleted_rows(bufnr, state)
   state.restoring_deleted = nil
   state.pending_deleted_restore = nil
   if ok then
-    refresh_display_ids(bufnr, state)
+    local row_ids = refresh_display_ids(bufnr, state)
     capture_deleted_guard_snapshot(bufnr, state)
-    refresh_highlights(bufnr, state)
-    refresh_icons(bufnr, state)
+    refresh_highlights(bufnr, state, row_ids)
+    refresh_icons(bufnr, state, row_ids)
   end
 end
 
@@ -225,6 +244,7 @@ local function attach_deleted_guard(bufnr)
         end
       end
       if deleted_touched then
+        state.decorations_dirty = true
         local original_lines = {}
         for row = firstline, lastline - 1 do
           if old_lines[row + 1] ~= nil then
@@ -248,6 +268,10 @@ local function attach_deleted_guard(bufnr)
       end
 
       local delta = new_lastline - lastline
+      if changed_rows_need_decoration_refresh(changed_buf, firstline,
+          lastline, new_lastline, old_ids) then
+        state.decorations_dirty = true
+      end
       local next_ids = {}
       for row, id in pairs(old_ids) do
         if row < firstline then
@@ -407,7 +431,7 @@ local tree_planner = require('direct.buffer_tree')({
   fs = fs,
   states = states,
   namespace = namespace,
-  row_id_at = row_id_at,
+  row_ids_by_row = row_ids_by_row,
   set_row_mark = set_row_mark,
   is_dir_line = is_dir_line,
   component_reason = component_reason,
@@ -426,7 +450,7 @@ reconcile_undone_materialization = require('direct.buffer_undo_state')({
   fs = fs,
   path_identity = path_identity,
   same_lines = same_lines,
-  row_id_at = row_id_at,
+  row_ids_by_row = row_ids_by_row,
   set_row_mark = set_row_mark,
   refresh_display_ids = refresh_display_ids,
   is_dir_line = is_dir_line,
@@ -538,9 +562,10 @@ local function set_options(bufnr)
       -- Edits such as `J` can move display extmarks from a deleted row into
       -- the middle of the surviving line. Rebuild them from row identities.
       state = states[bufnr]
-      if state then
-        refresh_highlights(bufnr, state)
-        refresh_icons(bufnr, state)
+      if state and state.decorations_dirty and not state.pending_deleted_restore then
+        local row_ids = row_ids_by_row(bufnr)
+        refresh_highlights(bufnr, state, row_ids)
+        refresh_icons(bufnr, state, row_ids)
       end
     end,
     desc = 'direct: reconcile child rows and refresh display marks after text changes',
@@ -551,9 +576,12 @@ local function set_options(bufnr)
     callback = function()
       local state = states[bufnr]
       if state then restore_deleted_rows(bufnr, state) end
-      if state then
-        refresh_highlights(bufnr, state)
-        refresh_icons(bufnr, state)
+      state = states[bufnr]
+      if state and (state.decorations_dirty
+          or state.icon_line_count ~= vim.api.nvim_buf_line_count(bufnr)) then
+        local row_ids = row_ids_by_row(bufnr)
+        refresh_highlights(bufnr, state, row_ids)
+        refresh_icons(bufnr, state, row_ids)
       end
     end,
     desc = 'direct: refresh display marks when insert-mode edits change line count',
@@ -724,8 +752,9 @@ function Buffer:list()
     end
     old_known_children = old_state.known_children or {}
     local old_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    local old_row_ids = row_ids_by_row(bufnr)
     for row, line in ipairs(old_lines) do
-      local id = row_id_at(bufnr, row - 1)
+      local id = old_row_ids[row - 1]
       local rec = id and old_state.rows[id]
       -- Reuse a root only while its extmark still identifies the unchanged
       -- row. `rec.path` is assigned from this row's entry path on every list;
@@ -857,8 +886,9 @@ function Buffer:list()
   for row, item in ipairs(rendered) do
     set_row_mark(bufnr, row - 1, item.id)
   end
-  refresh_highlights(bufnr, state)
-  refresh_icons(bufnr, state)
+  local row_ids = row_ids_by_row(bufnr)
+  refresh_highlights(bufnr, state, row_ids)
+  refresh_icons(bufnr, state, row_ids)
   state.materialization_seq = vim.fn.undotree().seq_cur
   set_options(bufnr)
   self:place_cursor(display, display_identities,
@@ -883,6 +913,7 @@ function Buffer:expand(row)
   if not is_dir_line(rec.name) then return false end
 
   local state = states[bufnr]
+  local display_row_ids
   local just_materialized = false
   if not state.expanded[rec.id] then
     local path = row_path(self.root, rec, line)
@@ -966,12 +997,13 @@ function Buffer:expand(row)
         set_row_mark(bufnr, insert_at + offset - 1, child.id)
       end
       state.display_ids = {}
+      display_row_ids = row_ids_by_row(bufnr)
       for display_row = 0, vim.api.nvim_buf_line_count(bufnr) - 1 do
-        local id = row_id_at(bufnr, display_row)
+        local id = display_row_ids[display_row]
         if id then state.display_ids[#state.display_ids + 1] = id end
       end
       capture_deleted_guard_snapshot(bufnr, state)
-      refresh_highlights(bufnr, state)
+      refresh_highlights(bufnr, state, display_row_ids)
       state.materialization_seq = vim.fn.undotree().seq_cur
       if state.materialization_seq ~= base_seq then
         local child_ids = {}
@@ -999,12 +1031,13 @@ function Buffer:expand(row)
   end
 
   if just_materialized then vim.cmd('redraw') end
-  refresh_icons(bufnr, state)
+  refresh_icons(bufnr, state, display_row_ids)
   return true
 end
 
 local function collapse_snapshot(bufnr, state, parent, parent_row)
   local rows, rows_by_id, expansions, directory_snapshots = {}, {}, {}, {}
+  local visible_ids_by_row = row_ids_by_row(bufnr)
   local cursor = parent_row
   local function visit(parent_id)
     local expansion = state.expanded[parent_id]
@@ -1014,7 +1047,7 @@ local function collapse_snapshot(bufnr, state, parent, parent_row)
       cursor = row
       local line = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1]
       if state.rows[child.id] ~= child or child.parent ~= parent_id
-        or row_id_at(bufnr, row) ~= child.id
+        or visible_ids_by_row[row] ~= child.id
         or line ~= recorded_row_text(child) then
         return false
       end
@@ -1043,7 +1076,7 @@ local function collapse_snapshot(bufnr, state, parent, parent_row)
       local rec = state.rows[id]
       local line = display_lines[row]
       local identity = rec and rec.path and path_identity(rec.path) or nil
-      if not rec or visible_records[id] or row_id_at(bufnr, row - 1) ~= id
+      if not rec or visible_records[id] or visible_ids_by_row[row - 1] ~= id
         or not identity
         or (rec.kind == 'child'
           and not fs.path_identities_match(identity, rec.identity)) then
@@ -1124,6 +1157,7 @@ function Buffer:collapse(row)
     ui.notify(message, vim.log.levels.ERROR)
     return false, reason
   end
+  local display_row_ids
   if #snapshot.rows > 0 then
     local modified = vim.bo[bufnr].modified
     local undo_levels = vim.bo[bufnr].undolevels
@@ -1140,14 +1174,14 @@ function Buffer:collapse(row)
     state.collapse_undos = state.collapse_undos or {}
     state.collapse_undos[#state.collapse_undos + 1] = snapshot
     remove_expanded_subtree(bufnr, state, parent.id)
-    refresh_display_ids(bufnr, state)
+    display_row_ids = refresh_display_ids(bufnr, state)
     capture_deleted_guard_snapshot(bufnr, state)
-    refresh_highlights(bufnr, state)
+    refresh_highlights(bufnr, state, display_row_ids)
     vim.bo[bufnr].modified = modified
   else
     state.expanded[parent.id] = nil
   end
-  refresh_icons(bufnr, state)
+  refresh_icons(bufnr, state, display_row_ids)
   return true
 end
 
@@ -1406,12 +1440,14 @@ function Buffer:sync(options)
       end
     end
     local visible_ids, stack, has_tree_edit, has_indented = {}, {}, false, false
+    local row_ids = row_ids_by_row(bufnr)
     for row = 0, #visible - 1 do
-      local id = row_id_at(bufnr, row)
+      local id = row_ids[row]
       if id then visible_ids[id] = true end
     end
     for row, line in ipairs(visible) do
-      local rec = current_row_record(bufnr, row - 1)
+      local id = row_ids[row - 1]
+      local rec = id and state.rows[id] or nil
       if not rec then
         local expected_id = state and state.display_ids[row]
         local expected_rec = expected_id and state.rows[expected_id]
@@ -1618,19 +1654,17 @@ function Buffer:sync(options)
       if a.name == 'mkdir' and adepth ~= bdepth then return adepth < bdepth end
       return adst < bdst
     end)
-    local destinations = {}
+    local destination_index = fs.path_identity_index()
     for _, act in ipairs(actions) do
       if act.name == 'mv' or act.name == 'touch' or act.name == 'mkdir' then
-        for _, destination in ipairs(destinations) do
-          if fs.same_path(destination, act.dst) then
-            vim.bo[bufnr].modified = true
-            local reason = 'multiple subtree actions target the same path: ' .. act.dst
-            ui.notify('Refusing to sync: ' .. reason .. '; nothing was changed.',
-              vim.log.levels.ERROR)
-            return nil, reason
-          end
+        if fs.path_identity_index_contains(destination_index, act.dst) then
+          vim.bo[bufnr].modified = true
+          local reason = 'multiple subtree actions target the same path: ' .. act.dst
+          ui.notify('Refusing to sync: ' .. reason .. '; nothing was changed.',
+            vim.log.levels.ERROR)
+          return nil, reason
         end
-        destinations[#destinations + 1] = act.dst
+        fs.path_identity_index_add(destination_index, act.dst)
       end
       local _, serialize_err = action_mod.serialize(act)
       if serialize_err then
@@ -1900,8 +1934,9 @@ function Buffer:sync(options)
   -- rebuilds its inode index, so the expansion follows the renamed directory.
   local state_before_list = states[bufnr]
   if state_before_list then
+    local row_ids = row_ids_by_row(bufnr)
     for row, line in ipairs(visible) do
-      local id = row_id_at(bufnr, row - 1)
+      local id = row_ids[row - 1]
       local rec = id and state_before_list.rows[id]
       if rec and rec.kind == 'root' and not line:match('^%s') then
         local path = M.entry_path(self.root, line)

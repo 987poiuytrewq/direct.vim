@@ -31,10 +31,22 @@ H.describe('buffer: listing and path identity', function()
     vim.cmd('edit ' .. vim.fn.fnameescape(ws .. '/file-2000.txt'))
     local listing = buffer.Buffer(ws)
     local original_stat, original_same_path = vim.uv.fs_stat, fs.same_path
-    local stat_calls, same_path_calls = 0, 0
+    local original_scandir, original_get_extmarks =
+      vim.uv.fs_scandir, vim.api.nvim_buf_get_extmarks
+    local stat_calls, same_path_calls, root_scans, extmark_calls = 0, 0, 0, 0
     vim.uv.fs_stat = function(...)
       stat_calls = stat_calls + 1
       return original_stat(...)
+    end
+    vim.uv.fs_scandir = function(path, ...)
+      if vim.fs.normalize(path) == vim.fs.normalize(ws) then
+        root_scans = root_scans + 1
+      end
+      return original_scandir(path, ...)
+    end
+    vim.api.nvim_buf_get_extmarks = function(...)
+      extmark_calls = extmark_calls + 1
+      return original_get_extmarks(...)
     end
     fs.same_path = function(...)
       same_path_calls = same_path_calls + 1
@@ -43,11 +55,15 @@ H.describe('buffer: listing and path identity', function()
     end
     local initial_ok, initial_result = pcall(listing.list, listing)
     local initial_stats = stat_calls
-    vim.uv.fs_stat, fs.same_path = original_stat, original_same_path
+    vim.uv.fs_stat, vim.uv.fs_scandir = original_stat, original_scandir
+    vim.api.nvim_buf_get_extmarks, fs.same_path = original_get_extmarks, original_same_path
 
     H.assert_true(initial_ok, tostring(initial_result))
     H.assert_true(initial_result == true, 'initial listing succeeds')
     H.assert_eq(same_path_calls, 0, 'initial listing avoids same_path comparisons')
+    H.assert_eq(root_scans, 1, 'initial listing scans the root only once')
+    H.assert_true(extmark_calls <= 4,
+      'initial rendering reads extmarks in batches, got ' .. extmark_calls .. ' calls')
     H.assert_true(initial_stats <= 2 * count + 10,
       'initial listing uses at most 2*N+10 stats, got ' .. initial_stats)
     H.assert_eq(vim.api.nvim_buf_line_count(0), count, 'all plain files are listed')
@@ -57,10 +73,20 @@ H.describe('buffer: listing and path identity', function()
     local before_marks = vim.api.nvim_buf_get_extmarks(0, ns, 0, -1, {})
     H.assert_eq(#before_marks, count, 'every row has a stable identity mark')
 
-    stat_calls, same_path_calls = 0, 0
+    stat_calls, same_path_calls, root_scans, extmark_calls = 0, 0, 0, 0
     vim.uv.fs_stat = function(...)
       stat_calls = stat_calls + 1
       return original_stat(...)
+    end
+    vim.uv.fs_scandir = function(path, ...)
+      if vim.fs.normalize(path) == vim.fs.normalize(ws) then
+        root_scans = root_scans + 1
+      end
+      return original_scandir(path, ...)
+    end
+    vim.api.nvim_buf_get_extmarks = function(...)
+      extmark_calls = extmark_calls + 1
+      return original_get_extmarks(...)
     end
     fs.same_path = function(...)
       same_path_calls = same_path_calls + 1
@@ -69,11 +95,15 @@ H.describe('buffer: listing and path identity', function()
     end
     local refresh_ok, refresh_result = pcall(listing.list, listing)
     local refresh_stats = stat_calls
-    vim.uv.fs_stat, fs.same_path = original_stat, original_same_path
+    vim.uv.fs_stat, vim.uv.fs_scandir = original_stat, original_scandir
+    vim.api.nvim_buf_get_extmarks, fs.same_path = original_get_extmarks, original_same_path
 
     H.assert_true(refresh_ok, tostring(refresh_result))
     H.assert_true(refresh_result == true, 'refresh succeeds')
     H.assert_eq(same_path_calls, 0, 'refresh avoids same_path comparisons')
+    H.assert_eq(root_scans, 1, 'refresh scans the root only once')
+    H.assert_true(extmark_calls <= 4,
+      'refresh rendering reads extmarks in batches, got ' .. extmark_calls .. ' calls')
     H.assert_true(refresh_stats <= 3 * count + 10,
       'refresh uses at most 3*N+10 stats, got ' .. refresh_stats)
     local after_marks = vim.api.nvim_buf_get_extmarks(0, ns, 0, -1, {})

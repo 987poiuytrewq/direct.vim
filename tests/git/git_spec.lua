@@ -67,6 +67,26 @@ local function status_text(marks)
 end
 
 H.describe('Git status display', function()
+  H.it('does not send already-tracked paths to Git ignore queries', function()
+    local original_system = vim.system
+    local system_calls = 0
+    vim.system = function(...)
+      system_calls = system_calls + 1
+      return original_system(...)
+    end
+    local ignored, err = git_status.ignored_paths({
+      root = '/direct-ignore-query-test',
+      scope_path = '/direct-ignore-query-test',
+      repo_prefix = '',
+      tracked = { ['tracked.txt'] = true },
+    }, { '/direct-ignore-query-test/tracked.txt' })
+    vim.system = original_system
+
+    H.assert_eq(ignored, {}, 'tracked entries cannot be filtered by Git')
+    H.assert_nil(err, 'the filtered query succeeds without Git')
+    H.assert_eq(system_calls, 0, 'all-tracked input launches no check-ignore process')
+  end)
+
   H.it('preserves porcelain columns and aggregates each directory column independently', function()
     local sb = H.sandbox()
     local root = H.mkdir(sb.root, 'repo')
