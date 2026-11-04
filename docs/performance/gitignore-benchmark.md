@@ -6,9 +6,10 @@ Environment: macOS, Neovim 0.12.5, Apple Git 2.54.0, libgit2 1.9.7
 
 ## Summary
 
-For large candidate sets, Git's ignored-path enumeration and libgit2's in-process
-ignore matcher were substantially faster than sending every candidate to
-`git check-ignore`. On a 20,000-file flat repository, the medians were:
+These measurements are the pre-implementation baseline. For large candidate
+sets, Git's ignored-path enumeration and libgit2's in-process ignore matcher
+were substantially faster than sending every candidate to `git check-ignore`.
+On a 20,000-file flat repository, the medians were:
 
 | Operation | Median |
 |---|---:|
@@ -25,10 +26,19 @@ list was a re-list after an unmeasured initial attach; the repeat value is the
 median of three re-lists. The benchmark therefore points to promising backends,
 not a predicted end-to-end speedup.
 
-The results suggest a hybrid worth prototyping: retain `git check-ignore` for
-small directory batches, and use a scoped ignored-path inventory or a reused
-libgit2 repository/index for large batches. This does not yet address the
-separate cost of the current whole-repository fingerprint.
+The implementation now uses `git ls-files` as its sole ignore-enumeration
+backend. It uses `--directory` and scopes queries with literal pathspecs where
+the listed directory is below the repository root. `check-ignore` and libgit2
+are not used; libgit2 was rejected to avoid a native dependency. The timing
+table remains a baseline, not a measurement of the new implementation.
+
+Ignore snapshots now capture Git's effective ignored/tracked path decisions
+instead of hashing ignore files and Git configuration. Sync validates tracked
+membership in the listed scope and ignore decisions for entries present at list
+time, then re-queries the current ignored inventory when filtering current disk
+entries and checking descendants. Thus newly appearing ignored entries are
+excluded from delete sources without invalidating an otherwise unrelated sync.
+Nested repositories are still captured and checked independently.
 
 ## Scaling comparison: CLI operations
 
@@ -114,9 +124,11 @@ The semantic check was a focused fixture, not an exhaustive compatibility suite.
 - libgit2 was tested through a local macOS installation. Shipping it would add a
   native dependency and requires broader tests for worktrees, nested repos,
   global/config changes, index refreshes, symlinks, and Git-version parity.
-- A path-decision snapshot can avoid rejecting unrelated rule changes, but
-  destructive actions on collapsed directories still need a safe policy for
-  descendants that were never individually displayed.
+- The updated end-to-end implementation has not yet been benchmarked against
+  these baseline timings. Measure full list/expand/sync flows, including scoped
+  pathspecs and nested repositories, before claiming a speedup.
+- Destructive actions still inspect current descendants and refuse when they
+  contain filtered entries; nested repositories are validated independently.
 
-No plugin source was changed for these benchmarks; this report is the only
-benchmark artifact added to the worktree.
+The original benchmark numbers above are unchanged; implementation and semantic
+tests were added afterward.

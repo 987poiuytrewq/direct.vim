@@ -67,7 +67,7 @@ local function status_text(marks)
 end
 
 H.describe('Git status display', function()
-  H.it('does not send already-tracked paths to Git ignore queries', function()
+  H.it('does not query Git when all candidate paths are already tracked', function()
     local original_system = vim.system
     local system_calls = 0
     vim.system = function(...)
@@ -84,7 +84,7 @@ H.describe('Git status display', function()
 
     H.assert_eq(ignored, {}, 'tracked entries cannot be filtered by Git')
     H.assert_nil(err, 'the filtered query succeeds without Git')
-    H.assert_eq(system_calls, 0, 'all-tracked input launches no check-ignore process')
+    H.assert_eq(system_calls, 0, 'all-tracked input launches no ls-files process')
   end)
 
   H.it('preserves porcelain columns and aggregates each directory column independently', function()

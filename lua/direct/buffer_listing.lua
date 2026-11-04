@@ -107,7 +107,7 @@ local function capture_filter(root, show_hidden_override)
   return snapshot
 end
 
-local function filtered_paths(root, paths, snapshot)
+local function filtered_paths(root, paths, snapshot, git_inventory_cache)
   local matches = {}
   for _, path in ipairs(M.ignore_set(root, snapshot.wildignore or '') or {}) do
     matches[#matches + 1] = path
@@ -119,7 +119,7 @@ local function filtered_paths(root, paths, snapshot)
     end
   end
   if snapshot.respect_gitignore and snapshot.git then
-    local ignored, err = git.ignored_paths(snapshot.git, paths)
+    local ignored, err = git.ignored_paths(snapshot.git, paths, git_inventory_cache)
     if not ignored then return nil, err end
     vim.list_extend(matches, ignored)
   end
@@ -159,6 +159,9 @@ local function list_with_snapshot(root, read, show_hidden_override)
   end
   table.sort(hidden)
   snapshot.hidden = hidden
+  if snapshot.git then
+    git.record_ignore_candidates(snapshot.git, root, all_names)
+  end
   return visible, snapshot
 end
 
@@ -280,7 +283,7 @@ local function apply_snapshot(root, lines, snapshot)
   local ignored = ignored_identity_index(M.ignore_set(root, snapshot.wildignore or ''))
   local paths = {}
   for _, line in ipairs(lines) do paths[#paths + 1] = M.entry_path(root, line) end
-  local current_filtered, filter_err = filtered_paths(root, paths, snapshot)
+  local current_filtered, filter_err = filtered_paths(root, paths, snapshot, {})
   if not current_filtered then return nil, filter_err end
   local current_index = ignored_identity_index(current_filtered)
   local visible = {}
@@ -335,6 +338,7 @@ local function hidden_descendant(directory, root_snapshot, state)
   local visited = {}
   local filters = {}
   local git_contexts = {}
+  local git_inventory_cache = {}
   if root_snapshot.git then
     git_contexts[vim.fs.normalize(root_snapshot.git.root)] = root_snapshot.git
   end
@@ -364,7 +368,7 @@ local function hidden_descendant(directory, root_snapshot, state)
         if marker_root ~= context_root then
           local cached = git_contexts[marker_root]
           if cached == nil then
-            local discovered, discover_err = git.ignore_snapshot(real)
+            local discovered, discover_err = git.ignore_context(real)
             if discover_err then return nil, discover_err end
             cached = discovered or false
             git_contexts[marker_root] = cached
@@ -411,7 +415,8 @@ local function hidden_descendant(directory, root_snapshot, state)
     end
     local git_hidden = {}
     if filter.respect_gitignore and filter.git then
-      local matches, git_err = git.ignored_paths(filter.git, child_paths)
+      local matches, git_err = git.ignored_paths(filter.git, child_paths,
+        git_inventory_cache)
       if not matches then return nil, git_err end
       for _, match in ipairs(matches) do
         git_hidden[vim.fs.normalize(match)] = true
