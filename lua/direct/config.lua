@@ -79,8 +79,6 @@ local function report_invalid_git_option(key, reason)
     vim.log.levels.ERROR)
 end
 
-local parent_directory_entry = '..' .. package.config:sub(1, 1)
-
 local function resolve_git_options(value)
   if type(value) ~= 'table' then
     report_invalid_git_option('', 'expected a table')
@@ -163,7 +161,7 @@ M.BUFFER_MAPS = {
   { mode = 'n', lhs = '<CR>',
     rhs = '<Cmd>lua require("direct").open()<CR>' },
   { mode = 'n', lhs = '-',
-    rhs = '<Cmd>lua require("direct").open(' .. string.format('%q', parent_directory_entry) .. ')<CR>' },
+    rhs = '<Cmd>lua require("direct").list(vim.fs.dirname(vim.api.nvim_buf_get_name(0)))<CR>' },
   { mode = 'n', lhs = 'z-',
     rhs = '<Cmd>lua require("direct").open_parent_expanded()<CR>' },
   { mode = 'n', lhs = 'u', rhs = '<Cmd>DirectUndo<CR>' },

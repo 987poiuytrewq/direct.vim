@@ -76,7 +76,8 @@ function M.open(line)
 end
 
 function M.open_parent_expanded()
-  local opened = M.open('../')
+  local parent = vim.fs.dirname(vim.api.nvim_buf_get_name(0))
+  local opened = M.list(parent)
   if not opened then return opened end
   return buffer.expand()
 end
