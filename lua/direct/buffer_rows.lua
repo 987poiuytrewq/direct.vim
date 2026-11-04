@@ -147,7 +147,7 @@ local function refresh_icons(bufnr, state, row_ids)
         end
       end
       vim.api.nvim_buf_set_extmark(bufnr, icon_namespace, row,
-        (rec.depth or 0) * 2, {
+        (rec.depth or 0) * options.indent_size, {
           virt_text = { { glyph .. (enabled and ' ' or ''), group } },
           virt_text_pos = 'inline',
           right_gravity = false,
@@ -184,7 +184,8 @@ end
 local function recorded_row_text(rec)
   local name = rec.name
   if is_dir_line(name) then name = paths.mark_directory(paths.strip_directory_marker(name)) end
-  return string.rep('  ', rec.depth or 0) .. name
+  local indent_size = require('direct.config').options.indent_size
+  return string.rep(' ', indent_size * (rec.depth or 0)) .. name
 end
 
 local function visible_row_for_id(bufnr, state, id)

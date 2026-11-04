@@ -84,6 +84,7 @@ Run `:checkhealth direct` to confirm the version and the data home in use:
       map_default_keys = true, -- set false to install no default mappings
       show_hidden = true, -- set false to hide dot-prefixed entries
       respect_gitignore = true, -- set false to show Git-ignored entries
+      indent_size = 2, -- spaces per tree level; must be an integer greater than 1
       show_folder_icons = true, -- show Font Awesome folder icons
       show_file_icons = true, -- show a generic Font Awesome file icon
       icons = {
@@ -113,6 +114,9 @@ option name as an error instead of silently ignoring it. See
 `directory_separator` defaults to the filesystem separator and controls the
 trailing marker used for directory rows. Set it to `/` or `\\` to choose a
 different marker; configure it before opening Direct listings.
+
+`indent_size` defaults to 2 spaces per tree level. Set it to an integer greater
+than 1 to change the indentation width used to display and edit expanded trees.
 
 `max_recursive_expand_depth` defaults to `false` (unlimited). Set it to a
 positive integer to cap the directory levels opened by recursive commands

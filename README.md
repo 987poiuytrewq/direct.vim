@@ -137,6 +137,7 @@ require('direct').setup({
   map_default_keys = true, -- set false to install no default mappings
   show_hidden = true, -- set false to hide dot-prefixed entries
   respect_gitignore = true, -- set false to show Git-ignored entries
+  indent_size = 2, -- spaces per tree level; must be an integer greater than 1
   show_folder_icons = true, -- show Font Awesome folder icons
   show_file_icons = true, -- show a generic Font Awesome file icon
   icons = {
@@ -182,6 +183,7 @@ Configuration defaults:
 | `map_default_keys` | `true` | Install Direct's default key mappings. |
 | `show_hidden` | `true` | Show dotfiles; `gh` toggles visibility in a listing. |
 | `respect_gitignore` | `true` | Apply Git ignore rules to listings; tracked files remain visible. `gi` toggles the current view. |
+| `indent_size` | `2` | Number of spaces per tree level; must be an integer greater than 1. |
 | `show_folder_icons` | `true` | Show folder icons. |
 | `show_file_icons` | `true` | Show generic file icons. |
 | `icons.file` | U+F15B | Font Awesome file glyph. |

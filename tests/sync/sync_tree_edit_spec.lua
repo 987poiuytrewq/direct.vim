@@ -48,6 +48,33 @@ H.describe('sync: editable expanded subtrees', function()
     H.assert_false(vim.bo.modified, 'successful subtree sync clears modified state')
   end)
 
+  H.it('renders and syncs tree edits with a custom indentation width', function()
+    clean_buffers()
+    local config = require('direct.config')
+    config.setup({ indent_size = 4 })
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local sub = H.mkdir(ws, 'sub')
+    H.mkfile(sub, 'inside.txt', { 'inside' })
+    H.mkfile(ws, 'from-root.txt', { 'preserve me' })
+    local listing = buffer.list(ws)
+    listing:expand(1)
+    H.assert_buf_eq({ 'sub/', '    inside.txt', 'from-root.txt' }, 0,
+      'expanded child rows use the configured indentation width')
+
+    vim.api.nvim_buf_set_text(0, 2, 0, 2, 0, { '    ' })
+
+    local ok, reason = listing:sync()
+
+    H.assert_true(ok == true, tostring(reason))
+    H.assert_fs_eq(ws, {
+      'sub/', 'sub/from-root.txt', 'sub/inside.txt',
+    }, 'sync parses the configured width and moves the root file into the subtree')
+    H.assert_eq(vim.fn.readfile(sub .. '/from-root.txt'), { 'preserve me' },
+      'the moved file contents are preserved')
+    config.setup({})
+  end)
+
   H.it('moves a file between expanded sibling directories with its contents intact', function()
     clean_buffers()
     local sb = H.sandbox()

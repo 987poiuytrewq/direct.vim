@@ -21,6 +21,7 @@ return function(deps)
   end
   local refresh_icons = deps.refresh_icons
   local remove_expanded_subtree = deps.remove_expanded_subtree
+  local indent_size = deps.indent_size
 
   local function restore_redone_materialization(bufnr, state, materialization, lines)
     local parent = state.rows[materialization.parent_id]
@@ -68,7 +69,7 @@ return function(deps)
         or type(child.order) ~= 'number' or child.order <= previous_order
         or child.depth ~= (parent.depth or 0) + 1
         or child.path ~= expected_path
-        or child.text ~= string.rep('  ', child.depth) .. child.name
+        or child.text ~= string.rep(' ', indent_size() * child.depth) .. child.name
         or lines[expected_row + 1] ~= child.text
         or not child.identity
         or not fs.path_identities_match(path_identity(child.path), child.identity)

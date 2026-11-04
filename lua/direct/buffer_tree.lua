@@ -16,6 +16,7 @@ return function(deps)
   local read_with_snapshot = deps.read_with_snapshot
   local filter_git_status_lines = deps.filter_git_status_lines
   local action_mod = deps.action_mod
+  local indent_size = deps.indent_size
 
   local function children_integrity(bufnr, lines)
     local state = states[bufnr]
@@ -122,7 +123,7 @@ return function(deps)
           if child.kind ~= 'child' or child.parent ~= parent_id
             or state.rows[child.id] ~= child or child.order <= previous_order
             or child.depth ~= parent_depth + 1
-            or child.text ~= string.rep('  ', child.depth) .. child.name then
+            or child.text ~= string.rep(' ', indent_size() * child.depth) .. child.name then
             return false
           end
           previous_order = child.order
@@ -326,17 +327,19 @@ return function(deps)
       lines = {}
     end
 
+    local spaces_per_level = indent_size()
     local roots, nodes, nodes_by_id, nodes_by_key, children_by_parent = {}, {}, {}, {}, {}
     local stack, previous_depth = {}, 0
     for row, line in ipairs(lines) do
       local prefix = line:match('^( *)') or ''
-      if #prefix % 2 ~= 0 then
+      if #prefix % spaces_per_level ~= 0 then
         if not stack[1] or not is_dir_line(stack[1].name) then
           return nil, 'root names may not begin with whitespace'
         end
-        return nil, 'child row indentation must use pairs of spaces'
+        return nil, 'child row indentation must use groups of '
+          .. spaces_per_level .. ' spaces'
       end
-      local depth = #prefix / 2
+      local depth = #prefix / spaces_per_level
       if depth > previous_depth + 1 then
         return nil, 'a child row skips a directory level'
       end

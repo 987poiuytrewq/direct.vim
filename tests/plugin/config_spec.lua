@@ -222,6 +222,23 @@ H.describe('config', function()
     config.clear_mappings()
   end)
 
+  H.it('indent_size defaults to two and accepts only integers greater than one', function()
+    local config = fresh_config()
+    config.clear_mappings()
+    H.assert_eq(config.defaults.indent_size, 2, 'two spaces per level is the default')
+    H.assert_eq(config.setup({ indent_size = 4 }).indent_size, 4,
+      'a larger indentation width is accepted')
+
+    for _, invalid in ipairs({ 1, 0, 2.5, '4', false }) do
+      H.capture_messages()
+      local options = config.setup({ indent_size = invalid })
+      H.assert_eq(options.indent_size, 2, 'invalid values leave the default in place')
+      H.assert_notified('indent_size must be an integer greater than 1',
+        vim.log.levels.ERROR)
+    end
+    config.clear_mappings()
+  end)
+
   H.it('setup() rejects an unknown key with an ERROR notification', function()
     local config = fresh_config()
     config.clear_mappings()
