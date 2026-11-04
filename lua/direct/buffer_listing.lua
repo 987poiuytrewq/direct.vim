@@ -22,6 +22,9 @@ local function snapshot_matches_identity(snapshot, identity)
   -- replaced since capture. Different spellings (symlink/relative aliases)
   -- match by filesystem identity, as same_path does.
   return previous.path == identity.path
+    or (previous.resolved ~= nil and previous.resolved == identity.resolved)
+    or (previous.resolved ~= nil and previous.resolved == identity.path)
+    or (identity.resolved ~= nil and identity.resolved == previous.path)
     or (previous.inode ~= nil and previous.inode == identity.inode)
 end
 
@@ -187,11 +190,12 @@ end
 -- must not compare every visible row against every ignored path.
 local function ignored_identity_index(paths)
   if not paths or #paths == 0 then return nil end
-  local index = { by_path = {}, unknown_by_path = {}, by_inode = {} }
+  local index = { by_path = {}, by_resolved = {}, unknown_by_path = {}, by_inode = {} }
   for _, path in ipairs(paths) do
     local identity = fs.path_identity(path, fs.stat(path))
     if identity then
       index.by_path[identity.path] = true
+      if identity.resolved then index.by_resolved[identity.resolved] = true end
       if identity.inode then
         index.by_inode[identity.inode] = true
       else
@@ -210,7 +214,9 @@ local function identity_is_ignored(path, index)
     return index.by_inode[identity.inode] == true
       or index.unknown_by_path[identity.path] == true
   end
-  return index.by_path[identity.path] == true
+  return index.by_path[identity.path] == true or index.by_resolved[identity.path] == true
+    or (identity.resolved ~= nil and (index.by_path[identity.resolved] == true
+      or index.by_resolved[identity.resolved] == true))
 end
 
 local function path_is_ignored(path, ignored_index)

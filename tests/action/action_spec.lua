@@ -582,41 +582,46 @@ H.describe('action', function()
     local cases = {
       { label = 'mv', a = M.Move(root .. '/a.txt', root .. '/b.txt'),
         check = function(rev, a)
-          return rev.name == 'mv' and rev.src == a.dst and rev.dst == a.src
+          return rev.name == 'mv' and rev.src == M.paths.record_path(a.dst)
+            and rev.dst == M.paths.record_path(a.src)
         end },
       { label = 'rm', a = M.Remove(root .. '/a.txt'),
         check = function(rev, a)
-          return rev.name == 'rs' and rev.src == a.dst and rev.dst == a.src
+          return rev.name == 'rs' and rev.src == M.paths.record_path(a.dst)
+            and rev.dst == M.paths.record_path(a.src)
         end },
       { label = 'rmdir', a = M.RemoveDirectory(root .. '/dir'),
         check = function(rev, a)
-          return rev.name == 'rsdir' and rev.src == a.dst and rev.dst == a.src
+          return rev.name == 'rsdir' and rev.src == M.paths.record_path(a.dst)
+            and rev.dst == M.paths.record_path(a.src)
         end },
       { label = 'rs', a = M.Restore(root .. '/trash1', root .. '/a.txt'),
         check = function(rev, a)
-          return rev.name == 'rm' and rev.src == a.dst
+          return rev.name == 'rm' and rev.src == M.paths.record_path(a.dst)
         end },
       { label = 'rsdir', a = M.RestoreDirectory(root .. '/trash2', root .. '/dir'),
         check = function(rev, a)
-          return rev.name == 'rmdir' and rev.src == a.dst
+          return rev.name == 'rmdir' and rev.src == M.paths.record_path(a.dst)
         end },
       { label = 'touch', a = M.Touch(root .. '/c.txt'),
         check = function(rev, a)
-          return rev.name == 'rm' and rev.src == a.dst
+          return rev.name == 'rm' and rev.src == M.paths.record_path(a.dst)
         end },
       { label = 'mkdir', a = M.MakeDirectory(root .. '/d'),
         check = function(rev, a)
-          return rev.name == 'rmdir' and rev.src == a.dst
+          return rev.name == 'rmdir' and rev.src == M.paths.record_path(a.dst)
         end },
       { label = 'p', a = M.Paste(reg, root, { 'x', 'y' }, { 'm', 'n' }),
         check = function(rev, a)
-          return rev.name == 'up' and rev.src == a.dst and rev.dst == a.src
+          return rev.name == 'up' and rev.src == M.paths.record_path(a.dst)
+            and rev.dst == M.paths.record_path(a.src)
             and rev.renames[1].src == 'm' and rev.renames[1].dst == 'x'
             and rev.renames[2].src == 'n' and rev.renames[2].dst == 'y'
         end },
       { label = 'up', a = M.Unpaste(root, reg, { 'p', 'q' }, { 'p', 'q' }),
         check = function(rev, a)
-          return rev.name == 'p' and rev.src == a.dst and rev.dst == a.src
+          return rev.name == 'p' and rev.src == M.paths.record_path(a.dst)
+            and rev.dst == M.paths.record_path(a.src)
             and rev.renames[1].src == 'p' and rev.renames[1].dst == 'p'
             and rev.renames[2].src == 'q' and rev.renames[2].dst == 'q'
         end },

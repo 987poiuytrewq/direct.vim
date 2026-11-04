@@ -167,6 +167,16 @@ function M.data_home()
     return vim.fs.normalize(xdg)
   end
   local home = vim.env.HOME
+  local windows_profile = vim.env.USERPROFILE
+  if M.separator == '\\' and (windows_profile == nil or windows_profile == '') then
+    windows_profile = (vim.env.HOMEDRIVE or '') .. (vim.env.HOMEPATH or '')
+  end
+  if M.separator == '\\' and home ~= nil and home ~= '' and home == windows_profile then
+    -- Neovim can synthesize HOME from USERPROFILE on Windows. Treat that
+    -- platform default like an unset HOME so data lives under stdpath('data'),
+    -- while an explicitly configured HOME still uses the documented fallback.
+    home = nil
+  end
   if home ~= nil and home ~= '' then
     return M.join(home, '.local', 'share')
   end

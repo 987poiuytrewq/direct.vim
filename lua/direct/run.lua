@@ -6,6 +6,19 @@ local buffer = require('direct.buffer')
 local fs = require('direct.fs')
 local ui = require('direct.ui')
 
+local function shellescape_path(path)
+  if vim.fn.has('win32') == 1 or vim.fn.has('win64') == 1 then
+    local shell = (vim.o.shell or ''):lower():gsub('\\', '/')
+    if shell:find('powershell', 1, true) or shell:find('pwsh', 1, true) then
+      return "'" .. path:gsub("'", "''") .. "'"
+    elseif shell:find('bash', 1, true) or shell:find('zsh', 1, true)
+      or shell:find('fish', 1, true) then
+      return "'" .. path:gsub("'", "'\\''") .. "'"
+    end
+  end
+  return vim.fn.shellescape(path)
+end
+
 local function report_result(result, quiet_success)
   if quiet_success and result.code == 0 then return end
   local message = result.code == 0
@@ -50,7 +63,7 @@ function M.current_entry(command, on_complete, opts)
     return nil, err
   end
 
-  local escaped_path = vim.fn.shellescape(path)
+  local escaped_path = shellescape_path(path)
   local expanded = command:gsub('%{%}', function() return escaped_path end)
   local argv = { vim.o.shell }
   for _, flag in ipairs(vim.split(vim.o.shellcmdflag, '%s+', { trimempty = true })) do

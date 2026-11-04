@@ -5,6 +5,62 @@
 local M = {}
 M.uv = vim.uv
 local temp_sequence = 0
+local windows_identity_kernel32
+local windows_identity_declared = false
+
+local function windows_file_identity(path, nofollow)
+  if package.config:sub(1, 1) ~= '\\' or type(path) ~= 'string' then return nil end
+  local ffi_ok, ffi = pcall(require, 'ffi')
+  if not ffi_ok then return nil end
+  if not windows_identity_declared then
+    local ok = pcall(ffi.cdef, [[
+      typedef unsigned short direct_identity_WCHAR;
+      typedef void *direct_identity_HANDLE;
+      typedef unsigned long direct_identity_DWORD;
+      typedef int direct_identity_BOOL;
+      typedef struct { direct_identity_DWORD low, high; } direct_identity_FILETIME;
+      typedef struct {
+        direct_identity_DWORD attributes;
+        direct_identity_FILETIME created, accessed, written;
+        direct_identity_DWORD volume, size_high, size_low, links, index_high, index_low;
+      } direct_identity_FILE_INFORMATION;
+      int __stdcall MultiByteToWideChar(unsigned int CodePage, unsigned long dwFlags,
+        const char *lpMultiByteStr, int cbMultiByte, direct_identity_WCHAR *lpWideCharStr,
+        int cchWideChar);
+      direct_identity_HANDLE __stdcall CreateFileW(const direct_identity_WCHAR *name,
+        direct_identity_DWORD access, direct_identity_DWORD share, void *security,
+        direct_identity_DWORD creation, direct_identity_DWORD flags,
+        direct_identity_HANDLE template_file);
+      direct_identity_BOOL __stdcall GetFileInformationByHandle(direct_identity_HANDLE file,
+        direct_identity_FILE_INFORMATION *information);
+      direct_identity_BOOL __stdcall CloseHandle(direct_identity_HANDLE object);
+    ]])
+    if not ok then return nil end
+    windows_identity_declared = true
+  end
+  local ok, identity = pcall(function()
+    windows_identity_kernel32 = windows_identity_kernel32 or ffi.load('kernel32')
+    path = path:gsub('/', '\\')
+    local count = windows_identity_kernel32.MultiByteToWideChar(65001, 0, path, -1, nil, 0)
+    if count == 0 then return nil end
+    local wide = ffi.new('direct_identity_WCHAR[?]', count)
+    if windows_identity_kernel32.MultiByteToWideChar(65001, 0, path, -1, wide, count) == 0 then
+      return nil
+    end
+    local flags = 0x02000000 -- FILE_FLAG_BACKUP_SEMANTICS
+    if nofollow then flags = flags + 0x00200000 end -- FILE_FLAG_OPEN_REPARSE_POINT
+    local file = windows_identity_kernel32.CreateFileW(wide, 0, 7, nil, 3, flags, nil)
+    if file == ffi.cast('direct_identity_HANDLE', -1) then return nil end
+    local information = ffi.new('direct_identity_FILE_INFORMATION[1]')
+    local read = windows_identity_kernel32.GetFileInformationByHandle(file, information) ~= 0
+    windows_identity_kernel32.CloseHandle(file)
+    if not read then return nil end
+    local info = information[0]
+    return table.concat({ 'win', tonumber(info.volume), tonumber(info.index_high),
+      tonumber(info.index_low) }, ':')
+  end)
+  return ok and identity or nil
+end
 
 local function temp_candidate(parent, tag)
   temp_sequence = temp_sequence + 1
@@ -26,7 +82,9 @@ local function is_eexist(err, code)
       or err:find('exists', 1, true) ~= nil))
 end
 
-local function identity_key(stat)
+local function identity_key(stat, path)
+  local windows_identity = windows_file_identity(path, true)
+  if windows_identity then return windows_identity end
   if not stat or stat.dev == nil or stat.ino == nil then return nil end
   return tostring(stat.dev) .. ':' .. tostring(stat.ino)
 end
@@ -46,7 +104,7 @@ end
 
 local function remove_file_if_same(path, identity)
   local now = M.uv.fs_lstat(path)
-  if identity ~= nil and identity_key(now) == identity then
+  if identity ~= nil and identity_key(now, path) == identity then
     return M.rm_file(path)
   end
   return nil, 'temporary path changed; preserved at ' .. tostring(path)
@@ -54,7 +112,7 @@ end
 
 local function remove_dir_if_same(path, identity)
   local now = M.uv.fs_lstat(path)
-  if identity ~= nil and identity_key(now) == identity then
+  if identity ~= nil and identity_key(now, path) == identity then
     local ok, err = M.uv.fs_rmdir(path)
     if ok then return true end
     return nil, err
@@ -204,13 +262,21 @@ function M.path_identity(path, st)
   local spelling = path
   if package.config:sub(1, 1) == '\\' then
     -- Windows stat providers can reuse inode values across unrelated entries.
-    -- Use the resolved spelling for stat-following identities instead; lstat
-    -- symlinks retain their own spelling so entry_identity still distinguishes
-    -- a link name from its target.
+    -- Keep both lexical and resolved spelling for directories; lstat symlinks
+    -- retain their own spelling so entry_identity distinguishes a link name
+    -- from its target. File IDs remain useful for hardlinks.
     if not st or st.type ~= 'link' then
       spelling = M.uv.fs_realpath(path) or path
     end
-    return { path = paths.canonical(spelling) }
+    local identity = { path = paths.canonical(path) }
+    local resolved = paths.canonical(spelling)
+    if resolved ~= identity.path then identity.resolved = resolved end
+    identity.inode = windows_file_identity(path, st and st.type == 'link')
+    if not identity.inode and st and st.type == 'file' and st.dev ~= nil and st.ino ~= nil
+      and st.dev ~= 0 and st.ino ~= 0 then
+      identity.inode = tostring(st.dev) .. ':' .. tostring(st.ino)
+    end
+    return identity
   end
   local identity = { path = paths.canonical(spelling) }
   if st and st.dev ~= nil and st.ino ~= nil and st.dev ~= 0 and st.ino ~= 0 then
@@ -221,15 +287,37 @@ end
 
 function M.path_identities_match(a, b)
   if not a or not b then return false end
-  if a.inode and b.inode then return a.inode == b.inode end
-  return a.path == b.path
+  if a.path == b.path then return true end
+  if a.inode and b.inode and a.inode == b.inode then return true end
+  return (a.resolved ~= nil and (a.resolved == b.path or a.resolved == b.resolved))
+    or (b.resolved ~= nil and b.resolved == a.path)
+end
+
+local function index_identity(index, identity)
+  index.by_path[identity.path] = true
+  if identity.resolved then index.by_resolved[identity.resolved] = true end
+  if identity.inode then
+    index.by_inode[identity.inode] = true
+  else
+    index.unknown_by_path[identity.path] = true
+  end
+end
+
+local function index_contains_identity(index, identity)
+  if identity.inode and index.by_inode[identity.inode] then return true end
+  if index.by_path[identity.path] or index.by_resolved[identity.path] then return true end
+  if identity.resolved
+    and (index.by_path[identity.resolved] or index.by_resolved[identity.resolved]) then
+    return true
+  end
+  return index.unknown_by_path[identity.path] == true
 end
 
 -- A lookup index for same_path-style membership checks. This keeps aliases
 -- matched by device/inode while preserving normalized-path fallback whenever
 -- either side cannot be stat'ed.
 function M.path_identity_index(paths)
-  local index = { by_path = {}, by_inode = {}, unknown_by_path = {} }
+  local index = { by_path = {}, by_resolved = {}, by_inode = {}, unknown_by_path = {} }
   for _, path in ipairs(paths or {}) do
     M.path_identity_index_add(index, path)
   end
@@ -239,37 +327,23 @@ end
 function M.path_identity_index_add(index, path)
   local identity = M.path_identity(path, M.stat(path))
   if not identity then return false end
-  index.by_path[identity.path] = true
-  if identity.inode then
-    index.by_inode[identity.inode] = true
-  else
-    index.unknown_by_path[identity.path] = true
-  end
+  index_identity(index, identity)
   return true
 end
 
 function M.path_identity_index_contains(index, path)
   local identity = M.path_identity(path, M.stat(path))
   if not identity then return false end
-  if identity.inode then
-    return index.by_inode[identity.inode] == true
-      or index.unknown_by_path[identity.path] == true
-  end
-  return index.by_path[identity.path] == true
+  return index_contains_identity(index, identity)
 end
 
 local function index_identities(paths)
   if not paths or #paths == 0 then return nil end
-  local index = { by_path = {}, unknown_by_path = {}, by_inode = {} }
+  local index = { by_path = {}, by_resolved = {}, unknown_by_path = {}, by_inode = {} }
   for _, path in ipairs(paths) do
     local identity = M.path_identity(path, M.stat(path))
     if identity then
-      index.by_path[identity.path] = true
-      if identity.inode then
-        index.by_inode[identity.inode] = true
-      else
-        index.unknown_by_path[identity.path] = true
-      end
+      index_identity(index, identity)
     end
   end
   return index
@@ -279,11 +353,7 @@ local function ignored(path, st, index)
   if not index then return false end
   local identity = M.path_identity(path, st)
   if not identity then return false end
-  if identity.inode then
-    return index.by_inode[identity.inode] == true
-      or index.unknown_by_path[identity.path] == true
-  end
-  return index.by_path[identity.path] == true
+  return index_contains_identity(index, identity)
 end
 
 -- read_dir_lines(root, ignore_set) -> the listing pipeline as a string array
@@ -423,8 +493,15 @@ function M.same_entry(a, b)
     local name = vim.uv.fs_scandir_next(scan)
     if name == nil then break end
     if name == name_a or name == name_b then
-      local stat = lstat(vim.fs.joinpath(parent_a, name))
-      if stat and stat.dev == stat_a.dev and stat.ino == stat_a.ino then
+      local entry_path = vim.fs.joinpath(parent_a, name)
+      local stat = lstat(entry_path)
+      local same_identity
+      if package.config:sub(1, 1) == '\\' then
+        same_identity = identity_key(stat, entry_path) == identity_a.inode
+      else
+        same_identity = stat and stat.dev == stat_a.dev and stat.ino == stat_a.ino
+      end
+      if same_identity then
         matching_entries = matching_entries + 1
       end
     end
@@ -515,7 +592,7 @@ function M.rename_noreplace(src, dst, expected_source_identity)
     src, dst = src:gsub('/', '\\'), dst:gsub('/', '\\')
   end
   if expected_source_identity ~= nil then
-    local actual = identity_key(M.uv.fs_lstat(src))
+    local actual = identity_key(M.uv.fs_lstat(src), src)
     if expected_source_identity.inode == nil
       or actual ~= expected_source_identity.inode then
       return nil, 'source identity changed: ' .. src, 'ESTALE'
@@ -742,7 +819,7 @@ local function copy_dir(from, to, ctx)
   end
   if not existed then
     ctx.created[#ctx.created + 1] = {
-      path = to, dir = true, identity = identity_key(M.uv.fs_lstat(to)),
+      path = to, dir = true, identity = identity_key(M.uv.fs_lstat(to), to),
     }
   end
   local names = M.list_dir(from)
@@ -774,7 +851,8 @@ local function copy_dir(from, to, ctx)
         return nil, tostring(link_err or link_code or 'cannot recreate symlink')
       end
       ctx.created[#ctx.created + 1] = {
-        path = child_to, dir = false, identity = identity_key(M.uv.fs_lstat(child_to)),
+        path = child_to, dir = false,
+        identity = identity_key(M.uv.fs_lstat(child_to), child_to),
       }
     else
       -- A plain file. Recorded BEFORE the copy, so a half-written file is
@@ -804,12 +882,12 @@ local function copy_dir(from, to, ctx)
           -- A failed exclusive copy may leave its partial file behind. Capture
           -- its inode so cleanup cannot unlink a replacement at this pathname.
           local entry = ctx.created[#ctx.created]
-          entry.identity = identity_key(M.uv.fs_lstat(child_to))
+          entry.identity = identity_key(M.uv.fs_lstat(child_to), child_to)
         end
         return nil, cerr
       end
       if not child_taken then
-        ctx.created[#ctx.created].identity = identity_key(M.uv.fs_lstat(child_to))
+        ctx.created[#ctx.created].identity = identity_key(M.uv.fs_lstat(child_to), child_to)
       end
     end
   end
@@ -903,7 +981,7 @@ local function allocate_private_dir(dst, tag)
     local candidate = temp_candidate(parent, tag)
     local ok, err, code = M.mkdir_exclusive(candidate, 448) -- private mode 0700
     if ok then
-      return candidate, identity_key(M.uv.fs_lstat(candidate))
+      return candidate, identity_key(M.uv.fs_lstat(candidate), candidate)
     end
     if not is_eexist(err, code) then return nil, err, code end
   end
@@ -1112,7 +1190,7 @@ local function remove_source_after_copy(src, dst, kind, original_identity)
     return true
   end
 
-  local captured_identity = identity_key(M.uv.fs_lstat(quarantine))
+  local captured_identity = identity_key(M.uv.fs_lstat(quarantine), quarantine)
   if original_identity == nil or captured_identity ~= original_identity then
     return restore_quarantined_source(quarantine_dir, dir_identity, quarantine,
       src, dst, 'source identity changed before removal')
@@ -1148,7 +1226,7 @@ local function move_exdev_file(src, dst, source_identity)
     copied, copy_err, copy_code = M.copy_file_exclusive(src, temp)
     if copied then break end
     if not is_eexist(copy_err, copy_code) then
-      local partial_identity = identity_key(M.uv.fs_lstat(temp))
+      local partial_identity = identity_key(M.uv.fs_lstat(temp), temp)
       if partial_identity ~= nil then
         local cleanup_ok, cleanup_err = remove_file_if_same(temp, partial_identity)
         if not cleanup_ok then
@@ -1247,7 +1325,7 @@ function M.move_exdev(src, dst)
   dst = require('direct.paths').strip_trailing_separator(dst)
   local source = M.uv.fs_lstat(src)
   if not source then return nil, 'cannot stat source: ' .. tostring(src) end
-  local source_identity = identity_key(source)
+  local source_identity = identity_key(source, src)
   if source.type == 'file' then
     return move_exdev_file(src, dst, source_identity)
   elseif source.type == 'link' then

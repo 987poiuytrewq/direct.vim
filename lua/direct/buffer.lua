@@ -379,6 +379,7 @@ local function add_identity(index, identity, value)
     if entry.count > 1 then entry.only = nil end
   end
   add(index.by_path, identity.path)
+  if identity.resolved then add(index.by_resolved, identity.resolved) end
   if identity.inode then
     add(index.by_inode, identity.inode)
   else
@@ -389,7 +390,9 @@ end
 local function matching_identity_values(index, identity)
   if not identity then return nil, 0 end
   if not identity.inode then
-    local entry = index.by_path[identity.path]
+    local entry = index.by_path[identity.path] or index.by_resolved[identity.path]
+      or (identity.resolved and (index.by_path[identity.resolved]
+        or index.by_resolved[identity.resolved]))
     return entry and entry.only, entry and entry.count or 0
   end
   local inode = index.by_inode[identity.inode]
@@ -406,11 +409,15 @@ local function identity_is_duplicated(identity, counts)
       or (counts.unknown_by_path[identity.path] or 0) > 0
   end
   return (counts.by_path[identity.path] or 0) > 1
+    or (identity.resolved ~= nil and (counts.by_path[identity.resolved] or 0) > 1)
 end
 
 local function count_identity(counts, identity)
   if not identity then return end
   counts.by_path[identity.path] = (counts.by_path[identity.path] or 0) + 1
+  if identity.resolved then
+    counts.by_resolved[identity.resolved] = (counts.by_resolved[identity.resolved] or 0) + 1
+  end
   if identity.inode then
     counts.by_inode[identity.inode] = (counts.by_inode[identity.inode] or 0) + 1
   else
@@ -797,7 +804,7 @@ function Buffer:list()
   local old_known_children = {}
   local deleted_visibility_changed = old_state
     and old_state.view_show_deleted ~= show_deleted
-  local old_index = { by_path = {}, by_inode = {}, unknown_by_path = {} }
+  local old_index = { by_path = {}, by_resolved = {}, by_inode = {}, unknown_by_path = {} }
   if old_state and not deleted_visibility_changed then
     old_expanded = old_state.expanded or {}
     if not show_deleted then
@@ -825,7 +832,7 @@ function Buffer:list()
   end
 
   local new_identities, new_counts = {}, {
-    by_path = {}, by_inode = {}, unknown_by_path = {},
+    by_path = {}, by_resolved = {}, by_inode = {}, unknown_by_path = {},
   }
   for index, line in ipairs(safe) do
     local identity = path_identity(M.entry_path(self.root, line))
