@@ -50,9 +50,17 @@ jobs:
         if: runner.os == 'Linux'
         run: make coverage
 
-      - name: Run tests
-        if: runner.os != 'Linux'
+      - name: Run full test suite
+        if: matrix.os == 'macos-latest'
         run: nvim --headless -l tests/run.lua
+
+      - name: Run Windows compatibility tests
+        if: matrix.os == 'windows-latest'
+        # The full suite contains POSIX-only FIFO, symlink, and permission fixtures.
+        run: >-
+          nvim --headless -l tests/run.lua config_spec file_operations_spec
+          sync_plan_spec sync_tree_edit_spec sync_undo_spec entry_spec
+          history_format_spec history_preflight_spec platform_compat_spec
 
       - name: Add coverage to the run summary
         if: runner.os == 'Linux' && always() && hashFiles('coverage/summary.out') != ''
