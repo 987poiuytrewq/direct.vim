@@ -45,7 +45,13 @@ H.describe('DirectRun', function()
     local expected = ('git add {} && printf %s {}'):gsub('%{%}', function()
       return vim.fn.shellescape(path)
     end)
-    H.assert_eq(launched.argv[#launched.argv], expected,
+    local actual = launched.argv[#launched.argv]
+    if vim.fn.has('win32') == 1 or vim.fn.has('win64') == 1 then
+      H.assert_eq(launched.argv[2], '/d', 'uses a non-interactive cmd instance')
+      H.assert_eq(launched.argv[3], '/c', 'runs the batch command')
+      actual = table.concat(vim.fn.readfile(actual), '\n')
+    end
+    H.assert_eq(actual, expected,
       'replaces each placeholder with one shell-escaped absolute path')
     H.assert_eq(launched.opts.cwd, ws, 'runs in the listing directory')
     H.assert_true(launched.opts.text, 'captures text output')
