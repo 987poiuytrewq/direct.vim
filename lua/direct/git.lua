@@ -161,7 +161,9 @@ function M.deleted_children(snapshot, directory)
     if path:sub(1, #prefix) == prefix and path_is_missing(path) then
       local name = path:sub(#prefix + 1)
       if name ~= '' and not name:find('/', 1, true) then
-        if entry.kind == 'directory' then name = name .. '/' end
+        if entry.kind == 'directory' then
+          name = name .. require('direct.paths').directory_separator()
+        end
         result[#result + 1] = {
           name = name,
           path = path,

@@ -13,7 +13,9 @@ local methods = {
 
 local function canonical(path)
   if type(path) ~= 'string' then return nil end
-  return vim.fs.normalize(vim.fn.fnamemodify(path, ':p'))
+  local normalized = vim.fs.normalize(vim.fn.fnamemodify(path, ':p'))
+  if package.config:sub(1, 1) == '\\' then normalized = normalized:gsub('\\', '/') end
+  return normalized
 end
 
 local function under(path, root)

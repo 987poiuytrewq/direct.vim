@@ -7,6 +7,7 @@ local constants = require('direct.constants')
 
 local defaults = {
   map_default_keys = true,
+  directory_separator = package.config:sub(1, 1),
   show_hidden = true,
   respect_gitignore = true,
   show_folder_icons = true,
@@ -160,7 +161,7 @@ M.BUFFER_MAPS = {
   { mode = 'n', lhs = '<CR>',
     rhs = '<Cmd>lua require("direct").open()<CR>' },
   { mode = 'n', lhs = '-',
-    rhs = '<Cmd>lua require("direct").open("../")<CR>' },
+    rhs = '<Cmd>lua require("direct").list(vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":h"))<CR>' },
   { mode = 'n', lhs = 'z-',
     rhs = '<Cmd>lua require("direct").open_parent_expanded()<CR>' },
   { mode = 'n', lhs = 'u', rhs = '<Cmd>DirectUndo<CR>' },
@@ -308,6 +309,10 @@ function M.setup(opts)
       require('direct.ui').notify(
         'direct: max_recursive_expand_depth must be false or a positive integer',
         vim.log.levels.ERROR)
+    elseif key == 'directory_separator'
+      and value ~= '/' and value ~= '\\' then
+      require('direct.ui').notify(
+        'direct: directory_separator must be "/" or "\\\\"', vim.log.levels.ERROR)
     elseif key == 'icons' then
       next_options.icons = resolve_icon_options(value)
     elseif (key == 'show_hidden' or key == 'respect_gitignore')

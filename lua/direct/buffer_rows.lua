@@ -14,6 +14,7 @@ local fs = require('direct.fs')
 local listing = require('direct.buffer_listing')
 local git = require('direct.git')
 local highlight = require('direct.highlight')
+local paths = require('direct.paths')
 
 local function path_identity(path)
   return fs.path_identity(path, fs.stat(path))
@@ -63,11 +64,11 @@ local function current_row_record(bufnr, row)
   return state and id and state.rows[id] or nil
 end
 
--- is_dir_line(line) -> true for a directory entry. The trailing slash is the
--- convention: a directory is never distinguished from a file by a
--- filesystem stat here.
+-- is_dir_line(line) -> true for a directory entry. The configured trailing
+-- marker is the convention: a directory is never distinguished from a file by
+-- a filesystem stat here.
 local function is_dir_line(line)
-  return type(line) == 'string' and line:sub(-1) == '/'
+  return paths.is_directory_name(line)
 end
 
 -- Refresh display-only icons. When either kind is enabled, every row gets an
@@ -138,7 +139,7 @@ end
 
 -- dirs_then_name(lines) -> a copy ordered directories first, each group sorted
 -- ascending by byte-wise comparison. A directory line carries its
--- trailing '/', so the two groups never interleave.
+-- trailing directory marker, so the two groups never interleave.
 local function dirs_then_name(lines)
   local dirs, files = {}, {}
   for _, line in ipairs(lines or {}) do
@@ -162,7 +163,7 @@ end
 
 local function recorded_row_text(rec)
   local name = rec.name
-  if is_dir_line(name) then name = name:gsub('/+$', '') .. '/' end
+  if is_dir_line(name) then name = paths.mark_directory(paths.strip_directory_marker(name)) end
   return string.rep('  ', rec.depth or 0) .. name
 end
 

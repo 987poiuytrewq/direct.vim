@@ -131,11 +131,13 @@ local function merge_deleted_entries(directory, lines, git_snapshot, show_hidden
   local result, seen, deleted = {}, {}, {}
   for _, line in ipairs(lines or {}) do
     result[#result + 1] = line
-    seen[line:gsub('/+$', '')] = true
+    seen[paths.strip_directory_marker(line)] = true
   end
   for _, entry in ipairs(git.deleted_children(git_snapshot, directory)) do
-    local basename = entry.name:gsub('/+$', '')
-    if not seen[basename]
+    local basename = paths.strip_directory_marker(entry.name)
+    local raw_name = entry.kind == 'directory' and basename or entry.name
+    if not raw_name:find(paths.directory_separator(), 1, true)
+      and not seen[basename]
       and (show_hidden ~= false or basename:sub(1, 1) ~= '.') then
       result[#result + 1] = entry.name
       seen[basename] = true
@@ -271,6 +273,7 @@ local sync_plan = require('direct.buffer_sync_plan')({
   action_mod = action_mod,
   entry_path = M.entry_path,
   is_dir_line = is_dir_line,
+  directory_separator = paths.directory_separator,
   dirs_then_name = dirs_then_name,
   lstat = lstat,
   path_without_marker = path_without_marker,
@@ -410,6 +413,7 @@ local tree_planner = require('direct.buffer_tree')({
   row_id_at = row_id_at,
   set_row_mark = set_row_mark,
   is_dir_line = is_dir_line,
+  strip_directory_marker = paths.strip_directory_marker,
   component_reason = component_reason,
   same_lines = same_lines,
   entry_path = M.entry_path,
@@ -1593,7 +1597,10 @@ function Buffer:sync(options)
     -- order. Nested parent directories are expanded for every new nested path.
     for _, line in ipairs(actual) do
       if added_set[line] then
-        local relative = line:gsub('/+$', '')
+        local relative = paths.strip_directory_marker(line)
+        if paths.directory_separator() == '\\' then
+          relative = relative:gsub('\\', '/')
+        end
         added_focus_path = M.entry_path(self.root, line)
         if relative:find('/', 1, true) then
           local parts = vim.split(relative, '/', { plain = true })
@@ -1601,7 +1608,7 @@ function Buffer:sync(options)
           local parent = self.root
           for index = 1, directory_count do
             parent = fs.join(parent, parts[index])
-            local normalized_parent = parent:gsub('/+$', '')
+            local normalized_parent = paths.strip_trailing_separator(parent)
             local key = vim.fs.normalize(normalized_parent)
             expand_by_path[key] = parent
           end
@@ -1629,9 +1636,11 @@ function Buffer:sync(options)
       local function under_removed_root(path)
         if type(path) ~= 'string' then return false end
         local candidate = vim.fs.normalize(path)
+        candidate = paths.canonical(candidate)
         for _, root_path in ipairs(removed_roots) do
-          local normalized = vim.fs.normalize(root_path):gsub('/+$', '')
-          if candidate == normalized or candidate:sub(1, #normalized + 1) == normalized .. '/' then
+          local normalized = paths.canonical(root_path)
+          local prefix = normalized:sub(-1) == '/' and normalized or normalized .. '/'
+          if candidate == normalized or candidate:sub(1, #prefix) == prefix then
             return true
           end
         end
@@ -1718,8 +1727,7 @@ function Buffer:sync(options)
   -- Compare filesystem-entry identity as well as spelling for case-only moves.
   local move_sources, sources_by_inode = {}, {}
   local function move_key(path)
-    path = path:gsub('/+$', '')
-    if path == '' then path = '/' end
+    path = paths.strip_trailing_separator(path)
     return vim.fs.normalize(path)
   end
   for _, act in ipairs(actions) do
@@ -2171,14 +2179,13 @@ function Buffer:paste_destination(row)
 end
 
 local function normalized_path(path)
-  path = vim.fs.normalize(path):gsub('/+$', '')
-  return path == '' and '/' or path
+  return paths.canonical(path)
 end
 
 local function path_is_within(parent, candidate)
   parent, candidate = normalized_path(parent), normalized_path(candidate)
   if candidate == parent then return true end
-  local prefix = parent == '/' and '/' or parent .. '/'
+  local prefix = parent:sub(-1) == '/' and parent or parent .. '/'
   return candidate:sub(1, #prefix) == prefix
 end
 
