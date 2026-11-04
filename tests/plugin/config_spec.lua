@@ -8,9 +8,16 @@ local buffer = require('direct.buffer')
 -- A fresh module table: config is stateful (lifecycle flags), and the harness
 -- only unloads direct modules at file boundaries, so the spec reloads it where
 -- state matters.
-local function fresh_config()
+local function fresh_config(use_platform_default)
   package.loaded['direct.config'] = nil
-  return require('direct.config')
+  local config = require('direct.config')
+  local test_separator = vim.env.DIRECT_TEST_DIRECTORY_SEPARATOR
+  if not use_platform_default
+    and (test_separator == '/' or test_separator == '\\') then
+    config.defaults.directory_separator = test_separator
+    config.options.directory_separator = test_separator
+  end
+  return config
 end
 
 local function global_dash_count()
@@ -25,7 +32,7 @@ end
 
 H.describe('config', function()
   H.it('defaults the directory row marker to the filesystem separator and validates overrides', function()
-    local config = fresh_config()
+    local config = fresh_config(true)
     config.clear_mappings()
     H.assert_eq(config.defaults.directory_separator, package.config:sub(1, 1),
       'native path separator is the default display marker')

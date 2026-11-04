@@ -82,9 +82,11 @@ return function(deps)
     if line:match('^%s') then return 'root names may not begin with whitespace' end
     local component = line
     if is_dir_line(component) then component = component:sub(1, -2) end
+    local current_path_style = package.config:sub(1, 1) == '\\' and 'win32' or 'posix'
+    local selected_separator = (path_style == nil or path_style == current_path_style)
+      and component:find(directory_separator(), 1, true) ~= nil
     if component == '' or component == '.' or component == '..'
-      or component:find('/', 1, true)
-      or component:find(directory_separator(), 1, true) then
+      or component:find('/', 1, true) or selected_separator then
       return 'invalid path component'
     end
     local windows = path_style == 'win32'
