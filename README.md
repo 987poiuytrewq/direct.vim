@@ -258,6 +258,12 @@ view filter, so entries it hides are not treated as deletion sources during sync
 Outside a Git repository, or when `git.enabled = false`, the filtered view
 contains no entries.
 
+In any direct listing, `]c` and `[c` move to the next and previous visible entry
+with a Git change. They skip ignored entries, do not wrap at the ends, and only
+consider rows currently materialized in the listing (so collapsed descendants
+are not targets). Use `:DirectNextChange` and `:DirectPreviousChange` for the
+same navigation without the default mappings.
+
 The symbols can be customized independently by status:
 
 ```lua
@@ -516,6 +522,8 @@ use their existing synchronous staging path.
 | `:DirectToggleGitIgnore` | none | Toggle Git-ignore filtering in the current direct listing. |
 | `:DirectToggleGitStatus` | none | Toggle the Git-status-only view in the current direct listing. |
 | `:DirectGitStatus` | none | Enter the expanded Git-status-only view without toggling it off. |
+| `:DirectNextChange` | none | Navigate to the next visible entry with a Git change. |
+| `:DirectPreviousChange` | none | Navigate to the previous visible entry with a Git change. |
 | `:DirectUndo` | none | Undo the last filesystem action. |
 | `:DirectRedo` | none | Redo the last undone action. |
 | `:DirectYank` | range (default: current line) | Yank the ranged entries. |
@@ -523,8 +531,11 @@ use their existing synchronous staging path.
 | `:DirectPasteAs {name}` | `{name}` | Paste into the cursor row's directory (or a file's parent) under `{name}`. |
 
 `:DirectSync`, `:DirectFoldAll`, `:DirectUnfoldAll`, `:DirectToggleHidden`,
-`:DirectToggleGitIgnore`, `:DirectToggleGitStatus`, `:DirectGitStatus`, `:DirectUndo`, `:DirectRedo`, `:DirectYank`, `:DirectPaste` (no argument),
-`:DirectPasteAs`, `:DirectRun`, and the public `open()` API report an error and do
+`:DirectToggleGitIgnore`, `:DirectToggleGitStatus`, `:DirectGitStatus`,
+`:DirectNextChange`, `:DirectPreviousChange`, `:DirectUndo`, `:DirectRedo`,
+`:DirectYank`, `:DirectPaste` (no argument),
+`:DirectPasteAs`, `:DirectRun`, and the public `open()`, `next_change()`, and
+`previous_change()` APIs report an error and do
 nothing when the current buffer is not a direct buffer. `open()` is also used by
 the direct-buffer entry mappings. `:DirectPaste {dir}` is the exception: it
 pastes into an explicitly named directory and never touches the current buffer,
@@ -566,6 +577,8 @@ Buffer-local, in a direct buffer (all mappings follow `map_default_keys`):
 | normal | `gr` | `:DirectGit git reset -- {}` |
 | normal | `gc` | `:DirectGit git checkout -- {}` |
 | normal | `gs` | `:DirectToggleGitStatus` |
+| normal | `]c` | `:DirectNextChange` |
+| normal | `[c` | `:DirectPreviousChange` |
 
 The buffer-local `-` wins over the global `-` inside a direct buffer. All
 buffer-local mappings, including fold and mouse mappings, are omitted when

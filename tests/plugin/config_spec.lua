@@ -331,11 +331,17 @@ H.describe('config', function()
       'gr unstages the current entry through DirectGit')
     H.assert_eq(buf_map_rhs('gc', 'n'), '<Cmd>DirectGit git checkout -- {}<CR>',
       'gc checks out the current entry through DirectGit')
+    H.assert_eq(buf_map_rhs(']c', 'n'), '<Cmd>DirectNextChange<CR>',
+      ']c navigates to the next changed entry')
+    H.assert_eq(buf_map_rhs('[c', 'n'), '<Cmd>DirectPreviousChange<CR>',
+      '[c navigates to the previous changed entry')
 
     config.setup({ map_default_keys = false })
     H.assert_nil(buf_map_rhs('ga', 'n'), 'ga is removed when default mappings are disabled')
     H.assert_nil(buf_map_rhs('gr', 'n'), 'gr is removed when default mappings are disabled')
     H.assert_nil(buf_map_rhs('gc', 'n'), 'gc is removed when default mappings are disabled')
+    H.assert_nil(buf_map_rhs(']c', 'n'), ']c is removed when default mappings are disabled')
+    H.assert_nil(buf_map_rhs('[c', 'n'), '[c is removed when default mappings are disabled')
     pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
   end)
 
