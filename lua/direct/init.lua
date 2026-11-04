@@ -76,7 +76,8 @@ function M.open(line)
 end
 
 function M.open_parent_expanded()
-  local opened = M.open('../')
+  local parent = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ':h')
+  local opened = M.list(parent)
   if not opened then return opened end
   return buffer.expand()
 end
@@ -109,6 +110,12 @@ function M.toggle_git_status()
   if not guard('DirectToggleGitStatus') then return nil end
   if pending.refuse('toggle Git-status filter') then return nil end
   return buffer.toggle_git_status()
+end
+
+function M.toggle_gitignore()
+  if not guard('DirectToggleGitIgnore') then return nil end
+  if pending.refuse('toggle Git-ignore filtering') then return nil end
+  return buffer.toggle_gitignore()
 end
 
 function M.undo()

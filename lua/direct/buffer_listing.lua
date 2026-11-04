@@ -2,6 +2,7 @@
 local M = {}
 local fs = require('direct.fs')
 local git = require('direct.git')
+local paths = require('direct.paths')
 
 local function path_identity(path)
   return fs.path_identity(path, fs.stat(path))
@@ -24,19 +25,14 @@ local function snapshot_matches_identity(snapshot, identity)
     or (previous.inode ~= nil and previous.inode == identity.inode)
 end
 
--- entry_path(root, line) -> the absolute entry a buffer line denotes. The
--- spelling is `root.. '/'.. line`, so a directory line keeps its trailing '/'
--- (Python `os.path.join` parity): the delete auto-yank path and the trash
--- digest are therefore the trailing-slash string, exactly as in the Python
--- version. The only root that already ends in a separator is '/'.
+-- entry_path(root, line) -> native filesystem path for a buffer entry. A
+-- directory row retains a trailing native separator in its path identity; its
+-- configurable display marker is never passed to filesystem APIs.
 function M.entry_path(root, line)
   if type(root) ~= 'string' or type(line) ~= 'string' then
     return root
   end
-  if root:sub(-1) == '/' then
-    return root .. line
-  end
-  return root .. '/' .. line
+  return paths.join_entry(root, line)
 end
 
 -- ignore_set(root) -> the ignore set: the union of
@@ -87,14 +83,15 @@ end
 -- list_with_snapshot(root) returns the current filtered listing and the names
 -- omitted by that exact list-time wildignore value. Sync uses the captured names
 -- later instead of consulting a possibly changed option.
-local function capture_filter(root, show_hidden_override)
+local function capture_filter(root, show_hidden_override, respect_gitignore_override)
   local config = require('direct.config').options
   local snapshot = {
     path = root,
     wildignore = vim.o.wildignore or '',
     show_hidden = show_hidden_override == nil and config.show_hidden ~= false
       or show_hidden_override == true,
-    respect_gitignore = config.respect_gitignore == true,
+    respect_gitignore = respect_gitignore_override == nil
+      and config.respect_gitignore == true or respect_gitignore_override == true,
   }
   if snapshot.respect_gitignore then
     local git_snapshot, git_err = git.ignore_snapshot(root)
@@ -129,29 +126,29 @@ end
 local function read_with_snapshot(root, snapshot, read)
   local scan, scan_err = vim.uv.fs_scandir(root)
   if not scan then return nil, scan_err end
-  local paths, entries, names = {}, {}, {}
+  local entry_paths, entries, names = {}, {}, {}
   while true do
     local name, kind = vim.uv.fs_scandir_next(scan)
     if name == nil then break end
-    paths[#paths + 1] = M.entry_path(root, name)
+    entry_paths[#entry_paths + 1] = M.entry_path(root, name)
     entries[#entries + 1] = { name = name, type = kind }
     names[#names + 1] = name
   end
-  local ignored, filter_err = filtered_paths(root, paths, snapshot)
+  local ignored, filter_err = filtered_paths(root, entry_paths, snapshot)
   if not ignored then return nil, filter_err end
   local visible, err = (read or M.read)(root, ignored, entries)
   if not visible then return nil, err end
   return visible, nil, names
 end
 
-local function list_with_snapshot(root, read, show_hidden_override)
-  local snapshot, filter_err = capture_filter(root, show_hidden_override)
+local function list_with_snapshot(root, read, show_hidden_override, respect_gitignore_override)
+  local snapshot, filter_err = capture_filter(root, show_hidden_override, respect_gitignore_override)
   if not snapshot then return nil, nil, filter_err end
   local visible, err, all_names = read_with_snapshot(root, snapshot, read)
   if not visible then return nil, nil, err end
   local visible_set = {}
   for _, line in ipairs(visible) do
-    visible_set[line:gsub('/+$', '')] = true
+    visible_set[paths.strip_directory_marker(line)] = true
   end
   local hidden = {}
   for _, name in ipairs(all_names) do
@@ -281,14 +278,14 @@ local function apply_snapshot(root, lines, snapshot)
   -- those patterns to the current directory so matching entries that appeared
   -- after listing cannot be mistaken for user-visible DELETE sources.
   local ignored = ignored_identity_index(M.ignore_set(root, snapshot.wildignore or ''))
-  local paths = {}
-  for _, line in ipairs(lines) do paths[#paths + 1] = M.entry_path(root, line) end
-  local current_filtered, filter_err = filtered_paths(root, paths, snapshot, {})
+  local entry_paths = {}
+  for _, line in ipairs(lines) do entry_paths[#entry_paths + 1] = M.entry_path(root, line) end
+  local current_filtered, filter_err = filtered_paths(root, entry_paths, snapshot, {})
   if not current_filtered then return nil, filter_err end
   local current_index = ignored_identity_index(current_filtered)
   local visible = {}
   for _, line in ipairs(lines) do
-    local identity = line:gsub('/+$', '')
+    local identity = paths.strip_directory_marker(line)
     if not hidden[identity]
       and not identity_is_ignored(M.entry_path(root, line), ignored)
       and not identity_is_ignored(M.entry_path(root, line), current_index) then
@@ -299,14 +296,13 @@ local function apply_snapshot(root, lines, snapshot)
 end
 
 local function path_without_marker(path)
-  local trimmed = tostring(path):gsub('/+$', '')
-  if trimmed == '' then return '/' end
-  return trimmed
+  return paths.strip_trailing_separator(tostring(path))
 end
 
 local function relative_path(root, path)
   local function normalize(value)
-    value = vim.fs.normalize(tostring(value)):gsub('\\', '/')
+    value = vim.fs.normalize(tostring(value))
+    if package.config:sub(1, 1) == '\\' then value = value:gsub('\\', '/') end
     if value:match('^%a:/$') then return value end
     value = value:gsub('/+$', '')
     return value == '' and '/' or value
@@ -426,7 +422,7 @@ local function hidden_descendant(directory, root_snapshot, state)
     local hidden = {}
     if snapshot and fs.same_path(snapshot.path, path) then
       for _, name in ipairs(snapshot.hidden or {}) do
-        hidden[name:gsub('/+$', '')] = true
+        hidden[name] = true
       end
     end
     for _, name in ipairs(names) do

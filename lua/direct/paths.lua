@@ -7,6 +7,71 @@ local M = {}
 local fs = require('direct.fs')
 local constants = require('direct.constants')
 
+M.separator = package.config:sub(1, 1)
+
+function M.directory_separator()
+  local config = package.loaded['direct.config']
+  return config and config.options.directory_separator
+    or M.separator
+end
+
+function M.is_directory_name(name)
+  return type(name) == 'string' and name:sub(-1) == M.directory_separator()
+end
+
+function M.strip_directory_marker(name)
+  if M.is_directory_name(name) then
+    return name:sub(1, -2)
+  end
+  return name
+end
+
+function M.mark_directory(name)
+  return tostring(name) .. M.directory_separator()
+end
+
+function M.join_entry(root, name)
+  local directory = M.is_directory_name(name)
+  local component = M.strip_directory_marker(name)
+  if M.separator == '\\' then
+    component = component:gsub('/', '\\')
+  elseif M.directory_separator() == '\\' then
+    component = component:gsub('\\', '/')
+  end
+  local path = vim.fs.joinpath(root, component)
+  if directory and path:sub(-1) ~= M.separator then
+    path = path .. M.separator
+  end
+  return path
+end
+
+function M.strip_trailing_separator(path)
+  if type(path) ~= 'string' then return path end
+  local trimmed
+  if M.separator == '\\' then
+    trimmed = path:gsub('[/\\]+$', '')
+  else
+    trimmed = path:gsub('/+$', '')
+  end
+  if trimmed == '' then
+    return M.separator
+  end
+  if M.separator == '\\' and path:match('^%a:[/\\]+$') then
+    return path:sub(1, 2) .. M.separator
+  end
+  return trimmed
+end
+
+-- A slash-normalized spelling for comparisons and URI-relative paths only.
+-- Filesystem calls should retain their native spelling.
+function M.canonical(path)
+  local normalized = vim.fs.normalize(tostring(path))
+  if M.separator == '\\' then normalized = normalized:gsub('\\', '/') end
+  if normalized:match('^%a:/$') then return normalized end
+  local trimmed = normalized:gsub('/+$', '')
+  return trimmed == '' and '/' or trimmed
+end
+
 -- valid_utf8(value) validates UTF-8 without relying on decoder replacement
 -- behavior. It rejects overlong sequences, surrogates, and codepoints > U+10FFFF.
 function M.valid_utf8(value)
@@ -65,8 +130,7 @@ function M.validate_canonical_path(value)
   local ok, err = M.validate_path(value)
   if not ok then return nil, err end
   local normalized = M.root(value)
-  local spelling = value:gsub('/+$', '')
-  if spelling == '' then spelling = '/' end
+  local spelling = M.strip_trailing_separator(value)
   if normalized ~= spelling then return nil, 'path must be absolute and canonical' end
   return true
 end
@@ -133,10 +197,7 @@ function M.basename(path)
   if path == nil then
     return nil
   end
-  local trimmed = path:gsub('/+$', '')
-  if trimmed == '' then
-    trimmed = '/'
-  end
+  local trimmed = M.strip_trailing_separator(path)
   return vim.fs.basename(trimmed)
 end
 

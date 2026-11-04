@@ -7,8 +7,9 @@ local constants = require('direct.constants')
 
 local defaults = {
   map_default_keys = true,
+  directory_separator = package.config:sub(1, 1),
   show_hidden = true,
-  respect_gitignore = false,
+  respect_gitignore = true,
   show_folder_icons = true,
   show_file_icons = true,
   icons = {
@@ -149,7 +150,7 @@ M._setup_called = false
 M._vim_enter_installed = false
 M._installed = vim.fn.maparg(M.GLOBAL_MAP.lhs, M.GLOBAL_MAP.mode) == M.GLOBAL_MAP.rhs
 
--- The fifteen buffer-local mappings for filetype=direct buffers, owned
+-- The sixteen buffer-local mappings for filetype=direct buffers, owned
 -- here so setup can clear and restore them in
 -- ALREADY-open direct buffers. Installed by `ftplugin/direct.lua` via
 -- `install_buffer_mappings(0)`. Built on `<Cmd>` (never a `:` command that
@@ -160,7 +161,7 @@ M.BUFFER_MAPS = {
   { mode = 'n', lhs = '<CR>',
     rhs = '<Cmd>lua require("direct").open()<CR>' },
   { mode = 'n', lhs = '-',
-    rhs = '<Cmd>lua require("direct").open("../")<CR>' },
+    rhs = '<Cmd>lua require("direct").list(vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":h"))<CR>' },
   { mode = 'n', lhs = 'z-',
     rhs = '<Cmd>lua require("direct").open_parent_expanded()<CR>' },
   { mode = 'n', lhs = 'u', rhs = '<Cmd>DirectUndo<CR>' },
@@ -176,6 +177,7 @@ M.BUFFER_MAPS = {
   { mode = 'n', lhs = 'p', rhs = '<Cmd>DirectPaste<CR>' },
   { mode = 'n', lhs = 'P', rhs = '<Cmd>DirectPaste<CR>' },
   { mode = 'n', lhs = 'gh', rhs = '<Cmd>DirectToggleHidden<CR>' },
+  { mode = 'n', lhs = 'gi', rhs = '<Cmd>DirectToggleGitIgnore<CR>' },
   { mode = 'n', lhs = 'ga', rhs = '<Cmd>DirectGit git add -- {}<CR>' },
   { mode = 'n', lhs = 'gr', rhs = '<Cmd>DirectGit git reset -- {}<CR>' },
   { mode = 'n', lhs = 'gc', rhs = '<Cmd>DirectGit git checkout -- {}<CR>' },
@@ -307,6 +309,10 @@ function M.setup(opts)
       require('direct.ui').notify(
         'direct: max_recursive_expand_depth must be false or a positive integer',
         vim.log.levels.ERROR)
+    elseif key == 'directory_separator'
+      and value ~= '/' and value ~= '\\' then
+      require('direct.ui').notify(
+        'direct: directory_separator must be "/" or "\\\\"', vim.log.levels.ERROR)
     elseif key == 'icons' then
       next_options.icons = resolve_icon_options(value)
     elseif (key == 'show_hidden' or key == 'respect_gitignore')

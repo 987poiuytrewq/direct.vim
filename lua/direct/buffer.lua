@@ -41,8 +41,8 @@ M._state_for_test = rows.state_for_test
 M.entry_path = listing.entry_path
 M.ignore_set = listing.ignore_set
 M.read = listing.read
-local function list_with_snapshot(root, show_hidden)
-  return listing.list_with_snapshot(root, M.read, show_hidden)
+local function list_with_snapshot(root, show_hidden, respect_gitignore)
+  return listing.list_with_snapshot(root, M.read, show_hidden, respect_gitignore)
 end
 
 -- Keep only entries represented by the list-time Git status snapshot. Directory
@@ -133,11 +133,13 @@ local function merge_deleted_entries(directory, lines, git_snapshot, show_hidden
   local result, seen, deleted = {}, {}, {}
   for _, line in ipairs(lines or {}) do
     result[#result + 1] = line
-    seen[line:gsub('/+$', '')] = true
+    seen[paths.strip_directory_marker(line)] = true
   end
   for _, entry in ipairs(git.deleted_children(git_snapshot, directory)) do
-    local basename = entry.name:gsub('/+$', '')
-    if not seen[basename]
+    local basename = paths.strip_directory_marker(entry.name)
+    local raw_name = entry.kind == 'directory' and basename or entry.name
+    if not raw_name:find(paths.directory_separator(), 1, true)
+      and not seen[basename]
       and (show_hidden ~= false or basename:sub(1, 1) ~= '.') then
       result[#result + 1] = entry.name
       seen[basename] = true
@@ -295,6 +297,7 @@ local sync_plan = require('direct.buffer_sync_plan')({
   action_mod = action_mod,
   entry_path = M.entry_path,
   is_dir_line = is_dir_line,
+  directory_separator = paths.directory_separator,
   dirs_then_name = dirs_then_name,
   lstat = lstat,
   path_without_marker = path_without_marker,
@@ -434,6 +437,7 @@ local tree_planner = require('direct.buffer_tree')({
   row_ids_by_row = row_ids_by_row,
   set_row_mark = set_row_mark,
   is_dir_line = is_dir_line,
+  strip_directory_marker = paths.strip_directory_marker,
   component_reason = component_reason,
   same_lines = same_lines,
   entry_path = M.entry_path,
@@ -683,7 +687,13 @@ function Buffer:list()
     and type(old_state.view_show_hidden) == 'boolean' then
     show_hidden_override = old_state.view_show_hidden
   end
-  local lines, snapshot, err = list_with_snapshot(self.root, show_hidden_override)
+  local respect_gitignore_override
+  if old_state and old_state.view_respect_gitignore_override
+    and type(old_state.view_respect_gitignore) == 'boolean' then
+    respect_gitignore_override = old_state.view_respect_gitignore
+  end
+  local lines, snapshot, err = list_with_snapshot(self.root, show_hidden_override,
+    respect_gitignore_override)
   if not lines then
     ui.notify('direct: cannot list ' .. tostring(self.root) .. ': '
       .. tostring(err), vim.log.levels.ERROR)
@@ -800,8 +810,11 @@ function Buffer:list()
       and not deleted_visibility_changed
       and vim.deepcopy(old_state.collapse_undos or {}) or {},
     view_show_hidden = snapshot.show_hidden,
+    view_respect_gitignore = snapshot.respect_gitignore,
     view_show_deleted = show_deleted,
     view_show_hidden_override = old_state and old_state.view_show_hidden_override or false,
+    view_respect_gitignore_override = old_state
+      and old_state.view_respect_gitignore_override or false,
     view_git_status_only = view_git_status_only,
     git_status = git_snapshot or false,
   }
@@ -920,10 +933,14 @@ function Buffer:expand(row)
     local physical_children, snapshot
     if rec.deleted_kind then
       physical_children = {}
-      snapshot = { wildignore = vim.o.wildignore or '', show_hidden = state.view_show_hidden }
+      snapshot = {
+        wildignore = vim.o.wildignore or '', show_hidden = state.view_show_hidden,
+        respect_gitignore = state.view_respect_gitignore,
+      }
     else
       local err
-      physical_children, snapshot, err = list_with_snapshot(path, state.view_show_hidden)
+      physical_children, snapshot, err = list_with_snapshot(path,
+        state.view_show_hidden, state.view_respect_gitignore)
       if not physical_children then
         ui.notify('direct: cannot expand ' .. tostring(path) .. ': '
           .. tostring(err), vim.log.levels.ERROR)
@@ -1287,6 +1304,46 @@ function M.toggle_git_status()
   return listed
 end
 
+function M.toggle_gitignore()
+  local bufnr = vim.api.nvim_get_current_buf()
+  if vim.bo[bufnr].modified then
+    local reason = 'cannot toggle Git-ignore filtering with unsaved edits; sync or discard them first'
+    ui.notify('direct: ' .. reason, vim.log.levels.ERROR)
+    return nil, reason
+  end
+  local state = states[bufnr]
+  if not state then
+    local reason = 'direct listing state is unavailable; re-list this directory'
+    ui.notify('direct: ' .. reason, vim.log.levels.ERROR)
+    return nil, reason
+  end
+  local previous = {
+    view_respect_gitignore = state.view_respect_gitignore,
+    view_respect_gitignore_override = state.view_respect_gitignore_override,
+    expanded = state.expanded,
+    known_children = state.known_children,
+    directory_snapshots = state.directory_snapshots,
+    materialization_undos = state.materialization_undos,
+    materialization_recoveries = state.materialization_recoveries,
+    collapse_undos = state.collapse_undos,
+  }
+  state.view_respect_gitignore = not state.view_respect_gitignore
+  state.view_respect_gitignore_override = true
+  -- Rebuild from the root so every expanded level uses the same Git rules.
+  state.expanded = {}
+  state.known_children = {}
+  state.directory_snapshots = {}
+  state.materialization_undos = {}
+  state.materialization_recoveries = {}
+  state.collapse_undos = {}
+  local listed, err = M.restore():list()
+  if not listed then
+    for key, value in pairs(previous) do state[key] = value end
+    return nil, err
+  end
+  return listed
+end
+
 -- Internal adapter for the folding command module. Keep row marks and state
 -- owned by this buffer model; folding.lua only receives these narrow accessors.
 function M._folding_context(bufnr)
@@ -1576,7 +1633,10 @@ function Buffer:sync(options)
     -- order. Nested parent directories are expanded for every new nested path.
     for _, line in ipairs(actual) do
       if added_set[line] then
-        local relative = line:gsub('/+$', '')
+        local relative = paths.strip_directory_marker(line)
+        if paths.directory_separator() == '\\' then
+          relative = relative:gsub('\\', '/')
+        end
         added_focus_path = M.entry_path(self.root, line)
         if relative:find('/', 1, true) then
           local parts = vim.split(relative, '/', { plain = true })
@@ -1584,7 +1644,7 @@ function Buffer:sync(options)
           local parent = self.root
           for index = 1, directory_count do
             parent = fs.join(parent, parts[index])
-            local normalized_parent = parent:gsub('/+$', '')
+            local normalized_parent = paths.strip_trailing_separator(parent)
             local key = vim.fs.normalize(normalized_parent)
             expand_by_path[key] = parent
           end
@@ -1612,9 +1672,11 @@ function Buffer:sync(options)
       local function under_removed_root(path)
         if type(path) ~= 'string' then return false end
         local candidate = vim.fs.normalize(path)
+        candidate = paths.canonical(candidate)
         for _, root_path in ipairs(removed_roots) do
-          local normalized = vim.fs.normalize(root_path):gsub('/+$', '')
-          if candidate == normalized or candidate:sub(1, #normalized + 1) == normalized .. '/' then
+          local normalized = paths.canonical(root_path)
+          local prefix = normalized:sub(-1) == '/' and normalized or normalized .. '/'
+          if candidate == normalized or candidate:sub(1, #prefix) == prefix then
             return true
           end
         end
@@ -1699,8 +1761,7 @@ function Buffer:sync(options)
   -- Compare filesystem-entry identity as well as spelling for case-only moves.
   local move_sources, sources_by_inode = {}, {}
   local function move_key(path)
-    path = path:gsub('/+$', '')
-    if path == '' then path = '/' end
+    path = paths.strip_trailing_separator(path)
     return vim.fs.normalize(path)
   end
   for _, act in ipairs(actions) do
@@ -2153,14 +2214,13 @@ function Buffer:paste_destination(row)
 end
 
 local function normalized_path(path)
-  path = vim.fs.normalize(path):gsub('/+$', '')
-  return path == '' and '/' or path
+  return paths.canonical(path)
 end
 
 local function path_is_within(parent, candidate)
   parent, candidate = normalized_path(parent), normalized_path(candidate)
   if candidate == parent then return true end
-  local prefix = parent == '/' and '/' or parent .. '/'
+  local prefix = parent:sub(-1) == '/' and parent or parent .. '/'
   return candidate:sub(1, #prefix) == prefix
 end
 

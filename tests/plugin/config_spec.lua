@@ -8,9 +8,14 @@ local buffer = require('direct.buffer')
 -- A fresh module table: config is stateful (lifecycle flags), and the harness
 -- only unloads direct modules at file boundaries, so the spec reloads it where
 -- state matters.
-local function fresh_config()
+local function fresh_config(use_platform_default)
   package.loaded['direct.config'] = nil
-  return require('direct.config')
+  local config = require('direct.config')
+  if not use_platform_default then
+    config.defaults.directory_separator = '/'
+    config.options.directory_separator = '/'
+  end
+  return config
 end
 
 local function global_dash_count()
@@ -24,6 +29,23 @@ local function global_dash_count()
 end
 
 H.describe('config', function()
+  H.it('defaults the directory row marker to the filesystem separator and validates overrides', function()
+    local config = fresh_config(true)
+    config.clear_mappings()
+    H.assert_eq(config.defaults.directory_separator, package.config:sub(1, 1),
+      'native path separator is the default display marker')
+    H.assert_eq(config.setup({ directory_separator = '\\' }).directory_separator, '\\',
+      'backslash override is accepted')
+    H.assert_eq(config.setup({ directory_separator = '/' }).directory_separator, '/',
+      'slash override is accepted')
+    H.capture_messages()
+    local options = config.setup({ directory_separator = '|' })
+    H.assert_eq(options.directory_separator, config.defaults.directory_separator,
+      'invalid marker leaves the platform default')
+    H.assert_notified('directory_separator', vim.log.levels.ERROR)
+    config.clear_mappings()
+  end)
+
   H.it('two setup() calls converge on the same options', function()
     local config = fresh_config()
     config.clear_mappings()

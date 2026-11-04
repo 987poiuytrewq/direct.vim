@@ -161,7 +161,9 @@ function M.deleted_children(snapshot, directory)
     if path:sub(1, #prefix) == prefix and path_is_missing(path) then
       local name = path:sub(#prefix + 1)
       if name ~= '' and not name:find('/', 1, true) then
-        if entry.kind == 'directory' then name = name .. '/' end
+        if entry.kind == 'directory' then
+          name = name .. require('direct.paths').directory_separator()
+        end
         result[#result + 1] = {
           name = name,
           path = path,
@@ -413,6 +415,18 @@ function M.ignore_snapshot_matches(snapshot, path, checked)
   -- directory so a newly-created (or newly-removed) repository is detected.
   path = path or (snapshot and snapshot.scope_path)
   if not path then return nil, 'Git ignore snapshot path is unavailable' end
+  -- Expanded directories can be moved or removed by a successful sync while
+  -- retaining their original list-time snapshot. If they were outside Git,
+  -- the now-missing path cannot have gained repository context; accept it.
+  -- A Git-backed snapshot still requires a live path so repository changes fail
+  -- closed as usual.
+  if not snapshot then
+    local stat, stat_err = vim.uv.fs_stat(path)
+    if not stat and stat_err and (stat_err:find('ENOENT', 1, true)
+      or stat_err:find('ENOTDIR', 1, true)) then
+      return true
+    end
+  end
   local repo_root, discover_err = discover_repo(path)
   if repo_root == false then
     if snapshot then

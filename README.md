@@ -102,11 +102,13 @@ Default keys:
 - `-` goes to the parent directory.
 - `zo` expands a directory in place.
 - `gh` shows or hides dotfiles.
+- `gi` toggles Git-ignore filtering.
 - `gs` shows only entries with a Git status; press it again to restore the listing.
 
 Edit the listing to rename, create, or delete entries, then save with `:write`.
-Directory names end in `/`; file names do not. At the root level, save one kind
-of change at a time. `yy` yanks the entry under the cursor and `p` pastes it.
+Directory names end in the platform's filesystem separator by default; file
+names do not. At the root level, save one kind of change at a time. `yy` yanks
+the entry under the cursor and `p` pastes it.
 
 | To… | Edit the listing |
 |---|---|
@@ -114,11 +116,13 @@ of change at a time. `yy` yanks the entry under the cursor and `p` pastes it.
 | Create | Add a line, e.g. `notes.md` or `reports/2026/summary.md` |
 | Delete | Remove the line |
 
-Save with `:write` to apply your change. Directory names must end in `/` (such
-as `archive/`); file names must not. At the root level, save one kind of change
-at a time—create, rename, or delete. A new relative path may contain `/`; Direct
-creates missing parent directories. Absolute paths, empty path components, and
-`.` or `..` components are refused; the final `/` remains the directory marker.
+Save with `:write` to apply your change. Directory names must end in the
+configured directory separator (such as `archive/` on POSIX or `archive\\` on
+Windows); file names must not. At the root level, save one kind of change at a
+time—create, rename, or delete. A new relative path may contain the platform's
+separator; Direct creates missing parent directories. Absolute paths, empty
+path components, and `.` or `..` components are refused; the final separator
+remains the directory marker.
 After saving a nested path, Direct expands its parent directories and moves the
 cursor to the last added entry. If Direct can't tell what you meant, it refuses
 the save and leaves the filesystem unchanged.
@@ -129,9 +133,10 @@ the save and leaves the filesystem unchanged.
 
 ```lua
 require('direct').setup({
+  directory_separator = package.config:sub(1, 1), -- '/' or '\\'; defaults to the filesystem separator
   map_default_keys = true, -- set false to install no default mappings
   show_hidden = true, -- set false to hide dot-prefixed entries
-  respect_gitignore = false, -- opt in to Git's ignore rules
+  respect_gitignore = true, -- set false to show Git-ignored entries
   show_folder_icons = true, -- show Font Awesome folder icons
   show_file_icons = true, -- show a generic Font Awesome file icon
   icons = {
@@ -156,6 +161,11 @@ switches the current direct buffer's view. The toggle is refused while the
 listing has unsaved edits. It refreshes from disk and collapses expanded
 subtrees so every visible level uses the same setting.
 
+Git-ignore filtering is enabled by default. Set `respect_gitignore = false` to
+show ignored entries; `:DirectToggleGitIgnore` (also mapped to `gi`) switches
+the current direct buffer's view. Like the hidden-entry toggle, it refuses
+unsaved edits and refreshes the listing, collapsing expanded subtrees.
+
 In a direct listing, `gs` (or `:DirectToggleGitStatus`) toggles a view that shows
 only entries with a Git status. Directories with changed descendants are
 included, and expanding them applies the same filter to their children. The
@@ -169,7 +179,7 @@ Configuration defaults:
 |---|---|---|
 | `map_default_keys` | `true` | Install Direct's default key mappings. |
 | `show_hidden` | `true` | Show dotfiles; `gh` toggles visibility in a listing. |
-| `respect_gitignore` | `false` | Apply Git ignore rules to listings; tracked files remain visible. |
+| `respect_gitignore` | `true` | Apply Git ignore rules to listings; tracked files remain visible. `gi` toggles the current view. |
 | `show_folder_icons` | `true` | Show folder icons. |
 | `show_file_icons` | `true` | Show generic file icons. |
 | `icons.file` | U+F15B | Font Awesome file glyph. |
@@ -288,8 +298,10 @@ exit status and captured output.
 The default `ga`, `gr`, and `gc` mappings run `git add -- {}`, `git reset -- {}`,
 and `git checkout -- {}` for the current entry through `:DirectGit`.
 
-Git ignore filtering is separate from status display and is off by default. Set
-`respect_gitignore = true` to use Git itself to apply root and nested
+Git ignore filtering is separate from status display and is on by default. Set
+`respect_gitignore = false` to show ignored entries. Press `gi` or run
+`:DirectToggleGitIgnore` to toggle filtering in the current listing. When enabled,
+Direct uses Git itself to apply root and nested
 `.gitignore` files, negations, anchoring, escaped patterns, `.git/info/exclude`,
 and the configured global excludes file. Tracked files remain visible, and a
 directory containing tracked descendants remains visible. Outside a repository
@@ -344,12 +356,14 @@ At the root level, a save is classified as exactly one of *rename*, *create* or
 - **Delete** — delete the lines for the entries you want to remove, and save.
   Deleted entries are yanked automatically, so you can paste them back.
 
-### The trailing-slash rule
+### The directory-separator rule
 
-A directory must always be written with a trailing slash, and a file must never
-have one: the line, not the filesystem, decides what will be created or
-renamed. Renaming `foo/` to `foo` therefore replaces the directory `foo` with a
-file, and adding a line `bar` creates a file while `bar/` creates a directory.
+A directory must always be written with a trailing configured separator, and a
+file must never have one: the line, not the filesystem, decides what will be
+created or renamed. By default, the marker is the platform's filesystem
+separator; `directory_separator` can override it with `/` or `\\`. The selected
+marker is reserved inside entry names, so names containing it are omitted from
+the editable listing to avoid ambiguity.
 
 At the root level, an edit that both adds and deletes entries, or that leaves a
 duplicated line, is reported as ambiguous, naming both sides of the comparison.
@@ -495,6 +509,7 @@ use their existing synchronous staging path.
 | `:DirectFoldAll` | none | Collapse all expanded directories in the current listing. |
 | `:DirectUnfoldAll` | none | Recursively expand all directories in the current listing. |
 | `:DirectToggleHidden` | none | Toggle dot-hidden entries in the current direct listing and refresh its view. |
+| `:DirectToggleGitIgnore` | none | Toggle Git-ignore filtering in the current direct listing. |
 | `:DirectToggleGitStatus` | none | Toggle the Git-status-only view in the current direct listing. |
 | `:DirectUndo` | none | Undo the last filesystem action. |
 | `:DirectRedo` | none | Redo the last undone action. |
@@ -503,7 +518,7 @@ use their existing synchronous staging path.
 | `:DirectPasteAs {name}` | `{name}` | Paste into the cursor row's directory (or a file's parent) under `{name}`. |
 
 `:DirectSync`, `:DirectFoldAll`, `:DirectUnfoldAll`, `:DirectToggleHidden`,
-`:DirectToggleGitStatus`, `:DirectUndo`, `:DirectRedo`, `:DirectYank`, `:DirectPaste` (no argument),
+`:DirectToggleGitIgnore`, `:DirectToggleGitStatus`, `:DirectUndo`, `:DirectRedo`, `:DirectYank`, `:DirectPaste` (no argument),
 `:DirectPasteAs`, `:DirectRun`, and the public `open()` API report an error and do
 nothing when the current buffer is not a direct buffer. `open()` is also used by
 the direct-buffer entry mappings. `:DirectPaste {dir}` is the exception: it
@@ -541,6 +556,7 @@ Buffer-local, in a direct buffer (all mappings follow `map_default_keys`):
 | visual | `y` | `:DirectYank` (selected range) |
 | normal | `p`, `P` | `:DirectPaste` |
 | normal | `gh` | `:DirectToggleHidden` |
+| normal | `gi` | `:DirectToggleGitIgnore` |
 | normal | `ga` | `:DirectGit git add -- {}` |
 | normal | `gr` | `:DirectGit git reset -- {}` |
 | normal | `gc` | `:DirectGit git checkout -- {}` |

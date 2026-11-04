@@ -66,8 +66,9 @@ loader is disabled.
 2. Requirements                                        *direct.vim-requirements*
 
     - Neovim >= 0.12
-    - No Python: the plugin is pure Lua. Git is optional for ordinary listings;
-      Git status and `respect_gitignore` use the Git command-line executable.
+    - No Python: the plugin is pure Lua. Git status and Git-ignore filtering use
+      the Git command-line executable. Git-ignore filtering is on by default;
+      set `respect_gitignore = false` to disable it.
 
 Run `:checkhealth direct` to confirm the version and the data home in use:
 
@@ -79,9 +80,10 @@ Run `:checkhealth direct` to confirm the version and the data home in use:
 `setup()` is optional; the defaults apply when it is never called.
 
     require('direct').setup({
+      directory_separator = package.config:sub(1, 1), -- '/' or '\\'; defaults to the filesystem separator
       map_default_keys = true, -- set false to install no default mappings
       show_hidden = true, -- set false to hide dot-prefixed entries
-      respect_gitignore = false, -- opt in to Git ignore filtering
+      respect_gitignore = true, -- set false to show Git-ignored entries
       show_folder_icons = true, -- show Font Awesome folder icons
       show_file_icons = true, -- show a generic Font Awesome file icon
       icons = {
@@ -108,6 +110,10 @@ Run `:checkhealth direct` to confirm the version and the data home in use:
 option name as an error instead of silently ignoring it. See
 |direct.vim-mappings| for `map_default_keys`.
 
+`directory_separator` defaults to the filesystem separator and controls the
+trailing marker used for directory rows. Set it to `/` or `\\` to choose a
+different marker; configure it before opening Direct listings.
+
 `max_recursive_expand_depth` defaults to `false` (unlimited). Set it to a
 positive integer to cap the directory levels opened by recursive commands
 `zO`, `zA`, `zR`, and `:DirectUnfoldAll`. The cap does not restrict one-level
@@ -118,6 +124,12 @@ Dot-prefixed files and directories are visible by default. Set
 switches the current direct buffer's view. It refuses while the listing has
 unsaved edits, refreshes from disk, and collapses expanded subtrees so every
 visible level uses the same filter.
+
+Git-ignore filtering is enabled by default. Set `respect_gitignore = false` to
+show ignored entries. In a direct listing, `gi` (or
+`:DirectToggleGitIgnore`) toggles this filter. It refuses while the listing has
+unsaved edits, refreshes from disk, and collapses expanded subtrees so every
+visible level uses the same rules.
 
 In a direct listing, `gs` (or `:DirectToggleGitStatus`) toggles a view showing
 only entries with a Git status. Directories with changed descendants are
@@ -208,8 +220,10 @@ Deleted tracked rows always use `DirectGitDeletedFile` or
 staged/reset/restored with `ga`, `gr`, and `gc`. Other listing edits, opens,
 yanks, and pastes on these rows are ignored.
 
-Git-ignore filtering is separately opt-in with `respect_gitignore = true`. It
-uses Git's own matching for root and nested `.gitignore` files, negations,
+Git-ignore filtering is on by default. Set `respect_gitignore = false` to show
+ignored entries; press `gi` or run `:DirectToggleGitIgnore` to toggle the current
+listing. When enabled, it uses Git's own matching for root and nested
+`.gitignore` files, negations,
 anchoring, escaped patterns, `.git/info/exclude`, and the configured global
 excludes file. Tracked files remain visible, as do directories containing
 tracked descendants. Outside a repository this filter has no effect. Git must
@@ -257,18 +271,23 @@ delete:
       save.
     - Create: add new lines at any location, and save. A new relative path such
       as `reports/2026/summary.txt` creates the file and missing parent
-      directories. A path ending in `/`, such as `reports/2026/`, creates a
-      directory at that path. After saving nested paths, their parent
-      directories are expanded and the cursor moves to the last added entry.
+      directories. A path ending in the configured `directory_separator`, such
+      as `reports/2026/` on POSIX, creates a directory at that path. After
+      saving nested paths, their parent directories are expanded and the cursor
+      moves to the last added entry.
     - Delete: delete the lines for the entries you want to remove, and save.
       Deleted entries are yanked automatically, so you can paste them back.
 
-The trailing-slash rule ~
+The directory-separator rule ~
 
-A directory must always be written with a trailing slash, and a file must never
-have one: the line, not the filesystem, decides what will be created or
-renamed. Renaming `foo/` to `foo` therefore replaces the directory `foo` with a
-file, and adding a line `bar` creates a file while `bar/` creates a directory.
+A directory must always be written with a trailing configured separator, and a
+file must never have one: the line, not the filesystem, decides what will be
+created or renamed. By default this is the filesystem separator; set
+`directory_separator` to `/` or `\\` to override it. Renaming a marked `foo`
+directory to `foo` replaces it with a file, and adding an unmarked `bar` creates
+a file while marked `bar` creates a directory.
+The selected marker is reserved inside entry names; entries containing it are
+omitted from the editable listing to keep the row grammar unambiguous.
 
 At the root level, an edit that both adds and deletes entries, or that leaves a
 duplicated line, is reported as ambiguous, naming both sides of the comparison.
@@ -408,6 +427,10 @@ existing synchronous staging behavior.
         Toggle dot-hidden entries in the current direct listing and refresh its
         view. Refuses if the listing has unsaved edits.
 
+    :DirectToggleGitIgnore
+        Toggle Git-ignore filtering in the current direct listing. Refuses if
+        the listing has unsaved edits.
+
     :DirectToggleGitStatus
         Toggle the Git-status-only view in the current direct listing. Refuses
         if the listing has unsaved edits.
@@ -484,6 +507,7 @@ Buffer-local, in a direct buffer (all mappings follow `map_default_keys`):
     visual      y           :DirectYank (selected range)
     normal      p, P        :DirectPaste
     normal      gh          :DirectToggleHidden
+    normal      gi          :DirectToggleGitIgnore
     normal      ga          :DirectGit git add -- {}
     normal      gr          :DirectGit git reset -- {}
     normal      gc          :DirectGit git checkout -- {}

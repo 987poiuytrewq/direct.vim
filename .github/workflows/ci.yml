@@ -1,9 +1,7 @@
 name: CI
 
-# Push covers branches without PRs; pull_request also tests the merge result and
-# enables CI for fork PRs. Unfiltered push means tag pushes run too (harmless).
+# Test proposed merge commits for pull requests, including fork PRs.
 on:
-  push:
   pull_request:
 
 permissions:
@@ -11,12 +9,16 @@ permissions:
 
 jobs:
   test:
-    name: Test with Neovim (${{ matrix.neovim-version }})
-    runs-on: ubuntu-latest
+    name: Test on ${{ matrix.os }} (Neovim ${{ matrix.neovim-version }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
         neovim-version: [v0.12.0, stable]
 
     steps:
@@ -39,17 +41,31 @@ jobs:
         run: nvim --version | head -n 1
 
       - name: Install LuaRocks
+        if: runner.os == 'Linux'
         run: make ci-deps
 
       - name: Run tests and generate coverage
+        if: runner.os == 'Linux'
         run: make coverage
 
+      - name: Run full test suite
+        if: matrix.os == 'macos-latest'
+        run: nvim --headless -l tests/run.lua
+
+      - name: Run Windows compatibility tests
+        if: matrix.os == 'windows-latest'
+        # Focus on portable fixtures; the full suite has POSIX-only fixtures and
+        # path-spelling assumptions not yet suitable for Windows.
+        run: >-
+          nvim --headless -l tests/run.lua config_spec sync_plan_spec
+          history_format_spec history_preflight_spec platform_compat_spec
+
       - name: Add coverage to the run summary
-        if: always() && hashFiles('coverage/summary.out') != ''
+        if: runner.os == 'Linux' && always() && hashFiles('coverage/summary.out') != ''
         run: make coverage-summary NEOVIM_VERSION='${{ matrix.neovim-version }}'
 
       - name: Publish coverage report
-        if: always()
+        if: runner.os == 'Linux' && always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: coverage-${{ matrix.neovim-version }}

@@ -122,6 +122,28 @@ local function format_mismatch(label, actual, expected)
 end
 
 function M.assert_eq(actual, expected, msg)
+  -- Filesystem APIs may preserve native `\\` spellings while fixtures often
+  -- compose paths with `/` (also accepted by Win32). Compare absolute paths by
+  -- their separator-neutral spelling so assertions focus on identity, not the
+  -- input spelling used to reach the same Windows path.
+  if package.config:sub(1, 1) == '\\' then
+    local function normalize_paths(value)
+      if type(value) == 'string' then
+        if value:match('^%a:[/\\]') or value:match('^[/\\][/\\]') then
+          return value:gsub('\\', '/')
+        end
+        return value
+      elseif type(value) == 'table' then
+        local normalized = {}
+        for key, item in pairs(value) do
+          normalized[normalize_paths(key)] = normalize_paths(item)
+        end
+        return normalized
+      end
+      return value
+    end
+    actual, expected = normalize_paths(actual), normalize_paths(expected)
+  end
   if vim.deep_equal(actual, expected) then
     pass('assert_eq', msg)
   else
@@ -344,6 +366,10 @@ end
 -- records text without a level marker, so the level is not asserted on.
 function M.assert_notified(pattern, level)
   local text = M.messages()
+  if package.config:sub(1, 1) == '\\' then
+    pattern = tostring(pattern):gsub('\\', '/')
+    text = text:gsub('\\', '/')
+  end
   if not text:find(pattern, 1, true) then
     M.fail(string.format('expected notification containing %q; messages:\n%s',
       pattern, text))
@@ -477,6 +503,11 @@ end
 local function reset_runtime()
   clear_foreign_autocmds()
   pcall(vim.cmd, 'runtime! plugin/direct.lua')
+  -- Keep existing fixture rows portable and stable across OSes. Native marker
+  -- behavior is covered explicitly by the separator specs.
+  local config = require('direct.config')
+  config.defaults.directory_separator = '/'
+  config.options.directory_separator = '/'
 end
 
 local function reset_options()
@@ -533,6 +564,9 @@ function M._begin_test()
     vim.env.XDG_DATA_HOME = M._file_home
   end
   reset_options()
+  local config = require('direct.config')
+  config.defaults.directory_separator = '/'
+  config.options.directory_separator = '/'
   -- Within-file isolation: clear foreign autocmds but keep the plugin's own
   -- (re-registered at the file boundary), so re-sourcing is not needed here.
   clear_foreign_autocmds()

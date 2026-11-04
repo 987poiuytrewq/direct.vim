@@ -76,6 +76,52 @@ H.describe('buffer: current entry and cursor', function()
     H.assert_eq(buffer.entry_path('/a/b', 'f.txt'), '/a/b/f.txt', 'file line')
     H.assert_eq(buffer.entry_path('/', 'f.txt'), '/f.txt', 'root is special-cased')
   end)
+
+  H.it('renders configured markers but builds native filesystem paths', function()
+    clean_buffers()
+    local marker = package.config:sub(1, 1) == '/' and '\\' or '/'
+    require('direct.config').setup({ directory_separator = marker, git = { enabled = false } })
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkdir(ws, 'existing')
+    if package.config:sub(1, 1) == '/' and marker == '\\' then
+      H.mkfile(ws, 'hidden\\marker.txt', 'not representable with this marker')
+    end
+
+    local listing = buffer.list(ws)
+
+    H.assert_buf_eq({ 'existing' .. marker })
+    local expected = vim.fs.joinpath(ws, 'existing') .. package.config:sub(1, 1)
+    H.assert_eq(buffer.entry_path(ws, 'existing' .. marker), expected,
+      'display override does not leak into filesystem paths')
+    vim.api.nvim_buf_set_lines(0, -1, -1, false, {
+      'created' .. marker,
+      'nested' .. marker,
+      'nested' .. marker .. 'child.txt',
+    })
+    H.assert_true(listing:sync() == true, 'a directory can be created with the configured marker')
+    H.assert_true(fs.is_dir(vim.fs.joinpath(ws, 'created')), 'the native path was created')
+    H.assert_true(fs.is_file(vim.fs.joinpath(ws, 'nested', 'child.txt')),
+      'nested paths use the platform separator for filesystem operations')
+    H.assert_true(buffer._component_reason('bad' .. marker .. 'name') ~= nil,
+      'the configured marker is reserved inside entry names')
+  end)
+
+  H.it('renders the native separator by default', function()
+    clean_buffers()
+    local native = package.config:sub(1, 1)
+    require('direct.config').setup({ directory_separator = native, git = { enabled = false } })
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkdir(ws, 'native')
+
+    buffer.list(ws)
+
+    H.assert_buf_eq({ 'native' .. native })
+    H.assert_eq(buffer.entry_path(ws, 'native' .. native),
+      vim.fs.joinpath(ws, 'native') .. native,
+      'the default display marker still maps to a native filesystem path')
+  end)
 end)
 
 H.describe('buffer: attach by path identity', function()
