@@ -564,6 +564,9 @@ function M._begin_test()
     vim.env.XDG_DATA_HOME = M._file_home
   end
   reset_options()
+  local config = require('direct.config')
+  config.defaults.directory_separator = '/'
+  config.options.directory_separator = '/'
   -- Within-file isolation: clear foreign autocmds but keep the plugin's own
   -- (re-registered at the file boundary), so re-sourcing is not needed here.
   clear_foreign_autocmds()
