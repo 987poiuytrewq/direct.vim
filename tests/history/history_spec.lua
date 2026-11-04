@@ -507,6 +507,163 @@ H.describe('history', function()
     interrupted_reverse(true)
   end)
 
+  H.it('an interrupted Unpaste is retried or committed on restart by entry identity', function()
+    local register = require('direct.register')
+    local function recover(completed_before_restart)
+      local sb = H.sandbox()
+      local source = H.mkfile(sb.root, 'file.txt', { 'payload' })
+      H.assert_true(register.yank({ source }), 'register source is available')
+      local register_copy = register.content()
+      local destination = H.mkdir(sb.root, 'destination')
+      local paste = action.Paste(register_copy, destination, { 'file.txt' }, { 'file.txt' })
+      H.assert_true(paste['do']() ~= nil, 'fixture paste applies')
+      H.assert_true(history.log(paste), 'fixture paste is recorded')
+      local unpaste = action.Unpaste(destination, register_copy,
+        { 'file.txt' }, { 'file.txt' })
+      local record = action.serialize(unpaste)
+      local identity = fs.entry_identity(destination .. '/file.txt')
+      if completed_before_restart then
+        H.assert_true(unpaste['do']() ~= nil, 'simulate Unpaste landing before crash')
+      end
+      local transaction = vim.json.encode({
+        format = 'direct-history-transaction',
+        version = 1,
+        kind = 'unpaste',
+        direction = 'undo',
+        undo = { MARKER },
+        redo = { MARKER, record },
+        action = record,
+        entries = { { path = destination .. '/file.txt', identity = identity } },
+      })
+      local transaction_path = vim.fs.joinpath(history_dir(sb), 'transaction.json')
+      H.assert_true(log.write_raw_atomic(transaction_path, transaction .. '\n') == true,
+        'the Unpaste intent is durable')
+      with_fresh_process(function()
+        H.assert_true(require('direct.history').preflight() ~= nil,
+          'restart settles the interrupted Unpaste')
+      end)
+      H.assert_nil(vim.uv.fs_lstat(destination .. '/file.txt'), 'the pasted target is removed')
+      H.assert_eq(vim.fn.readfile(vim.fs.joinpath(history_dir(sb), 'undo.log')),
+        { MARKER }, 'the undo stack is drained')
+      H.assert_eq(vim.fn.readfile(vim.fs.joinpath(history_dir(sb), 'redo.log')),
+        { MARKER, record }, 'redo records the completed Unpaste')
+    end
+
+    recover(false)
+    recover(true)
+  end)
+
+  H.it('an async Paste reversal checkpoint survives a crash before the history commit', function()
+    local register = require('direct.register')
+    local sb = H.sandbox()
+    local source = H.mkfile(sb.root, 'file.txt', { 'payload' })
+    H.assert_true(register.yank({ source }), 'register source is available')
+    local register_copy = register.content()
+    local destination = H.mkdir(sb.root, 'destination')
+    local unpaste = action.Unpaste(destination, register_copy,
+      { 'file.txt' }, { 'file.txt' })
+    H.assert_true(history.log(unpaste), 'fixture Unpaste is on the undo stack')
+
+    local original_log = history.log
+    history.log = function() error('simulated crash before history commit') end
+    H.assert_true(history.undo_async(function() end) ~= nil,
+      'async reversal begins and copies the registered file')
+    history.log = original_log
+    H.assert_eq(vim.fn.readfile(destination .. '/file.txt'), { 'payload' },
+      'the async copy reached its destination before the simulated crash')
+    H.assert_true(fs.exists(vim.fs.joinpath(history_dir(sb), 'transaction.json')),
+      'the copy checkpoint remains journaled')
+
+    with_fresh_process(function()
+      H.assert_true(require('direct.history').preflight() ~= nil,
+        'restart commits the checkpointed reversal')
+    end)
+    H.assert_eq(vim.fn.readfile(vim.fs.joinpath(history_dir(sb), 'undo.log')),
+      { MARKER }, 'the undone Unpaste leaves undo history')
+    H.assert_eq(vim.fn.readfile(vim.fs.joinpath(history_dir(sb), 'redo.log')),
+      { MARKER, fixtures.paste('p', register_copy, destination,
+        { 'file.txt' }, { 'file.txt' }) }, 'the completed Paste is redoable')
+  end)
+
+  H.it('a grouped move intent is retried or committed on restart by entry identity', function()
+    local function recover(completed_before_restart)
+      local sb = H.sandbox()
+      local ws = H.mkdir(sb.root, 'ws')
+      H.mkfile(ws, 'a.txt', { 'A' })
+      H.mkfile(ws, 'b.txt', { 'B' })
+      local group = action.Group({
+        action.Move(ws .. '/a.txt', ws .. '/b.txt'),
+        action.Move(ws .. '/b.txt', ws .. '/a.txt'),
+      })
+      local record = action.serialize(group)
+      local prepared, journaled = history.prepare(group)
+      H.assert_true(prepared and journaled, 'the connected move batch is journaled')
+      if completed_before_restart then
+        H.assert_true(group['do']() ~= nil, 'simulate the complete swap before a crash')
+      end
+      with_fresh_process(function()
+        local fresh_history = require('direct.history')
+        H.assert_true(fresh_history.preflight() ~= nil, 'restart settles the grouped move')
+      end)
+      H.assert_eq(vim.fn.readfile(ws .. '/a.txt'), { 'B' }, 'the swap is present')
+      H.assert_eq(vim.fn.readfile(ws .. '/b.txt'), { 'A' }, 'the swap is present')
+      H.assert_eq(vim.fn.readfile(vim.fs.joinpath(history_dir(sb), 'undo.log')),
+        { MARKER, record }, 'one group record is committed')
+    end
+
+    recover(false)
+    recover(true)
+  end)
+
+  H.it('a completed async paste checkpoint is committed after a simulated crash', function()
+    local sb = H.sandbox()
+    local source = H.mkdir(sb.root, 'register')
+    local destination = H.mkdir(sb.root, 'destination')
+    H.mkfile(source, 'file.txt', { 'payload' })
+    local paste = action.Paste(source, destination, { 'file.txt' }, { 'file.txt' })
+    H.assert_true(history.prepare(paste), 'paste intent is prepared')
+    H.assert_true(history.paste_checkpoint(paste, 'file.txt', 'file.txt', false),
+      'the copy target is checkpointed before creation')
+    H.assert_true(fs.copy_file_exclusive(source .. '/file.txt', destination .. '/file.txt'),
+      'simulate the copy landing')
+    H.assert_true(history.paste_checkpoint(paste, 'file.txt', 'file.txt', true),
+      'the copied identity is checkpointed')
+
+    with_fresh_process(function()
+      H.assert_true(require('direct.history').preflight() ~= nil,
+        'restart commits the checkpointed copy')
+    end)
+    H.assert_eq(vim.fn.readfile(vim.fs.joinpath(history_dir(sb), 'undo.log')),
+      { MARKER, fixtures.paste('p', source, destination, { 'file.txt' }, { 'file.txt' }) },
+      'the exact completed paste is undoable')
+    H.assert_nil(vim.uv.fs_stat(vim.fs.joinpath(history_dir(sb), 'transaction.json')),
+      'the paste journal is removed')
+  end)
+
+  H.it('an uncheckpointed async paste target is preserved as ambiguous after a crash', function()
+    local sb = H.sandbox()
+    local source = H.mkdir(sb.root, 'register')
+    local destination = H.mkdir(sb.root, 'destination')
+    H.mkfile(source, 'file.txt', { 'payload' })
+    local paste = action.Paste(source, destination, { 'file.txt' }, { 'file.txt' })
+    H.assert_true(history.prepare(paste), 'paste intent is prepared')
+    H.assert_true(history.paste_checkpoint(paste, 'file.txt', 'file.txt', false),
+      'the in-flight destination is journaled')
+    H.assert_true(fs.copy_file_exclusive(source .. '/file.txt', destination .. '/file.txt'),
+      'simulate a crash between copy placement and its completion checkpoint')
+
+    with_fresh_process(function()
+      local state, err = require('direct.history').preflight()
+      H.assert_nil(state, 'an uncheckpointed output is not assumed to belong to Direct')
+      H.assert_true(type(err) == 'string' and err:find('ambiguous', 1, true) ~= nil,
+        'recovery explains the ambiguity')
+    end)
+    H.assert_eq(vim.fn.readfile(destination .. '/file.txt'), { 'payload' },
+      'the uncertain output is preserved')
+    H.assert_true(fs.exists(vim.fs.joinpath(history_dir(sb), 'transaction.json')),
+      'the incomplete journal is preserved')
+  end)
+
   H.it('a paired history transaction is replayed after a simulated mid-commit crash', function()
     local sb = H.sandbox()
     H.assert_true(history.preflight() ~= nil, 'initialize the history directory')

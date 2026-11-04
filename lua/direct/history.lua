@@ -109,6 +109,17 @@ end
 
 local copy_lines
 
+local function path_key(path)
+  local normalized = vim.fs.normalize(path)
+  local trimmed = normalized:gsub('[/\\]+$', '')
+  if trimmed == '' then return normalized:sub(1, 1) end
+  return trimmed
+end
+
+local function entry_identity(path)
+  return M.action.fs.entry_identity(path_key(path))
+end
+
 local function valid_identity(identity)
   if identity == nil or identity == vim.NIL then return true end
   if type(identity) ~= 'table' or type(identity.path) ~= 'string'
@@ -123,7 +134,48 @@ end
 
 local function identity_path_matches(identity, path)
   if identity == nil or identity == vim.NIL then return true end
-  return identity.path == vim.fs.normalize(path)
+  return path_key(identity.path) == path_key(path)
+end
+
+local function is_array(value)
+  if type(value) ~= 'table' then return false end
+  local count, max = 0, 0
+  for key in pairs(value) do
+    if type(key) ~= 'number' or key < 1 or key % 1 ~= 0 then return false end
+    count = count + 1
+    max = math.max(max, key)
+  end
+  return count == max
+end
+
+local function paste_action_record(base_action, completed)
+  local src_names, dst_names = {}, {}
+  for _, item in ipairs(completed or {}) do
+    src_names[#src_names + 1] = item.src
+    dst_names[#dst_names + 1] = item.dst
+  end
+  local action = M.action.Paste(base_action.src, base_action.dst, src_names, dst_names)
+  return M.action.serialize(action)
+end
+
+local function paste_stack_targets(direction, base_undo, base_redo, source_record, record)
+  if not record then return copy_lines(base_undo), copy_lines(base_redo) end
+  local undo_lines, redo_lines = copy_lines(base_undo), copy_lines(base_redo)
+  if direction == 'apply' then
+    undo_lines[#undo_lines + 1] = record
+    redo_lines = { M.HEADER }
+  elseif direction == 'undo' then
+    if undo_lines[#undo_lines] ~= source_record then return nil end
+    table.remove(undo_lines)
+    redo_lines[#redo_lines + 1] = record
+  elseif direction == 'redo' then
+    if redo_lines[#redo_lines] ~= source_record then return nil end
+    table.remove(redo_lines)
+    undo_lines[#undo_lines + 1] = record
+  else
+    return nil
+  end
+  return undo_lines, redo_lines
 end
 
 local function parse_transaction(bytes)
@@ -186,6 +238,142 @@ local function parse_transaction(bytes)
       or (action.src or nil) ~= source or action.dst ~= value.destination then
       return nil
     end
+  elseif value.kind == 'group' then
+    if not exact_keys(value, {
+        format = true, version = true, kind = true, direction = true,
+        undo = true, redo = true, action = true, moves = true, before = true,
+      }) or (value.direction ~= 'apply' and value.direction ~= 'undo'
+        and value.direction ~= 'redo')
+      or not valid_stack(value.undo) or not valid_stack(value.redo)
+      or not is_array(value.moves) or #value.moves < 2
+      or not is_array(value.before) then
+      return nil
+    end
+    local action = M.action.deserialize(value.action)
+    if not action or action.name ~= 'g' or #(action.actions or {}) ~= #value.moves then
+      return nil
+    end
+    local before_by_path, source_inodes = {}, {}
+    for _, item in ipairs(value.before) do
+      if not exact_keys(item, { path = true, identity = true })
+        or type(item.path) ~= 'string' or not valid_identity(item.identity)
+        or not identity_path_matches(item.identity, item.path) then
+        return nil
+      end
+      local key = path_key(item.path)
+      if before_by_path[key] ~= nil then return nil end
+      before_by_path[key] = item.identity
+    end
+    for index, item in ipairs(value.moves) do
+      local member = action.actions[index]
+      if not exact_keys(item, { src = true, dst = true, identity = true })
+        or type(item.src) ~= 'string' or type(item.dst) ~= 'string'
+        or not valid_identity(item.identity) or type(item.identity) ~= 'table'
+        or type(item.identity.inode) ~= 'string'
+        or not identity_path_matches(item.identity, item.src)
+        or member.name ~= 'mv' or member.src ~= item.src or member.dst ~= item.dst
+        or source_inodes[item.identity.inode]
+        or before_by_path[path_key(item.src)] == nil
+        or before_by_path[path_key(item.dst)] == nil then
+        return nil
+      end
+      local source_before = before_by_path[path_key(item.src)]
+      if type(source_before) ~= 'table'
+        or source_before.inode ~= item.identity.inode then
+        return nil
+      end
+      source_inodes[item.identity.inode] = true
+    end
+  elseif value.kind == 'paste' then
+    if not exact_keys(value, {
+        format = true, version = true, kind = true, direction = true,
+        undo = true, redo = true, base_undo = true, base_redo = true,
+        action = true, intent = true, source_record = true,
+        completed = true, pending = true,
+      }) or (value.direction ~= 'apply' and value.direction ~= 'undo'
+        and value.direction ~= 'redo')
+      or not valid_stack(value.undo) or not valid_stack(value.redo)
+      or not valid_stack(value.base_undo) or not valid_stack(value.base_redo)
+      or not is_array(value.completed)
+      or (value.source_record ~= vim.NIL and type(value.source_record) ~= 'string') then
+      return nil
+    end
+    if value.direction == 'apply' then
+      if value.source_record ~= vim.NIL then return nil end
+    else
+      local source = value.direction == 'undo' and value.base_undo or value.base_redo
+      if type(value.source_record) ~= 'string' or source[#source] ~= value.source_record then
+        return nil
+      end
+    end
+    local intent = M.action.deserialize(value.intent)
+    local current_action = M.action.deserialize(value.action)
+    if not intent or intent.name ~= 'p' or not current_action
+      or current_action.name ~= 'p' or current_action.src ~= intent.src
+      or current_action.dst ~= intent.dst then
+      return nil
+    end
+    local valid_sources, completed_paths = {}, {}
+    for _, pair in ipairs(intent.renames or {}) do valid_sources[pair.src] = true end
+    for _, item in ipairs(value.completed) do
+      if not exact_keys(item, { src = true, dst = true, path = true, identity = true })
+        or not valid_sources[item.src] or M.action.entry_name_reason(item.dst)
+        or type(item.path) ~= 'string' or not valid_identity(item.identity)
+        or type(item.identity) ~= 'table' or type(item.identity.inode) ~= 'string'
+        or not identity_path_matches(item.identity, item.path)
+        or item.path ~= M.paths.join(intent.dst, item.dst) then
+        return nil
+      end
+      local key = path_key(item.path)
+      if completed_paths[key] then return nil end
+      completed_paths[key] = true
+    end
+    if value.pending ~= vim.NIL then
+      local item = value.pending
+      if not exact_keys(item, { src = true, dst = true, path = true })
+        or not valid_sources[item.src] or M.action.entry_name_reason(item.dst)
+        or type(item.path) ~= 'string'
+        or item.path ~= M.paths.join(intent.dst, item.dst)
+        or completed_paths[path_key(item.path)] then
+        return nil
+      end
+    end
+    if #value.completed > 0 then
+      local expected_action = paste_action_record(intent, value.completed)
+      if not expected_action or expected_action ~= value.action then return nil end
+    elseif value.action ~= value.intent then
+      return nil
+    end
+    local record = #value.completed > 0 and value.action or nil
+    local expected_undo, expected_redo = paste_stack_targets(value.direction,
+      value.base_undo, value.base_redo, value.source_record, record)
+    if not expected_undo or not vim.deep_equal(expected_undo, value.undo)
+      or not vim.deep_equal(expected_redo, value.redo) then
+      return nil
+    end
+  elseif value.kind == 'unpaste' then
+    if not exact_keys(value, {
+        format = true, version = true, kind = true, direction = true,
+        undo = true, redo = true, action = true, entries = true,
+      }) or (value.direction ~= 'undo' and value.direction ~= 'redo')
+      or not valid_stack(value.undo) or not valid_stack(value.redo)
+      or not is_array(value.entries) or #value.entries == 0 then
+      return nil
+    end
+    local action = M.action.deserialize(value.action)
+    if not action or action.name ~= 'up' or #action.renames ~= #value.entries then
+      return nil
+    end
+    for index, entry in ipairs(value.entries) do
+      local pair = action.renames[index]
+      if not exact_keys(entry, { path = true, identity = true })
+        or type(entry.path) ~= 'string' or not valid_identity(entry.identity)
+        or type(entry.identity) ~= 'table' or type(entry.identity.inode) ~= 'string'
+        or not identity_path_matches(entry.identity, entry.path)
+        or entry.path ~= M.action.fs.join(action.src, pair.src) then
+        return nil
+      end
+    end
   else
     return nil
   end
@@ -200,7 +388,236 @@ local function identities_equal(expected, actual)
   return expected.path == actual.path
 end
 
+local function group_operation_status(transaction)
+  local before = true
+  for _, item in ipairs(transaction.before) do
+    local identity, stat = M.action.fs.entry_identity(item.path)
+    if not stat then identity = vim.NIL end
+    if not identities_equal(item.identity, identity) then
+      before = false
+      break
+    end
+  end
+  if before then return 'not-started' end
+
+  for _, move in ipairs(transaction.moves) do
+    local identity, stat = entry_identity(move.dst)
+    if not stat or not identity or identity.inode ~= move.identity.inode then
+      return 'ambiguous'
+    end
+  end
+  return 'completed'
+end
+
+local function paste_operation_status(transaction)
+  for _, item in ipairs(transaction.completed) do
+    local identity, stat = entry_identity(item.path)
+    if not stat or not identities_equal(item.identity, identity) then
+      return 'ambiguous'
+    end
+  end
+  if transaction.pending == vim.NIL then
+    return #transaction.completed > 0 and 'completed' or 'not-started'
+  end
+  local _, pending_stat = entry_identity(transaction.pending.path)
+  if pending_stat then return 'ambiguous' end
+  return #transaction.completed > 0 and 'completed' or 'not-started'
+end
+
+local function has_unpaste_quarantine(path, inode)
+  local parent = M.action.fs.dirname(path)
+  local ok, iter = pcall(vim.fs.dir, parent)
+  if not ok or type(iter) ~= 'function' then return nil end
+  for name in iter do
+    if name:match('^%.direct%-unpaste%-') then
+      local identity, stat = entry_identity(M.action.fs.join(parent, name))
+      if stat and identity and identity.inode == inode then return true end
+    end
+  end
+  return false
+end
+
+local function unpaste_operation_status(transaction)
+  local present, absent = 0, 0
+  for _, entry in ipairs(transaction.entries) do
+    local identity, stat = entry_identity(entry.path)
+    if stat then
+      if not identities_equal(entry.identity, identity) then return 'ambiguous' end
+      present = present + 1
+    else
+      local quarantined = has_unpaste_quarantine(entry.path, entry.identity.inode)
+      if quarantined ~= false then return 'ambiguous' end
+      absent = absent + 1
+    end
+  end
+  if present == #transaction.entries then return 'not-started' end
+  if absent == #transaction.entries then return 'completed' end
+  return 'ambiguous'
+end
+
+local function write_paste_intent(state, direction, action, source_record)
+  if type(action) ~= 'table' or action.name ~= 'p' then return nil end
+  local intent, intent_err = M.action.serialize(action)
+  if not intent then return false, intent_err end
+  source_record = source_record or vim.NIL
+  if direction == 'undo' and state.undo_lines[#state.undo_lines] ~= source_record
+    or direction == 'redo' and state.redo_lines[#state.redo_lines] ~= source_record then
+    return nil
+  end
+  local transaction = {
+    format = 'direct-history-transaction',
+    version = 1,
+    kind = 'paste',
+    direction = direction,
+    undo = copy_lines(state.undo_lines),
+    redo = copy_lines(state.redo_lines),
+    base_undo = copy_lines(state.undo_lines),
+    base_redo = copy_lines(state.redo_lines),
+    action = intent,
+    intent = intent,
+    source_record = source_record,
+    completed = {},
+    pending = vim.NIL,
+  }
+  local ok, err = log_mod.write_raw_atomic(state.transaction_path,
+    vim.json.encode(transaction) .. '\n')
+  if not ok then return false, err end
+  return transaction
+end
+
+function M.paste_checkpoint(action, src_name, dst_name, copied)
+  return M.with_lock(function()
+    local _, _, transaction_path = log_paths()
+    local bytes, read_err, exists = log_mod.read_raw(transaction_path)
+    if read_err then return nil, read_err end
+    if not exists then return nil, 'paste recovery intent is missing' end
+    local transaction = parse_transaction(bytes)
+    if not transaction or transaction.kind ~= 'paste'
+      or transaction.intent == nil then
+      return nil, 'paste recovery intent is invalid'
+    end
+    local intent = M.action.deserialize(transaction.intent)
+    if not intent or type(action) ~= 'table' or action.name ~= 'p'
+      or intent.src ~= action.src or intent.dst ~= action.dst then
+      return nil, 'paste recovery intent does not match the running action'
+    end
+    local path = M.paths.join(intent.dst, dst_name)
+    if copied ~= true then
+      if transaction.pending ~= vim.NIL then
+        return nil, 'another paste target is already pending'
+      end
+      local _, stat = entry_identity(path)
+      if stat then return nil, 'paste destination became occupied: ' .. path end
+      transaction.pending = { src = src_name, dst = dst_name, path = path }
+    else
+      local pending = transaction.pending
+      if pending == vim.NIL or pending.src ~= src_name or pending.dst ~= dst_name
+        or pending.path ~= path then
+        return nil, 'completed paste target does not match its recovery intent'
+      end
+      local identity, stat = entry_identity(path)
+      if not stat or not identity or not identity.inode then
+        return nil, 'could not capture completed paste target identity: ' .. path
+      end
+      transaction.completed[#transaction.completed + 1] = {
+        src = src_name,
+        dst = dst_name,
+        path = path,
+        identity = identity,
+      }
+      transaction.pending = vim.NIL
+      local record, serialize_err = paste_action_record(intent, transaction.completed)
+      if not record then return nil, serialize_err end
+      transaction.action = record
+      local undo, redo = paste_stack_targets(transaction.direction,
+        transaction.base_undo, transaction.base_redo,
+        transaction.source_record, record)
+      if not undo then return nil, 'paste recovery history stacks no longer match' end
+      transaction.undo, transaction.redo = undo, redo
+    end
+    local ok, err = log_mod.write_raw_atomic(transaction_path,
+      vim.json.encode(transaction) .. '\n')
+    if not ok then return nil, err end
+    return true
+  end)
+end
+
+local function group_intent(state, direction, operation, record)
+  if type(operation) ~= 'table' or operation.name ~= 'g' then return nil end
+  local seen_sources, before_by_path, moves = {}, {}, {}
+  local function capture(path)
+    local key = path_key(path)
+    if before_by_path[key] then return end
+    local identity, stat = entry_identity(path)
+    before_by_path[key] = {
+      path = key,
+      identity = stat and identity or vim.NIL,
+    }
+  end
+  for _, member in ipairs(operation.actions or {}) do
+    if member.name ~= 'mv' or type(member.src) ~= 'string'
+      or type(member.dst) ~= 'string'
+      or vim.fs.normalize(member.src) == vim.fs.normalize(member.dst) then
+      return nil
+    end
+    local identity, stat = entry_identity(member.src)
+    if not stat or not identity or not identity.inode or seen_sources[identity.inode] then
+      return nil
+    end
+    seen_sources[identity.inode] = true
+    capture(member.src)
+    capture(member.dst)
+    local source_before = before_by_path[path_key(member.src)].identity
+    if not identities_equal(source_before, identity) then return nil end
+    moves[#moves + 1] = {
+      src = member.src,
+      dst = member.dst,
+      identity = identity,
+    }
+  end
+  if #moves < 2 then return nil end
+  local undo_lines, redo_lines
+  if direction == 'apply' then
+    undo_lines, redo_lines = copy_lines(state.undo_lines), { M.HEADER }
+    undo_lines[#undo_lines + 1] = record
+  else
+    local source = direction == 'undo' and state.undo_lines or state.redo_lines
+    local destination = direction == 'undo' and state.redo_lines or state.undo_lines
+    if #source <= 1 then return nil end
+    undo_lines, redo_lines = copy_lines(state.undo_lines), copy_lines(state.redo_lines)
+    local source_lines = direction == 'undo' and undo_lines or redo_lines
+    local destination_lines = direction == 'undo' and redo_lines or undo_lines
+    table.remove(source_lines)
+    destination_lines[#destination_lines + 1] = record
+  end
+  local before = {}
+  for _, item in pairs(before_by_path) do before[#before + 1] = item end
+  table.sort(before, function(a, b) return a.path < b.path end)
+  return {
+    format = 'direct-history-transaction',
+    version = 1,
+    kind = 'group',
+    direction = direction,
+    undo = undo_lines,
+    redo = redo_lines,
+    action = record,
+    moves = moves,
+    before = before,
+  }
+end
+
+local function write_group_intent(state, direction, operation, record)
+  local transaction = group_intent(state, direction, operation, record)
+  if not transaction then return nil end
+  local ok, err = log_mod.write_raw_atomic(state.transaction_path,
+    vim.json.encode(transaction) .. '\n')
+  if not ok then return false, err end
+  return transaction
+end
+
 local function reverse_operation_status(transaction)
+  if transaction.kind == 'group' then return group_operation_status(transaction) end
+  if transaction.kind == 'unpaste' then return unpaste_operation_status(transaction) end
   if transaction.direction == 'apply'
     and (transaction.source == vim.NIL or transaction.source == nil) then
     local destination_now, destination_stat = M.action.fs.entry_identity(transaction.destination)
@@ -270,7 +687,50 @@ local function reverse_intent(state, which, reversal, inverse)
   }
 end
 
+local function unpaste_intent(state, which, reversal, record)
+  if type(reversal) ~= 'table' or reversal.name ~= 'up'
+    or #(reversal.renames or {}) == 0 then
+    return nil
+  end
+  local entries, seen_paths = {}, {}
+  for _, pair in ipairs(reversal.renames) do
+    local path = M.action.fs.join(reversal.src, pair.src)
+    local identity, stat = entry_identity(path)
+    local key = path_key(path)
+    if not stat or not identity or not identity.inode or seen_paths[key] then return nil end
+    seen_paths[key] = true
+    entries[#entries + 1] = { path = path, identity = identity }
+  end
+  local next_src = copy_lines(which == 'undo' and state.undo_lines or state.redo_lines)
+  local next_dst = copy_lines(which == 'undo' and state.redo_lines or state.undo_lines)
+  table.remove(next_src)
+  next_dst[#next_dst + 1] = record
+  local next_undo = which == 'undo' and next_src or next_dst
+  local next_redo = which == 'undo' and next_dst or next_src
+  return {
+    format = 'direct-history-transaction',
+    version = 1,
+    kind = 'unpaste',
+    direction = which,
+    undo = next_undo,
+    redo = next_redo,
+    action = record,
+    entries = entries,
+  }
+end
+
 local function write_reverse_intent(state, which, reversal, inverse)
+  if reversal.name == 'g' then
+    return write_group_intent(state, which, reversal, inverse)
+  end
+  if reversal.name == 'up' then
+    local transaction = unpaste_intent(state, which, reversal, inverse)
+    if not transaction then return nil end
+    local ok, err = log_mod.write_raw_atomic(state.transaction_path,
+      vim.json.encode(transaction) .. '\n')
+    if not ok then return false, err end
+    return transaction
+  end
   local transaction = reverse_intent(state, which, reversal, inverse)
   if not transaction then return nil end
   local ok, err = log_mod.write_raw_atomic(state.transaction_path,
@@ -280,6 +740,9 @@ local function write_reverse_intent(state, which, reversal, inverse)
 end
 
 local function write_apply_intent(state, action, record)
+  if action.name == 'g' then
+    return write_group_intent(state, 'apply', action, record)
+  end
   if not recoverable_apply_kinds[action.name] then return nil end
   local source = action.src
   local destination = action.dst
@@ -322,7 +785,8 @@ end
 
 local function settle_failed_reverse(state, transaction)
   if not transaction then return true end
-  local outcome = reverse_operation_status(transaction)
+  local outcome = transaction.kind == 'paste' and paste_operation_status(transaction)
+    or reverse_operation_status(transaction)
   if outcome == 'not-started' then
     return clear_transaction(state.transaction_path)
   end
@@ -355,11 +819,26 @@ local function recover_transaction(undo_path, redo_path, transaction_path)
     M.ui.notify('direct: ' .. message, vim.log.levels.ERROR)
     return nil, message
   end
-  if transaction.kind == 'reverse' or transaction.kind == 'apply' then
+  if transaction.kind == 'paste' then
+    local status = paste_operation_status(transaction)
+    if status == 'ambiguous' then
+      local message = 'interrupted paste is ambiguous; recovery journal preserved at '
+        .. transaction_path .. '; inspect the affected paths before retrying'
+      M.ui.notify('direct: ' .. message, vim.log.levels.ERROR)
+      return nil, message
+    end
+    if status == 'not-started' then return clear_transaction(transaction_path) end
+    local ok, err = commit_stacks(undo_path, redo_path, transaction_path,
+      transaction.undo, transaction.redo)
+    if not ok then return nil, err end
+    return true
+  end
+  if transaction.kind == 'reverse' or transaction.kind == 'apply'
+    or transaction.kind == 'group' or transaction.kind == 'unpaste' then
     local status = reverse_operation_status(transaction)
     if status == 'ambiguous' then
-      local operation = transaction.kind == 'apply' and 'filesystem action'
-        or transaction.direction
+      local operation = transaction.direction == 'apply'
+        and 'filesystem action' or transaction.direction
       local message = 'interrupted ' .. operation
         .. ' is ambiguous; recovery journal preserved at ' .. transaction_path
         .. '; inspect the affected paths before retrying'
@@ -375,8 +854,8 @@ local function recover_transaction(undo_path, redo_path, transaction_path)
       if not called or result == nil then
         status = reverse_operation_status(transaction)
         if status == 'not-started' then return clear_transaction(transaction_path) end
-        local operation = transaction.kind == 'apply' and 'filesystem action'
-          or transaction.direction
+        local operation = transaction.direction == 'apply'
+          and 'filesystem action' or transaction.direction
         local message = 'automatic ' .. operation .. ' recovery failed; journal '
           .. 'preserved at ' .. transaction_path .. ' ('
           .. tostring(called and execute_err or result) .. ')'
@@ -503,7 +982,12 @@ function M.prepare(action)
   return M.with_lock(function()
     local state, preflight_err = preflight_locked(action_paths(action))
     if not state then return nil, preflight_err end
-    local transaction, transaction_err = write_apply_intent(state, action, record)
+    local transaction, transaction_err
+    if action.name == 'p' then
+      transaction, transaction_err = write_paste_intent(state, 'apply', action)
+    else
+      transaction, transaction_err = write_apply_intent(state, action, record)
+    end
     if transaction == false then
       notify_unavailable(transaction_err)
       return nil, transaction_err
@@ -521,7 +1005,25 @@ function M.abort(action)
     if read_err then return nil, read_err end
     if not exists then return true end
     local transaction = parse_transaction(bytes)
-    if not transaction or transaction.kind ~= 'apply' or transaction.action ~= record then
+    if transaction and transaction.kind == 'paste' and type(action) == 'table'
+      and action.name == 'p' then
+      local intent = M.action.deserialize(transaction.intent)
+      if intent and intent.src == action.src and intent.dst == action.dst then
+        local status = paste_operation_status(transaction)
+        if status == 'not-started' then return clear_transaction(transaction_path) end
+        if status == 'completed' then
+          return commit_stacks(undo_path, redo_path, transaction_path,
+            transaction.undo, transaction.redo)
+        end
+        local message = 'paste failed ambiguously; recovery journal preserved at '
+          .. transaction_path
+        M.ui.notify('direct: ' .. message, vim.log.levels.ERROR)
+        return nil, message
+      end
+    end
+    if not transaction or (transaction.kind ~= 'apply'
+        and not (transaction.kind == 'group' and transaction.direction == 'apply'))
+      or transaction.action ~= record then
       return nil, 'no matching prepared filesystem action'
     end
     local status = reverse_operation_status(transaction)
@@ -557,7 +1059,16 @@ local function log_locked(action)
   end
   if pending_exists then
     local transaction = parse_transaction(pending_bytes)
-    if transaction and transaction.kind == 'apply' and transaction.action == record then
+    if transaction and transaction.kind == 'paste' and transaction.action == record then
+      local undo_path, redo_path, current_transaction_path = log_paths()
+      local recovered, recover_err = recover_transaction(undo_path, redo_path,
+        current_transaction_path)
+      if not recovered then return nil, recover_err end
+      return true
+    end
+    if transaction and (transaction.kind == 'apply'
+        or (transaction.kind == 'group' and transaction.direction == 'apply'))
+      and transaction.action == record then
       local undo_path, redo_path = log_paths()
       local committed, commit_err = commit_stacks(undo_path, redo_path,
         transaction_path, transaction.undo, transaction.redo)
@@ -857,7 +1368,23 @@ function M._reverse_async(which, callback, options)
   end
 
   local inverse, reverse_transaction
-  if recoverable_rename_kinds[reversal.name] then
+  if reversal.name == 'p' then
+    local journal_result, journal_err = write_paste_intent(state, which, reversal,
+      record)
+    if journal_result == false then
+      release_lock()
+      M.pending.finish(token)
+      M.ui.notify('Failed to ' .. which .. ' action - cannot write paste recovery journal: '
+        .. tostring(journal_err), vim.log.levels.ERROR)
+      finish_callback(callback, nil, journal_err)
+      return nil, journal_err
+    end
+    reverse_transaction = journal_result
+    reversal._history_checkpoint = function(src_name, dst_name, copied)
+      return M.paste_checkpoint(reversal, src_name, dst_name, copied)
+    end
+  elseif recoverable_rename_kinds[reversal.name] or reversal.name == 'g'
+    or reversal.name == 'up' then
     local inverse_err
     inverse, inverse_err = M.action.serialize(reversal)
     if not inverse then
@@ -925,8 +1452,13 @@ function M._reverse_async(which, callback, options)
     next_dst[#next_dst + 1] = inverse
     local next_undo, next_redo = which == 'undo' and next_src or next_dst,
       which == 'undo' and next_dst or next_src
-    local appended, append_err = commit_stacks(state.undo_path, state.redo_path,
-      state.transaction_path, next_undo, next_redo)
+    local appended, append_err
+    if reverse_transaction and reverse_transaction.kind == 'paste' then
+      appended, append_err = M.log(reversal)
+    else
+      appended, append_err = commit_stacks(state.undo_path, state.redo_path,
+        state.transaction_path, next_undo, next_redo)
+    end
     if not appended then
       M.ui.notify('Failed to ' .. which .. ' action - cannot write history: '
         .. tostring(append_err), vim.log.levels.ERROR)
