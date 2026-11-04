@@ -65,19 +65,15 @@ function M.current_entry(command, on_complete, opts)
 
   local escaped_path = shellescape_path(path)
   local expanded = command:gsub('%{%}', function() return escaped_path end)
+  local is_windows_cmd = (vim.fn.has('win32') == 1 or vim.fn.has('win64') == 1)
+    and (vim.o.shell or ''):lower():match('cmd%.exe$') ~= nil
   local argv = { vim.o.shell }
   for _, flag in ipairs(vim.split(vim.o.shellcmdflag, '%s+', { trimempty = true })) do
-    argv[#argv + 1] = flag
+    if not (is_windows_cmd and flag:lower() == '/s') then
+      argv[#argv + 1] = flag
+    end
   end
-  if (vim.fn.has('win32') == 1 or vim.fn.has('win64') == 1)
-    and (vim.o.shell or ''):lower():match('cmd%.exe$') then
-    -- cmd.exe /s /c strips the first and last quotes from its command string.
-    -- Wrap the complete command so quotes produced by shellescape remain syntax
-    -- for cmd instead of reaching the child process as literal characters.
-    argv[#argv + 1] = '"' .. expanded .. '"'
-  else
-    argv[#argv + 1] = expanded
-  end
+  argv[#argv + 1] = expanded
 
   local ok, process = pcall(vim.system, argv, {
     cwd = listing.root,

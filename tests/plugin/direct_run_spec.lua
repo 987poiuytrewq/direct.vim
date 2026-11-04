@@ -68,7 +68,9 @@ H.describe('DirectRun', function()
     vim.api.nvim_win_set_cursor(0, { 2, 0 })
     H.capture_messages()
 
-    vim.cmd([[DirectRun printf '%s' {} ; exit 7]])
+    local command = (vim.fn.has('win32') == 1 or vim.fn.has('win64') == 1)
+      and 'echo {} & exit /b 7' or [[printf '%s' {} ; exit 7]]
+    vim.cmd('DirectRun ' .. command)
     H.assert_true(vim.wait(3000, function()
       return H.messages():find(path, 1, true) ~= nil
     end), 'shell receives the expanded child path as one argument')
@@ -187,7 +189,12 @@ H.describe('DirectRun', function()
     vim.api.nvim_win_set_cursor(0, { row, 0 })
 
     local direct = require('direct')
-    local shell_command = direct.run('test ! -e {}')
+    local shell_command
+    if vim.fn.has('win32') == 1 or vim.fn.has('win64') == 1 then
+      shell_command = direct.run('if exist {} (exit /b 1) else (exit /b 0)')
+    else
+      shell_command = direct.run('test ! -e {}')
+    end
     H.assert_not_nil(shell_command, 'DirectRun accepts a missing tracked row')
     H.assert_eq(shell_command:wait().code, 0,
       'DirectRun receives the absent path for an arbitrary command')
