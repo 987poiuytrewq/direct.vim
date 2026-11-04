@@ -1,5 +1,11 @@
 -- Assertions run after a normal Neovim startup with the plugin on runtimepath.
 local function run()
+  local fs = require('direct.fs')
+  local directory_separator = package.config:sub(1, 1)
+  local function is_same_path(a, b)
+    return fs.same_path(a, b) == true
+  end
+
   if vim.env.DIRECT_LIVE_MAP_DEFAULT_KEYS == 'false' then
     local function has_lhs(maps, lhs)
       for _, mapping in ipairs(maps) do
@@ -30,22 +36,22 @@ local function run()
   end
 
   assert(vim.bo.filetype == 'direct', 'CLI directory startup was not intercepted')
-  assert(vim.fs.normalize(vim.api.nvim_buf_get_name(0)) == vim.fs.normalize(root),
+  assert(is_same_path(vim.api.nvim_buf_get_name(0), root),
     'startup listing is not attached to the requested directory: '
       .. vim.inspect(vim.api.nvim_buf_get_name(0)) .. ' != ' .. vim.inspect(root))
-  assert(vim.deep_equal(lines(), { 'sub/', 'alpha.txt' }),
+  assert(vim.deep_equal(lines(), { 'sub' .. directory_separator, 'alpha.txt' }),
     'startup listing contents differ: ' .. vim.inspect(lines()))
 
   -- Exercise the buffer-local Enter mapping to open a file, then the global
   -- `-` mapping to list that file's directory.
   vim.api.nvim_win_set_cursor(0, { 2, 0 })
   feed('<CR>')
-  assert(vim.fs.normalize(vim.api.nvim_buf_get_name(0)) == vim.fs.normalize(file),
+  assert(is_same_path(vim.api.nvim_buf_get_name(0), file),
     '<CR> did not open the selected file')
   assert(vim.bo.filetype ~= 'direct', 'opening a file left it in a direct buffer')
   feed('-')
   assert(vim.bo.filetype == 'direct', 'global - did not list the file directory')
-  assert(vim.fs.normalize(vim.api.nvim_buf_get_name(0)) == vim.fs.normalize(root),
+  assert(is_same_path(vim.api.nvim_buf_get_name(0), root),
     'global - listed the wrong directory')
 
   -- Enter a child directory and use the buffer-local `-` override to return.
