@@ -205,9 +205,8 @@ end
 
 function M.path_identities_match(a, b)
   if not a or not b then return false end
-  if a.path == b.path then return true end
   if a.inode and b.inode then return a.inode == b.inode end
-  return false
+  return a.path == b.path
 end
 
 local function index_identity(index, identity)
