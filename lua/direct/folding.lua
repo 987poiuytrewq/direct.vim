@@ -24,6 +24,10 @@ function M.install_mappings(bufnr, buffer)
       'Expand all direct directories' },
     { 'zM', function() return M.collapse_all(buffer) end,
       'Collapse all direct directories' },
+    { '[d', function() return M.navigate_directory(buffer, -1) end,
+      'Jump to the previous visible direct directory' },
+    { ']d', function() return M.navigate_directory(buffer, 1) end,
+      'Jump to the next visible direct directory' },
   }
   for _, map in ipairs(maps) do
     vim.keymap.set('n', map[1], map[2], {
@@ -48,6 +52,8 @@ function M.clear_mappings()
     zC = 'direct: Recursively collapse direct directories',
     zR = 'direct: Expand all direct directories',
     zM = 'direct: Collapse all direct directories',
+    ['[d'] = 'direct: Jump to the previous visible direct directory',
+    [']d'] = 'direct: Jump to the next visible direct directory',
   }
   for lhs, desc in pairs(descriptions) do
     local current = vim.fn.maparg(lhs, 'n', false, true)
@@ -55,6 +61,28 @@ function M.clear_mappings()
       pcall(vim.keymap.del, 'n', lhs, { buffer = true })
     end
   end
+end
+
+-- Move to the next visible directory row in the requested direction. Child
+-- rows only participate once their parent has been expanded, so this naturally
+-- follows the current materialized tree without changing its expansion state.
+function M.navigate_directory(buffer, direction)
+  local bufnr = vim.api.nvim_get_current_buf()
+  local context = buffer._folding_context(bufnr)
+  if not context or (direction ~= -1 and direction ~= 1) then return false end
+
+  local current = vim.api.nvim_win_get_cursor(0)[1]
+  local row = current + direction
+  local last = vim.api.nvim_buf_line_count(bufnr)
+  while row >= 1 and row <= last do
+    local rec = context.get_row_record(row)
+    if context.is_directory(rec) then
+      vim.api.nvim_win_set_cursor(0, { row, 0 })
+      return true
+    end
+    row = row + direction
+  end
+  return false
 end
 
 -- Toggle only when the click lands on the rendered folder glyph. The icon is

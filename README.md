@@ -554,6 +554,8 @@ Buffer-local, in a direct buffer (all mappings follow `map_default_keys`):
 | normal | `zC` | recursively collapse the directory under the cursor |
 | normal | `zR` | recursively expand all directories (`:DirectUnfoldAll`) |
 | normal | `zM` | collapse all directories (`:DirectFoldAll`) |
+| normal | `[d` | jump to the previous visible directory row |
+| normal | `]d` | jump to the next visible directory row |
 | normal | `-` | open `../` (the parent directory) |
 | normal | `u` | undo the last filesystem operation |
 | normal | `<C-r>` | redo the last filesystem operation |
@@ -570,6 +572,8 @@ Buffer-local, in a direct buffer (all mappings follow `map_default_keys`):
 The buffer-local `-` wins over the global `-` inside a direct buffer. All
 buffer-local mappings, including fold and mouse mappings, are omitted when
 `map_default_keys` is false.
+`[d` and `]d` include nested directories shown in expanded subtrees, skip
+collapsed descendants, and move the cursor without changing expansion state.
 
 ## Data directory
 

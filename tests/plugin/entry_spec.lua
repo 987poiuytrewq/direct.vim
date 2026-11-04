@@ -497,6 +497,8 @@ H.describe('entry: default mappings', function()
       zC = 'direct: Recursively collapse direct directories',
       zR = 'direct: Expand all direct directories',
       zM = 'direct: Collapse all direct directories',
+      ['[d'] = 'direct: Jump to the previous visible direct directory',
+      [']d'] = 'direct: Jump to the next visible direct directory',
       ['<LeftMouse>'] = 'direct: Toggle a direct directory from its folder icon',
       ['<2-LeftMouse>'] = 'direct: Open the direct entry under the double-click',
     }
@@ -564,7 +566,7 @@ H.describe('entry: default mappings', function()
       end
     end
     H.assert_nil(normal.gh, 'the opt-out does not install the hidden toggle mapping')
-    for _, lhs in ipairs({ 'zo', 'za', 'zc', 'zO', 'zA', 'zC', 'zR', 'zM',
+    for _, lhs in ipairs({ 'zo', 'za', 'zc', 'zO', 'zA', 'zC', 'zR', 'zM', '[d', ']d',
       '<LeftMouse>', '<2-LeftMouse>' }) do
       H.assert_nil(normal_records[lhs], 'the opt-out leaves fold key ' .. lhs .. ' unmapped')
     end
