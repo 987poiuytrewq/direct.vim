@@ -57,10 +57,10 @@ local function run()
   -- Enter a child directory and use the buffer-local `-` override to return.
   vim.api.nvim_win_set_cursor(0, { 1, 0 })
   feed('<CR>')
-  assert(vim.fs.normalize(vim.api.nvim_buf_get_name(0)) == vim.fs.normalize(child),
+  assert(is_same_path(vim.api.nvim_buf_get_name(0), child),
     '<CR> did not open the selected directory')
   feed('-')
-  assert(vim.fs.normalize(vim.api.nvim_buf_get_name(0)) == vim.fs.normalize(root),
+  assert(is_same_path(vim.api.nvim_buf_get_name(0), root),
     'buffer-local - did not navigate to the parent directory')
 
   -- Exercise the user-facing write path rather than calling Buffer:sync().
