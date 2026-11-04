@@ -585,13 +585,14 @@ Run `:checkhealth direct` to print the resolved data home. Inside it:
     coordinates updates to both stacks; an interrupted stack rewrite is replayed
     on the next history access.
     Direct keeps an undo/redo source record until its filesystem reversal
-    succeeds. It journals simple sync actions and simple rename/trash/restore
-    reversals before executing them. On restart, when identity checks prove the
-    before/after state, Direct retries an action that did not start or commits
-    history for one that completed. If the filesystem state is ambiguous, Direct
+    succeeds. It journals eligible sync actions, grouped moves, simple
+    rename/trash/restore reversals, and asynchronous paste/unpaste work before
+    executing them. On restart, when identity checks prove the before/after
+    state, Direct retries an action that did not start or commits history for
+    work that is checkpointed as complete. If a crash lands between a
+    filesystem effect and its checkpoint, or leaves a partially staged group or quarantine, Direct
     keeps the journal and refuses further history operations until the paths are
-    inspected. Grouped moves and asynchronous paste/unpaste still have partial
-    crash windows and may require manual recovery.
+    inspected.
 
     A persistent advisory lock coordinates Direct instances on the same host
     that share a data home. Direct holds it across its synchronous filesystem

@@ -1,6 +1,6 @@
 -- Same-host advisory lock shared by Direct processes using the same data home.
 -- The lock file is intentionally persistent: unlinking it could let waiters lock
--- different inodes. flock is released by the OS if Neovim exits or crashes.
+-- different inodes. The native advisory lock is released by the OS on exit.
 local M = {}
 
 M.uv = vim.uv

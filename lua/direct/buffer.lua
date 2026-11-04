@@ -1480,7 +1480,11 @@ local function log_applied(actions, applied, already_logged)
       end
       members[#members + 1] = actions[index]
     end
-    if complete and not (#group == 1 and already_logged and already_logged[group[1]]) then
+    local group_logged = already_logged ~= nil
+    for _, index in ipairs(group) do
+      if not already_logged or not already_logged[index] then group_logged = false end
+    end
+    if complete and not group_logged then
       if #members == 1 then
         history.log(members[1])
       else
@@ -1982,110 +1986,113 @@ local function sync_locked(self, options)
     end
   end
 
-  -- swap/chain renames are staged before the real moves.
-  local staging, stage_err, stage_temps, stage_overrides, stage_identities =
-    stage_moves(actions)
-  if staging == nil and stage_err ~= nil then
-    ui.notify('Action failed - could not stage renames: ' .. tostring(stage_err),
-      vim.log.levels.ERROR)
-    -- Restore only with atomic no-replace. Never delete a staged path: if its
-    -- original name was reoccupied or the primitive is unavailable, preserve
-    -- and report the exact stranded temp for manual recovery.
-    local staged_identities = stage_identities or {}
-    local reported = {}
-    for _, act in ipairs(actions) do
-      local tmp = act.src ~= nil and stage_overrides
-        and stage_overrides[act.src] or nil
-      if tmp and fs.taken(tmp) then
-        local expected = staged_identities[act.src]
-        local restored, restore_err = fs.rename_noreplace(tmp, act.src, expected)
-        if not restored then
-          reported[tmp] = true
-          ui.notify('direct: could not restore staged entry ' .. tmp .. ' to '
-            .. tostring(act.src) .. ' (' .. tostring(restore_err)
-            .. '); temp preserved; manual recovery required', vim.log.levels.ERROR)
-        end
-      end
-    end
-    for _, tmp in ipairs(stage_temps or {}) do
-      if fs.taken(tmp) and not reported[tmp] then
-        ui.notify('direct: a failed rename left the staged entry ' .. tmp,
-          vim.log.levels.ERROR)
-      end
-    end
-    return nil, stage_err
-  end
-
-  -- Apply each action and record successful work in history, grouping dependent
-  -- moves into one entry. `history.log` reports write failures without raising.
-  local singleton = {}
-  for _, group in ipairs(action_mod.move_groups(actions)) do
-    if #group == 1 then singleton[group[1]] = true end
-  end
+  -- Apply one history group at a time. Its journal is durable before staging,
+  -- so a process crash cannot strand a swap without enough context to detect it.
   local failed, applied, failure_reason, already_logged = {}, {}, nil, {}
-  for i, act in ipairs(actions) do
-    local exec_action = act
-    if staging ~= nil and act.name == 'mv'
-      and staging.overrides[act.src] ~= nil then
-      exec_action = action_mod.Move(staging.overrides[act.src], act.dst)
-    end
-    local prepared, journaled = true, false
-    if singleton[i] then
-      prepared, journaled = history.prepare(act)
-      if not prepared then
-        local prepare_err = journaled
-        ui.notify('Action failed - could not prepare recovery for '
-          .. action_mod.describe_action(act) .. ': ' .. tostring(prepare_err),
-          vim.log.levels.ERROR)
-        failed[#failed + 1] = act
-        if failure_reason == nil then failure_reason = prepare_err end
-      end
-    end
-    local ok, res, aerr
-    if prepared then
-      ok, res, aerr = pcall(action_mod.execute, exec_action)
-    end
-    if ok and res then
-      applied[i] = true
-      self.current_entry = result_entry(act)
-      if journaled then
-        already_logged[i] = true
-        local logged, log_err = history.log(act)
-        if not logged then
-          ui.notify('Action completed but its history transaction is pending recovery: '
-            .. tostring(log_err), vim.log.levels.ERROR)
-          if failure_reason == nil then failure_reason = log_err end
-          failed[#failed + 1] = act
-          break
-        end
-      end
+  local stop_after_group, stage_failure = false, false
+  for _, indices in ipairs(action_mod.move_groups(actions)) do
+    local members = {}
+    for _, index in ipairs(indices) do members[#members + 1] = actions[index] end
+    local history_action = #members == 1 and members[1] or action_mod.Group(members)
+    local prepared, journaled = history.prepare(history_action)
+    if not prepared then
+      local prepare_err = journaled
+      ui.notify('Action failed - could not prepare recovery for '
+        .. action_mod.summarize({ history_action }) .. ': ' .. tostring(prepare_err),
+        vim.log.levels.ERROR)
+      for _, index in ipairs(indices) do failed[#failed + 1] = actions[index] end
+      if failure_reason == nil then failure_reason = prepare_err end
+      stop_after_group = journaled ~= nil
     else
-      if prepared then
-        if journaled then history.abort(act) end
-        ui.notify('Action failed - ' .. action_mod.describe_action(act),
+      local staging, stage_err, stage_temps, stage_overrides, stage_identities =
+        stage_moves(members)
+      if staging == nil and stage_err ~= nil then
+        ui.notify('Action failed - could not stage renames: ' .. tostring(stage_err),
           vim.log.levels.ERROR)
-        failed[#failed + 1] = act
-        if failure_reason == nil then
-          failure_reason = (ok and aerr) or res
-            or ('action failed: ' .. action_mod.describe_action(act))
+        local staged_identities, reported = stage_identities or {}, {}
+        for _, act in ipairs(members) do
+          local tmp = act.src ~= nil and stage_overrides
+            and stage_overrides[act.src] or nil
+          if tmp and fs.taken(tmp) then
+            local restored, restore_err = fs.rename_noreplace(tmp, act.src,
+              staged_identities[act.src])
+            if not restored then
+              reported[tmp] = true
+              ui.notify('direct: could not restore staged entry ' .. tmp .. ' to '
+                .. tostring(act.src) .. ' (' .. tostring(restore_err)
+                .. '); temp preserved; manual recovery required', vim.log.levels.ERROR)
+            end
+          end
+        end
+        for _, tmp in ipairs(stage_temps or {}) do
+          if fs.taken(tmp) and not reported[tmp] then
+            ui.notify('direct: a failed rename left the staged entry ' .. tmp,
+              vim.log.levels.ERROR)
+          end
+        end
+        for _, index in ipairs(indices) do failed[#failed + 1] = actions[index] end
+        if failure_reason == nil then failure_reason = stage_err end
+        stage_failure = true
+        stop_after_group = true
+        if journaled then
+          local aborted = history.abort(history_action)
+          if not aborted then stop_after_group = true end
+        end
+      else
+        local group_complete = true
+        for _, index in ipairs(indices) do
+          local act = actions[index]
+          local exec_action = act
+          if staging ~= nil and act.name == 'mv'
+            and staging.overrides[act.src] ~= nil then
+            exec_action = action_mod.Move(staging.overrides[act.src], act.dst)
+          end
+          local ok, result, action_err = pcall(action_mod.execute, exec_action)
+          if ok and result then
+            applied[index] = true
+            self.current_entry = result_entry(act)
+          else
+            group_complete = false
+            ui.notify('Action failed - ' .. action_mod.describe_action(act),
+              vim.log.levels.ERROR)
+            failed[#failed + 1] = act
+            if failure_reason == nil then
+              failure_reason = (ok and action_err) or result
+                or ('action failed: ' .. action_mod.describe_action(act))
+            end
+          end
+        end
+        if group_complete and journaled then
+          for _, index in ipairs(indices) do already_logged[index] = true end
+          local logged, log_err = history.log(history_action)
+          if not logged then
+            ui.notify('Action completed but its history transaction is pending recovery: '
+              .. tostring(log_err), vim.log.levels.ERROR)
+            if failure_reason == nil then failure_reason = log_err end
+            for _, index in ipairs(indices) do failed[#failed + 1] = actions[index] end
+            stop_after_group = true
+          end
+        elseif not group_complete and journaled then
+          stop_after_group = not history.abort(history_action)
+        end
+        if staging ~= nil then
+          for _, tmp in ipairs(staging.temps) do
+            if fs.taken(tmp) then
+              ui.notify('direct: a staged entry remains at ' .. tmp
+                .. '; preserved for manual recovery', vim.log.levels.ERROR)
+            end
+          end
         end
       end
     end
+    if stop_after_group then break end
+  end
+  if stage_failure and next(applied) == nil then
+    vim.bo[bufnr].modified = true
+    return nil, failure_reason
   end
   log_applied(actions, applied, already_logged)
   file_operations.emit_actions(actions, applied, options.suppress_operations)
-
-  -- Every staged temp is expected to be consumed by a successful no-replace
-  -- move. If a temp path remains, preserve and report it; never recursively
-  -- remove by pathname because it may now contain foreign user data.
-  if staging ~= nil then
-    for _, tmp in ipairs(staging.temps) do
-      if fs.taken(tmp) then
-        ui.notify('direct: a staged entry remains at ' .. tmp
-          .. '; preserved for manual recovery', vim.log.levels.ERROR)
-      end
-    end
-  end
 
   -- Re-list so the buffer reflects the filesystem, restore the cursor, and
   -- mark it unmodified only after the refresh succeeds.

@@ -401,7 +401,17 @@ function M.Paste(src, dst, src_names, dst_names)
       index = index + 1
       process_next()
     end
+    local function checkpoint(pair, full_dst, copied_entry)
+      if type(self._history_checkpoint) ~= 'function' then return true end
+      local called, ok, err = pcall(self._history_checkpoint,
+        pair.src, pair.dst, copied_entry)
+      if not called then return nil, tostring(ok) end
+      if not ok then return nil, tostring(err or 'could not checkpoint paste') end
+      return true
+    end
     local function copy_pair(pair, full_src, full_dst, st)
+      local checkpointed, checkpoint_err = checkpoint(pair, full_dst, false)
+      if not checkpointed then fail(checkpoint_err); return end
       local called, ok, extra, code = pcall(function()
         if st.type == 'file' then
           return M.fs.copy_file_exclusive(full_src, full_dst)
@@ -425,6 +435,8 @@ function M.Paste(src, dst, src_names, dst_names)
       end
       last = full_dst
       copied[#copied + 1] = { src = pair.src, dst = pair.dst }
+      checkpointed, checkpoint_err = checkpoint(pair, full_dst, true)
+      if not checkpointed then fail(checkpoint_err); return end
       index = index + 1
       process_next()
     end

@@ -723,7 +723,9 @@ H.describe('register', function()
     H.assert_true(reg.yank({ sb.root .. '/tree' }) == true, 'yank the tree')
     local ws = H.mkdir(sb.root, 'ws')
 
-    local restore = H.stub(fs, 'copy_tree_exclusive', function()
+    local restore = H.stub(fs, 'copy_tree_exclusive', function(src, dst)
+      local copied, copy_err = fs.copy_tree(src, dst)
+      if not copied then error(copy_err) end
       return true, { { path = '/register/tree/link', kind = 'symlink' } }
     end)
     H.capture_messages()

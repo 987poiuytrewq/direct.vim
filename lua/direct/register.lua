@@ -253,6 +253,17 @@ function M.paste(dst, name, callback)
     M.ui.notify('direct: cannot paste: ' .. message, vim.log.levels.WARN)
     return nil, message
   end
+  local prepared, journaled = M.history.prepare(paste_action)
+  if not prepared or not journaled then
+    release_history_lock()
+    M.pending.finish()
+    local message = journaled or 'could not prepare paste recovery'
+    M.ui.notify('direct: cannot paste: ' .. tostring(message), vim.log.levels.ERROR)
+    return nil, message
+  end
+  paste_action._history_checkpoint = function(src_name, dst_name, copied)
+    return M.history.paste_checkpoint(paste_action, src_name, dst_name, copied)
+  end
   local completed, immediate_result, immediate_err = false, nil, nil
   local function finish(ok, result, execution_err)
     if completed then return end
@@ -282,6 +293,13 @@ function M.paste(dst, name, callback)
         end
       elseif not ok then
         M.ui.notify('Failed to paste: ' .. tostring(execution_err), vim.log.levels.ERROR)
+      end
+      if copied == 0 then
+        local aborted, abort_err = M.history.abort(paste_action)
+        if not aborted then
+          M.ui.notify('direct: paste recovery journal remains pending: '
+            .. tostring(abort_err), vim.log.levels.ERROR)
+        end
       end
     end, debug.traceback)
     release_history_lock()
