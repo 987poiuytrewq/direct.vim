@@ -3,6 +3,7 @@ name: CI
 # Test proposed merge commits for pull requests, including fork PRs.
 on:
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
