@@ -52,7 +52,7 @@ end
 
 local EXPECTED_N = {
   ['<CR>'] = '<Cmd>lua require("direct").open()<CR>',
-  ['-'] = '<Cmd>lua require("direct").list(vim.fs.dirname(vim.api.nvim_buf_get_name(0)))<CR>',
+  ['-'] = '<Cmd>lua require("direct").list(vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":h"))<CR>',
   ['z-'] = '<Cmd>lua require("direct").open_parent_expanded()<CR>',
   ['u'] = '<Cmd>DirectUndo<CR>',
   ['<C-R>'] = '<Cmd>DirectRedo<CR>',

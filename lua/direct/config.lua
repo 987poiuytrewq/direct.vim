@@ -161,7 +161,7 @@ M.BUFFER_MAPS = {
   { mode = 'n', lhs = '<CR>',
     rhs = '<Cmd>lua require("direct").open()<CR>' },
   { mode = 'n', lhs = '-',
-    rhs = '<Cmd>lua require("direct").list(vim.fs.dirname(vim.api.nvim_buf_get_name(0)))<CR>' },
+    rhs = '<Cmd>lua require("direct").list(vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":h"))<CR>' },
   { mode = 'n', lhs = 'z-',
     rhs = '<Cmd>lua require("direct").open_parent_expanded()<CR>' },
   { mode = 'n', lhs = 'u', rhs = '<Cmd>DirectUndo<CR>' },

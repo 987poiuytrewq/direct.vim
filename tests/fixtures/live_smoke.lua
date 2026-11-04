@@ -57,14 +57,18 @@ local function run()
   -- Enter a child directory and use the buffer-local `-` override to return.
   vim.api.nvim_win_set_cursor(0, { 1, 0 })
   feed('<CR>')
-  assert(is_same_path(vim.api.nvim_buf_get_name(0), child),
+  local child_buffer_name = vim.api.nvim_buf_get_name(0)
+  assert(is_same_path(child_buffer_name, child),
     '<CR> did not open the selected directory: '
-      .. vim.inspect(vim.api.nvim_buf_get_name(0)) .. ' != ' .. vim.inspect(child))
+      .. vim.inspect(child_buffer_name) .. ' != ' .. vim.inspect(child))
+  local expected_parent = vim.fn.fnamemodify(child_buffer_name, ':h')
   feed('-')
   local parent_result = vim.api.nvim_buf_get_name(0)
   assert(is_same_path(parent_result, root),
     'buffer-local - did not navigate to the parent directory: '
       .. vim.inspect(parent_result) .. ' != ' .. vim.inspect(root)
+      .. ' (from ' .. vim.inspect(child_buffer_name) .. ' via '
+      .. vim.inspect(expected_parent) .. ')'
       .. '; mapping=' .. vim.inspect(vim.fn.maparg('-', 'n', false, true)))
 
   -- Exercise the user-facing write path rather than calling Buffer:sync().
