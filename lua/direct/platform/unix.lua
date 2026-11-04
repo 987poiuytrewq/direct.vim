@@ -1,5 +1,15 @@
 -- POSIX platform implementation for path and filesystem primitives.
 local M = {}
+local ffi
+
+local function get_ffi()
+  if ffi then return ffi end
+  local loaded, module = pcall(require, 'ffi')
+  if not loaded then return nil end
+  ffi = module
+  pcall(ffi.cdef, 'int flock(int fd, int operation);')
+  return ffi
+end
 
 function M.canonical_path(path)
   return vim.fs.normalize(tostring(path))
@@ -87,5 +97,28 @@ function M.command_argv(shell, shellcmdflag, command)
 end
 
 function M.cleanup_command(_path) end
+
+function M.acquire_file_lock(path)
+  local lib = get_ffi()
+  if not lib then return nil, 'same-host history locking requires LuaJIT FFI' end
+  local fd, open_err = vim.uv.fs_open(path, 'a', 384)
+  if not fd then return nil, tostring(open_err or 'could not open history lock') end
+  if lib.C.flock(fd, 2 + 4) ~= 0 then
+    local err = 'flock failed (errno ' .. tostring(lib.errno()) .. ')'
+    vim.uv.fs_close(fd)
+    return nil, err
+  end
+  return { fd = fd }
+end
+
+function M.release_file_lock(token)
+  local unlocked = ffi.C.flock(token.fd, 8) == 0
+  local unlock_err = not unlocked and ('flock unlock failed (errno '
+    .. tostring(ffi.errno()) .. ')') or nil
+  local closed, close_err = vim.uv.fs_close(token.fd)
+  if not unlocked then return nil, unlock_err end
+  if not closed then return nil, tostring(close_err or 'could not close history lock') end
+  return true
+end
 
 return M

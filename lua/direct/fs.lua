@@ -472,8 +472,6 @@ end
 -- occupied destination, and checking M.taken(dst) first leaves a TOCTOU window.
 -- Use the native atomic exclusive-rename operation on each supported platform;
 -- if unavailable, fail closed rather than placing onto a user path.
-local windows_ffi_declared = false
-local windows_kernel32
 function M.rename_noreplace(src, dst, expected_source_identity)
   if type(src) ~= 'string' or src == '' or type(dst) ~= 'string' or dst == '' then
     return nil, 'invalid path'

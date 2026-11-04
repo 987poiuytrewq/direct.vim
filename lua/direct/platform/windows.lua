@@ -22,6 +22,12 @@ local function windows_api()
         direct_platform_FILETIME created, accessed, written;
         direct_platform_DWORD volume, size_high, size_low, links, index_high, index_low;
       } direct_platform_FILE_INFORMATION;
+      typedef unsigned long long direct_platform_UINTPTR;
+      typedef struct {
+        direct_platform_UINTPTR internal, internal_high;
+        direct_platform_DWORD offset, offset_high;
+        void *event;
+      } direct_platform_OVERLAPPED;
       int __stdcall MultiByteToWideChar(unsigned int CodePage, unsigned long dwFlags,
         const char *lpMultiByteStr, int cbMultiByte, direct_platform_WCHAR *lpWideCharStr,
         int cchWideChar);
@@ -32,6 +38,13 @@ local function windows_api()
       direct_platform_BOOL __stdcall GetFileInformationByHandle(direct_platform_HANDLE file,
         direct_platform_FILE_INFORMATION *information);
       direct_platform_BOOL __stdcall CloseHandle(direct_platform_HANDLE object);
+      direct_platform_BOOL __stdcall LockFileEx(direct_platform_HANDLE file,
+        direct_platform_DWORD flags, direct_platform_DWORD reserved,
+        direct_platform_DWORD length_low, direct_platform_DWORD length_high,
+        direct_platform_OVERLAPPED *overlapped);
+      direct_platform_BOOL __stdcall UnlockFileEx(direct_platform_HANDLE file,
+        direct_platform_DWORD reserved, direct_platform_DWORD length_low,
+        direct_platform_DWORD length_high, direct_platform_OVERLAPPED *overlapped);
       int __stdcall MoveFileW(const direct_platform_WCHAR *existing_name,
         const direct_platform_WCHAR *new_name);
       direct_platform_DWORD __stdcall GetLastError(void);
@@ -181,6 +194,40 @@ end
 
 function M.cleanup_command(path)
   if path then pcall(vim.uv.fs_unlink, path) end
+end
+
+function M.acquire_file_lock(path)
+  local lib, api = windows_api()
+  if not lib then return nil, 'same-host history locking requires Windows LockFileEx support' end
+  local fd, open_err = vim.uv.fs_open(path, 'a', 384)
+  if not fd then return nil, tostring(open_err or 'could not open history lock') end
+  vim.uv.fs_close(fd)
+  local wide, wide_err = wide_path(path, lib, api)
+  if not wide then return nil, wide_err end
+  local handle = api.CreateFileW(wide, 0x80000000 + 0x40000000,
+    0x1 + 0x2, nil, 3, 0x80, nil)
+  if handle == lib.cast('direct_platform_HANDLE', -1) then
+    return nil, 'CreateFileW failed (error ' .. tostring(api.GetLastError()) .. ')'
+  end
+  local overlapped = lib.new('direct_platform_OVERLAPPED[1]')
+  if api.LockFileEx(handle, 3, 0, 1, 0, overlapped) == 0 then
+    local lock_err = 'LockFileEx failed (error ' .. tostring(api.GetLastError()) .. ')'
+    api.CloseHandle(handle)
+    return nil, lock_err
+  end
+  return { handle = handle, overlapped = overlapped }
+end
+
+function M.release_file_lock(token)
+  local unlocked = kernel32.UnlockFileEx(token.handle, 0, 1, 0, token.overlapped) ~= 0
+  local unlock_err = not unlocked and ('UnlockFileEx failed (error '
+    .. tostring(kernel32.GetLastError()) .. ')') or nil
+  local closed = kernel32.CloseHandle(token.handle) ~= 0
+  if not unlocked then return nil, unlock_err end
+  if not closed then
+    return nil, 'CloseHandle failed (error ' .. tostring(kernel32.GetLastError()) .. ')'
+  end
+  return true
 end
 
 return M
