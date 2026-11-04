@@ -19,6 +19,8 @@ if ffi_ok and windows then
       direct_dword OffsetHigh;
       void *hEvent;
     } direct_overlapped;
+    int __stdcall MultiByteToWideChar(direct_dword code_page, direct_dword flags,
+      const char *input, int input_length, unsigned short *output, int output_length);
     void *__stdcall CreateFileW(const unsigned short *name, direct_dword access,
       direct_dword share, void *security, direct_dword creation,
       direct_dword flags, void *template_file);
@@ -34,8 +36,8 @@ if ffi_ok and windows then
   local api_ok, api = pcall(ffi.load, 'kernel32')
   if api_ok then
     local symbols_ok = pcall(function()
-      return api.CreateFileW, api.LockFileEx, api.UnlockFileEx, api.CloseHandle,
-        api.GetLastError
+      return api.MultiByteToWideChar, api.CreateFileW, api.LockFileEx,
+        api.UnlockFileEx, api.CloseHandle, api.GetLastError
     end)
     if symbols_ok then windows_api = api end
   end
@@ -71,16 +73,23 @@ function M.acquire()
   if not path then return nil, path_err end
   if windows then
     local native_path = path:gsub('/', '\\')
-    local converted, utf16 = pcall(vim.fn.iconv, native_path, 'utf-8', 'utf-16le')
-    if not converted then return nil, tostring(utf16) end
-    if type(utf16) ~= 'string' then return nil, 'could not encode Windows lock path' end
+    local wide_length = windows_api.MultiByteToWideChar(65001, 0, native_path, -1,
+      nil, 0)
+    if wide_length <= 0 then
+      return nil, 'MultiByteToWideChar failed (error '
+        .. tostring(windows_api.GetLastError()) .. ')'
+    end
+    local wide = ffi.new('unsigned short[?]', wide_length)
+    if windows_api.MultiByteToWideChar(65001, 0, native_path, -1, wide,
+        wide_length) == 0 then
+      return nil, 'MultiByteToWideChar failed (error '
+        .. tostring(windows_api.GetLastError()) .. ')'
+    end
     local created, create_err, create_code = M.uv.fs_open(path, 'a', 384)
     if not created then
       return nil, tostring(create_err or create_code or 'could not open history lock')
     end
     M.uv.fs_close(created)
-    local wide = ffi.new('unsigned short[?]', #utf16 / 2 + 1)
-    ffi.copy(wide, utf16, #utf16)
     local handle = windows_api.CreateFileW(wide, 0x80000000 + 0x40000000,
       0x1 + 0x2, nil, 3, 0x80, nil)
     if handle == ffi.cast('void *', -1) then
