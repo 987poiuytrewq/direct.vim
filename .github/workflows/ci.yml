@@ -14,8 +14,6 @@ jobs:
     name: Test on ${{ matrix.os }} (Neovim ${{ matrix.neovim-version }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
-    env:
-      DIRECT_TEST_DIRECTORY_SEPARATOR: slash
     defaults:
       run:
         shell: bash
