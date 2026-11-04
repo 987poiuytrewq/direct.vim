@@ -680,8 +680,8 @@ local function reverse_intent(state, which, reversal, inverse)
     undo = next_undo,
     redo = next_redo,
     action = inverse,
-    source = reversal.src,
-    destination = reversal.dst,
+    source = M.paths.record_path(reversal.src),
+    destination = M.paths.record_path(reversal.dst),
     source_identity = source_identity,
     destination_identity = destination_identity or vim.NIL,
   }
@@ -772,8 +772,8 @@ local function write_apply_intent(state, action, record)
     undo = next_undo,
     redo = next_redo,
     action = record,
-    source = source or vim.NIL,
-    destination = destination,
+    source = source and M.paths.record_path(source) or vim.NIL,
+    destination = M.paths.record_path(destination),
     source_identity = source_identity or vim.NIL,
     destination_identity = destination_identity or vim.NIL,
   }

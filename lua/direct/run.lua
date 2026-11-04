@@ -69,7 +69,15 @@ function M.current_entry(command, on_complete, opts)
   for _, flag in ipairs(vim.split(vim.o.shellcmdflag, '%s+', { trimempty = true })) do
     argv[#argv + 1] = flag
   end
-  argv[#argv + 1] = expanded
+  if (vim.fn.has('win32') == 1 or vim.fn.has('win64') == 1)
+    and (vim.o.shell or ''):lower():match('cmd%.exe$') then
+    -- cmd.exe /s /c strips the first and last quotes from its command string.
+    -- Wrap the complete command so quotes produced by shellescape remain syntax
+    -- for cmd instead of reaching the child process as literal characters.
+    argv[#argv + 1] = '"' .. expanded .. '"'
+  else
+    argv[#argv + 1] = expanded
+  end
 
   local ok, process = pcall(vim.system, argv, {
     cwd = listing.root,
