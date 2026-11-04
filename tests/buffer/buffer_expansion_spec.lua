@@ -19,6 +19,47 @@ end
 
 
 H.describe('buffer: expansion and collapse lifecycle', function()
+  H.it('[d and ]d jump between visible directory rows without changing expansion', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local alpha = H.mkdir(ws, 'alpha')
+    local inner = H.mkdir(alpha, 'inner')
+    H.mkfile(inner, 'deep.txt', { 'deep' })
+    H.mkfile(alpha, 'alpha.txt', { 'alpha' })
+    H.mkdir(ws, 'beta/hidden-child')
+    H.mkdir(ws, 'gamma')
+    local listing = buffer.list(ws)
+    listing:expand(1)
+    listing:expand(2)
+    H.assert_buf_eq({
+      'alpha/', '  inner/', '    deep.txt', '  alpha.txt', 'beta/', 'gamma/',
+    }, 0)
+
+    vim.api.nvim_win_set_cursor(0, { 4, 0 })
+    vim.api.nvim_feedkeys('[d', 'mx', false)
+    H.assert_eq(vim.api.nvim_win_get_cursor(0)[1], 2,
+      '[d skips preceding files and reaches a nested directory')
+
+    vim.api.nvim_feedkeys(']d', 'mx', false)
+    H.assert_eq(vim.api.nvim_win_get_cursor(0)[1], 5,
+      ']d skips files and collapsed descendants to reach the next visible directory')
+    vim.api.nvim_feedkeys(']d', 'mx', false)
+    H.assert_eq(vim.api.nvim_win_get_cursor(0)[1], 6,
+      ']d continues across visible root directories')
+    vim.api.nvim_feedkeys(']d', 'mx', false)
+    H.assert_eq(vim.api.nvim_win_get_cursor(0)[1], 6,
+      ']d stays put when there is no later visible directory')
+    vim.api.nvim_win_set_cursor(0, { 1, 0 })
+    vim.api.nvim_feedkeys('[d', 'mx', false)
+    H.assert_eq(vim.api.nvim_win_get_cursor(0)[1], 1,
+      '[d stays put when there is no earlier visible directory')
+
+    H.assert_buf_eq({
+      'alpha/', '  inner/', '    deep.txt', '  alpha.txt', 'beta/', 'gamma/',
+    }, 0, 'directory jumps do not expand, collapse, or edit the listing')
+  end)
+
   H.it('keeps the root flat and expands one directory level lazily', function()
     clean_buffers()
     local sb = H.sandbox()

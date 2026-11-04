@@ -528,6 +528,8 @@ Buffer-local, in a direct buffer (all mappings follow `map_default_keys`):
     normal      zC          recursively collapse a directory
     normal      zR          recursively expand all root directories
     normal      zM          collapse all root directories
+    normal      [d          jump to the previous visible directory row
+    normal      ]d          jump to the next visible directory row
     normal      -           open ../ (the parent directory)
     normal      z-          open ../ and expand the directory just left
     normal      u           undo the last filesystem action
@@ -547,6 +549,9 @@ Buffer-local, in a direct buffer (all mappings follow `map_default_keys`):
 The buffer-local `-` wins over the global `-` inside a direct buffer. All
 buffer-local mappings, including fold and mouse mappings, are omitted when
 `map_default_keys` is false.
+`[d` and `]d` include nested directories currently shown in expanded subtrees;
+collapsed descendants are skipped. They move the cursor only and do not alter
+expansion state.
 `:DirectUnfoldAll` and `:DirectFoldAll` provide command-line equivalents of `zR`
 and `zM`.
 
