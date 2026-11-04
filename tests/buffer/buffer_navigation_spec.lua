@@ -240,6 +240,28 @@ H.describe('buffer: open and ranged paths', function()
       'the new buffer denotes the sub directory')
   end)
 
+  H.it('navigation back to a parent directory reuses its existing buffer', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local parent = H.mkdir(sb.root, 'parent')
+    local child = H.mkdir(parent, 'child')
+    H.mkfile(child, 'inside.txt', { 'i' })
+
+    local parent_listing = buffer.list(parent)
+    local parent_bufnr = vim.api.nvim_get_current_buf()
+    parent_listing:open('child/')
+    local child_bufnr = vim.api.nvim_get_current_buf()
+
+    H.assert_true(vim.api.nvim_buf_is_valid(parent_bufnr),
+      'opening a directory keeps the previous direct buffer available')
+    H.assert_true(require('direct').open_parent_expanded(),
+      'navigation to the parent succeeds')
+    H.assert_eq(vim.api.nvim_get_current_buf(), parent_bufnr,
+      'the existing parent buffer is reused')
+    H.assert_true(vim.api.nvim_buf_is_valid(child_bufnr),
+      'the child listing remains available')
+  end)
+
   H.it('open() edits a file whose name contains a space', function()
     clean_buffers()
     local sb = H.sandbox()

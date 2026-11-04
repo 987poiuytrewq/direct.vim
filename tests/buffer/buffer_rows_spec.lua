@@ -296,7 +296,7 @@ H.describe('buffer: row identity and filtered rendering', function()
       'refresh and yank do not modify filesystem entries')
   end)
 
-  H.it('<CR> still opens a nested listing and replaces the previous direct buffer', function()
+  H.it('<CR> opens a nested listing and keeps the previous direct buffer', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -311,8 +311,8 @@ H.describe('buffer: row identity and filtered rendering', function()
     H.assert_buf_eq({ 'inside.txt' }, 0)
     H.assert_true(fs.same_path(vim.api.nvim_buf_get_name(0), ws .. '/sub'),
       '<CR> opens the directory listing')
-    H.assert_false(vim.api.nvim_buf_is_valid(previous),
-      'the prior direct buffer is wiped as before')
+    H.assert_true(vim.api.nvim_buf_is_valid(previous),
+      'the prior direct buffer remains available for parent navigation')
   end)
 
   H.it('double-click opens the directory or file under the mouse', function()
@@ -344,8 +344,8 @@ H.describe('buffer: row identity and filtered rendering', function()
     H.assert_true(fs.same_path(vim.api.nvim_buf_get_name(0), ws .. '/sub'),
       'double-clicking a directory opens its listing')
     H.assert_buf_eq({ 'inside.txt' }, 0)
-    H.assert_false(vim.api.nvim_buf_is_valid(old_buf),
-      'opening the directory replaces the old listing')
+    H.assert_true(vim.api.nvim_buf_is_valid(old_buf),
+      'opening the directory keeps the old listing for parent navigation')
 
     old_buf = vim.api.nvim_get_current_buf()
     double_click(1)
