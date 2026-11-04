@@ -73,10 +73,15 @@ function M.acquire()
     local converted, utf16 = pcall(vim.fn.iconv, path, 'utf-8', 'utf-16le')
     if not converted then return nil, tostring(utf16) end
     if type(utf16) ~= 'string' then return nil, 'could not encode Windows lock path' end
+    local created, create_err, create_code = M.uv.fs_open(path, 'a', 384)
+    if not created then
+      return nil, tostring(create_err or create_code or 'could not open history lock')
+    end
+    M.uv.fs_close(created)
     local wide = ffi.new('unsigned short[?]', #utf16 / 2 + 1)
     ffi.copy(wide, utf16, #utf16)
     local handle = windows_api.CreateFileW(wide, 0x80000000 + 0x40000000,
-      0x1 + 0x2, nil, 4, 0x80, nil)
+      0x1 + 0x2, nil, 3, 0x80, nil)
     if handle == ffi.cast('void *', -1) then
       return nil, 'CreateFileW failed (error '
         .. tostring(windows_api.GetLastError()) .. ')'
