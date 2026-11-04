@@ -200,7 +200,19 @@ end
 -- deliberately treated as unknown and use the normalized-name fallback.
 function M.path_identity(path, st)
   if type(path) ~= 'string' then return nil end
-  local identity = { path = require('direct.paths').canonical(path) }
+  local paths = require('direct.paths')
+  local spelling = path
+  if package.config:sub(1, 1) == '\\' then
+    -- Windows stat providers can reuse inode values across unrelated entries.
+    -- Use the resolved spelling for stat-following identities instead; lstat
+    -- symlinks retain their own spelling so entry_identity still distinguishes
+    -- a link name from its target.
+    if not st or st.type ~= 'link' then
+      spelling = M.uv.fs_realpath(path) or path
+    end
+    return { path = paths.canonical(spelling) }
+  end
+  local identity = { path = paths.canonical(spelling) }
   if st and st.dev ~= nil and st.ino ~= nil and st.dev ~= 0 and st.ino ~= 0 then
     identity.inode = tostring(st.dev) .. ':' .. tostring(st.ino)
   end

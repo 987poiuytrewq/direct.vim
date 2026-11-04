@@ -129,10 +129,28 @@ end
 function M.validate_canonical_path(value)
   local ok, err = M.validate_path(value)
   if not ok then return nil, err end
-  local normalized = M.root(value)
-  local spelling = M.strip_trailing_separator(value)
-  if normalized ~= spelling then return nil, 'path must be absolute and canonical' end
+  local lexical = value
+  if M.separator == '\\' then lexical = lexical:gsub('\\', '/') end
+  local normalized = vim.fs.normalize(lexical)
+  if M.separator == '\\' then normalized = normalized:gsub('\\', '/') end
+  local spelling = lexical:gsub('/+$', '')
+  normalized = normalized:gsub('/+$', '')
+  if normalized ~= spelling or M.canonical(M.root(value)) ~= M.canonical(value) then
+    return nil, 'path must be absolute and canonical'
+  end
   return true
+end
+
+-- Persist paths in separator-neutral form so JSONL history is stable across
+-- Windows APIs that may return either slash style. Keep a directory's trailing
+-- marker because action replay uses it to distinguish directory operations.
+function M.record_path(value)
+  local is_directory = type(value) == 'string' and value:match('[/\\]$') ~= nil
+  local result = M.canonical(M.root(value))
+  if is_directory and result ~= '/' and not result:match('^%a:/$') then
+    result = result .. '/'
+  end
+  return result
 end
 
 -- normalize does not absolutise, so abspath follows it; the result is not symlink-resolved (fs.same_path covers that).

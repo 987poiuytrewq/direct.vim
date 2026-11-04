@@ -596,8 +596,10 @@ local function swap_line(ws)
     H.assert_nil(vim.uv.fs_lstat(src_a), 'group rollback did not move foreign data to src')
     H.assert_eq(vim.fn.readfile(src_b), { 'B' }, 'the unstaged source remains')
     local reported = false
+    local expected_temp = vim.fs.normalize(temp):gsub('\\', '/')
     for _, message in ipairs(notices) do
-      if message:find('source identity changed: ' .. temp, 1, true) then
+      local normalized_message = message:gsub('\\', '/')
+      if normalized_message:find('source identity changed: ' .. expected_temp, 1, true) then
         reported = true
       end
     end

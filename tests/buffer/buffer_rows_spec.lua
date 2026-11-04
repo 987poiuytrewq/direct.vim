@@ -130,7 +130,12 @@ H.describe('buffer: row identity and filtered rendering', function()
 
     -- nvim stores the buffer's canonical spelling. Restore through that alias
     -- so list() compares the equivalent path against the unresolved saved path.
-    H.assert_eq(vim.api.nvim_buf_get_name(bufnr), real, 'buffer name is the resolved alias')
+    local stored = vim.api.nvim_buf_get_name(bufnr)
+    if vim.fn.has('win32') == 1 or vim.fn.has('win64') == 1 then
+      H.assert_true(fs.same_path(stored, real), 'buffer name resolves to the alias target')
+    else
+      H.assert_eq(stored, real, 'buffer name is the resolved alias')
+    end
     local refreshed = buffer.restore()
     refreshed:list()
 
@@ -507,6 +512,9 @@ H.describe('buffer: row identity and filtered rendering', function()
   -- A newline cannot be represented in a buffer line, so skip it with a notice
   -- rather than aborting the listing; space-named entries remain representable.
   H.it('a newline-named entry is dropped with a notice, a space-named one survives', function()
+    if vim.fn.has('win32') == 1 or vim.fn.has('win64') == 1 then
+      H.skip('Windows filenames cannot contain newline characters')
+    end
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')

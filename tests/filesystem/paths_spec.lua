@@ -85,9 +85,10 @@ H.describe('paths', function()
 
   H.it('data_home() warns and uses stdpath when both are unset', function()
     H.capture_messages()
-    H.with_env({ HOME = vim.env.HOME }, function()
+    H.with_env({ HOME = vim.env.HOME, USERPROFILE = vim.env.USERPROFILE }, function()
       vim.env.XDG_DATA_HOME = nil
       vim.env.HOME = nil
+      vim.env.USERPROFILE = nil
       H.assert_eq(paths.data_home(), vim.fn.stdpath('data'),
         'stdpath fallback when both are unset')
     end)
