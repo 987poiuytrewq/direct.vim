@@ -2193,8 +2193,10 @@ end
 -- ---------------------------------------------------------------------------
 
 -- Open directories with a direct listing and files with `:edit`. Pass paths
--- through fnameescape so special characters cannot become Ex syntax. Remove
--- the old direct buffer only after another buffer is current.
+-- through fnameescape so special characters cannot become Ex syntax. Keep
+-- previous direct buffers when navigating between directories so returning to
+-- a directory can reuse its existing listing; remove the old listing on file
+-- opens after another buffer is current.
 -- Child paths resolve from their row identities rather than their display text.
 function Buffer:open(line)
   local bufnr = vim.api.nvim_get_current_buf()
@@ -2225,10 +2227,10 @@ function Buffer:open(line)
     M.list(path)
   else
     vim.cmd('edit ' .. vim.fn.fnameescape(path))
-  end
-  if vim.api.nvim_buf_is_valid(direct_buf)
-    and vim.api.nvim_get_current_buf() ~= direct_buf then
-    pcall(vim.api.nvim_buf_delete, direct_buf, { force = true })
+    if vim.api.nvim_buf_is_valid(direct_buf)
+      and vim.api.nvim_get_current_buf() ~= direct_buf then
+      pcall(vim.api.nvim_buf_delete, direct_buf, { force = true })
+    end
   end
   return true
 end
