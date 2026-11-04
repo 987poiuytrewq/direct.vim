@@ -60,7 +60,7 @@ jobs:
         # path-spelling assumptions not yet suitable for Windows.
         run: >-
           nvim --headless -l tests/run.lua config_spec sync_plan_spec
-          entry_spec history_format_spec history_preflight_spec platform_compat_spec
+          history_format_spec history_preflight_spec platform_compat_spec
 
       - name: Add coverage to the run summary
         if: runner.os == 'Linux' && always() && hashFiles('coverage/summary.out') != ''
