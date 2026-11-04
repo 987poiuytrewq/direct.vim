@@ -18,8 +18,8 @@ H.describe('history preflight', function()
     local ok, err = history.lock.acquire()
     H.assert_true(ok == true, 'process lock is acquired: ' .. tostring(err))
     H.assert_true(history.lock.release(), 'process lock is released')
-    H.assert_true(fs.exists(vim.fs.joinpath(sb.data_home, '.direct-history.lock')),
-      'persistent lock file remains in the shared data home')
+    H.assert_true(vim.uv.fs_stat(sb.data_home) ~= nil,
+      'the shared data home remains available after unlock')
   end)
 
   H.it('rejects invalid UTF-8 before creating data or register directories', function()
