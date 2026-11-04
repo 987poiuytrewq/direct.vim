@@ -102,6 +102,14 @@ vim.api.nvim_create_user_command('DirectGitStatus', function()
   require('direct').show_git_status()
 end, { nargs = 0, desc = 'direct: show only entries with Git status' })
 
+vim.api.nvim_create_user_command('DirectNextChange', function()
+  require('direct').next_change()
+end, { nargs = 0, desc = 'direct: navigate to the next changed entry' })
+
+vim.api.nvim_create_user_command('DirectPreviousChange', function()
+  require('direct').previous_change()
+end, { nargs = 0, desc = 'direct: navigate to the previous changed entry' })
+
 vim.api.nvim_create_user_command('DirectUndo', function()
   require('direct').undo()
 end, { nargs = 0, desc = 'direct: undo the last filesystem action' })

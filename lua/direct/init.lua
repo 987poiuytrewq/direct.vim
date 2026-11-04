@@ -124,6 +124,16 @@ function M.show_git_status()
   return buffer.show_git_status()
 end
 
+function M.next_change()
+  if not guard('DirectNextChange') then return nil end
+  return buffer.next_change()
+end
+
+function M.previous_change()
+  if not guard('DirectPreviousChange') then return nil end
+  return buffer.previous_change()
+end
+
 function M.undo()
   if not guard('DirectUndo') then
     return nil

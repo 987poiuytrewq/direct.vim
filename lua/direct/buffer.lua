@@ -125,6 +125,44 @@ function M.refresh_git_status(bufnr, root)
   return true
 end
 
+-- Move to the next/previous row in this listing with a non-ignored Git change.
+-- This deliberately walks materialized rows only: filtered-out and collapsed
+-- entries are not navigation targets.
+function M.navigate_git_status(direction)
+  local bufnr = vim.api.nvim_get_current_buf()
+  local state = states[bufnr]
+  if not state or (direction ~= 1 and direction ~= -1) then return false end
+
+  local options = require('direct.config').options
+  if not options.git.enabled then return false end
+  local snapshot = ensure_git_snapshot(state, options)
+  if not snapshot then return false end
+
+  local cursor_row = vim.api.nvim_win_get_cursor(0)[1] - 1
+  local row_ids = row_ids_by_row(bufnr)
+  local line_count = vim.api.nvim_buf_line_count(bufnr)
+  local row = cursor_row + direction
+  while row >= 0 and row < line_count do
+    local id = row_ids[row]
+    local record = id and state.rows[id]
+    local status = record and git.first_status_for(snapshot, record.path)
+    if status and status ~= 'ignored' then
+      vim.api.nvim_win_set_cursor(0, { row + 1, 0 })
+      return true
+    end
+    row = row + direction
+  end
+  return false
+end
+
+function M.next_change()
+  return M.navigate_git_status(1)
+end
+
+function M.previous_change()
+  return M.navigate_git_status(-1)
+end
+
 local function is_deleted_record(record)
   return record ~= nil and record.deleted_kind ~= nil
 end
