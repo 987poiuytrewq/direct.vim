@@ -1205,8 +1205,7 @@ local function finish_callback(callback, result, err)
   if type(callback) ~= 'function' then return end
   local ok, callback_err = pcall(callback, result, err)
   if not ok then
-    M.ui.notify('direct: history completion callback failed: '
-      .. tostring(callback_err), vim.log.levels.ERROR)
+    M.ui.report_error('finish the history operation', callback_err)
   end
 end
 
@@ -1481,8 +1480,7 @@ function M._reverse_async(which, callback, options)
     if not finished then
       release_lock()
       M.pending.finish(token)
-      M.ui.notify('Failed to complete async ' .. which .. ' history action: '
-        .. tostring(completion_err), vim.log.levels.ERROR)
+      M.ui.report_error('finish the ' .. which .. ' operation', completion_err)
       finish_callback(callback, nil, completion_err)
     end
   end

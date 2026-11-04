@@ -231,8 +231,9 @@ function M.notify(kind, paths, pairs, kinds)
       local params = { files = allowed }
       local ok, err = pcall(selected.client.notify, selected.client, method, params)
       if not ok then
-        require('direct.ui').notify('direct: LSP ' .. method .. ' notification failed: '
-          .. tostring(err), vim.log.levels.WARN)
+        require('direct.ui').report_error(
+          'notify the language server about ' .. operation_field(method), err,
+          vim.log.levels.WARN)
       end
     end
   end
@@ -464,8 +465,9 @@ function M.will_rename(files, callback, warn, is_active)
     return true
   end
   local function warning(client, reason)
-    local message = 'direct: LSP willRenameFiles failed for client '
-      .. tostring(client and client.id) .. ': ' .. tostring(reason)
+    local client_id = tostring(client and client.id or 'unknown')
+    local message = require('direct.ui').error_message(
+      'check with the language server before renaming (client ' .. client_id .. ')', reason)
     if warn then
       pcall(warn, message)
     else
@@ -570,8 +572,8 @@ end
 local function notify_safely(...)
   local ok, err = pcall(M.notify, ...)
   if not ok then
-    pcall(require('direct.ui').notify,
-      'direct: LSP file-operation notification failed: ' .. tostring(err),
+    pcall(require('direct.ui').report_error,
+      'send file-operation notifications to language servers', err,
       vim.log.levels.WARN)
   end
 end

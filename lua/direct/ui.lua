@@ -4,8 +4,44 @@
 
 local M = {}
 
+local function strip_traceback(message)
+  local traceback = message:find('\nstack traceback:', 1, true)
+  if traceback then message = message:sub(1, traceback - 1) end
+  return message
+end
+
 function M.notify(msg, level)
-  vim.notify(msg, level)
+  local message = tostring(msg or '')
+  local ok = pcall(vim.notify, message, level)
+  if not ok then
+    local highlight = level == vim.log.levels.ERROR and 'ErrorMsg' or 'WarningMsg'
+    local echoed = pcall(vim.api.nvim_echo, { { message, highlight } }, true, {})
+    if not echoed then
+      pcall(vim.api.nvim_err_writeln, message)
+    end
+  end
+end
+
+-- report_error(action, err[, level]) turns a raised Lua error into one concise
+-- user-facing message. Keep the cause's first line, but never expose an internal
+-- traceback as part of a normal notification. The original error is returned so
+-- callers of the public Lua API can still inspect it.
+function M.error_message(action, err)
+  action = tostring(action or 'complete the operation')
+  local detail = strip_traceback(tostring(err or ''))
+  local newline = detail:find('\n', 1, true)
+  if newline then detail = detail:sub(1, newline - 1) end
+  detail = detail:gsub('^%s*(.-)%s*$', '%1')
+  -- Lua errors often start with an implementation filename and line number;
+  -- those details are useful in the returned error, but distract in a notice.
+  detail = detail:gsub('^.-:%d+: ', '')
+  if detail == '' then detail = 'please try again' end
+  return 'direct: Could not ' .. action .. ': ' .. detail
+end
+
+function M.report_error(action, err, level)
+  M.notify(M.error_message(action, err), level or vim.log.levels.ERROR)
+  return nil, err
 end
 
 -- inputsave/inputrestore must stay bracketed around the pcall so a failed input still restores prompt state.
@@ -35,12 +71,10 @@ function M.input(prompt, default, completion, on_confirm, on_error)
       if type(on_error) == 'function' then
         local reported, report_err = pcall(on_error, err)
         if not reported then
-          M.notify('direct: input error handler failed: ' .. tostring(report_err),
-            vim.log.levels.ERROR)
+          M.report_error('handle the input error', report_err)
         end
       else
-        M.notify('direct: input callback failed: ' .. tostring(err),
-          vim.log.levels.ERROR)
+        M.report_error('complete the input', err)
       end
     end
   end

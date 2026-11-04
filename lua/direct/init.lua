@@ -21,8 +21,7 @@ local function paste_and_refresh(destination, name)
         pasted_entry or (type(result) == 'string' and result or nil))
     end)
     if not ok then
-      ui.notify('direct: re-list failed: ' .. tostring(refresh_err),
-        vim.log.levels.ERROR)
+      ui.report_error('refresh the directory after pasting', refresh_err)
     end
   end)
 end
@@ -230,6 +229,52 @@ function M.git(command)
   return run.current_entry(command, function(_, bufnr, root)
     buffer.refresh_git_status(bufnr, root)
   end, { quiet_success = true })
+end
+
+-- Public API functions are a final error boundary for both Lua callers and the
+-- user commands/mappings that delegate to them. Expected failures are returned
+-- normally by the implementations; only unexpected raised errors are reported
+-- here, so a failure already handled by an operation does not produce a second
+-- notification.
+local protected_actions = {
+  setup = 'apply the configuration',
+  list = 'open the directory listing',
+  list_buffer = "open the current buffer's directory",
+  list_cwd = 'open the current working directory',
+  open = 'open the selected entry',
+  open_parent_expanded = 'open and expand the parent directory',
+  sync = 'sync the directory listing',
+  fold_all = 'collapse the expanded directories',
+  unfold_all = 'expand the directories',
+  toggle_hidden = 'toggle hidden entries',
+  toggle_git_status = 'toggle the Git-status filter',
+  toggle_gitignore = 'toggle Git-ignore filtering',
+  show_git_status = 'show the Git-status view',
+  next_change = 'navigate to the next changed entry',
+  previous_change = 'navigate to the previous changed entry',
+  undo = 'undo the last filesystem action',
+  redo = 'redo the last filesystem action',
+  yank = 'copy the selected entries to the Direct register',
+  paste = 'paste the Direct register',
+  paste_as = 'paste the Direct register with the requested name',
+  run = 'run the command for the selected entry',
+  git = 'run the Git command for the selected entry',
+}
+
+local pack = function(...) return { n = select('#', ...), ... } end
+local unpack_values = table.unpack or unpack
+for name, description in pairs(protected_actions) do
+  local implementation = M[name]
+  M[name] = function(...)
+    local args, count = pack(...), select('#', ...)
+    local result = pack(xpcall(function()
+      return implementation(unpack_values(args, 1, count))
+    end, debug.traceback))
+    if not result[1] then
+      return ui.report_error(description, result[2])
+    end
+    return unpack_values(result, 2, result.n)
+  end
 end
 
 return M

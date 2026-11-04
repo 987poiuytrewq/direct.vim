@@ -1939,8 +1939,7 @@ local function sync_locked(self, options)
         end, debug.traceback)
         operation.cleanup()
         if not ran then
-          ui.notify('direct: async rename completion failed: '
-            .. tostring(callback_err), vim.log.levels.ERROR)
+          ui.report_error('finish the directory rename', callback_err)
         end
       end
       local started, cancel = pcall(file_operations.will_rename, files, finish, nil,
