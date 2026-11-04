@@ -5,7 +5,7 @@ return function(deps)
   local fs = deps.fs
   local states = deps.states
   local namespace = deps.namespace
-  local row_id_at = deps.row_id_at
+  local row_ids_by_row = deps.row_ids_by_row
   local set_row_mark = deps.set_row_mark
   local is_dir_line = deps.is_dir_line
   local strip_directory_marker = deps.strip_directory_marker
@@ -44,8 +44,9 @@ return function(deps)
         end
       end
       local visible_roots = {}
+      local row_ids = row_ids_by_row(bufnr)
       for row, line in ipairs(lines) do
-        local id = row_id_at(bufnr, row - 1)
+        local id = row_ids[row - 1]
         local rec = id and state.rows[id]
         if not (rec and rec.deleted_kind) then
           visible_roots[#visible_roots + 1] = line
@@ -718,17 +719,18 @@ return function(deps)
     end
 
     local source_paths = {}
-    for _, item in ipairs(moves) do source_paths[item.action.src] = true end
+    for _, item in ipairs(moves) do
+      source_paths[#source_paths + 1] = item.action.src
+    end
+    local source_index = fs.path_identity_index(source_paths)
     for _, item in ipairs(creates) do
       if fs.taken(item.action.dst) then
         return nil, 'destination already exists: ' .. item.action.dst
       end
     end
     for _, item in ipairs(moves) do
-      local source_target = false
-      for source in pairs(source_paths) do
-        if fs.same_path(source, item.action.dst) then source_target = true; break end
-      end
+      local source_target = fs.path_identity_index_contains(source_index,
+        item.action.dst)
       if fs.taken(item.action.dst) and not source_target then
         return nil, 'move destination already exists: ' .. item.action.dst
       end

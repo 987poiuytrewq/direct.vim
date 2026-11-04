@@ -19,6 +19,49 @@ end
 
 
 H.describe('buffer: row identity and filtered rendering', function()
+  H.it('avoids full decoration redraws for in-place normal-mode edits', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkfile(ws, 'entry.txt', '')
+    buffer.list(ws)
+    local bufnr = vim.api.nvim_get_current_buf()
+
+    local original = vim.api.nvim_buf_get_extmarks
+    local calls = 0
+    vim.api.nvim_buf_get_extmarks = function(...)
+      calls = calls + 1
+      return original(...)
+    end
+    vim.api.nvim_buf_set_text(bufnr, 0, 0, 0, 0, { 'prefix-' })
+    vim.api.nvim_buf_get_extmarks = original
+
+    H.assert_eq(calls, 1,
+      'in-place edits inspect only the changed row instead of redrawing every row')
+  end)
+
+  H.it('skips insert-mode decoration refreshes when row count is unchanged', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkfile(ws, 'entry.txt', '')
+    buffer.list(ws)
+    local bufnr = vim.api.nvim_get_current_buf()
+    vim.api.nvim_buf_set_text(bufnr, 0, 0, 0, 0, { 'renamed-' })
+
+    local original = vim.api.nvim_buf_get_extmarks
+    local calls = 0
+    vim.api.nvim_buf_get_extmarks = function(...)
+      calls = calls + 1
+      return original(...)
+    end
+    vim.api.nvim_exec_autocmds('TextChangedI', { buffer = bufnr })
+    vim.api.nvim_buf_get_extmarks = original
+
+    H.assert_eq(calls, 0,
+      'same-line insert edits do not rebuild row highlights and icons')
+  end)
+
   H.it('nested directories reveal only their immediate children when expanded', function()
     clean_buffers()
     local sb = H.sandbox()

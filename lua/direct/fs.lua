@@ -200,6 +200,39 @@ function M.path_identities_match(a, b)
   return a.path == b.path
 end
 
+-- A lookup index for same_path-style membership checks. This keeps aliases
+-- matched by device/inode while preserving normalized-path fallback whenever
+-- either side cannot be stat'ed.
+function M.path_identity_index(paths)
+  local index = { by_path = {}, by_inode = {}, unknown_by_path = {} }
+  for _, path in ipairs(paths or {}) do
+    M.path_identity_index_add(index, path)
+  end
+  return index
+end
+
+function M.path_identity_index_add(index, path)
+  local identity = M.path_identity(path, M.stat(path))
+  if not identity then return false end
+  index.by_path[identity.path] = true
+  if identity.inode then
+    index.by_inode[identity.inode] = true
+  else
+    index.unknown_by_path[identity.path] = true
+  end
+  return true
+end
+
+function M.path_identity_index_contains(index, path)
+  local identity = M.path_identity(path, M.stat(path))
+  if not identity then return false end
+  if identity.inode then
+    return index.by_inode[identity.inode] == true
+      or index.unknown_by_path[identity.path] == true
+  end
+  return index.by_path[identity.path] == true
+end
+
 local function index_identities(paths)
   if not paths or #paths == 0 then return nil end
   local index = { by_path = {}, unknown_by_path = {}, by_inode = {} }
@@ -234,15 +267,17 @@ end
 -- stat fails (broken symlink) or whose target is neither a file nor a directory
 -- (fifo, socket, device) are omitted, matching Python where isdir and isfile are
 -- both false. `ignore_set` is a list of paths (the glob results of &wildignore);
--- entries are compared to its stat-indexed filesystem identities.
-function M.read_dir_lines(root, ignore_set)
+-- entries are compared to its stat-indexed filesystem identities. Callers that
+-- already scanned the directory may pass those `{ name, type }` records as
+-- `entries` to avoid reopening and walking it a second time.
+function M.read_dir_lines(root, ignore_set, entries)
   if not M.is_dir(root) then
     return nil, 'not a directory: ' .. tostring(root)
   end
   local ignored_index = index_identities(ignore_set)
   local display_separator = require('direct.paths').directory_separator()
   local dirs, files = {}, {}
-  for name, typ in M.iter_dir(root) do
+  local function add_entry(name, typ)
     local path = M.join(root, name)
     local st, did_stat
     if typ == 'link' then
@@ -263,6 +298,15 @@ function M.read_dir_lines(root, ignore_set)
       elseif typ == 'file' then
         files[#files + 1] = name
       end
+    end
+  end
+  if entries then
+    for _, entry in ipairs(entries) do
+      add_entry(entry.name, entry.type)
+    end
+  else
+    for name, typ in M.iter_dir(root) do
+      add_entry(name, typ)
     end
   end
   table.sort(dirs)
