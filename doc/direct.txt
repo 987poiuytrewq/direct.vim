@@ -521,8 +521,9 @@ Run `:checkhealth direct` to print the resolved data home. Inside it:
 
     Every stack rewrite uses an exclusive same-directory temporary file, syncs
     the file, closes it, atomically renames it, and syncs the containing
-    directory. A durable transaction snapshot coordinates updates to both
-    stacks; an interrupted stack rewrite is replayed on the next history access.
+    directory where the platform supports it. A durable transaction snapshot
+    coordinates updates to both stacks; an interrupted stack rewrite is replayed
+    on the next history access.
     Direct keeps an undo/redo source record until its filesystem reversal
     succeeds. It journals simple sync actions and simple rename/trash/restore
     reversals before executing them. On restart, when identity checks prove the

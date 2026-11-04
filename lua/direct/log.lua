@@ -47,6 +47,9 @@ local function remove_temp(path)
 end
 
 local function sync_parent(path)
+  -- libuv cannot open directories for fsync on Windows. File contents are still
+  -- synced before replacement; directory-entry durability is platform-limited.
+  if M.uv.os_uname().sysname:match('Windows') then return true end
   local parent = vim.fs.dirname(path)
   local fd, open_err, code = M.uv.fs_open(parent, 'r', 0)
   if not fd then

@@ -13,6 +13,15 @@ local function history_dir(sb)
 end
 
 H.describe('history preflight', function()
+  H.it('acquires and releases the platform-native same-host process lock', function()
+    local sb = H.sandbox()
+    local ok, err = history.lock.acquire()
+    H.assert_true(ok == true, 'process lock is acquired: ' .. tostring(err))
+    H.assert_true(history.lock.release(), 'process lock is released')
+    H.assert_true(fs.exists(vim.fs.joinpath(sb.data_home, '.direct-history.lock')),
+      'persistent lock file remains in the shared data home')
+  end)
+
   H.it('rejects invalid UTF-8 before creating data or register directories', function()
     local sb = H.sandbox()
     local bad = sb.root .. '/bad\255name'
