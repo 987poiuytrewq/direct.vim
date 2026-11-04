@@ -52,7 +52,8 @@ end
 
 local EXPECTED_N = {
   ['<CR>'] = '<Cmd>lua require("direct").open()<CR>',
-  ['-'] = '<Cmd>lua require("direct").open("../")<CR>',
+  ['-'] = '<Cmd>lua require("direct").open('
+    .. string.format('%q', '..' .. package.config:sub(1, 1)) .. ')<CR>',
   ['z-'] = '<Cmd>lua require("direct").open_parent_expanded()<CR>',
   ['u'] = '<Cmd>DirectUndo<CR>',
   ['<C-R>'] = '<Cmd>DirectRedo<CR>',

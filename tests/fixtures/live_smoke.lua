@@ -58,10 +58,12 @@ local function run()
   vim.api.nvim_win_set_cursor(0, { 1, 0 })
   feed('<CR>')
   assert(is_same_path(vim.api.nvim_buf_get_name(0), child),
-    '<CR> did not open the selected directory')
+    '<CR> did not open the selected directory: '
+      .. vim.inspect(vim.api.nvim_buf_get_name(0)) .. ' != ' .. vim.inspect(child))
   feed('-')
   assert(is_same_path(vim.api.nvim_buf_get_name(0), root),
-    'buffer-local - did not navigate to the parent directory')
+    'buffer-local - did not navigate to the parent directory: '
+      .. vim.inspect(vim.api.nvim_buf_get_name(0)) .. ' != ' .. vim.inspect(root))
 
   -- Exercise the user-facing write path rather than calling Buffer:sync().
   local rows = lines()
