@@ -282,8 +282,7 @@ H.describe('history', function()
     H.assert_notified('Nothing to redo')
   end)
 
-  -- Recognized predecessor logs are discarded with a warning, never replayed.
-  -- Unknown or malformed files instead remain byte-identical and block actions.
+  -- Unsupported history is discarded silently, never replayed or migrated.
   H.it('a recognized markerless Python log is reset, never executed or backed up', function()
     local sb = H.sandbox()
     local hist = history_dir(sb)
@@ -299,7 +298,8 @@ H.describe('history', function()
     H.capture_messages()
     local res = history.undo()
     H.assert_nil(res, 'a foreign log yields no undo action')
-    H.assert_notified('resetting legacy or empty undo history')
+    H.assert_false(H.messages():find('resetting legacy', 1, true) ~= nil,
+      'unsupported history is discarded silently')
 
     -- The deleted-file oracle: these readfile calls raise E484 if the foreign
     -- line is ever executed.
@@ -319,7 +319,7 @@ H.describe('history', function()
     H.assert_notified('Nothing to undo')
   end)
 
-  H.it('an unknown log is preserved even when legacy backup names exist', function()
+  H.it('an unknown log is discarded silently without touching unrelated backup names', function()
     local sb = H.sandbox()
     local hist = history_dir(sb)
     local undo_path = vim.fs.joinpath(hist, 'undo.log')
@@ -329,36 +329,36 @@ H.describe('history', function()
 
     H.capture_messages()
     H.assert_nil(history.undo(), 'an unknown log yields no action')
-    H.assert_notified('history was preserved')
-    H.assert_eq(log.read_raw(undo_path), '#direct-history-v99\n',
-      'unknown bytes are unchanged')
+    H.assert_false(H.messages():find('resetting legacy', 1, true) ~= nil,
+      'unsupported history is discarded silently')
+    H.assert_eq(log.read_raw(undo_path), MARKER .. '\n',
+      'unknown bytes are replaced with empty current history')
     H.assert_eq(vim.fn.readfile(undo_path .. '.legacy'), { 'legacy-older' },
       'an unrelated pre-existing .legacy file is untouched')
     H.assert_eq(vim.fn.readfile(undo_path .. '.legacy.1'), { 'legacy-even-older' },
       'an unrelated pre-existing .legacy.1 file is untouched')
   end)
 
-  H.it('a malformed log is left untouched and never appended to', function()
+  H.it('a malformed log is discarded before a new action is recorded', function()
     local sb = H.sandbox()
     local hist = history_dir(sb)
     local undo_path = vim.fs.joinpath(hist, 'undo.log')
     H.mkfile(hist, 'undo.log', { '#direct-history-v3', 'mv\t/a' })
-    local before = vim.fn.readfile(undo_path)
-
     H.capture_messages()
-    H.assert_nil(history.undo(), 'an unquarantinable foreign log yields no action')
-    H.assert_notified('history was preserved')
-    H.assert_eq(log.read_raw(undo_path), before[1] .. '\n' .. before[2] .. '\n',
-      'malformed bytes remain byte-for-byte untouched')
+    H.assert_nil(history.undo(), 'discarded history yields no action')
+    H.assert_notified('Nothing to undo')
+    H.assert_eq(log.read_raw(undo_path), MARKER .. '\n',
+      'malformed bytes are discarded')
 
     -- A new action must not append to the foreign file either.
     local touch = action.Touch(sb.root .. '/c.txt')
     touch['do']()
     local ok, err = history.log(touch)
-    H.assert_nil(ok, 'log() refuses while the foreign log cannot be quarantined')
-    H.assert_true(type(err) == 'string' and #err > 0, 'log() carries an err')
-    H.assert_eq(log.read_raw(undo_path), before[1] .. '\n' .. before[2] .. '\n',
-      'log() never appends to malformed bytes')
+    H.assert_true(ok == true, 'new action is logged after discarding unsupported bytes')
+    H.assert_nil(err, 'log() succeeds')
+    H.assert_eq(log.read_raw(undo_path), MARKER .. '\n'
+      .. fixtures.touch(sb.root .. '/c.txt') .. '\n',
+      'the new record replaces unsupported history')
   end)
 
   H.it('a marker-only log is empty history', function()
@@ -405,6 +405,137 @@ H.describe('history', function()
     H.assert_false(H.exists(sb.root, 'b.txt'), 'b.txt is gone')
   end)
 
+  H.it('the history lock excludes a second Neovim process sharing the data home', function()
+    local sb = H.sandbox()
+    H.assert_true(history.lock.acquire(), 'the first process takes the lock')
+    local script = H.mkfile(sb.root, 'try_lock.lua', {
+      "local root = assert(vim.env.DIRECT_FRESH_ROOT)",
+      "package.path = root .. '/lua/?.lua;' .. package.path",
+      "local lock = require('direct.history_lock')",
+      "local ok = lock.acquire()",
+      "if ok then io.stdout:write('ACQUIRED\\n'); lock.release()",
+      "else io.stdout:write('BLOCKED\\n') end",
+    })
+    local output
+    H.with_env({ XDG_DATA_HOME = sb.data_home, DIRECT_FRESH_ROOT = vim.fn.getcwd() },
+      function()
+        output = vim.fn.system({ vim.v.progpath, '--headless', '-l', script })
+      end)
+    H.assert_true(history.lock.release(), 'the first process releases the lock')
+    H.assert_true(output:find('BLOCKED', 1, true) ~= nil,
+      'the concurrent process fails closed instead of entering the critical section')
+  end)
+
+  H.it('a prepared simple filesystem action is completed after a simulated crash', function()
+    local sb = H.sandbox()
+    local target = sb.root .. '/created.txt'
+    local create = action.Touch(target)
+    H.assert_true(history.prepare(create), 'the action intent is durable before execution')
+
+    with_fresh_process(function()
+      local fresh_history = require('direct.history')
+      local state = fresh_history.preflight()
+      H.assert_true(state ~= nil, 'startup recovers the prepared action')
+    end)
+
+    H.assert_true(fs.exists(target), 'recovery completes the not-yet-started creation')
+    H.assert_eq(vim.fn.readfile(vim.fs.joinpath(history_dir(sb), 'undo.log')),
+      { MARKER, fixtures.touch(target) }, 'the recovered action is in undo history')
+    H.assert_nil(vim.uv.fs_stat(vim.fs.joinpath(history_dir(sb), 'transaction.json')),
+      'the completed journal is removed')
+  end)
+
+  H.it('ambiguous recovery retains its journal and blocks later history changes', function()
+    local sb = H.sandbox()
+    local target = sb.root .. '/created.txt'
+    H.assert_true(history.prepare(action.Touch(target)), 'prepare an absent destination')
+    H.mkfile(sb.root, 'created.txt', { 'not known to be Direct data' })
+
+    H.capture_messages()
+    local state, err = history.preflight()
+    H.assert_nil(state, 'an unexpected destination is not treated as a completed create')
+    H.assert_true(type(err) == 'string' and err:find('ambiguous', 1, true) ~= nil,
+      'the recovery error explains the uncertainty')
+    H.assert_true(fs.exists(vim.fs.joinpath(history_dir(sb), 'transaction.json')),
+      'the recovery journal is preserved')
+    H.assert_notified('inspect the affected paths')
+  end)
+
+  H.it('an interrupted rename reversal is completed or committed by identity on restart', function()
+    local function interrupted_reverse(complete_before_restart)
+      local sb = H.sandbox()
+      local ws = H.mkdir(sb.root, 'ws')
+      H.mkfile(ws, 'a.txt', { 'A' })
+      local forward = action.Move(ws .. '/a.txt', ws .. '/b.txt')
+      H.assert_true(forward['do']() ~= nil, 'fixture move applies')
+      H.assert_true(history.log(forward), 'fixture move is recorded')
+      local source_identity = fs.entry_identity(ws .. '/b.txt')
+      local reversal = action.Move(ws .. '/b.txt', ws .. '/a.txt')
+      local inverse_record = action.serialize(reversal)
+      if complete_before_restart then
+        H.assert_true(reversal['do']() ~= nil, 'simulate rename landing before crash')
+      end
+      local transaction = vim.json.encode({
+        format = 'direct-history-transaction',
+        version = 1,
+        kind = 'reverse',
+        direction = 'undo',
+        undo = { MARKER },
+        redo = { MARKER, inverse_record },
+        action = inverse_record,
+        source = ws .. '/b.txt',
+        destination = ws .. '/a.txt',
+        source_identity = source_identity,
+        destination_identity = vim.NIL,
+      })
+      local transaction_path = vim.fs.joinpath(history_dir(sb), 'transaction.json')
+      H.assert_true(log.write_raw_atomic(transaction_path, transaction .. '\n') == true,
+        'the prepared reversal intent is durable')
+      with_fresh_process(function()
+        local fresh_history = require('direct.history')
+        H.assert_true(fresh_history.preflight() ~= nil, 'restart recovers the transaction')
+      end)
+      H.assert_true(H.exists(ws, 'a.txt'), 'undo state is applied')
+      H.assert_false(H.exists(ws, 'b.txt'), 'source path is vacated')
+      H.assert_eq(vim.fn.readfile(vim.fs.joinpath(history_dir(sb), 'undo.log')),
+        { MARKER }, 'undo stack is committed')
+      H.assert_eq(vim.fn.readfile(vim.fs.joinpath(history_dir(sb), 'redo.log')),
+        { MARKER, inverse_record }, 'redo stack is committed')
+    end
+
+    interrupted_reverse(false)
+    interrupted_reverse(true)
+  end)
+
+  H.it('a paired history transaction is replayed after a simulated mid-commit crash', function()
+    local sb = H.sandbox()
+    H.assert_true(history.preflight() ~= nil, 'initialize the history directory')
+    local undo_path = vim.fs.joinpath(history_dir(sb), 'undo.log')
+    local redo_path = vim.fs.joinpath(history_dir(sb), 'redo.log')
+    local transaction_path = vim.fs.joinpath(history_dir(sb), 'transaction.json')
+    local action_line = fixtures.touch(sb.root .. '/a.txt')
+    local transaction = vim.json.encode({
+      format = 'direct-history-transaction',
+      version = 1,
+      kind = 'stacks',
+      undo = { MARKER, action_line },
+      redo = { MARKER },
+    })
+    H.assert_true(log.write_raw_atomic(transaction_path, transaction .. '\n') == true,
+      'write-ahead stack snapshot')
+    H.assert_true(log.write(undo_path, { MARKER }) == true,
+      'simulate only the first stack rename landing')
+    H.assert_true(log.write(redo_path, { MARKER, fixtures.move('/a', '/b') }) == true,
+      'leave the other stack with stale content')
+
+    H.assert_true(history.preflight() ~= nil, 'startup replays the paired update')
+    H.assert_eq(vim.fn.readfile(undo_path), { MARKER, action_line },
+      'the desired undo stack is restored')
+    H.assert_eq(vim.fn.readfile(redo_path), { MARKER },
+      'the desired redo stack is restored')
+    H.assert_nil(vim.uv.fs_stat(transaction_path), 'the replayed journal is removed')
+  end)
+
   H.it('undo success notifies the joined summary exactly once', function()
     local sb = H.sandbox()
     H.mkfile(sb.root, 'a.txt', { 'a' })
@@ -433,12 +564,12 @@ H.describe('history', function()
     local ok, err = history.log(action.Touch(sb.root .. '/t.txt'))
     H.assert_nil(ok, 'log() reports the failure')
     H.assert_true(type(err) == 'string' and #err > 0, 'log() carries an err')
-    H.assert_notified('history was preserved')
+    H.assert_notified('history unavailable')
 
     H.capture_messages()
     local res = history.undo()
     H.assert_nil(res, 'undo() reports the failure')
-    H.assert_notified('history was preserved')
+    H.assert_notified('history unavailable')
     H.assert_false(H.messages():find('Nothing to undo', 1, true) ~= nil,
       'the data-dir failure is not reported as an empty log')
   end)

@@ -1,5 +1,5 @@
--- Legacy history is classified from raw bytes. Only recognized predecessors
--- are reset; malformed and unknown content must stay byte-identical.
+-- Only current history is supported. Everything else is reset silently; action
+-- records from unsupported bytes are never replayed.
 local H = require('tests.support.harness')
 local format = require('direct.history_format')
 local fixtures = require('tests.support.history_fixtures')
@@ -18,19 +18,19 @@ H.describe('history format classifier', function()
   local function assert_reset(raw, label)
     local result = format.classify(raw, true)
     H.assert_eq(result.state, 'reset', label .. ' is reset-eligible')
-    H.assert_true(result.warn == true, label .. ' requests a warning')
+    H.assert_nil(result.warn, label .. ' does not request a warning')
   end
 
-  local function assert_preserved(raw, label)
+  local function assert_discarded(raw, label)
     local result = format.classify(raw, true)
-    H.assert_eq(result.state, 'preserve', label .. ' is preserved')
-    H.assert_true(type(result.reason) == 'string', label .. ' has a reason')
+    H.assert_eq(result.state, 'reset', label .. ' is discarded')
+    H.assert_nil(result.warn, label .. ' is discarded silently')
   end
 
   H.it('L-01 to L-03 reset absent, zero-byte, and marker-only logs', function()
     local absent = format.classify(nil, false)
     H.assert_eq(absent.state, 'reset', 'absent log resets')
-    H.assert_true(absent.warn, 'absent log requests a warning')
+    H.assert_nil(absent.warn, 'absent log is silent')
     assert_reset('', 'zero-byte log')
     assert_reset(legacy(2), 'marker-only v2')
     assert_reset(legacy(3), 'marker-only v3')
@@ -44,21 +44,21 @@ H.describe('history format classifier', function()
     }), 'valid v2 log')
   end)
 
-  H.it('L-05 resets valid v3 groups and L-06/L-07 preserve bad groups', function()
+  H.it('L-05 resets valid v3 groups and silently discards invalid groups', function()
     assert_reset(legacy(3, { 'g\t2\t/a\t/b\t/b\t/c' }), 'valid v3 group')
-    assert_preserved(legacy(3, { 'g\t3\t/a\t/b\t/b\t/c' }),
+    assert_discarded(legacy(3, { 'g\t3\t/a\t/b\t/b\t/c' }),
       'count-mismatched v3 group')
-    assert_preserved(legacy(2, { 'g\t2\t/a\t/b\t/b\t/c' }), 'v2 group')
+    assert_discarded(legacy(2, { 'g\t2\t/a\t/b\t/b\t/c' }), 'v2 group')
   end)
 
-  H.it('L-08 to L-10 preserve empty mandatory, extra, and missing fields', function()
-    assert_preserved(legacy(3, { 'mv\t\t/b' }), 'empty mandatory field')
-    assert_preserved(legacy(3, { 'mv\t/a\t/b\textra' }), 'extra field')
-    assert_preserved(legacy(3, { 'mv\t/a' }), 'missing field')
+  H.it('L-08 to L-10 silently discard empty mandatory, extra, and missing fields', function()
+    assert_discarded(legacy(3, { 'mv\t\t/b' }), 'empty mandatory field')
+    assert_discarded(legacy(3, { 'mv\t/a\t/b\textra' }), 'extra field')
+    assert_discarded(legacy(3, { 'mv\t/a' }), 'missing field')
   end)
 
-  H.it('L-11 preserves ambiguous Lua names and L-12 accepts empty name fields', function()
-    assert_preserved(legacy(3, { 'p\t/reg\t/dst\tmy file\tmy file' }),
+  H.it('L-11 and L-12 silently discard old Lua name-list framing', function()
+    assert_discarded(legacy(3, { 'p\t/reg\t/dst\tmy file\tmy file' }),
       'ambiguous Lua name list')
     assert_reset(legacy(3, { 'p\t/reg\t/dst\t\t' }), 'empty Lua name lists')
     assert_reset(legacy(3, { 'p\t/reg\t/dst\tname\tname' }),
@@ -73,33 +73,33 @@ H.describe('history format classifier', function()
       'markerless Python log with opaque p/up name fields')
   end)
 
-  H.it('L-15/L-16 preserve unknown verbs, groups, and old space-framed logs', function()
-    assert_preserved(bytes({ 'g\t2\t/a\t/b\t/b\t/c' }), 'markerless group')
-    assert_preserved(bytes({ 'future\t/a' }), 'markerless unknown verb')
-    assert_preserved('#direct-history-v2\n/a b c\n', 'space-framed predecessor')
+  H.it('L-15/L-16 silently discard unknown verbs, groups, and space-framed logs', function()
+    assert_discarded(bytes({ 'g\t2\t/a\t/b\t/b\t/c' }), 'markerless group')
+    assert_discarded(bytes({ 'future\t/a' }), 'markerless unknown verb')
+    assert_discarded('#direct-history-v2\n/a b c\n', 'space-framed predecessor')
   end)
 
-  H.it('L-17 to L-21 preserve byte-hygiene failures and unknown markers', function()
-    assert_preserved('#direct-history-v3\r\n', 'CRLF log')
-    assert_preserved('\239\187\191' .. legacy(3), 'BOM log')
-    assert_preserved('#direct-history-v3\n\0\n', 'NUL log')
-    assert_preserved('#direct-history-v3', 'missing final LF')
-    assert_preserved(bytes({ '#direct-history-v4' }), 'future marker')
-    assert_preserved('#direct-history-v3\n\255\n', 'invalid UTF-8')
+  H.it('L-17 to L-21 silently discard byte-hygiene failures and unknown markers', function()
+    assert_discarded('#direct-history-v3\r\n', 'CRLF log')
+    assert_discarded('\239\187\191' .. legacy(3), 'BOM log')
+    assert_discarded('#direct-history-v3\n\0\n', 'NUL log')
+    assert_discarded('#direct-history-v3', 'missing final LF')
+    assert_discarded(bytes({ '#direct-history-v4' }), 'future marker')
+    assert_discarded('#direct-history-v3\n\255\n', 'invalid UTF-8')
   end)
 
-  H.it('L-23 preserves a known marker with a malformed body', function()
-    assert_preserved(legacy(3, { 'mv\t/a\t/b\textra' }),
+  H.it('L-23 silently discards a known marker with a malformed body', function()
+    assert_discarded(legacy(3, { 'mv\t/a\t/b\textra' }),
       'known marker and malformed body')
   end)
 
-  H.it('current JSONL accepts canonical records and preserves malformed records', function()
+  H.it('current JSONL accepts canonical records and discards malformed records', function()
     H.assert_eq(format.HEADER, fixtures.header, 'the current header is an exact fixture')
     local good = bytes({ fixtures.header, '{"op":"mv","src":"/a","dst":"/b"}' })
     H.assert_eq(format.classify(good, true).state, 'current', 'canonical JSONL')
     local bad = bytes({ fixtures.header, '{"op":"mv","src":"/a"}' })
-    assert_preserved(bad, 'JSONL with a missing key')
+    assert_discarded(bad, 'JSONL with a missing key')
     local noncanonical = bytes({ fixtures.header, '{ "op":"touch","dst":"/t"}' })
-    assert_preserved(noncanonical, 'non-canonical JSONL record')
+    assert_discarded(noncanonical, 'non-canonical JSONL record')
   end)
 end)

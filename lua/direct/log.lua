@@ -46,6 +46,28 @@ local function remove_temp(path)
   if path then pcall(M.uv.fs_unlink, path) end
 end
 
+local function sync_parent(path)
+  -- libuv cannot open directories for fsync on Windows. File contents are still
+  -- synced before replacement; directory-entry durability is platform-limited.
+  if M.uv.os_uname().sysname:match('Windows') then return true end
+  local parent = vim.fs.dirname(path)
+  local fd, open_err, code = M.uv.fs_open(parent, 'r', 0)
+  if not fd then
+    return nil, tostring(open_err or code or 'could not open history directory')
+  end
+  local synced, sync_err = M.uv.fs_fsync(fd)
+  local closed, close_err = M.uv.fs_close(fd)
+  if synced == nil or synced == false then
+    return nil, tostring(sync_err or 'history directory fsync failed')
+  end
+  if closed == nil or closed == false then
+    return nil, tostring(close_err or 'history directory close failed')
+  end
+  return true
+end
+
+M.sync_parent = sync_parent
+
 -- write_raw_atomic(path, bytes) -> true | nil, err. `path` must name an owned
 -- history file; the temp is always exclusive and on the same filesystem.
 function M.write_raw_atomic(path, bytes)
@@ -97,6 +119,10 @@ function M.write_raw_atomic(path, bytes)
     remove_temp(temp_path)
     return nil, tostring(rename_err or 'rename failed')
   end
+  -- The file fsync makes the contents durable; syncing the containing directory
+  -- makes the replacement name durable across a power loss where supported.
+  local synced, sync_err = sync_parent(path)
+  if not synced then return nil, sync_err end
   return true
 end
 
