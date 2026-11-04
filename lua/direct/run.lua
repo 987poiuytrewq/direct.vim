@@ -8,7 +8,9 @@ local ui = require('direct.ui')
 
 local function report_result(result, quiet_success)
   if quiet_success and result.code == 0 then return end
-  local message = string.format('direct: command exited with status %d', result.code)
+  local message = result.code == 0
+    and 'direct: command completed successfully (exit status 0)'
+    or string.format('direct: command failed with exit status %d', result.code)
   local stdout = (result.stdout or ''):gsub('%s+$', '')
   local stderr = (result.stderr or ''):gsub('%s+$', '')
   if stdout ~= '' then message = message .. '\nstdout:\n' .. stdout end
@@ -61,12 +63,14 @@ function M.current_entry(command, on_complete, opts)
     text = true,
   }, function(result)
     vim.schedule(function()
-      report_result(result, opts.quiet_success)
+      local reported, report_err = pcall(report_result, result, opts.quiet_success)
+      if not reported then
+        ui.report_error('report the command result', report_err)
+      end
       if on_complete then
         local completed, err = pcall(on_complete, result, bufnr, listing.root)
         if not completed then
-          ui.notify('direct: command completion callback failed: ' .. tostring(err),
-            vim.log.levels.WARN)
+          ui.report_error('refresh after the command', err, vim.log.levels.WARN)
         end
       end
     end)

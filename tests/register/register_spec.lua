@@ -771,7 +771,7 @@ H.describe('register', function()
 
     H.assert_nil(res, 'paste reports the failure')
     H.assert_eq(err, 'forced failure', 'execution failure is returned')
-    H.assert_notified('Failed to paste')
+    H.assert_notified('Could not paste the entries')
     H.assert_eq(vim.fn.readfile(vim.fs.joinpath(sb.data_home,
       'direct/history/undo.log')), { fixtures.header },
       'a failed paste leaves preflight history header-only')

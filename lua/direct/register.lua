@@ -277,18 +277,16 @@ function M.paste(dst, name, callback)
         if ok then
           M.ui.notify(M.action.summarize({ paste_action }), vim.log.levels.INFO)
         else
-          M.ui.notify('Partially pasted; completed entries were retained: '
-            .. tostring(execution_err), vim.log.levels.ERROR)
+          M.ui.report_error('finish pasting; completed entries were kept', execution_err)
         end
       elseif not ok then
-        M.ui.notify('Failed to paste: ' .. tostring(execution_err), vim.log.levels.ERROR)
+        M.ui.report_error('paste the entries', execution_err)
       end
     end, debug.traceback)
     release_history_lock()
     M.pending.finish()
     if not final_ok then
-      M.ui.notify('direct: paste completion failed: ' .. tostring(final_err),
-        vim.log.levels.ERROR)
+      M.ui.report_error('finish the paste operation', final_err)
       ok, result, execution_err = false, nil, final_err
     end
     immediate_result = result
@@ -297,8 +295,7 @@ function M.paste(dst, name, callback)
       local called, callback_err = pcall(callback, result, execution_err, ok,
         changed, pasted_entry)
       if not called then
-        M.ui.notify('direct: paste callback failed: ' .. tostring(callback_err),
-          vim.log.levels.ERROR)
+        M.ui.report_error('refresh after pasting', callback_err)
       end
     end
   end

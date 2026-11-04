@@ -276,8 +276,7 @@ return function(M)
       completed = true
       local called, callback_err = pcall(callback, ok, result, err)
       if not called then
-        M.ui.notify('direct: async action completion failed: '
-          .. tostring(callback_err), vim.log.levels.ERROR)
+        M.ui.report_error('finish the filesystem action', callback_err)
       end
     end
     if type(action) == 'table' and type(action._execute_async) == 'function' then

@@ -357,7 +357,8 @@ H.describe('LSP file operations', function()
     end)
     vim.lsp.util.apply_workspace_edit = apply
     vim.notify = saved_notify
-    H.assert_eq(notify, 'direct: LSP willRenameFiles failed for client 1: request timed out after 15 ms')
+    H.assert_eq(notify, 'direct: Could not check with the language server before renaming '
+      .. '(client 1): request timed out after 15 ms')
     H.assert_eq(notifications, 1)
   end)
 
@@ -416,7 +417,7 @@ H.describe('LSP file operations', function()
     H.assert_eq(vim.api.nvim_buf_get_lines(0, 0, -1, false), { 'after.txt' },
       'the user-edited listing is preserved')
     H.assert_true(#warnings > 0, 'malformed WorkspaceEdit is reported')
-    H.assert_true(table.concat(warnings, '\n'):find('LSP willRenameFiles failed', 1, true) ~= nil
+    H.assert_true(table.concat(warnings, '\n'):find('check with the language server', 1, true) ~= nil
       or table.concat(warnings, '\n'):find('workspace edit', 1, true) ~= nil,
       'warning identifies the failed WorkspaceEdit')
   end)

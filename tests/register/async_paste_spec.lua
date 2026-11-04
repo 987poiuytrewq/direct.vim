@@ -125,7 +125,7 @@ H.describe('async paste prompts', function()
     local record = assert(action.deserialize(lines[2]))
     H.assert_eq(record.renames, { { src = 'a.txt', dst = 'a.txt' } },
       'history describes only the copied entry')
-    H.assert_notified('Partially pasted')
+    H.assert_notified('completed entries were kept')
   end)
 
   H.it('the repeated-clash cap is ten callback requests and all-skipped writes no success history', function()
