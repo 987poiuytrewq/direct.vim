@@ -20,6 +20,8 @@ H.describe('platform path compatibility', function()
     local sb = H.sandbox()
     local root = H.mkdir(sb.root, 'workspace')
     H.mkdir(root, 'existing')
+    H.assert_false(fs.same_path(root, vim.fs.joinpath(root, 'existing')),
+      'a directory is distinct from its child directory')
 
     buffer.list(root)
 

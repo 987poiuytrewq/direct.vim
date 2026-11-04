@@ -289,6 +289,18 @@ function M.same_path(a, b)
   if type(a) ~= 'string' or type(b) ~= 'string' then
     return nil, 'invalid path'
   end
+  if package.config:sub(1, 1) == '\\' then
+    -- Some Windows stat providers report inode values that are not unique for
+    -- directory paths. Prefer canonical spelling and resolved path identity so
+    -- a parent listing can never be mistaken for one of its child directories.
+    local paths = require('direct.paths')
+    local normalized_a = paths.canonical(a):lower()
+    local normalized_b = paths.canonical(b):lower()
+    if normalized_a == normalized_b then return true end
+    local real_a, real_b = M.realpath(a), M.realpath(b)
+    return real_a ~= nil and real_b ~= nil
+      and paths.canonical(real_a):lower() == paths.canonical(real_b):lower()
+  end
   return M.path_identities_match(
     M.path_identity(a, M.stat(a)), M.path_identity(b, M.stat(b)))
 end
