@@ -12,6 +12,7 @@ local function fresh_config(use_platform_default)
   package.loaded['direct.config'] = nil
   local config = require('direct.config')
   local test_separator = vim.env.DIRECT_TEST_DIRECTORY_SEPARATOR
+  if test_separator == 'slash' then test_separator = '/' end
   if not use_platform_default
     and (test_separator == '/' or test_separator == '\\') then
     config.defaults.directory_separator = test_separator

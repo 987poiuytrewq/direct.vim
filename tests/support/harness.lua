@@ -504,6 +504,7 @@ local function reset_runtime()
   clear_foreign_autocmds()
   pcall(vim.cmd, 'runtime! plugin/direct.lua')
   local test_separator = vim.env.DIRECT_TEST_DIRECTORY_SEPARATOR
+  if test_separator == 'slash' then test_separator = '/' end
   if test_separator == '/' or test_separator == '\\' then
     local config = require('direct.config')
     config.defaults.directory_separator = test_separator
