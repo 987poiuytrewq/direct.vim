@@ -164,7 +164,16 @@ local function write_cmd_script(command)
   return path
 end
 
-function M.command_argv(shell, _shellcmdflag, command)
+function M.command_argv(shell, shellcmdflag, command)
+  local shell_name = (shell or ''):lower():gsub('\\', '/')
+  if shell_name ~= 'cmd' and not shell_name:match('cmd%.exe$') then
+    local argv = { shell }
+    for _, flag in ipairs(vim.split(shellcmdflag, '%s+', { trimempty = true })) do
+      argv[#argv + 1] = flag
+    end
+    argv[#argv + 1] = command
+    return argv
+  end
   local path, err = write_cmd_script(command)
   if not path then return nil, nil, err end
   return { shell, '/d', '/c', path }, path
