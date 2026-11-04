@@ -14,6 +14,8 @@ jobs:
     name: Test on ${{ matrix.os }} (Neovim ${{ matrix.neovim-version }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
+    env:
+      DIRECT_TEST_DIRECTORY_SEPARATOR: /
     defaults:
       run:
         shell: bash
@@ -52,8 +54,6 @@ jobs:
 
       - name: Run tests
         if: runner.os != 'Linux'
-        env:
-          DIRECT_TEST_DIRECTORY_SEPARATOR: ${{ runner.os == 'Windows' && '/' || '' }}
         run: nvim --headless -l tests/run.lua
 
       - name: Add coverage to the run summary
