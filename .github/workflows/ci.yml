@@ -1,9 +1,7 @@
 name: CI
 
-# Push covers branches without PRs; pull_request also tests the merge result and
-# enables CI for fork PRs. Unfiltered push means tag pushes run too (harmless).
+# Test proposed merge commits for pull requests, including fork PRs.
 on:
-  push:
   pull_request:
 
 permissions:
