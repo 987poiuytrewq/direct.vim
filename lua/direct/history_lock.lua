@@ -70,7 +70,8 @@ function M.acquire()
   local path, path_err = lock_path()
   if not path then return nil, path_err end
   if windows then
-    local converted, utf16 = pcall(vim.fn.iconv, path, 'utf-8', 'utf-16le')
+    local native_path = path:gsub('/', '\\')
+    local converted, utf16 = pcall(vim.fn.iconv, native_path, 'utf-8', 'utf-16le')
     if not converted then return nil, tostring(utf16) end
     if type(utf16) ~= 'string' then return nil, 'could not encode Windows lock path' end
     local created, create_err, create_code = M.uv.fs_open(path, 'a', 384)
