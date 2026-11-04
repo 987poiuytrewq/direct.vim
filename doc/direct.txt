@@ -132,11 +132,13 @@ unsaved edits, refreshes from disk, and collapses expanded subtrees so every
 visible level uses the same rules.
 
 In a direct listing, `gs` (or `:DirectToggleGitStatus`) toggles a view showing
-only entries with a Git status. Directories with changed descendants are
-included, and expanding them applies the same filter to their children. It
-refuses while the listing has unsaved edits. Outside a Git repository, or when
-`git.enabled = false`, the filtered view is empty. Entries hidden by this view
-are not treated as deletion sources during sync.
+only entries with a Git status and recursively expands all directories. Use
+`:DirectGitStatus` to enter the view without toggling it off when already there.
+Directories with changed descendants are included, and their children are
+filtered the same way. These commands refuse while the listing has unsaved
+edits. Outside a Git repository, or when `git.enabled = false`, the filtered
+view is empty. Entries hidden by this view are not treated as deletion sources
+during sync.
 
 File and folder icons ~
 
@@ -189,11 +191,13 @@ symbol, including staged-only tombstones. Set
 status on entries that still exist. This option has no effect when Git status is
 disabled; it defaults to `true`.
 
-Press `gs` or run `:DirectToggleGitStatus` to show only entries with a status;
-press it again to restore the normal listing. This filter composes with hidden,
-wildignore, and Git-ignore filtering. Entries it hides are not treated as
-deletion sources during sync. In directories with changed descendants, the
-directory remains visible and its expanded children use the same filter.
+Press `gs` or run `:DirectToggleGitStatus` to show only entries with a status and
+recursively expand the view; press it again to restore the normal listing. Use
+`:DirectGitStatus` to enter the filtered view without toggling it off when
+already active. This filter composes with hidden, wildignore, and Git-ignore
+filtering. Entries it hides are not treated as deletion sources during sync.
+Directories with changed descendants remain visible, and their children use the
+same filter.
 
 Status symbols can be configured independently by category:
 
@@ -434,6 +438,10 @@ existing synchronous staging behavior.
     :DirectToggleGitStatus
         Toggle the Git-status-only view in the current direct listing. Refuses
         if the listing has unsaved edits.
+
+    :DirectGitStatus
+        Enter the recursively expanded Git-status-only view in the current
+        direct listing without toggling it off when already active.
 
     :DirectUndo
         Undo the last filesystem action.

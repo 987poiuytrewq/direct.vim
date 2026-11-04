@@ -1265,10 +1265,10 @@ function M.toggle_hidden()
   return listed
 end
 
-function M.toggle_git_status()
+local function set_git_status_only(enabled)
   local bufnr = vim.api.nvim_get_current_buf()
   if vim.bo[bufnr].modified then
-    local reason = 'cannot toggle the Git-status filter with unsaved edits; sync or discard them first'
+    local reason = 'cannot change the Git-status filter with unsaved edits; sync or discard them first'
     ui.notify('direct: ' .. reason, vim.log.levels.ERROR)
     return nil, reason
   end
@@ -1277,6 +1277,12 @@ function M.toggle_git_status()
     local reason = 'direct listing state is unavailable; re-list this directory'
     ui.notify('direct: ' .. reason, vim.log.levels.ERROR)
     return nil, reason
+  end
+  if state.view_git_status_only == enabled then
+    if enabled then
+      return require('direct.folding').expand_all(M)
+    end
+    return true
   end
   local previous = {
     view_git_status_only = state.view_git_status_only,
@@ -1287,7 +1293,7 @@ function M.toggle_git_status()
     materialization_recoveries = state.materialization_recoveries,
     collapse_undos = state.collapse_undos,
   }
-  state.view_git_status_only = not state.view_git_status_only
+  state.view_git_status_only = enabled
   -- Rebuild at every level from a fresh Git snapshot; the view must not leave
   -- stale child rows behind when the filter is enabled or disabled.
   state.expanded = {}
@@ -1300,6 +1306,9 @@ function M.toggle_git_status()
   if not listed then
     for key, value in pairs(previous) do state[key] = value end
     return nil, err
+  end
+  if enabled then
+    return require('direct.folding').expand_all(M)
   end
   return listed
 end
@@ -1342,6 +1351,18 @@ function M.toggle_gitignore()
     return nil, err
   end
   return listed
+end
+
+function M.toggle_git_status()
+  local state = states[vim.api.nvim_get_current_buf()]
+  if not state then
+    return set_git_status_only(true)
+  end
+  return set_git_status_only(not state.view_git_status_only)
+end
+
+function M.show_git_status()
+  return set_git_status_only(true)
 end
 
 -- Internal adapter for the folding command module. Keep row marks and state
