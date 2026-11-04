@@ -4,63 +4,8 @@
 
 local M = {}
 M.uv = vim.uv
+local platform = require('direct.platform')
 local temp_sequence = 0
-local windows_identity_kernel32
-local windows_identity_declared = false
-
-local function windows_file_identity(path, nofollow)
-  if package.config:sub(1, 1) ~= '\\' or type(path) ~= 'string' then return nil end
-  local ffi_ok, ffi = pcall(require, 'ffi')
-  if not ffi_ok then return nil end
-  if not windows_identity_declared then
-    local ok = pcall(ffi.cdef, [[
-      typedef unsigned short direct_identity_WCHAR;
-      typedef void *direct_identity_HANDLE;
-      typedef unsigned long direct_identity_DWORD;
-      typedef int direct_identity_BOOL;
-      typedef struct { direct_identity_DWORD low, high; } direct_identity_FILETIME;
-      typedef struct {
-        direct_identity_DWORD attributes;
-        direct_identity_FILETIME created, accessed, written;
-        direct_identity_DWORD volume, size_high, size_low, links, index_high, index_low;
-      } direct_identity_FILE_INFORMATION;
-      int __stdcall MultiByteToWideChar(unsigned int CodePage, unsigned long dwFlags,
-        const char *lpMultiByteStr, int cbMultiByte, direct_identity_WCHAR *lpWideCharStr,
-        int cchWideChar);
-      direct_identity_HANDLE __stdcall CreateFileW(const direct_identity_WCHAR *name,
-        direct_identity_DWORD access, direct_identity_DWORD share, void *security,
-        direct_identity_DWORD creation, direct_identity_DWORD flags,
-        direct_identity_HANDLE template_file);
-      direct_identity_BOOL __stdcall GetFileInformationByHandle(direct_identity_HANDLE file,
-        direct_identity_FILE_INFORMATION *information);
-      direct_identity_BOOL __stdcall CloseHandle(direct_identity_HANDLE object);
-    ]])
-    if not ok then return nil end
-    windows_identity_declared = true
-  end
-  local ok, identity = pcall(function()
-    windows_identity_kernel32 = windows_identity_kernel32 or ffi.load('kernel32')
-    path = path:gsub('/', '\\')
-    local count = windows_identity_kernel32.MultiByteToWideChar(65001, 0, path, -1, nil, 0)
-    if count == 0 then return nil end
-    local wide = ffi.new('direct_identity_WCHAR[?]', count)
-    if windows_identity_kernel32.MultiByteToWideChar(65001, 0, path, -1, wide, count) == 0 then
-      return nil
-    end
-    local flags = 0x02000000 -- FILE_FLAG_BACKUP_SEMANTICS
-    if nofollow then flags = flags + 0x00200000 end -- FILE_FLAG_OPEN_REPARSE_POINT
-    local file = windows_identity_kernel32.CreateFileW(wide, 0, 7, nil, 3, flags, nil)
-    if file == ffi.cast('direct_identity_HANDLE', -1) then return nil end
-    local information = ffi.new('direct_identity_FILE_INFORMATION[1]')
-    local read = windows_identity_kernel32.GetFileInformationByHandle(file, information) ~= 0
-    windows_identity_kernel32.CloseHandle(file)
-    if not read then return nil end
-    local info = information[0]
-    return table.concat({ 'win', tonumber(info.volume), tonumber(info.index_high),
-      tonumber(info.index_low) }, ':')
-  end)
-  return ok and identity or nil
-end
 
 local function temp_candidate(parent, tag)
   temp_sequence = temp_sequence + 1
@@ -83,7 +28,7 @@ local function is_eexist(err, code)
 end
 
 local function identity_key(stat, path)
-  local windows_identity = windows_file_identity(path, true)
+  local windows_identity = platform.file_identity(path, true)
   if windows_identity then return windows_identity end
   if not stat or stat.dev == nil or stat.ino == nil then return nil end
   return tostring(stat.dev) .. ':' .. tostring(stat.ino)
@@ -92,16 +37,6 @@ end
 -- libuv needs the Windows directory-symlink flag when recreating a link whose
 -- target is a directory. Resolve through the source link so relative targets
 -- are interpreted relative to the link's parent, not the process cwd.
-local function symlink_flags(source_link)
-  if M.uv.os_uname().sysname == 'Windows_NT' then
-    local target_stat = M.uv.fs_stat(source_link)
-    if target_stat and target_stat.type == 'directory' then
-      return { dir = true }
-    end
-  end
-  return nil
-end
-
 local function remove_file_if_same(path, identity)
   local now = M.uv.fs_lstat(path)
   if identity ~= nil and identity_key(now, path) == identity then
@@ -259,20 +194,10 @@ end
 function M.path_identity(path, st)
   if type(path) ~= 'string' then return nil end
   local paths = require('direct.paths')
-  if package.config:sub(1, 1) == '\\' then
-    -- Windows stat providers can reuse inode values; use the native file ID
-    -- while keeping the canonical lexical spelling for transaction validation.
-    -- lstat symlinks request the reparse-point ID, distinct from their target.
-    local identity = { path = paths.canonical(path) }
-    identity.inode = windows_file_identity(path, st and st.type == 'link')
-    if not identity.inode and st and st.type == 'file' and st.dev ~= nil and st.ino ~= nil
-      and st.dev ~= 0 and st.ino ~= 0 then
-      identity.inode = tostring(st.dev) .. ':' .. tostring(st.ino)
-    end
-    return identity
-  end
   local identity = { path = paths.canonical(path) }
-  if st and st.dev ~= nil and st.ino ~= nil and st.dev ~= 0 and st.ino ~= 0 then
+  identity.inode = platform.file_identity(path, st and st.type == 'link')
+  if not identity.inode and st and st.dev ~= nil and st.ino ~= nil
+    and st.dev ~= 0 and st.ino ~= 0 then
     identity.inode = tostring(st.dev) .. ':' .. tostring(st.ino)
   end
   return identity
@@ -415,18 +340,6 @@ function M.same_path(a, b)
   if type(a) ~= 'string' or type(b) ~= 'string' then
     return nil, 'invalid path'
   end
-  if package.config:sub(1, 1) == '\\' then
-    -- Some Windows stat providers report inode values that are not unique for
-    -- directory paths. Prefer canonical spelling and resolved path identity so
-    -- a parent listing can never be mistaken for one of its child directories.
-    local paths = require('direct.paths')
-    local normalized_a = paths.canonical(a):lower()
-    local normalized_b = paths.canonical(b):lower()
-    if normalized_a == normalized_b then return true end
-    local real_a, real_b = M.realpath(a), M.realpath(b)
-    return real_a ~= nil and real_b ~= nil
-      and paths.canonical(real_a):lower() == paths.canonical(real_b):lower()
-  end
   return M.path_identities_match(
     M.path_identity(a, M.stat(a)), M.path_identity(b, M.stat(b)))
 end
@@ -463,7 +376,7 @@ function M.same_entry(a, b)
   if parent_a == '' then parent_a = '/' end
   if parent_b == '' then parent_b = '/' end
   if parent_a ~= parent_b and not M.same_path(parent_a, parent_b) then return false end
-  local identity_a, stat_a = M.entry_identity(normalized_a)
+  local identity_a = M.entry_identity(normalized_a)
   local identity_b = M.entry_identity(normalized_b)
   if not (identity_a and identity_b and identity_a.inode
     and identity_a.inode == identity_b.inode) then
@@ -482,12 +395,7 @@ function M.same_entry(a, b)
     if name == name_a or name == name_b then
       local entry_path = vim.fs.joinpath(parent_a, name)
       local stat = lstat(entry_path)
-      local same_identity
-      if package.config:sub(1, 1) == '\\' then
-        same_identity = identity_key(stat, entry_path) == identity_a.inode
-      else
-        same_identity = stat and stat.dev == stat_a.dev and stat.ino == stat_a.ino
-      end
+      local same_identity = identity_key(stat, entry_path) == identity_a.inode
       if same_identity then
         matching_entries = matching_entries + 1
       end
@@ -575,9 +483,6 @@ function M.rename_noreplace(src, dst, expected_source_identity)
   end
   src = require('direct.paths').strip_trailing_separator(src)
   dst = require('direct.paths').strip_trailing_separator(dst)
-  if package.config:sub(1, 1) == '\\' then
-    src, dst = src:gsub('/', '\\'), dst:gsub('/', '\\')
-  end
   if expected_source_identity ~= nil then
     local actual = identity_key(M.uv.fs_lstat(src), src)
     if expected_source_identity.inode == nil
@@ -585,83 +490,7 @@ function M.rename_noreplace(src, dst, expected_source_identity)
       return nil, 'source identity changed: ' .. src, 'ESTALE'
     end
   end
-  local ffi_ok, ffi = pcall(require, 'ffi')
-  if not ffi_ok then
-    return nil, 'atomic no-replace rename is unavailable (LuaJIT FFI unavailable)'
-  end
-  pcall(ffi.cdef, [[
-    int renamex_np(const char *from, const char *to, unsigned int flags);
-    int renameat2(int olddirfd, const char *oldpath, int newdirfd,
-      const char *newpath, unsigned int flags);
-    char *strerror(int errnum);
-  ]])
-
-  local sysname = M.uv.os_uname().sysname
-  local ok, result = pcall(function()
-    if sysname == 'Windows_NT' then
-      if not windows_ffi_declared then
-        local declared, declaration_err = pcall(ffi.cdef, [[
-          typedef unsigned short direct_WCHAR;
-          int __stdcall MultiByteToWideChar(unsigned int CodePage, unsigned long dwFlags,
-            const char *lpMultiByteStr, int cbMultiByte, direct_WCHAR *lpWideCharStr,
-            int cchWideChar);
-          int __stdcall MoveFileW(const direct_WCHAR *lpExistingFileName,
-            const direct_WCHAR *lpNewFileName);
-          unsigned long __stdcall GetLastError(void);
-        ]])
-        if not declared and not pcall(ffi.typeof, 'direct_WCHAR') then
-          error(declaration_err)
-        end
-        windows_ffi_declared = true
-      end
-      windows_kernel32 = windows_kernel32 or ffi.load('kernel32')
-      local function wide(value)
-        local count = windows_kernel32.MultiByteToWideChar(65001, 0, value, -1, nil, 0)
-        if count == 0 then error('could not convert UTF-8 path to UTF-16') end
-        local output = ffi.new('direct_WCHAR[?]', count)
-        if windows_kernel32.MultiByteToWideChar(65001, 0, value, -1, output, count) == 0 then
-          error('could not convert UTF-8 path to UTF-16')
-        end
-        return output
-      end
-      local moved = windows_kernel32.MoveFileW(wide(src), wide(dst))
-      if moved ~= 0 then return 0 end
-      return -tonumber(windows_kernel32.GetLastError())
-    elseif sysname == 'Darwin' then
-      -- macOS RENAME_EXCL (renamex_np): atomically refuse an existing target.
-      return ffi.C.renamex_np(src, dst, 0x00000004)
-    elseif sysname == 'Linux' then
-      -- Linux RENAME_NOREPLACE (renameat2), with both paths relative to cwd.
-      return ffi.C.renameat2(-100, src, -100, dst, 0x00000001)
-    end
-    error('atomic no-replace rename is unavailable on ' .. tostring(sysname))
-  end)
-  if not ok then
-    return nil, tostring(result)
-  end
-  if result == 0 then
-    return true
-  end
-  if sysname == 'Windows_NT' then
-    local code = -result
-    if code == 80 or code == 183 then
-      return nil, 'destination exists: ' .. dst, 'EEXIST'
-    elseif code == 17 then
-      return nil, 'EXDEV: cross-device move', 'EXDEV'
-    end
-    return nil, 'Windows error ' .. tostring(code), code
-  end
-  local code = ffi.errno()
-  local err_ok, err = pcall(function()
-    return ffi.string(ffi.C.strerror(code))
-  end)
-  local message = err_ok and err or ('errno ' .. tostring(code))
-  if code == 17 then
-    return nil, 'destination exists: ' .. dst, 'EEXIST'
-  elseif code == 18 then
-    return nil, 'EXDEV: ' .. tostring(message), 'EXDEV'
-  end
-  return nil, tostring(message), code
+  return platform.rename_noreplace(src, dst, M.uv.os_uname().sysname)
 end
 
 -- copy_file(src, dst) -> true | nil, err, code (vim.uv.fs_copyfile preserves
@@ -832,8 +661,7 @@ local function copy_dir(from, to, ctx)
       if not target then
         return nil, 'cannot read symlink: ' .. tostring(read_err)
       end
-      local linked, link_err, link_code = M.uv.fs_symlink(
-        target, child_to, symlink_flags(child_from))
+      local linked, link_err, link_code = platform.create_symlink(target, child_to, child_from)
       if not linked then
         return nil, tostring(link_err or link_code or 'cannot recreate symlink')
       end
@@ -1269,7 +1097,7 @@ local function move_exdev_link(src, dst, source_identity)
     if not temp_dir then return nil, temp_dir_identity or link_err, link_code end
     temp = M.join(temp_dir, 'payload')
     local linked
-    linked, link_err, link_code = M.uv.fs_symlink(target, temp, symlink_flags(src))
+    linked, link_err, link_code = platform.create_symlink(target, temp, src)
     if linked then break end
     cleanup_private_dir(temp_dir, temp_dir_identity)
     if not is_eexist(link_err, link_code) then return nil, link_err, link_code end

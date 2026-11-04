@@ -132,7 +132,7 @@ H.describe('paths', function()
   end)
 
   H.it('data_dir() returns nil, err on a read-only data home', function()
-    if vim.fn.has('win32') == 1 or vim.fn.has('win64') == 1 then
+    if H.is_windows() then
       H.skip('Windows does not enforce POSIX directory mode bits')
     end
     local sb = H.sandbox()

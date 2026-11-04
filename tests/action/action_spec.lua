@@ -108,7 +108,7 @@ H.describe('action', function()
       local buf = vim.api.nvim_create_buf(true, false)
       vim.api.nvim_buf_set_name(buf, sb.root .. '/linkdir/file.txt')
       local stored_name = vim.api.nvim_buf_get_name(buf)
-      if vim.fn.has('win32') == 1 or vim.fn.has('win64') == 1 then
+      if H.is_windows() then
         H.assert_true(M.fs.same_path(stored_name, sb.root .. '/realdir/file.txt'),
           'the stored symlink spelling denotes the target file')
       else
@@ -667,7 +667,7 @@ H.describe('action', function()
   H.it('JSON records use canonical escaping and reject duplicate or extra keys', function()
     local root = M.paths.record_path(vim.fs.joinpath(vim.uv.cwd(), 'r'))
     local src = root .. '/quote"\\slash/café'
-    if package.config:sub(1, 1) == '\\' then
+    if H.is_windows() then
       src = vim.fs.joinpath(root, 'quote"', 'slash', 'café')
     end
     local dst = root .. '/b'

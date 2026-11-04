@@ -17,6 +17,11 @@
 
 local M = {}
 local skip_tag = {}
+local platform = require('direct.platform')
+
+function M.is_windows()
+  return platform.is_windows
+end
 
 -- ---------------------------------------------------------------------------
 -- Configuration and per-run state
@@ -140,7 +145,7 @@ function M.assert_eq(actual, expected, msg)
   -- compose paths with `/` (also accepted by Win32). Compare absolute paths by
   -- their separator-neutral spelling so assertions focus on identity, not the
   -- input spelling used to reach the same Windows path.
-  if package.config:sub(1, 1) == '\\' then
+  if platform.is_windows then
     local function normalize_paths(value)
       if type(value) == 'string' then
         if value:match('^%a:[/\\]') or value:match('^[/\\][/\\]') then
@@ -168,7 +173,7 @@ end
 
 function M.is_absolute_path(path)
   if type(path) ~= 'string' then return false end
-  if package.config:sub(1, 1) == '\\' then
+  if platform.is_windows then
     return path:match('^%a:[/\\]') ~= nil or path:match('^[/\\][/\\]') ~= nil
   end
   return path:sub(1, 1) == '/'
@@ -270,7 +275,7 @@ end
 -- assuming the command exists; callers can explicitly skip only the test that
 -- depends on this filesystem feature.
 function M.mkfifo(path)
-  if vim.fn.has('win32') == 1 or vim.fn.has('win64') == 1 then
+  if platform.is_windows then
     return nil, 'POSIX FIFOs are unavailable on Windows'
   end
   vim.fn.system({ 'mkfifo', path })
@@ -284,14 +289,7 @@ end
 -- Create a symbolic link with the Windows directory flag when its target is
 -- an existing directory. POSIX platforms ignore this distinction.
 function M.symlink(target, link)
-  local flags
-  if vim.fn.has('win32') == 1 or vim.fn.has('win64') == 1 then
-    local stat = vim.uv.fs_stat(target)
-    if stat and stat.type == 'directory' then
-      flags = { dir = true }
-    end
-  end
-  return vim.uv.fs_symlink(target, link, flags)
+  return platform.create_symlink(target, link, target)
 end
 
 function M.ls(root)
@@ -416,7 +414,7 @@ end
 -- records text without a level marker, so the level is not asserted on.
 function M.assert_notified(pattern, level)
   local text = M.messages()
-  if package.config:sub(1, 1) == '\\' then
+  if platform.is_windows then
     pattern = tostring(pattern):gsub('\\', '/')
     text = text:gsub('\\', '/')
   end

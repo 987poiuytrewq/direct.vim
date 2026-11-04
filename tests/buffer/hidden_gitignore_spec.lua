@@ -715,7 +715,7 @@ H.describe('hidden and Git-ignore filtering', function()
   end)
 
   H.it('matches a literal backslash filename in Git ignore rules on POSIX', function()
-    if vim.fn.has('win32') == 1 or vim.fn.has('win64') == 1 then
+    if H.is_windows() then
       H.skip('backslashes are path separators on Windows, not literal filename bytes')
     end
     require('direct.config').setup({ map_default_keys = false, respect_gitignore = true })

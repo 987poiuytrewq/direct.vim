@@ -1,0 +1,177 @@
+-- Win32 platform implementation for native file identity, no-replace rename,
+-- directory symlinks, and cmd.exe invocation.
+local M = {}
+local ffi
+local kernel32
+local ffi_declared = false
+
+local function windows_api()
+  if ffi and kernel32 then return ffi, kernel32 end
+  local loaded, module = pcall(require, 'ffi')
+  if not loaded then return nil, 'LuaJIT FFI unavailable' end
+  ffi = module
+  if not ffi_declared then
+    local declared, declaration_err = pcall(ffi.cdef, [[
+      typedef unsigned short direct_platform_WCHAR;
+      typedef void *direct_platform_HANDLE;
+      typedef unsigned long direct_platform_DWORD;
+      typedef int direct_platform_BOOL;
+      typedef struct { direct_platform_DWORD low, high; } direct_platform_FILETIME;
+      typedef struct {
+        direct_platform_DWORD attributes;
+        direct_platform_FILETIME created, accessed, written;
+        direct_platform_DWORD volume, size_high, size_low, links, index_high, index_low;
+      } direct_platform_FILE_INFORMATION;
+      int __stdcall MultiByteToWideChar(unsigned int CodePage, unsigned long dwFlags,
+        const char *lpMultiByteStr, int cbMultiByte, direct_platform_WCHAR *lpWideCharStr,
+        int cchWideChar);
+      direct_platform_HANDLE __stdcall CreateFileW(const direct_platform_WCHAR *name,
+        direct_platform_DWORD access, direct_platform_DWORD share, void *security,
+        direct_platform_DWORD creation, direct_platform_DWORD flags,
+        direct_platform_HANDLE template_file);
+      direct_platform_BOOL __stdcall GetFileInformationByHandle(direct_platform_HANDLE file,
+        direct_platform_FILE_INFORMATION *information);
+      direct_platform_BOOL __stdcall CloseHandle(direct_platform_HANDLE object);
+      int __stdcall MoveFileW(const direct_platform_WCHAR *existing_name,
+        const direct_platform_WCHAR *new_name);
+      direct_platform_DWORD __stdcall GetLastError(void);
+    ]])
+    if not declared and not pcall(ffi.typeof, 'direct_platform_WCHAR') then
+      return nil, tostring(declaration_err)
+    end
+    ffi_declared = true
+  end
+  local loaded_kernel, library = pcall(ffi.load, 'kernel32')
+  if not loaded_kernel then return nil, tostring(library) end
+  kernel32 = library
+  return ffi, kernel32
+end
+
+local function wide_path(path, lib, api)
+  path = path:gsub('/', '\\')
+  local count = api.MultiByteToWideChar(65001, 0, path, -1, nil, 0)
+  if count == 0 then return nil, 'could not convert UTF-8 path to UTF-16' end
+  local output = lib.new('direct_platform_WCHAR[?]', count)
+  if api.MultiByteToWideChar(65001, 0, path, -1, output, count) == 0 then
+    return nil, 'could not convert UTF-8 path to UTF-16'
+  end
+  return output
+end
+
+function M.canonical_path(path)
+  return vim.fs.normalize(tostring(path)):gsub('\\', '/')
+end
+
+function M.validation_path(path)
+  return path:gsub('\\', '/')
+end
+
+function M.strip_trailing_separator(path)
+  if type(path) ~= 'string' then return path end
+  local trimmed = path:gsub('[/\\]+$', '')
+  if trimmed == '' then return '\\' end
+  if path:match('^%a:[/\\]+$') then return path:sub(1, 2) .. '\\' end
+  return trimmed
+end
+
+function M.path_component(component, _display_separator)
+  return component:gsub('/', '\\')
+end
+
+function M.home_directory(home)
+  local profile = vim.env.USERPROFILE
+  if profile == nil or profile == '' then
+    profile = (vim.env.HOMEDRIVE or '') .. (vim.env.HOMEPATH or '')
+  end
+  if home ~= nil and home ~= '' and home == profile then return nil end
+  return home
+end
+
+function M.component_path_reason(component, path_style)
+  if path_style == 'posix' then return nil end
+  return require('direct.platform.windows_path').component_reason(component)
+end
+
+function M.file_identity(path, nofollow)
+  if type(path) ~= 'string' then return nil end
+  local lib, api = windows_api()
+  if not lib then return nil end
+  local ok, identity = pcall(function()
+    local wide, err = wide_path(path, lib, api)
+    if not wide then error(err) end
+    local flags = 0x02000000 -- FILE_FLAG_BACKUP_SEMANTICS
+    if nofollow then flags = flags + 0x00200000 end -- FILE_FLAG_OPEN_REPARSE_POINT
+    local handle = api.CreateFileW(wide, 0, 7, nil, 3, flags, nil)
+    if handle == lib.cast('direct_platform_HANDLE', -1) then return nil end
+    local information = lib.new('direct_platform_FILE_INFORMATION[1]')
+    local read = api.GetFileInformationByHandle(handle, information) ~= 0
+    api.CloseHandle(handle)
+    if not read then return nil end
+    local info = information[0]
+    return table.concat({ 'win', tonumber(info.volume), tonumber(info.index_high),
+      tonumber(info.index_low) }, ':')
+  end)
+  return ok and identity or nil
+end
+
+function M.create_symlink(target, link, source_link)
+  local options
+  if source_link then
+    local stat = vim.uv.fs_stat(source_link)
+    if stat and stat.type == 'directory' then options = { dir = true } end
+  end
+  return vim.uv.fs_symlink(target, link, options)
+end
+
+function M.rename_noreplace(src, dst)
+  local lib, api = windows_api()
+  if not lib then return nil, api or 'LuaJIT FFI unavailable' end
+  local src_wide, src_err = wide_path(src, lib, api)
+  if not src_wide then return nil, src_err end
+  local dst_wide, dst_err = wide_path(dst, lib, api)
+  if not dst_wide then return nil, dst_err end
+  if api.MoveFileW(src_wide, dst_wide) ~= 0 then return true end
+  local code = tonumber(api.GetLastError())
+  if code == 80 or code == 183 then
+    return nil, 'destination exists: ' .. dst, 'EEXIST'
+  elseif code == 17 then
+    return nil, 'EXDEV: cross-device move', 'EXDEV'
+  end
+  return nil, 'Windows error ' .. tostring(code), code
+end
+
+function M.shellescape_path(path, shell)
+  shell = (shell or ''):lower():gsub('\\', '/')
+  if shell:find('powershell', 1, true) or shell:find('pwsh', 1, true) then
+    return "'" .. path:gsub("'", "''") .. "'"
+  elseif shell:find('bash', 1, true) or shell:find('zsh', 1, true)
+    or shell:find('fish', 1, true) then
+    return "'" .. path:gsub("'", "'\\''") .. "'"
+  end
+  return vim.fn.shellescape(path)
+end
+
+local function write_cmd_script(command)
+  local path = vim.fn.tempname() .. '.cmd'
+  local fd, open_err = vim.uv.fs_open(path, 'wx', 384)
+  if not fd then return nil, open_err end
+  local written, write_err = vim.uv.fs_write(fd, command .. '\r\n', 0)
+  local closed, close_err = vim.uv.fs_close(fd)
+  if not written or not closed then
+    pcall(vim.uv.fs_unlink, path)
+    return nil, write_err or close_err or 'could not write the command script'
+  end
+  return path
+end
+
+function M.command_argv(shell, _shellcmdflag, command)
+  local path, err = write_cmd_script(command)
+  if not path then return nil, nil, err end
+  return { shell, '/d', '/c', path }, path
+end
+
+function M.cleanup_command(path)
+  if path then pcall(vim.uv.fs_unlink, path) end
+end
+
+return M

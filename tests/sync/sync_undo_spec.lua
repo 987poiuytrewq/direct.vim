@@ -1456,7 +1456,7 @@ H.describe('sync with expanded children', function()
   end)
 
   H.it('accepts POSIX literal backslashes in filename components', function()
-    if package.config:sub(1, 1) ~= '/' then
+    if H.is_windows() then
       H.skip('a backslash is a path separator on Windows, not a literal filename byte')
     end
     clean_buffers()

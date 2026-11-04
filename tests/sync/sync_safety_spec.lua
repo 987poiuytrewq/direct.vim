@@ -922,7 +922,7 @@ H.describe('sync: safety guards', function()
   end)
 
   H.it('an unsafe name on the DISK side is refused too', function()
-    if vim.fn.has('win32') == 1 or vim.fn.has('win64') == 1 then
+    if H.is_windows() then
       H.skip('Windows filenames cannot contain control characters')
     end
     clean_buffers()

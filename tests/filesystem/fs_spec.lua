@@ -534,7 +534,7 @@ H.describe('fs', function()
     H.mkfile(sb.root, 'src.txt', { 'SOURCE' })
     local system = vim.uv.os_uname().sysname
     local ok, err = fs.rename_noreplace(src, dst)
-    if system ~= 'Darwin' and system ~= 'Linux' and system ~= 'Windows_NT' then
+    if system ~= 'Darwin' and system ~= 'Linux' and not H.is_windows() then
       H.assert_nil(ok, 'unsupported platforms fail closed: ' .. tostring(err))
       H.assert_eq(vim.fn.readfile(src), { 'SOURCE' }, 'source stays on unsupported platforms')
       return
@@ -707,7 +707,7 @@ H.describe('fs', function()
   -- bypasses permission bits, and Windows does not implement POSIX directory
   -- permission semantics, so those hosts report the test as skipped.
   H.it('copy_tree with require_complete refuses an unreadable directory, leaving no destination', function()
-    if vim.fn.has('win32') == 1 or vim.fn.has('win64') == 1 then
+    if H.is_windows() then
       H.skip('POSIX directory permission semantics are unavailable on Windows')
     end
     if vim.uv.getuid ~= nil and vim.uv.getuid() == 0 then
@@ -740,7 +740,7 @@ H.describe('fs', function()
   -- Best-effort copies may skip unreadable subtrees, but must report them rather
   -- than silently creating an empty stand-in.
   H.it('copy_tree without require_complete reports an unreadable directory it skipped', function()
-    if vim.fn.has('win32') == 1 or vim.fn.has('win64') == 1 then
+    if H.is_windows() then
       H.skip('POSIX directory permission semantics are unavailable on Windows')
     end
     if vim.uv.getuid ~= nil and vim.uv.getuid() == 0 then

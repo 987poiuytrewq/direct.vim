@@ -46,7 +46,7 @@ H.describe('DirectRun', function()
       return vim.fn.shellescape(path)
     end)
     local actual = launched.argv[#launched.argv]
-    if vim.fn.has('win32') == 1 or vim.fn.has('win64') == 1 then
+    if H.is_windows() then
       H.assert_eq(launched.argv[2], '/d', 'uses a non-interactive cmd instance')
       H.assert_eq(launched.argv[3], '/c', 'runs the batch command')
       actual = table.concat(vim.fn.readfile(actual), '\n')
@@ -74,7 +74,7 @@ H.describe('DirectRun', function()
     vim.api.nvim_win_set_cursor(0, { 2, 0 })
     H.capture_messages()
 
-    local command = (vim.fn.has('win32') == 1 or vim.fn.has('win64') == 1)
+    local command = H.is_windows()
       and 'echo {} & exit /b 7' or [[printf '%s' {} ; exit 7]]
     vim.cmd('DirectRun ' .. command)
     H.assert_true(vim.wait(3000, function()
@@ -196,7 +196,7 @@ H.describe('DirectRun', function()
 
     local direct = require('direct')
     local shell_command
-    if vim.fn.has('win32') == 1 or vim.fn.has('win64') == 1 then
+    if H.is_windows() then
       shell_command = direct.run('if exist {} (exit /b 1) else (exit /b 0)')
     else
       shell_command = direct.run('test ! -e {}')

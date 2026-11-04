@@ -5,9 +5,10 @@
 local M = {}
 
 local fs = require('direct.fs')
+local platform = require('direct.platform')
 local constants = require('direct.constants')
 
-M.separator = package.config:sub(1, 1)
+M.separator = platform.separator
 
 function M.directory_separator()
   local config = package.loaded['direct.config']
@@ -33,11 +34,7 @@ end
 function M.join_entry(root, name)
   local directory = M.is_directory_name(name)
   local component = M.strip_directory_marker(name)
-  if M.separator == '\\' then
-    component = component:gsub('/', '\\')
-  elseif M.directory_separator() == '\\' then
-    component = component:gsub('\\', '/')
-  end
+  component = platform.path_component(component, M.directory_separator())
   local path = vim.fs.joinpath(root, component)
   if directory and path:sub(-1) ~= M.separator then
     path = path .. M.separator
@@ -46,27 +43,13 @@ function M.join_entry(root, name)
 end
 
 function M.strip_trailing_separator(path)
-  if type(path) ~= 'string' then return path end
-  local trimmed
-  if M.separator == '\\' then
-    trimmed = path:gsub('[/\\]+$', '')
-  else
-    trimmed = path:gsub('/+$', '')
-  end
-  if trimmed == '' then
-    return M.separator
-  end
-  if M.separator == '\\' and path:match('^%a:[/\\]+$') then
-    return path:sub(1, 2) .. M.separator
-  end
-  return trimmed
+  return platform.strip_trailing_separator(path)
 end
 
 -- A slash-normalized spelling for comparisons and URI-relative paths only.
 -- Filesystem calls should retain their native spelling.
 function M.canonical(path)
-  local normalized = vim.fs.normalize(tostring(path))
-  if M.separator == '\\' then normalized = normalized:gsub('\\', '/') end
+  local normalized = platform.canonical_path(path)
   if normalized:match('^%a:/$') then return normalized end
   local trimmed = normalized:gsub('/+$', '')
   return trimmed == '' and '/' or trimmed
@@ -129,10 +112,8 @@ end
 function M.validate_canonical_path(value)
   local ok, err = M.validate_path(value)
   if not ok then return nil, err end
-  local lexical = value
-  if M.separator == '\\' then lexical = lexical:gsub('\\', '/') end
-  local normalized = vim.fs.normalize(lexical)
-  if M.separator == '\\' then normalized = normalized:gsub('\\', '/') end
+  local lexical = platform.validation_path(value)
+  local normalized = platform.validation_path(vim.fs.normalize(lexical))
   local spelling = lexical:gsub('/+$', '')
   normalized = normalized:gsub('/+$', '')
   if normalized ~= spelling or M.canonical(M.root(value)) ~= M.canonical(value) then
@@ -167,16 +148,7 @@ function M.data_home()
     return vim.fs.normalize(xdg)
   end
   local home = vim.env.HOME
-  local windows_profile = vim.env.USERPROFILE
-  if M.separator == '\\' and (windows_profile == nil or windows_profile == '') then
-    windows_profile = (vim.env.HOMEDRIVE or '') .. (vim.env.HOMEPATH or '')
-  end
-  if M.separator == '\\' and home ~= nil and home ~= '' and home == windows_profile then
-    -- Neovim can synthesize HOME from USERPROFILE on Windows. Treat that
-    -- platform default like an unset HOME so data lives under stdpath('data'),
-    -- while an explicitly configured HOME still uses the documented fallback.
-    home = nil
-  end
+  home = platform.home_directory(home)
   if home ~= nil and home ~= '' then
     return M.join(home, '.local', 'share')
   end

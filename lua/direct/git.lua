@@ -1,6 +1,7 @@
 -- lua/direct/git.lua -- Git status and native Git-ignore snapshots.
 
 local M = {}
+local paths = require('direct.paths')
 
 local status_priority = {
   ['!'] = -1,
@@ -13,13 +14,7 @@ local status_priority = {
 }
 
 local function normalize(path)
-  local value = vim.fs.normalize(path)
-  if vim.fn.has('win32') == 1 or vim.fn.has('win64') == 1 then
-    value = value:gsub('\\', '/')
-  end
-  if value:match('^%a:/$') then return value end
-  value = value:gsub('/+$', '')
-  return value == '' and '/' or value
+  return paths.canonical(path)
 end
 
 local function run(args, stdin)

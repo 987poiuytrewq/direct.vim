@@ -4,33 +4,8 @@ local M = {}
 
 local buffer = require('direct.buffer')
 local fs = require('direct.fs')
+local platform = require('direct.platform')
 local ui = require('direct.ui')
-
-local function shellescape_path(path)
-  if vim.fn.has('win32') == 1 or vim.fn.has('win64') == 1 then
-    local shell = (vim.o.shell or ''):lower():gsub('\\', '/')
-    if shell:find('powershell', 1, true) or shell:find('pwsh', 1, true) then
-      return "'" .. path:gsub("'", "''") .. "'"
-    elseif shell:find('bash', 1, true) or shell:find('zsh', 1, true)
-      or shell:find('fish', 1, true) then
-      return "'" .. path:gsub("'", "'\\''") .. "'"
-    end
-  end
-  return vim.fn.shellescape(path)
-end
-
-local function write_cmd_script(command)
-  local path = vim.fn.tempname() .. '.cmd'
-  local fd, open_err = vim.uv.fs_open(path, 'wx', 384)
-  if not fd then return nil, open_err end
-  local written, write_err = vim.uv.fs_write(fd, command .. '\r\n', 0)
-  local closed, close_err = vim.uv.fs_close(fd)
-  if not written or not closed then
-    pcall(vim.uv.fs_unlink, path)
-    return nil, write_err or close_err or 'could not write the command script'
-  end
-  return path
-end
 
 local function report_result(result, quiet_success)
   if quiet_success and result.code == 0 then return end
@@ -76,27 +51,14 @@ function M.current_entry(command, on_complete, opts)
     return nil, err
   end
 
-  local escaped_path = shellescape_path(path)
+  local escaped_path = platform.shellescape_path(path, vim.o.shell)
   local expanded = command:gsub('%{%}', function() return escaped_path end)
-  local is_windows_cmd = (vim.fn.has('win32') == 1 or vim.fn.has('win64') == 1)
-    and (vim.o.shell or ''):lower():match('cmd%.exe$') ~= nil
-  local command_file
-  local argv
-  if is_windows_cmd then
-    local script_err
-    command_file, script_err = write_cmd_script(expanded)
-    if not command_file then
-      local err = 'could not create command script: ' .. tostring(script_err)
-      ui.notify('direct: ' .. err, vim.log.levels.ERROR)
-      return nil, err
-    end
-    argv = { vim.o.shell, '/d', '/c', command_file }
-  else
-    argv = { vim.o.shell }
-    for _, flag in ipairs(vim.split(vim.o.shellcmdflag, '%s+', { trimempty = true })) do
-      argv[#argv + 1] = flag
-    end
-    argv[#argv + 1] = expanded
+  local argv, command_file, command_err = platform.command_argv(
+    vim.o.shell, vim.o.shellcmdflag, expanded)
+  if not argv then
+    local err = 'could not prepare shell command: ' .. tostring(command_err)
+    ui.notify('direct: ' .. err, vim.log.levels.ERROR)
+    return nil, err
   end
 
   local ok, process = pcall(vim.system, argv, {
@@ -104,7 +66,7 @@ function M.current_entry(command, on_complete, opts)
     text = true,
   }, function(result)
     vim.schedule(function()
-      if command_file then pcall(vim.uv.fs_unlink, command_file) end
+      platform.cleanup_command(command_file)
       local reported, report_err = pcall(report_result, result, opts.quiet_success)
       if not reported then
         ui.report_error('report the command result', report_err)
@@ -118,7 +80,7 @@ function M.current_entry(command, on_complete, opts)
     end)
   end)
   if not ok then
-    if command_file then pcall(vim.uv.fs_unlink, command_file) end
+    platform.cleanup_command(command_file)
     local err = 'could not start shell command: ' .. tostring(process)
     ui.notify('direct: ' .. err, vim.log.levels.ERROR)
     return nil, err

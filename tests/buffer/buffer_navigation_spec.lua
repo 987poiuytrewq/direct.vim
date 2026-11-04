@@ -192,7 +192,7 @@ H.describe('buffer: attach by path identity', function()
     -- nvim_buf_set_name resolves the symlinked prefix, so the stored
     -- spelling differs from the unresolved root. Without this the case would be
     -- vacuous rather than wrong, which is why it is asserted, not skipped.
-    if vim.fn.has('win32') == 1 or vim.fn.has('win64') == 1 then
+    if H.is_windows() then
       H.assert_true(fs.same_path(stored, real), 'stored name resolves to the target')
     else
       H.assert_true(stored ~= unresolved,
