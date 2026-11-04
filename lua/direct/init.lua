@@ -118,6 +118,12 @@ function M.toggle_gitignore()
   return buffer.toggle_gitignore()
 end
 
+function M.show_git_status()
+  if not guard('DirectGitStatus') then return nil end
+  if pending.refuse('show Git-status view') then return nil end
+  return buffer.show_git_status()
+end
+
 function M.undo()
   if not guard('DirectUndo') then
     return nil

@@ -167,11 +167,13 @@ the current direct buffer's view. Like the hidden-entry toggle, it refuses
 unsaved edits and refreshes the listing, collapsing expanded subtrees.
 
 In a direct listing, `gs` (or `:DirectToggleGitStatus`) toggles a view that shows
-only entries with a Git status. Directories with changed descendants are
-included, and expanding them applies the same filter to their children. The
-toggle is refused while the listing has unsaved edits. Outside a Git repository,
-or with `git.enabled = false`, the filtered view is empty. Hidden entries remain
-excluded from sync while this view is active; they are not treated as deletions.
+only entries with a Git status and expands all directories recursively. Use
+`:DirectGitStatus` to enter that view without toggling it off when already there.
+Directories with changed descendants are included, and their children are
+filtered the same way. These commands are refused while the listing has unsaved
+edits. Outside a Git repository, or with `git.enabled = false`, the filtered
+view is empty. Hidden entries remain excluded from sync while this view is
+active; they are not treated as deletions.
 
 Configuration defaults:
 
@@ -248,11 +250,13 @@ the first status symbol, including staged-only tombstones. Set
 rows while retaining Git status on entries that still exist. This option has no
 effect when Git status is disabled; it defaults to `true`.
 
-Press `gs` or run `:DirectToggleGitStatus` to show only entries with a status;
-press it again to restore the normal listing. Directories inherit status from
-changed descendants and remain visible in this view. This is a view filter, so
-entries it hides are not treated as deletion sources during sync. Outside a Git
-repository, or when `git.enabled = false`, the filtered view contains no entries.
+Press `gs` or run `:DirectToggleGitStatus` to show only entries with a status and
+recursively expand the view; press it again to restore the normal listing. Use
+`:DirectGitStatus` to enter the filtered view without toggling it off when
+already active. Directories inherit status from changed descendants. This is a
+view filter, so entries it hides are not treated as deletion sources during sync.
+Outside a Git repository, or when `git.enabled = false`, the filtered view
+contains no entries.
 
 The symbols can be customized independently by status:
 
@@ -511,6 +515,7 @@ use their existing synchronous staging path.
 | `:DirectToggleHidden` | none | Toggle dot-hidden entries in the current direct listing and refresh its view. |
 | `:DirectToggleGitIgnore` | none | Toggle Git-ignore filtering in the current direct listing. |
 | `:DirectToggleGitStatus` | none | Toggle the Git-status-only view in the current direct listing. |
+| `:DirectGitStatus` | none | Enter the expanded Git-status-only view without toggling it off. |
 | `:DirectUndo` | none | Undo the last filesystem action. |
 | `:DirectRedo` | none | Redo the last undone action. |
 | `:DirectYank` | range (default: current line) | Yank the ranged entries. |
@@ -518,7 +523,7 @@ use their existing synchronous staging path.
 | `:DirectPasteAs {name}` | `{name}` | Paste into the cursor row's directory (or a file's parent) under `{name}`. |
 
 `:DirectSync`, `:DirectFoldAll`, `:DirectUnfoldAll`, `:DirectToggleHidden`,
-`:DirectToggleGitIgnore`, `:DirectToggleGitStatus`, `:DirectUndo`, `:DirectRedo`, `:DirectYank`, `:DirectPaste` (no argument),
+`:DirectToggleGitIgnore`, `:DirectToggleGitStatus`, `:DirectGitStatus`, `:DirectUndo`, `:DirectRedo`, `:DirectYank`, `:DirectPaste` (no argument),
 `:DirectPasteAs`, `:DirectRun`, and the public `open()` API report an error and do
 nothing when the current buffer is not a direct buffer. `open()` is also used by
 the direct-buffer entry mappings. `:DirectPaste {dir}` is the exception: it

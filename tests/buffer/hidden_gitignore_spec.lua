@@ -116,24 +116,27 @@ H.describe('hidden and Git-ignore filtering', function()
     H.assert_notified('unsaved edits', vim.log.levels.ERROR)
   end)
 
-  H.it('toggles a Git-status-only view with gs at roots and expanded directories', function()
+  H.it('shows the expanded Git-status-only view with gs and DirectGitStatus', function()
     local config = require('direct.config')
     config.setup({ map_default_keys = true })
     local sb = H.sandbox()
     local root = H.mkdir(sb.root, 'repo')
     local changed_dir = H.mkdir(root, 'changed-dir')
+    local nested_dir = H.mkdir(changed_dir, 'nested')
     init_repo(root)
     H.mkfile(root, 'changed.txt', 'before')
     H.mkfile(root, 'clean.txt', 'clean')
     H.mkfile(changed_dir, 'changed-child.txt', 'before')
     H.mkfile(changed_dir, 'clean-child.txt', 'clean')
+    H.mkfile(nested_dir, 'nested-change.txt', 'before')
     git(root, 'add', '.')
     git(root, 'commit', '-qm', 'baseline')
     H.mkfile(root, 'changed.txt', 'after')
     H.mkfile(changed_dir, 'changed-child.txt', 'after')
+    H.mkfile(nested_dir, 'nested-change.txt', 'after')
     H.mkfile(root, 'untracked.txt', 'new')
 
-    local listing = require('direct').list(root)
+    require('direct').list(root)
     H.assert_true(contains(H.buf_lines(), 'clean.txt'), 'clean entries show normally')
     H.assert_eq(vim.fn.maparg('gs', 'n', false, true).rhs,
       '<Cmd>DirectToggleGitStatus<CR>', 'gs is the plugin-owned status-filter mapping')
@@ -143,18 +146,27 @@ H.describe('hidden and Git-ignore filtering', function()
     H.assert_true(contains(filtered, 'changed-dir/'), 'changed descendant keeps its directory visible')
     H.assert_true(contains(filtered, 'changed.txt'), 'modified files are included')
     H.assert_true(contains(filtered, 'untracked.txt'), 'untracked files are included')
+    H.assert_true(contains(filtered, '  changed-child.txt'),
+      'gs expands changed directories automatically')
+    H.assert_true(contains(filtered, '  nested/'), 'gs expands nested changed directories')
+    H.assert_true(contains(filtered, '    nested-change.txt'),
+      'gs recursively reveals changed descendants')
     H.assert_false(contains(filtered, 'clean.txt'), 'clean files are hidden')
-
-    listing:expand(row_of(filtered, 'changed-dir/'))
-    local expanded = H.buf_lines()
-    H.assert_true(contains(expanded, '  changed-child.txt'), 'changed children are included')
-    H.assert_false(contains(expanded, '  clean-child.txt'), 'clean children are hidden')
+    H.assert_false(contains(filtered, '  clean-child.txt'), 'clean children are hidden')
 
     pcall(vim.cmd, 'DirectToggleGitStatus')
     local restored = H.buf_lines()
     H.assert_true(contains(restored, 'clean.txt'), 'second toggle restores clean entries')
     H.assert_false(contains(restored, '  changed-child.txt'),
       'toggling rebuilds the root and collapses old expansions')
+
+    pcall(vim.cmd, 'DirectGitStatus')
+    local direct_status = H.buf_lines()
+    H.assert_true(contains(direct_status, '    nested-change.txt'),
+      'DirectGitStatus enters the filtered view with all folds expanded')
+    pcall(vim.cmd, 'DirectGitStatus')
+    H.assert_false(contains(H.buf_lines(), 'clean.txt'),
+      'DirectGitStatus is idempotent rather than toggling the view off')
   end)
 
   H.it('does not treat status-filtered entries as deletions during sync', function()

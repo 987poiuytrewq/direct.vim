@@ -80,6 +80,8 @@ local EXPECTED_CMDS = {
   DirectUnfoldAll = { nargs = '0' },
   DirectToggleHidden = { nargs = '0' },
   DirectToggleGitStatus = { nargs = '0' },
+  DirectGitStatus = { nargs = '0' },
+  DirectToggleGitIgnore = { nargs = '0' },
   DirectUndo = { nargs = '0' },
   DirectRedo = { nargs = '0' },
   DirectYank = { nargs = '0', range = '.' },
@@ -90,7 +92,7 @@ local EXPECTED_CMDS = {
 }
 
 H.describe('entry: command surface', function()
-  H.it('the fifteen commands exist with their exact nargs/range/complete', function()
+  H.it('the commands exist with their exact nargs/range/complete', function()
     local cmds = vim.api.nvim_get_commands({ builtin = false })
     for name, want in pairs(EXPECTED_CMDS) do
       local got = cmds[name]
@@ -188,6 +190,7 @@ H.describe('entry: direct-buffer guard', function()
       'toggle_hidden',
       'toggle_gitignore',
       'toggle_git_status',
+      'show_git_status',
       'sync', 'fold_all', 'unfold_all', 'undo', 'redo', 'yank', 'paste', 'paste_as', 'run', 'git' }
     local actual = {}
     for name, value in pairs(api) do
@@ -214,6 +217,8 @@ H.describe('entry: direct-buffer guard', function()
         call = function(api) return api.toggle_git_status() end },
       { name = 'DirectToggleGitIgnore',
         call = function(api) return api.toggle_gitignore() end },
+      { name = 'DirectGitStatus',
+        call = function(api) return api.show_git_status() end },
       { name = 'DirectPaste', call = function(api) return api.paste() end },
       { name = 'DirectPasteAs', call = function(api) return api.paste_as('x.txt') end },
       { name = 'DirectRun', call = function(api) return api.run('echo {}') end },
