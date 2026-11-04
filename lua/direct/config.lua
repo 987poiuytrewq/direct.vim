@@ -10,6 +10,7 @@ local defaults = {
   directory_separator = package.config:sub(1, 1),
   show_hidden = true,
   respect_gitignore = true,
+  indent_size = 2,
   show_folder_icons = true,
   show_file_icons = true,
   icons = {
@@ -310,6 +311,11 @@ function M.setup(opts)
       and (type(value) ~= 'number' or value < 1 or value % 1 ~= 0) then
       require('direct.ui').notify(
         'direct: max_recursive_expand_depth must be false or a positive integer',
+        vim.log.levels.ERROR)
+    elseif key == 'indent_size'
+      and (type(value) ~= 'number' or value <= 1 or value % 1 ~= 0) then
+      require('direct.ui').notify(
+        'direct: indent_size must be an integer greater than 1',
         vim.log.levels.ERROR)
     elseif key == 'directory_separator'
       and value ~= '/' and value ~= '\\' then

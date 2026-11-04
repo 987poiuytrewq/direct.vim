@@ -74,7 +74,7 @@ function M._handle_mouse_click(buffer, mouse)
   local is_icon_click = false
   if rec and context.is_directory(rec)
     and require('direct.config').options.show_folder_icons == true then
-    local text_col = (rec.depth or 0) * 2 + 1
+    local text_col = (rec.depth or 0) * require('direct.config').options.indent_size + 1
     local ok, icon_pos = pcall(vim.fn.screenpos, winid, mouse.line, text_col)
     if ok and icon_pos and icon_pos.row == mouse.screenrow
       and icon_pos.col and icon_pos.curscol then

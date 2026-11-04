@@ -126,6 +126,7 @@ function M.render(bufnr, rows, options)
   vim.api.nvim_buf_clear_namespace(bufnr, git_namespace, 0, -1)
   options = options or {}
   local git_options = options.git or {}
+  local indent_size = options.indent_size or 2
 
   for _, item in ipairs(rows or {}) do
     local deleted_group = item.deleted_kind == 'directory'
@@ -133,22 +134,24 @@ function M.render(bufnr, rows, options)
       or (item.deleted_kind == 'file' and 'DirectGitDeletedFile' or nil)
     if deleted_group and not (git_options.enabled ~= false and item.first_status) then
       local line = vim.api.nvim_buf_get_lines(bufnr, item.row, item.row + 1, false)[1] or ''
-      vim.api.nvim_buf_set_extmark(bufnr, namespace, item.row, (item.depth or 0) * 2, {
-        end_row = item.row,
-        end_col = #line,
-        hl_group = deleted_group,
-        priority = 150,
-      })
+      vim.api.nvim_buf_set_extmark(bufnr, namespace, item.row,
+        (item.depth or 0) * indent_size, {
+          end_row = item.row,
+          end_col = #line,
+          hl_group = deleted_group,
+          priority = 150,
+        })
     end
 
     if git_options.enabled ~= false and item.first_status then
       local line = vim.api.nvim_buf_get_lines(bufnr, item.row, item.row + 1, false)[1] or ''
-      vim.api.nvim_buf_set_extmark(bufnr, namespace, item.row, (item.depth or 0) * 2, {
-        end_row = item.row,
-        end_col = #line,
-        hl_group = change_highlights[item.first_status],
-        priority = 160,
-      })
+      vim.api.nvim_buf_set_extmark(bufnr, namespace, item.row,
+        (item.depth or 0) * indent_size, {
+          end_row = item.row,
+          end_col = #line,
+          hl_group = change_highlights[item.first_status],
+          priority = 160,
+        })
     end
 
     if git_options.enabled ~= false and git_options.show_symbols ~= false and item.status then

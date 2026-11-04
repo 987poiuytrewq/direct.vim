@@ -468,6 +468,10 @@ local function same_lines(actual, expected)
   return true
 end
 
+local function indent_size()
+  return require('direct.config').options.indent_size
+end
+
 local tree_planner = require('direct.buffer_tree')({
   fs = fs,
   states = states,
@@ -483,6 +487,7 @@ local tree_planner = require('direct.buffer_tree')({
   read_with_snapshot = listing.read_with_snapshot,
   filter_git_status_lines = filter_git_status_lines,
   action_mod = action_mod,
+  indent_size = indent_size,
 })
 children_integrity = tree_planner.children_integrity
 edited_subtrees = tree_planner.edited_subtrees
@@ -497,6 +502,7 @@ reconcile_undone_materialization = require('direct.buffer_undo_state')({
   refresh_display_ids = refresh_display_ids,
   is_dir_line = is_dir_line,
   recorded_row_text = recorded_row_text,
+  indent_size = indent_size,
   ignore_set = M.ignore_set,
   read = M.read,
   read_with_snapshot = listing.read_with_snapshot,
@@ -886,13 +892,14 @@ function Buffer:list()
   end
 
   local rendered = {}
+  local spaces_per_level = indent_size()
   local function render_children(parent_id, parent_path, depth)
     local expansion = state.expanded[parent_id]
     if not expansion then return end
     for _, child in ipairs(expansion.children) do
       child.kind, child.parent, child.depth = 'child', parent_id, depth
       child.path = M.entry_path(parent_path, child.name)
-      child.text = string.rep('  ', depth) .. child.name
+      child.text = string.rep(' ', spaces_per_level * depth) .. child.name
       state.rows[child.id] = child
       rendered[#rendered + 1] = {
         text = child.text, id = child.id, identity = path_identity(child.path),
@@ -1005,7 +1012,7 @@ function Buffer:expand(row)
         materialized[#materialized + 1] = {
           id = next_id(state), kind = 'child', name = child_name,
           deleted_kind = deleted_children[vim.fs.normalize(child_path)],
-          text = string.rep('  ', (rec.depth or 0) + 1) .. child_name,
+          text = string.rep(' ', indent_size() * ((rec.depth or 0) + 1)) .. child_name,
           parent = rec.id, order = order, depth = (rec.depth or 0) + 1,
           path = child_path, identity = path_identity(child_path),
         }
@@ -1570,12 +1577,13 @@ function Buffer:sync(options)
         if expected_rec and line == expected_rec.text then rec = expected_rec end
       end
       local prefix = line:match('^( *)') or ''
+      local spaces_per_level = indent_size()
       if #prefix > 0 then has_indented = true end
-      if #prefix % 2 ~= 0 then
+      if #prefix % spaces_per_level ~= 0 then
         has_tree_edit = true
         break
       end
-      local depth = #prefix / 2
+      local depth = #prefix / spaces_per_level
       local parent = depth > 0 and stack[depth] or nil
       if rec then
         if rec.kind == 'root' and depth > 0 then
@@ -2117,7 +2125,8 @@ function Buffer:sync(options)
     for row = 0, vim.api.nvim_buf_line_count(bufnr) - 1 do
       local rec = current_row_record(bufnr, row)
       if rec and fs.same_path(rec.path, added_focus_path) then
-        pcall(vim.api.nvim_win_set_cursor, 0, { row + 1, (rec.depth or 0) * 2 })
+        pcall(vim.api.nvim_win_set_cursor, 0,
+          { row + 1, (rec.depth or 0) * indent_size() })
         break
       end
     end
@@ -2372,7 +2381,7 @@ function Buffer:refresh_after_paste(destination, pasted_entry)
   if pasted_row then
     local record = current_row_record(bufnr, pasted_row - 1)
     local col = record and record.kind == 'child'
-      and (record.depth or 0) * 2 or 0
+      and (record.depth or 0) * indent_size() or 0
     pcall(vim.api.nvim_win_set_cursor, 0, { pasted_row, col })
     local expanded, expand_err = self:expand(pasted_row)
     if expanded == nil then return nil, expand_err end
