@@ -1,40 +1,63 @@
-# Scripted demos
+# Scripted demo
 
-`demo.sh` records one continuous, repeatable terminal tour of Direct with
-asciinema. The opening listing is a menu of three sections; the script enters
-each section, demonstrates its workflow, and returns to the menu:
+`demo.sh` records a one-minute tour of direct.vim with asciinema, for the top
+of the project README.
 
-- `01-file-edits/` — rename, create, delete, and filesystem undo/redo.
-- `02-browse-and-move/` — expand/collapse a folder and move a child to its parent.
-- `03-copy-and-paste/` — copy a directory tree using `yy` and `p`.
+## The tour
 
-The recording sends normal terminal keys for navigation and edits; `:w` is the
-only Ex command it types. With the demo's `map_default_keys = true`, `u` and
-`<C-r>` invoke filesystem undo and redo. Use `:undo` and `:redo` for listing text
-history.
+The tour works on a small Neovim plugin project, `~/my-plugin`. It's a Git
+repository with a couple of changed files, so Git status shows from the first
+frame, and its `build/` and `debug.log` are ignored and so hidden.
 
-Each section uses a small fixture with action-oriented names such as
-`rename-me.txt`, `delete-me.txt`, and `move-from/move-me.txt`. The file-edit
-section also shows a hidden file and an expandable hidden folder. The tour uses a
-disposable Git repository and isolated `XDG_DATA_HOME`; it does not touch the
-user's files or Direct data. Both file and folder icons are enabled (a Nerd Font
-is needed to render them), and Git status colors are enabled.
+Each scene has a caption that names what's about to happen:
+
+1. **Edit your filesystem like a buffer.** The listing, with icons and Git
+   status.
+2. **Browse a project as a tree.** `zo` expands `lua/` and `lua/my-plugin/`.
+3. **Rename a file by editing its name.** `cw` renames `utils.lua` to
+   `strings.lua`, and `:w` applies it.
+4. **Rename many at once.** `:%s/_test/_spec/` renames three test files in one
+   save.
+5. **Create a file, parent folders included.** A new line,
+   `docs/guide/getting-started.md`, creates both folders and the file.
+6. **Delete a line to delete the file.** `dd` on `scratch.txt`, then `:w`.
+7. **Undo it on disk.** `u` brings `scratch.txt` back.
+8. **Redo it.** `Ctrl-r` deletes it again.
+9. **Copy whole folders.** `yy` and `p` copy `examples/minimal/`, and the
+   "already exists" prompt names the copy `examples/advanced/`.
+10. **Show only what changed.** `gs` shows everything the tour changed.
+11. **Stage a file.** `ga` stages `README.md`.
+12. **`:help direct.vim`.** `gs` returns to the full listing.
+
+## Files
+
+- `drive.expect` records the tour. It types the keys into asciinema's
+  terminal, so the recording's keystroke overlay shows them. Captions are
+  sent to Neovim over its `--listen` socket, so they don't show up as
+  keystrokes.
+- `tour.vim` is the same tour, run headlessly by `--check`. Keep the two in
+  step: their numbered sections match.
+- `init.lua` is the demo's Neovim config. It uses kickstart.nvim's options and
+  the plugins most setups have: tokyonight, lualine, bufferline and
+  nvim-web-devicons. It also shortens paths in messages to `~/my-plugin`.
+- `demo.sh` creates the project, downloads the plugins, runs the tour, and
+  checks the project ends up as expected.
+
+## Usage
 
 ```sh
-./demo/demo.sh
-./demo/demo.sh --force
+./demo/demo.sh            # record demo/casts/tour.cast
+./demo/demo.sh --force    # replace an existing recording
+./demo/demo.sh --check    # play the tour headlessly and check the result
 ```
 
-Recordings are written to `demo/casts/` by default. Set `CAST_DIR` to choose a
-different directory. Existing recordings are never overwritten unless `--force`
-is supplied. Recordings capture actual terminal input, so the asciinema player
-can show its keystroke overlay. The tour only types safe names into its disposable
-fixture. Run it headlessly and validate its filesystem result without asciinema
-or Expect using:
+Recording needs Neovim 0.12+, Git, asciinema 3 and Expect; `--check` needs only
+Neovim and Git. Use a terminal font with Nerd Font icons.
 
-```sh
-./demo/demo.sh --check
-```
+The first run downloads the plugins, at pinned versions, into `demo/.plugins/`
+(ignored by Git). Set `PLUGIN_DIR` to keep them somewhere else. Without them,
+the demo uses Neovim's default colour scheme and a plain status line.
 
-The fixture and plugin data are removed after each run. `nvim` and Neovim 0.12+
-and Git are required for `--check`; recording also requires asciinema and Expect.
+Recordings go to `demo/casts/` (also ignored); set `CAST_DIR` to change that.
+The project and the demo's data directory are temporary and removed after each
+run, so the tour never touches your own files or direct.vim history.

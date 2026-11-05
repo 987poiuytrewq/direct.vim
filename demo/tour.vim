@@ -1,94 +1,86 @@
+" The headless version of the tour that drive.expect records. Keep the two in
+" step: each section here matches a section there.
 let v:errmsg = ''
 execute 'source ' . fnameescape($DIRECT_DEMO_SCRIPT_DIR . '/util.vim')
 
-" The root listing is a simple menu of the three demo sections.
+" 1. The project listing: icons, Git status, and no ignored files.
+call Caption('direct.vim: edit your filesystem like a buffer')
 call Pause(1800)
 
-" Section 1: rename, save, then use u/C-r for filesystem undo/redo.
-call DemoFind('01-file-edits/$')
-call Mapped("\<CR>")
-call Pause(1200)
-
-" Dotfiles and dot-directories are visible; expand the hidden folder in place.
-call DemoFind('\.demo-settings/$')
+" 2. Browse a project as a tree.
+call Caption('Browse a project as a tree, with Git status')
+call DemoFind('^lua/$')
 call Mapped('zo')
-call Pause()
-call DemoFind('\.demo-settings/$')
-call Mapped('zc')
-call Pause()
+call Input('j')
+call Mapped('zo')
+call WaitFor('utils.lua')
 
-call DemoFind('rename-me.txt$')
-call Type('c$', 'A', 'renamed-file.txt')
+" 3. Rename one file by editing its name.
+call Caption('Rename a file by editing its name')
+call DemoFind('utils\.lua$')
+call Input('cwstrings')
 write
-call Pause()
-call Mapped('u')
-call Pause()
-call Mapped("\<C-r>")
-call Pause()
-call Input('G')
-call Input('o')
-call Type('c$', 'A', 'created-folder/')
+call WaitFor('strings.lua')
+
+" 4. Rename several files with :s.
+call Caption('Rename many at once, with any Vim command')
+call DemoFind('^tests/$')
+call Mapped('zo')
+call WaitFor('config_test.lua')
+%s/_test/_spec/
 write
-call Pause()
-call Input('G')
-call Input('o')
-call Type('c$', 'A', 'created-file.txt')
+call WaitFor('config_spec.lua')
+call Mapped('zM')
+call WaitFor('config_spec.lua', 0)
+
+" 5. Create a file, with its parent folders.
+call Caption('Add a line to create a file, parent folders included')
+call Input('Go' . 'docs/guide/getting-started.md')
 write
-call Pause()
-call DemoFind('delete-me.txt$')
+call WaitFor('getting-started.md')
+
+" 6-8. Delete a file, undo the deletion on disk, then redo it.
+call Caption('Delete a line to delete the file')
+call DemoFind('scratch\.txt$')
 call Input('dd')
 write
-call Pause()
+call WaitFor('scratch.txt', 0)
+call Caption('Changed your mind? u undoes it on disk')
 call Mapped('u')
-call Pause()
+call WaitFor('scratch.txt')
+call Caption('...and Ctrl-r redoes it')
 call Mapped("\<C-r>")
-call Pause()
-call Mapped('-')
-call Pause()
+call WaitFor('scratch.txt', 0)
 
-" Section 2: expand a folder and move its child to the parent with <<.
-call DemoFind('02-browse-and-move/$')
-call Mapped("\<CR>")
-call Pause(1200)
-call DemoFind('move-from/$')
+" 9. Copy a folder. Pasting next to the original asks for a new name. The
+" recording types the answer into the prompt; headless, answer it directly.
+call Mapped('zM')
+call Caption('Copy whole folders with yy and p')
+call DemoFind('^examples/$')
 call Mapped('zo')
-call Pause()
 call Input('j')
-call Input('j')
-call Input('<<')
-write
-call Pause()
-call DemoFind('move-from/$')
-call Mapped('zc')
-call Pause()
-call Mapped('zo')
-call Pause()
-call Mapped('-')
-call Pause()
-
-" Section 3: copy a directory tree into another folder with yy and p.
-call DemoFind('03-copy-and-paste/$')
-call Mapped("\<CR>")
-call Pause(1200)
-call DemoFind('copy-from/$')
 call Mapped('yy')
-call Pause()
-call DemoFind('copy-to/$')
+call Input('k')
+lua _G.demo_ui_input = vim.ui.input
+lua vim.ui.input = function(_, on_confirm) on_confirm('advanced') end
 call Mapped('p')
-call Pause()
-call DemoFind('^  copy-from/$')
-call Mapped('zc')
-call Pause()
-call Mapped('zo')
-call Pause()
-call DemoFind('examples/$')
-call Mapped('zo')
-call Pause()
-call Mapped('u')
-call Pause()
-call Mapped("\<C-r>")
-call Pause()
-call Mapped('-')
-call Pause()
+call WaitFor('advanced/')
+lua vim.ui.input = _G.demo_ui_input
+
+" 10-11. Git: show only what changed, then stage a file.
+call Mapped('zM')
+call Caption('gs shows only what changed')
+call Mapped('gs')
+call WaitFor('getting-started.md')
+call Caption('ga stages a file, gr unstages it')
+call DemoFind('README\.md$')
+call Mapped('ga')
+call luaeval('vim.wait(5000, function() return vim.fn.system({"git", "diff", "--cached", "--name-only"}):find("README.md", 1, true) ~= nil end, 50)')
+
+" 12. Back to the full listing.
+call Caption(':help direct.vim')
+call Mapped('gs')
+call WaitFor('LICENSE')
+call Pause(1500)
 
 call DemoFinish()

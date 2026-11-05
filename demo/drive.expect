@@ -1,23 +1,21 @@
 #!/usr/bin/expect -f
+# Records the demo tour. Keep this in step with tour.vim, its headless twin:
+# each numbered section here matches one there.
 
 set timeout 20
 log_user 0
 
-if {$argc != 4} {
-  puts stderr "usage: drive.expect ASCIINEMA CAST NVIM_COMMAND FORCE"
+if {$argc != 6} {
+  puts stderr "usage: drive.expect ASCIINEMA CAST NVIM_COMMAND FORCE NVIM SOCKET"
   exit 2
 }
 
-set asciinema [lindex $argv 0]
-set cast_file [lindex $argv 1]
-set nvim_command [lindex $argv 2]
-set force [lindex $argv 3]
+lassign $argv asciinema cast_file nvim_command force nvim socket
 
 set env(TERM) xterm-256color
 set env(NVIM_TEST) 1
 
 proc wait_for {pattern} {
-  global timeout
   expect {
     -re $pattern {}
     timeout {
@@ -39,7 +37,7 @@ proc key {keys {delay 350}} {
 proc type_text {text} {
   foreach character [split $text ""] {
     send -- $character
-    after 160
+    after 90
   }
 }
 
@@ -56,103 +54,137 @@ proc write_listing {} {
   after 900
 }
 
+# Show a caption without typing anything: it is set over Neovim's socket, so
+# it doesn't appear in the recording's keystroke overlay. An empty text hides it.
+proc caption {text} {
+  global nvim socket
+  set quoted "'[string map {' ''} $text]'"
+  if {[catch {exec $nvim --server $socket --remote-expr "v:lua.DemoCaption($quoted)"} err]} {
+    puts stderr "demo: could not show caption: $err"
+    exit 1
+  }
+}
+
 set record_args [list $asciinema rec --capture-input --window-size 100x30 \
-  --title "Direct: browse and edit files" -c $nvim_command --return]
+  --title "direct.vim: edit your filesystem like a buffer" -c $nvim_command --return]
 if {$force eq "1"} {
   lappend record_args --overwrite
 }
 lappend record_args $cast_file
 eval spawn -noecho $record_args
 
-# Section menu.
-wait_for {01-file-edits/}
-after 1800
-key "\r"
-wait_for {rename-me\.txt}
+# 1. The project listing: icons, Git status, and no ignored files.
+wait_for {scratch\.txt}
+after 500
+caption "direct.vim: edit your filesystem like a buffer"
+after 3000
 
-# Hidden entries are visible by default; expand the hidden folder in place.
-find_row {\.demo-settings/}
-key "zo"
-wait_for {\.editor-settings}
+# 2. Browse a project as a tree.
+caption "Browse a project as a tree, with Git status"
 after 1000
-key "zc"
-after 600
+find_row "^lua"
+key "zo"
+wait_for {my-plugin/}
+key "j"
+key "zo"
+wait_for {utils\.lua}
+after 2200
 
-# 1. Rename and save, then undo/redo the filesystem action with u/C-r.
-key "G"
-key "c$" 250
-type_text "renamed-file.txt"
-key "\033" 450
+# 3. Rename one file by editing its name.
+caption "Rename a file by editing its name"
+after 1000
+find_row "utils"
+key "cw" 250
+type_text "strings"
+key "\033" 600
 write_listing
-key "u"
-after 1100
-key "\022"
-after 1100
+wait_for {strings\.lua}
+after 1800
 
+# 4. Rename several files with :s. 'inccommand' previews the result live.
+caption "Rename many at once, with any Vim command"
+after 1000
+find_row "^tests"
+key "zo"
+wait_for {config_test\.lua}
+after 900
+key ":" 150
+type_text "%s/_test/_spec/"
+after 900
+key "\r" 600
+write_listing
+wait_for {config_spec\.lua}
+after 1800
+key "zM" 800
+
+# 5. Create a file, with its parent folders.
+caption "Add a line to create a file, parent folders included"
+after 1000
 key "G"
 key "o"
-type_text "created-folder/"
-key "\033" 450
+type_text "docs/guide/getting-started.md"
+key "\033" 600
 write_listing
+wait_for {getting-started\.md}
+after 2200
 
-key "G"
-key "o"
-type_text "created-file.txt"
-key "\033" 450
+# 6-8. Delete a file, undo the deletion on disk, then redo it.
+caption "Delete a line to delete the file"
+after 1000
+find_row "scratch"
+key "dd" 500
 write_listing
-
-find_row "delete-me.txt"
-key "dd" 400
-write_listing
+after 1300
+caption "Changed your mind? u undoes it on disk"
+after 1200
 key "u"
-after 1100
+wait_for {scratch\.txt}
+after 1800
+caption "...and Ctrl-r redoes it"
+after 1000
 key "\022"
-after 1100
-key "-"
-wait_for {02-browse-and-move/}
+after 1800
 
-# 2. Expand a folder and move its child to the parent with the << keys.
-key "gg"
+# 9. Copy a folder. Pasting next to the original asks for a new name; the
+# prompt starts with the old name, so clear it with Ctrl-u first.
+key "zM" 800
+caption "Copy whole folders with yy and p"
+after 1000
+find_row "^examples"
+key "zo"
+wait_for {minimal/}
 key "j"
+key "yy" 900
+key "k"
+key "p"
+wait_for {already exists}
+after 1100
+key "\025" 300
+type_text "advanced"
+after 400
 key "\r"
-wait_for {move-from/}
-key "gg"
-key "zo"
-wait_for {move-me\.txt}
-key "j"
-key "j"
-key "<<" 400
-write_listing
-key "gg"
-key "zc"
-after 900
-key "zo"
-after 900
-key "-"
-wait_for {03-copy-and-paste/}
+wait_for {advanced/}
+after 2200
 
-# 3. Copy a directory tree into another folder with yy and p.
-key "gg"
-key "j"
-key "j"
-key "\r"
-wait_for {copy-from/}
-key "gg"
-key "yy"
-key "j"
-key "p" 600
-wait_for {copy-from/}
-key "j"
-key "zo"
-key "j"
-key "zo"
-wait_for {nested-example\.txt}
-key "u"
-after 1100
-key "\022"
-after 1100
-key "-"
-wait_for {03-copy-and-paste/}
+# 10-11. Git: show only what changed, then stage a file.
+key "zM" 800
+caption "gs shows only what changed"
+after 1000
+key "gs"
+wait_for {getting-started\.md}
+after 2500
+caption "ga stages a file, gr unstages it"
+after 1000
+find_row "README"
+key "ga"
+after 2200
+
+# 12. Back to the full listing.
+caption ":help direct.vim"
+key "gs"
+wait_for {LICENSE}
+after 3500
+caption ""
 key "ZQ" 500
 
 expect eof

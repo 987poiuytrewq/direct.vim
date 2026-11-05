@@ -2,6 +2,7 @@
 .rocks/
 coverage/
 demo/casts/
+demo/.plugins/
 
 .DS_Store
 

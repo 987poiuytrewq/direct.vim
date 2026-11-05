@@ -7,6 +7,7 @@ NVIM=${NVIM:-nvim}
 ASCIINEMA=${ASCIINEMA:-asciinema}
 EXPECT=${EXPECT:-expect}
 CAST_DIR=${CAST_DIR:-"$SCRIPT_DIR/casts"}
+PLUGIN_DIR=${PLUGIN_DIR:-"$SCRIPT_DIR/.plugins"}
 MODE=record
 FORCE=0
 
@@ -14,15 +15,16 @@ usage() {
   cat <<'EOF'
 Usage: demo.sh [--check] [--force]
 
-Records one continuous tour organized as three folders you enter in sequence:
-file edits, nested moves, and directory copy/paste.
+Records one continuous tour of a small Neovim plugin project: browsing,
+renaming, creating, deleting with undo, copying folders, and Git.
 
 Options:
   --check   run the tour headlessly and verify its filesystem results;
             does not require asciinema and does not create a recording
   --force   replace an existing recording
 
-Set CAST_DIR to choose another recording directory.
+Set CAST_DIR to choose another recording directory, and PLUGIN_DIR to choose
+where the demo's plugins are downloaded (default: demo/.plugins).
 EOF
 }
 
@@ -57,70 +59,97 @@ if ! command -v git >/dev/null 2>&1; then
   exit 1
 fi
 
-create_fixture() {
-  local workspace=$1
+# The plugins most Neovim setups have, so the demo looks familiar. They are
+# downloaded once, at pinned versions, into PLUGIN_DIR (ignored by Git).
+PLUGINS=(
+  "tokyonight.nvim https://github.com/folke/tokyonight.nvim v4.14.1"
+  "nvim-web-devicons https://github.com/nvim-tree/nvim-web-devicons v0.100"
+  "lualine.nvim https://github.com/nvim-lualine/lualine.nvim 221ce6b2d999187044529f49da6554a92f740a96"
+  "bufferline.nvim https://github.com/akinsho/bufferline.nvim v4.9.1"
+)
 
-  mkdir -p "$workspace/01-file-edits" \
-    "$workspace/02-browse-and-move/move-from" \
-    "$workspace/02-browse-and-move/move-to" \
-    "$workspace/03-copy-and-paste/copy-from/examples" \
-    "$workspace/03-copy-and-paste/copy-to"
-  mkdir -p "$workspace/01-file-edits/.demo-settings"
-  printf 'Visible hidden-file example.\n' > "$workspace/01-file-edits/.env.example"
-  printf 'Visible hidden-folder example.\n' \
-    > "$workspace/01-file-edits/.demo-settings/.editor-settings"
-  printf 'This file is modified in Git.\n' > "$workspace/01-file-edits/edit-me.txt"
-  printf 'Rename this file in the tour.\n' > "$workspace/01-file-edits/rename-me.txt"
-  printf 'Delete, then restore, this file.\n' > "$workspace/01-file-edits/delete-me.txt"
-  printf 'Copy this folder.\n' > "$workspace/03-copy-and-paste/copy-from/copy-me.txt"
-  printf 'This nested example comes along too.\n' \
-    > "$workspace/03-copy-and-paste/copy-from/examples/nested-example.txt"
-  printf 'Move this file into move-to/.\n' \
-    > "$workspace/02-browse-and-move/move-from/move-me.txt"
-
-  git -C "$workspace" init -q
-  git -C "$workspace" config user.name 'Direct Demo'
-  git -C "$workspace" config user.email 'direct-demo@example.invalid'
-  git -C "$workspace" add 01-file-edits 02-browse-and-move 03-copy-and-paste
-  git -C "$workspace" commit -qm 'Create demo repository'
-  printf 'This file has changed since the Git commit.\n' \
-    > "$workspace/01-file-edits/edit-me.txt"
-  printf 'A new, untracked file inside move-from/.\n' \
-    > "$workspace/02-browse-and-move/move-from/added-in-git.txt"
+install_plugins() {
+  local entry name url ref
+  mkdir -p "$PLUGIN_DIR"
+  for entry in "${PLUGINS[@]}"; do
+    read -r name url ref <<<"$entry"
+    [[ -d "$PLUGIN_DIR/$name" ]] && continue
+    echo "Downloading $name"
+    if ! git clone --quiet --filter=blob:none "$url" "$PLUGIN_DIR/$name" \
+      || ! git -C "$PLUGIN_DIR/$name" checkout --quiet "$ref"; then
+      rm -rf -- "${PLUGIN_DIR:?}/$name"
+      echo "demo: could not download $name; the demo will use a plainer look" >&2
+    fi
+  done
 }
 
+# A small Neovim plugin project: committed to Git, then changed a little, so
+# the very first frame shows icons, Git status and hidden ignored files.
+create_fixture() {
+  local root=$1
+  mkdir -p "$root"/{.github/workflows,build,doc,examples/minimal,lua/my-plugin,plugin,tests}
+
+  printf 'name: CI\non: [push]\n' > "$root/.github/workflows/ci.yml"
+  printf 'build/\n*.log\n' > "$root/.gitignore"
+  printf 'MIT License\n' > "$root/LICENSE"
+  printf '# my-plugin\n\nA small Neovim plugin.\n' > "$root/README.md"
+  printf '*my-plugin.txt*\n' > "$root/doc/my-plugin.txt"
+  printf "require('my-plugin').setup()\n" > "$root/examples/minimal/init.lua"
+  printf 'return {}\n' > "$root/lua/my-plugin/init.lua"
+  printf 'return { enabled = true }\n' > "$root/lua/my-plugin/config.lua"
+  printf 'return {}\n' > "$root/lua/my-plugin/utils.lua"
+  printf "require('my-plugin')\n" > "$root/plugin/my-plugin.lua"
+  local name
+  for name in config init utils; do
+    printf "describe('%s', function() end)\n" "$name" > "$root/tests/${name}_test.lua"
+  done
+
+  git -C "$root" init -q
+  git -C "$root" config user.name 'Demo'
+  git -C "$root" config user.email 'demo@example.invalid'
+  git -C "$root" add -A
+  git -C "$root" commit -qm 'Initial commit'
+
+  # Ignored by .gitignore, so hidden from the listing.
+  printf 'binary\n' > "$root/build/my-plugin.so"
+  printf 'log\n' > "$root/debug.log"
+  # Changes for the Git status column to show.
+  printf '# my-plugin\n\nA small, fast Neovim plugin.\n' > "$root/README.md"
+  printf 'return { enabled = true, verbose = false }\n' > "$root/lua/my-plugin/config.lua"
+  printf 'Ideas:\n' > "$root/scratch.txt"
+}
+
+# The project as the tour should leave it.
 validate_fixture() {
-  local workspace=$1
-  local git_status
-
-  [[ -f "$workspace/01-file-edits/renamed-file.txt" \
-    && -f "$workspace/01-file-edits/created-file.txt" \
-    && -d "$workspace/01-file-edits/created-folder" ]] \
-    && [[ ! -e "$workspace/01-file-edits/rename-me.txt" \
-      && ! -e "$workspace/01-file-edits/delete-me.txt" ]] \
-    && [[ -f "$workspace/02-browse-and-move/move-me.txt" \
-      && ! -e "$workspace/02-browse-and-move/move-from/move-me.txt" ]] \
-    && [[ -f "$workspace/03-copy-and-paste/copy-to/copy-from/copy-me.txt" \
-      && -f "$workspace/03-copy-and-paste/copy-to/copy-from/examples/nested-example.txt" ]] \
-    || { echo 'demo: tour did not produce the expected filesystem changes' >&2; return 1; }
-
-  git_status=$(git -C "$workspace" status --porcelain)
-  [[ "$git_status" == *' M 01-file-edits/edit-me.txt'* \
-    && "$git_status" == *'?? 02-browse-and-move/move-from/added-in-git.txt'* ]] \
-    || { echo 'demo: tour is missing its expected Git changes' >&2; return 1; }
+  local root=$1 path failed=0
+  for path in \
+    lua/my-plugin/strings.lua \
+    tests/config_spec.lua tests/init_spec.lua tests/utils_spec.lua \
+    docs/guide/getting-started.md \
+    examples/minimal/init.lua examples/advanced/init.lua; do
+    [[ -e "$root/$path" ]] || { echo "demo: expected $path to exist" >&2; failed=1; }
+  done
+  for path in lua/my-plugin/utils.lua tests/config_test.lua scratch.txt; do
+    [[ ! -e "$root/$path" ]] || { echo "demo: expected $path to be gone" >&2; failed=1; }
+  done
+  git -C "$root" diff --cached --name-only | grep -qx README.md \
+    || { echo 'demo: expected README.md to be staged' >&2; failed=1; }
+  ((failed == 0))
 }
 
 run_tour() (
-  local sandbox workspace cast_file command
+  local sandbox workspace cast_file command socket
   sandbox=$(mktemp -d "${TMPDIR:-/tmp}/direct-demo.XXXXXX")
   trap 'rm -rf -- "$sandbox"' EXIT
-  workspace="$sandbox/workspace"
+  workspace="$sandbox/my-plugin"
   mkdir -p "$workspace" "$sandbox/data"
   create_fixture "$workspace"
 
   export XDG_DATA_HOME="$sandbox/data"
   export DIRECT_DEMO_REPO="$REPO_ROOT"
   export DIRECT_DEMO_SCRIPT_DIR="$SCRIPT_DIR"
+  export DIRECT_DEMO_WORKSPACE="$workspace"
+  export DIRECT_DEMO_PLUGINS="$PLUGIN_DIR"
 
   if [[ "$MODE" == check ]]; then
     echo 'Checking the continuous demo tour'
@@ -135,14 +164,17 @@ run_tour() (
       echo "demo: recording already exists: $cast_file (pass --force to replace it)" >&2
       return 1
     fi
-    printf -v command '%q ' "$NVIM" -u "$SCRIPT_DIR/init.lua" -- "$workspace"
+    # The socket lets drive.expect show captions without typing them.
+    socket="$sandbox/nvim.sock"
+    printf -v command '%q ' "$NVIM" --listen "$socket" -u "$SCRIPT_DIR/init.lua" -- "$workspace"
     echo "Recording the demo tour -> $cast_file"
     "$EXPECT" -f "$SCRIPT_DIR/drive.expect" \
-      "$ASCIINEMA" "$cast_file" "$command" "$FORCE"
+      "$ASCIINEMA" "$cast_file" "$command" "$FORCE" "$NVIM" "$socket"
   fi
 
   validate_fixture "$workspace"
   echo 'Passed: demo tour'
 )
 
+install_plugins
 run_tour

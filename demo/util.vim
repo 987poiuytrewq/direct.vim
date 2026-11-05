@@ -45,3 +45,23 @@ function! Type(entry, position, string)
   endfor
   call Pause()
 endfunction
+
+function! Caption(text) abort
+  call v:lua.DemoCaption(a:text)
+endfunction
+
+" WaitFor(text[, present]) waits, while processing events, until a line of the
+" listing contains text (or, with present = 0, until none does). Paste and Git
+" commands finish asynchronously, so the next step waits for their result.
+function! WaitFor(text, ...) abort
+  let present = a:0 > 0 ? a:1 : 1
+  let found = luaeval('vim.wait(10000, function() '
+        \ . 'for _, line in ipairs(vim.api.nvim_buf_get_lines(0, 0, -1, false)) do '
+        \ . 'if line:find(_A[1], 1, true) then return _A[2] end end '
+        \ . 'return not _A[2] end, 50)', [a:text, present ? v:true : v:false])
+  if !found
+    echoerr 'demo: timed out waiting for ' . (present ? '' : 'no ') . a:text
+    cquit 1
+  endif
+  redraw!
+endfunction
