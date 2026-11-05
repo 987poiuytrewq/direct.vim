@@ -3,12 +3,21 @@
 local H = require('tests.support.harness')
 local buffer = require('direct.buffer')
 local fs = require('direct.fs')
+local platform = require('direct.platform')
 
 local function clean_buffers()
   pcall(vim.cmd, '%bwipeout!')
 end
 
 H.describe('platform path compatibility', function()
+  H.it('normalizes identity paths with and without a trailing directory separator', function()
+    local sb = H.sandbox()
+    local directory = H.mkdir(sb.root, 'identity-dir')
+    local separator = package.config:sub(1, 1)
+    H.assert_eq(platform.identity_path(directory),
+      platform.identity_path(directory .. separator))
+  end)
+
   H.it('renders directory rows with the native separator and uses native paths', function()
     clean_buffers()
     local separator = package.config:sub(1, 1)

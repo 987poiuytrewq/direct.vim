@@ -41,7 +41,11 @@ function M.canonical_path(path)
 end
 
 function M.identity_path(path)
-  return M.canonical_path(path):lower()
+  local normalized = M.canonical_path(path)
+  if normalized:match('^%a:/$') then return normalized:lower() end
+  normalized = normalized:gsub('/+$', '')
+  if normalized == '' then normalized = '/' end
+  return normalized:lower()
 end
 
 function M.validation_path(path)
