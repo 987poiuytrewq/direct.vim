@@ -923,7 +923,7 @@ H.describe('LSP file operations', function()
         vim.api.nvim_buf_set_lines(0, 0, -1, false, { name })
         vim.bo.modified = true
         local synced, sync_err = listing:sync()
-        H.assert_true(synced == true, tostring(sync_err))
+        H.assert_true(synced == true, tostring(sync_err) .. '\n' .. H.messages())
         H.assert_true(vim.wait(300, function() return not pending.is_pending() end, 5))
       end
       rename_to('first.txt')
