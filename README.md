@@ -64,6 +64,13 @@ summary. The normal `make test` run does not need LuaRocks or LuaCov. CI runs
 downloadable artifact, and displays the coverage summary directly in the run
 summary.
 
+## Scripted demos
+
+Record the single scripted terminal tour with asciinema using
+`./demo/demo.sh`. Run it headlessly and verify its filesystem results without
+asciinema using `./demo/demo.sh --check`. See [`demo/README.md`](demo/README.md)
+for details.
+
 ## Install
 
 Install with your favourite package manager. For example, with
@@ -79,7 +86,7 @@ Plug '987poiuytrewq/direct.vim'
 
 ```lua
 require('direct').setup({
-  map_default_keys = true, -- set false to install no default mappings
+  map_default_keys = true, -- false disables standard mappings; fold keys remain
   show_folder_icons = false, -- opt in to Nerd Font folder icons
   show_file_icons = false, -- opt in to a generic Nerd Font file icon
   max_recursive_expand_depth = false, -- false means unlimited
@@ -229,11 +236,11 @@ directory in the same edit to move them out first. Moving or renaming a director
 together with separate edits to its descendants must be saved in separate syncs
 when their filesystem action order would otherwise be ambiguous.
 
-Expansion and collapse remain ordinary text-undo changes. `u` after a collapse
-restores the child rows and their identities; `<C-r>` re-applies the collapse.
-Redo restores materialized identities only when the original undo sequence and
-exact directory snapshot still match. A changed or ambiguous snapshot remains
-unsafe to save, open, or yank.
+Expansion and collapse remain ordinary text-undo changes. Use `:undo` after a
+collapse to restore child rows and their identities; `:redo` re-applies the
+collapse. Redo restores materialized identities only when the original undo
+sequence and exact directory snapshot still match. A changed or ambiguous
+snapshot remains unsafe to save, open, or yank.
 Entry names beginning with whitespace and names that could escape the listed
 directory (such as `../x` or `a/b`) are refused at save time.
 
@@ -243,13 +250,13 @@ verified; this documentation does not claim Windows support.
 
 ### Undo / Redo
 
-In a direct buffer, `u` and `<C-r>` perform Neovim text undo and redo. The
-filesystem action history is separate: use `:DirectUndo` and `:DirectRedo` to
-reverse or re-apply actions a sync or paste performed; `:DirectUndo` right after
-a paste, for example, undoes the paste.
+When `map_default_keys` is enabled, `u` and `<C-r>` undo and redo filesystem
+actions. They reverse or re-apply actions performed by a sync or paste; `u` right
+after a paste, for example, unpastes it. The equivalent commands are
+`:DirectUndo` and `:DirectRedo`.
 
-Text undo only reverses buffer-line changes; it never renames, creates, deletes
-or restores anything on disk. Only `:DirectUndo` reverses a filesystem action.
+Listing text undo and redo are separate: use `:undo` and `:redo` to reverse
+buffer-line changes. They do not change the filesystem.
 
 ## Yank / Paste
 
@@ -264,8 +271,8 @@ If an entry with the same name already exists, you are prompted
 another name; an empty answer skips that entry and leaves the original
 untouched.
 
-Yank and paste share the undo/redo history, so they can be undone like any other
-filesystem change.
+Yank and paste share the filesystem undo/redo history, so `u` and `<C-r>` undo
+and redo them like any other filesystem change.
 
 Undoing a paste first verifies each pasted file, directory tree, or symlink
 against the current register copy. If any target is missing, changed, unreadable,
@@ -323,7 +330,7 @@ Global (normal mode), installed when `map_default_keys` is true:
 | `-` | `:DirectListBuffer` |
 
 Buffer-local, in a direct buffer (standard actions follow `map_default_keys`;
-`zo`/`za`/`zc` are always installed):
+fold commands are always installed):
 
 | Mode | Key | Action |
 |---|---|---|
@@ -332,15 +339,15 @@ Buffer-local, in a direct buffer (standard actions follow `map_default_keys`;
 | normal | `za` | expand or collapse one directory |
 | normal | `zc` | collapse one directory |
 | normal | `-` | open `../` (the parent directory) |
-| normal | `u` | Neovim text undo |
-| normal | `<C-r>` | Neovim text redo |
+| normal | `u` | `:DirectUndo` (filesystem undo) |
+| normal | `<C-r>` | `:DirectRedo` (filesystem redo) |
 | normal | `yy`, `Y` | `:DirectYank` (current line) |
 | visual | `y` | `:DirectYank` (selected range) |
 | normal | `p`, `P` | `:DirectPaste` |
 
 The buffer-local `-` wins over the global `-` inside a direct buffer.
 `zo`, `za`, and `zc` are installed for every direct listing, independently of
-`map_default_keys`.
+`map_default_keys`. Listing text undo/redo use `:undo` and `:redo`.
 
 ## Data directory
 

@@ -527,15 +527,16 @@ H.describe('buffer: listing', function()
 
     listing:collapse(1)
     H.assert_buf_eq({ 'sub/' }, 0, 'collapse removes child rows')
-    H.assert_eq(vim.fn.maparg('<C-r>', 'n', false, true).rhs, '<Cmd>redo<CR>',
-      'direct buffer maps redo to Neovim text redo')
-    vim.api.nvim_feedkeys('u', 'mx', false)
+    H.assert_eq(vim.fn.maparg('u', 'n', false, true).rhs, '<Cmd>DirectUndo<CR>',
+      'direct buffer maps u to filesystem undo')
+    H.assert_eq(vim.fn.maparg('<C-r>', 'n', false, true).rhs, '<Cmd>DirectRedo<CR>',
+      'direct buffer maps redo to filesystem redo')
+    vim.cmd('undo')
     vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
     H.assert_buf_eq({ 'sub/', '  inside.txt' }, 0, 'undo restores exact child rows')
     H.assert_eq(vim.api.nvim_buf_get_extmarks(bufnr, row_ns, 0, -1, {}), before_marks,
       'undo restores the exact row identity marks')
-    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<C-r>', true, false, true),
-      'mx', false)
+    vim.cmd('redo')
     vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
     H.assert_buf_eq({ 'sub/' }, 0, 'redo re-collapses without duplicate rows')
     H.assert_eq(vim.api.nvim_buf_line_count(bufnr), 1, 'redo leaves one directory row')
@@ -552,18 +553,16 @@ H.describe('buffer: listing', function()
     listing:expand(1)
     listing:collapse(1)
 
-    vim.api.nvim_feedkeys('u', 'mx', false)
+    vim.cmd('undo')
     vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
     H.assert_buf_eq({ 'sub/', '  inside.txt' }, 0, 'first undo restores collapsed rows')
-    vim.api.nvim_feedkeys('u', 'mx', false)
+    vim.cmd('undo')
     vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
     H.assert_buf_eq({ 'sub/' }, 0, 'second undo removes the original expansion normally')
-    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<C-r>', true, false, true),
-      'mx', false)
+    vim.cmd('redo')
     vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
     H.assert_buf_eq({ 'sub/', '  inside.txt' }, 0, 'redo restores expansion once')
-    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<C-r>', true, false, true),
-      'mx', false)
+    vim.cmd('redo')
     vim.api.nvim_exec_autocmds('TextChanged', { buffer = bufnr })
     H.assert_buf_eq({ 'sub/' }, 0, 'redo then reapplies the collapse')
   end)

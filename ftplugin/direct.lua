@@ -1,6 +1,6 @@
--- ftplugin/direct.lua -- installs the nine buffer-local mappings into the current
--- buffer when `map_default_keys` is true. The table itself lives in
--- `direct.config` so setup() can clear and restore already-open buffers.
+-- ftplugin/direct.lua -- installs the default buffer-local mappings when
+-- `map_default_keys` is true. The table lives in `direct.config` so setup() can
+-- clear and restore already-open buffers.
 
 -- Only installs mappings. Under `nvim --headless -l` this file loads only because
 -- the harness ran `filetype plugin on`; with filetype plugins off it never loads.

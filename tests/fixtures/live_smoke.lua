@@ -12,6 +12,17 @@ local function run()
       'map_default_keys=false left the global - mapping installed')
     assert(not has_lhs(vim.api.nvim_buf_get_keymap(0, 'n'), '-'),
       'map_default_keys=false left a buffer-local - mapping installed')
+    local maps = vim.api.nvim_buf_get_keymap(0, 'n')
+    local direct_undo, direct_redo = false, false
+    for _, mapping in ipairs(maps) do
+      if mapping.lhs == 'u' and mapping.rhs == '<Cmd>DirectUndo<CR>' then
+        direct_undo = true
+      elseif mapping.lhs == '<C-R>' and mapping.rhs == '<Cmd>DirectRedo<CR>' then
+        direct_redo = true
+      end
+    end
+    assert(not direct_undo and not direct_redo,
+      'map_default_keys=false left filesystem undo/redo mappings installed')
     return 'LIVE_STARTUP_OPTOUT_OK'
   end
 

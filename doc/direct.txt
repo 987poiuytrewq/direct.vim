@@ -63,7 +63,7 @@ Run `:checkhealth direct` to confirm the version and the data home in use:
 `setup()` is optional; the defaults apply when it is never called.
 
     require('direct').setup({
-      map_default_keys = true, -- set false to install no default mappings
+      map_default_keys = true, -- false disables standard mappings; fold keys remain
       show_folder_icons = false, -- opt in to Nerd Font folder icons
       show_file_icons = false, -- opt in to a generic Nerd Font file icon
       max_recursive_expand_depth = false, -- false means unlimited
@@ -214,10 +214,11 @@ materialized descendants, unless you reindent surviving rows under another
 directory in the same edit to move them out first. Moving or renaming a directory
 together with separate edits to its descendants must be saved in separate syncs
 when their filesystem action order would otherwise be ambiguous. Expansion and
-collapse remain ordinary text-undo changes. `u` after collapse restores child
-rows and identities; `<C-r>` re-applies the collapse. Redo restores materialized
-identities only when the original undo sequence and exact directory snapshot
-still match. A changed or ambiguous snapshot remains unsafe to save, open, or yank.
+collapse remain ordinary text-undo changes. Use `:undo` after collapse to restore
+child rows and identities; `:redo` re-applies the collapse. Redo restores
+materialized identities only when the original undo sequence and exact directory
+snapshot still match. A changed or ambiguous snapshot remains unsafe to save,
+open, or yank.
 Entry names beginning with whitespace and names that could escape the listed
 directory (such as `../x` or `a/b`) are refused at save time.
 
@@ -229,14 +230,13 @@ verified; this documentation does not claim Windows support.
 ==============================================================================
 6. Undo / Redo                                                 *direct.vim-undo*
 
-In a direct buffer, `u` and `<C-r>` perform Neovim text undo and redo. The
-filesystem action history is separate: use `:DirectUndo` and `:DirectRedo` to
-reverse or re-apply actions a sync or paste performed. `:DirectUndo` right
-after a paste, for example, undoes the paste.
+When `map_default_keys` is enabled, `u` and `<C-r>` undo and redo filesystem
+actions. They reverse or re-apply actions performed by a sync or paste; `u` right
+after a paste, for example, unpastes it. The equivalent commands are
+`:DirectUndo` and `:DirectRedo`.
 
-Text undo only reverses changes to buffer lines; it never renames, creates,
-deletes or restores anything on disk. Only `:DirectUndo` reverses a filesystem
-action.
+Listing text undo and redo are separate: use `:undo` and `:redo` to reverse
+buffer-line changes. They do not change the filesystem.
 
 ==============================================================================
 7. Yank / Paste                                                *direct.vim-yank*
@@ -253,7 +253,7 @@ another name. An empty answer skips that entry and leaves the original
 untouched.
 
 Yank, paste, undo and redo all work on the filesystem through the same history,
-so `:DirectUndo` reverses a paste as well.
+so `u` reverses a paste as well.
 
 Undoing a paste verifies every pasted file, exact directory tree, or symlink
 target against the current register copy before changing anything. A missing,
@@ -343,15 +343,15 @@ fold commands are always installed):
     normal      zR          recursively expand all root directories
     normal      zM          collapse all root directories
     normal      -           open ../ (the parent directory)
-    normal      u           Neovim text undo
-    normal      <C-r>       Neovim text redo
+    normal      u           :DirectUndo (filesystem undo)
+    normal      <C-r>       :DirectRedo (filesystem redo)
     normal      yy, Y       :DirectYank (current line)
     visual      y           :DirectYank (selected range)
     normal      p, P        :DirectPaste
 
-The buffer-local `-` wins over the global `-` inside a direct buffer.
-Fold commands are installed for every direct listing, independently of
-`map_default_keys`.
+The buffer-local `-` wins over the global `-` inside a direct buffer. Fold
+commands are installed for every direct listing, independently of
+`map_default_keys`. Use `:undo` and `:redo` for listing text history.
 
 ==============================================================================
 10. Data directory                                          *direct.vim-data*

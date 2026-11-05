@@ -215,7 +215,7 @@ H.describe('config', function()
     return vim.fn.maparg(lhs, mode, false, true).rhs
   end
 
-  H.it('setup({ map_default_keys = false }) clears buffer-local maps in already-open direct buffers', function()
+  H.it('setup({ map_default_keys = false }) clears buffer-local mappings in open direct buffers', function()
     local config = fresh_config()
     config.clear_mappings()
     config.setup({ map_default_keys = true })
@@ -225,7 +225,8 @@ H.describe('config', function()
 
     config.setup({ map_default_keys = false })
 
-    H.assert_nil(buf_map_rhs('u', 'n'), 'the buffer-local u mapping is gone')
+    H.assert_nil(buf_map_rhs('u', 'n'), 'filesystem undo is disabled with default mappings')
+    H.assert_nil(buf_map_rhs('<C-r>', 'n'), 'filesystem redo is disabled with default mappings')
     H.assert_nil(buf_map_rhs('p', 'n'), 'the buffer-local p mapping is gone')
     H.assert_nil(buf_map_rhs('y', 'v'), 'the buffer-local visual y mapping is gone')
     pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
@@ -247,7 +248,7 @@ H.describe('config', function()
 
     -- Read the direct buffer's own scope first, then the other buffer's.
     vim.api.nvim_set_current_buf(direct_buf)
-    H.assert_nil(buf_map_rhs('u', 'n'), 'the direct buffer was cleared')
+    H.assert_nil(buf_map_rhs('u', 'n'), 'the direct buffer default mapping was cleared')
     vim.api.nvim_set_current_buf(other)
     H.assert_eq(buf_map_rhs('u', 'n'), ':echo "other user map"<CR>',
       'the other buffer-local mapping is untouched')
@@ -264,7 +265,7 @@ H.describe('config', function()
     local bufnr = open_direct_buffer()
 
     config.setup({ map_default_keys = false })
-    H.assert_nil(buf_map_rhs('u', 'n'), 'cleared first')
+    H.assert_nil(buf_map_rhs('u', 'n'), 'the u mapping is disabled')
 
     config.setup({ map_default_keys = true })
     H.assert_true(buf_map_rhs('u', 'n') ~= nil,
@@ -293,12 +294,12 @@ H.describe('config', function()
 
     config.setup({ map_default_keys = false })
 
-    -- The mappings AFTER the fallback in BUFFER_MAPS must still be cleared.
+    -- A global fallback is not a direct buffer's local mapping; it must be
+    -- left alone while the remaining plugin-local mappings are cleared.
     H.assert_nil(buf_map_rhs('p', 'n'), 'the later buffer-local mappings are still cleared')
     H.assert_nil(buf_map_rhs('yy', 'n'), 'and the ones in between too')
-    -- The global fallback is not this buffer's mapping: it must survive.
     local after = vim.fn.maparg('u', 'n', false, true)
-    H.assert_eq(after.buffer, 0, 'the global u is still global')
+    H.assert_eq(after.buffer, 0, 'the global u is still a global fallback')
     H.assert_eq(after.rhs, '<Cmd>undo<CR>', 'the global u was not deleted')
     vim.keymap.del('n', 'u')
     pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
@@ -313,7 +314,7 @@ H.describe('config', function()
 
     local real_del = vim.keymap.del
     local restore = H.stub(vim.keymap, 'del', function(mode, lhs, o)
-      if lhs == 'u' then
+      if lhs == 'p' then
         error('forced: cannot delete ' .. lhs, 0)
       end
       return real_del(mode, lhs, o)
@@ -322,9 +323,9 @@ H.describe('config', function()
     config.setup({ map_default_keys = false })
     restore()
 
-    H.assert_nil(buf_map_rhs('p', 'n'), 'the mappings after the failure are still cleared')
+    H.assert_true(buf_map_rhs('p', 'n') ~= nil, 'the mapping that could not be deleted stays')
     H.assert_nil(buf_map_rhs('yy', 'n'), 'and the ones in between too')
-    H.assert_true(buf_map_rhs('u', 'n') ~= nil, 'the mapping that could not be deleted stays')
+    H.assert_nil(buf_map_rhs('u', 'n'), 'other default mappings continue to clear')
     H.assert_notified('cannot clear', vim.log.levels.WARN)
     pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
   end)

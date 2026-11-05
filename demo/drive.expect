@@ -1,0 +1,163 @@
+#!/usr/bin/expect -f
+
+set timeout 20
+log_user 0
+
+if {$argc != 4} {
+  puts stderr "usage: drive.expect ASCIINEMA CAST NVIM_COMMAND FORCE"
+  exit 2
+}
+
+set asciinema [lindex $argv 0]
+set cast_file [lindex $argv 1]
+set nvim_command [lindex $argv 2]
+set force [lindex $argv 3]
+
+set env(TERM) xterm-256color
+set env(NVIM_TEST) 1
+
+proc wait_for {pattern} {
+  global timeout
+  expect {
+    -re $pattern {}
+    timeout {
+      puts stderr "demo: timed out waiting for screen text: $pattern"
+      exit 1
+    }
+    eof {
+      puts stderr "demo: recording ended while waiting for screen text: $pattern"
+      exit 1
+    }
+  }
+}
+
+proc key {keys {delay 350}} {
+  send -- $keys
+  after $delay
+}
+
+proc type_text {text} {
+  foreach character [split $text ""] {
+    send -- $character
+    after 160
+  }
+}
+
+proc find_row {text} {
+  key "/" 150
+  type_text $text
+  key "\r" 400
+}
+
+proc write_listing {} {
+  key ":" 150
+  key "w" 150
+  key "\r" 450
+  after 900
+}
+
+set record_args [list $asciinema rec --capture-input --window-size 100x30 \
+  --title "Direct: browse and edit files" -c $nvim_command --return]
+if {$force eq "1"} {
+  lappend record_args --overwrite
+}
+lappend record_args $cast_file
+eval spawn -noecho $record_args
+
+# Section menu.
+wait_for {01-file-edits/}
+after 1800
+key "\r"
+wait_for {rename-me\.txt}
+
+# Hidden entries are visible by default; expand the hidden folder in place.
+find_row {\.demo-settings/}
+key "zo"
+wait_for {\.editor-settings}
+after 1000
+key "zc"
+after 600
+
+# 1. Rename and save, then undo/redo the filesystem action with u/C-r.
+key "G"
+key "c$" 250
+type_text "renamed-file.txt"
+key "\033" 450
+write_listing
+key "u"
+after 1100
+key "\022"
+after 1100
+
+key "G"
+key "o"
+type_text "created-folder/"
+key "\033" 450
+write_listing
+
+key "G"
+key "o"
+type_text "created-file.txt"
+key "\033" 450
+write_listing
+
+find_row "delete-me.txt"
+key "dd" 400
+write_listing
+key "u"
+after 1100
+key "\022"
+after 1100
+key "-"
+wait_for {02-browse-and-move/}
+
+# 2. Expand a folder and move its child to the parent with the << keys.
+key "gg"
+key "j"
+key "\r"
+wait_for {move-from/}
+key "gg"
+key "zo"
+wait_for {move-me\.txt}
+key "j"
+key "j"
+key "<<" 400
+write_listing
+key "gg"
+key "zc"
+after 900
+key "zo"
+after 900
+key "-"
+wait_for {03-copy-and-paste/}
+
+# 3. Copy a directory tree into another folder with yy and p.
+key "gg"
+key "j"
+key "j"
+key "\r"
+wait_for {copy-from/}
+key "gg"
+key "yy"
+key "j"
+key "p" 600
+wait_for {copy-from/}
+key "j"
+key "zo"
+key "j"
+key "zo"
+wait_for {nested-example\.txt}
+key "u"
+after 1100
+key "\022"
+after 1100
+key "-"
+wait_for {03-copy-and-paste/}
+key "ZQ" 500
+
+expect eof
+set result [wait]
+if {[lindex $result 3] != 0} {
+  puts stderr "demo: asciinema recording command failed: $result"
+  exit 1
+}

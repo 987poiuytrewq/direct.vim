@@ -174,30 +174,30 @@ M._setup_called = false
 M._vim_enter_installed = false
 M._installed = vim.fn.maparg(M.GLOBAL_MAP.lhs, M.GLOBAL_MAP.mode) == M.GLOBAL_MAP.rhs
 
--- The nine buffer-local mappings for filetype=direct buffers, owned
--- here so setup can clear and restore them in
--- ALREADY-open direct buffers. Installed by `ftplugin/direct.lua` via
--- `install_buffer_mappings(0)`. Built on `<Cmd>` (never a `:` command that
--- would leave visual mode / re-trigger mappings); the buffer-local `-` wins
--- over the global one inside a direct buffer, which is why the global mapping
--- resolving to `getcwd` there is never observable.
+-- The nine buffer-local mappings for filetype=direct buffers, owned here so
+-- setup can clear and restore them in ALREADY-open direct buffers. All nine
+-- mappings, including `u` and `<C-r>` for filesystem undo/redo, follow
+-- map_default_keys. Installed by `ftplugin/direct.lua` via
+-- install_buffer_mappings(0). Built on `<Cmd>` (never a `:` command that would
+-- leave visual mode / re-trigger mappings); the buffer-local `-` wins over the
+-- global one inside a direct buffer, so its global mapping is unobservable here.
 M.BUFFER_MAPS = {
-  { mode = 'n', lhs = '<CR>',
+  { mode = 'n', lhs = '<CR>', optional = true,
     rhs = '<Cmd>lua require("direct").open()<CR>' },
-  { mode = 'n', lhs = '-',
+  { mode = 'n', lhs = '-', optional = true,
     rhs = '<Cmd>lua require("direct").open("../")<CR>' },
-  { mode = 'n', lhs = 'u', rhs = '<Cmd>undo<CR>' },
-  { mode = 'n', lhs = '<C-r>', rhs = '<Cmd>redo<CR>' },
-  { mode = 'n', lhs = 'yy', rhs = '<Cmd>DirectYank<CR>' },
-  { mode = 'n', lhs = 'Y', rhs = '<Cmd>DirectYank<CR>' },
+  { mode = 'n', lhs = 'u', optional = true, rhs = '<Cmd>DirectUndo<CR>' },
+  { mode = 'n', lhs = '<C-r>', optional = true, rhs = '<Cmd>DirectRedo<CR>' },
+  { mode = 'n', lhs = 'yy', optional = true, rhs = '<Cmd>DirectYank<CR>' },
+  { mode = 'n', lhs = 'Y', optional = true, rhs = '<Cmd>DirectYank<CR>' },
   -- Visual `y`: a ranged command (`:<C-U>'<,'>DirectYank<CR>`) raises E20 and
   -- unsets the marks here, so the Lua entry point is called with the visual
   -- range (start from `'v'`, end from the cursor); `M.yank` normalises the
   -- order.
-  { mode = 'v', lhs = 'y',
+  { mode = 'v', lhs = 'y', optional = true,
     rhs = '<Cmd>lua require("direct").yank(vim.fn.line("v"), vim.fn.line("."))<CR>' },
-  { mode = 'n', lhs = 'p', rhs = '<Cmd>DirectPaste<CR>' },
-  { mode = 'n', lhs = 'P', rhs = '<Cmd>DirectPaste<CR>' },
+  { mode = 'n', lhs = 'p', optional = true, rhs = '<Cmd>DirectPaste<CR>' },
+  { mode = 'n', lhs = 'P', optional = true, rhs = '<Cmd>DirectPaste<CR>' },
 }
 
 -- The loaded buffers whose filetype is `direct`: the retrofit targets for
@@ -218,11 +218,13 @@ end
 -- mapping replaces it in place, so repeated ftplugin runs cannot stack.
 function M.install_buffer_mappings(bufnr)
   for _, entry in ipairs(M.BUFFER_MAPS) do
-    vim.keymap.set(entry.mode, entry.lhs, entry.rhs, {
-      buffer = bufnr,
-      silent = true,
-      noremap = true,
-    })
+    if not entry.optional or M.options.map_default_keys then
+      vim.keymap.set(entry.mode, entry.lhs, entry.rhs, {
+        buffer = bufnr,
+        silent = true,
+        noremap = true,
+      })
+    end
   end
   return true
 end
@@ -331,11 +333,7 @@ function M.setup(opts)
   end
   M.options = next_options
   M._setup_called = true
-  if M.options.map_default_keys then
-    M.install_mappings()
-  else
-    M.clear_mappings()
-  end
+  M.install_mappings()
   return M.options
 end
 

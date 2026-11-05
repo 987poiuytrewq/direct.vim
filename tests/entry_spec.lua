@@ -45,8 +45,8 @@ end
 local EXPECTED_N = {
   ['<CR>'] = '<Cmd>lua require("direct").open()<CR>',
   ['-'] = '<Cmd>lua require("direct").open("../")<CR>',
-  ['u'] = '<Cmd>undo<CR>',
-  ['<C-R>'] = '<Cmd>redo<CR>',
+  ['u'] = '<Cmd>DirectUndo<CR>',
+  ['<C-R>'] = '<Cmd>DirectRedo<CR>',
   ['yy'] = '<Cmd>DirectYank<CR>',
   ['Y'] = '<Cmd>DirectYank<CR>',
   ['p'] = '<Cmd>DirectPaste<CR>',
@@ -444,7 +444,7 @@ H.describe('entry: default mappings', function()
     end
   end)
 
-  H.it('map_default_keys=false installs no global - and no Lua buffer-local mappings', function()
+  H.it('map_default_keys=false installs no global or buffer-local default mappings', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -457,16 +457,13 @@ H.describe('entry: default mappings', function()
     local buf = vim.api.nvim_get_current_buf()
     H.assert_eq(vim.bo[buf].filetype, 'direct', 'listing still works without mappings')
 
-    -- Scoped to OUR ftplugin's `<Cmd>`-based mappings: the retired Vimscript
-    -- ftplugin is gone, so a key absent here is simply not mapped.
+    -- The opt-out leaves the direct buffer usable but installs no mappings;
+    -- the retired Vimscript ftplugin is gone too.
     local normal = buf_maps(buf, 'n')
     local visual = buf_maps(buf, 'v')
     for lhs in pairs(EXPECTED_N) do
       local rhs = normal[lhs]
-      if rhs ~= nil then
-        H.assert_false(rhs:find('<Cmd>', 1, true) ~= nil,
-          'the opt-out must not install the Lua mapping for normal ' .. lhs)
-      end
+      H.assert_nil(rhs, 'the opt-out removes the default mapping for ' .. lhs)
     end
     for lhs in pairs(EXPECTED_V) do
       local rhs = visual[lhs]

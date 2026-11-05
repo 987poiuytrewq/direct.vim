@@ -1,6 +1,7 @@
 .cache
 .rocks/
 coverage/
+demo/casts/
 
 .DS_Store
 
