@@ -278,6 +278,13 @@ make coverage-summary # writes coverage/summary.md
 CI runs the suite on Linux, macOS and Windows against Neovim 0.12.0 and the
 latest stable release on every pull request.
 
+### Demo recording
+
+`./demo/demo.sh` records a scripted tour of direct.vim with
+[asciinema](https://asciinema.org/), using a throwaway Git repository and data
+directory. `./demo/demo.sh --check` runs the same tour headlessly and checks
+the result. See [`demo/README.md`](demo/README.md) for details.
+
 ## License
 
 [MIT](LICENSE) © Duncan Williams
