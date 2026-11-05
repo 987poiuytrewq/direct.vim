@@ -117,6 +117,18 @@ local function path_key(path)
   return trimmed
 end
 
+local function canonical_paths_match(a, b)
+  if type(a) ~= 'string' or type(b) ~= 'string' then return false end
+  return platform.identity_path(M.paths.canonical(a))
+    == platform.identity_path(M.paths.canonical(b))
+end
+
+local function canonical_optional_paths_match(a, b)
+  if a == nil or a == vim.NIL then return b == nil or b == vim.NIL end
+  if b == nil or b == vim.NIL then return false end
+  return canonical_paths_match(a, b)
+end
+
 local function entry_identity(path)
   return M.action.fs.entry_identity(path_key(path))
 end
@@ -135,8 +147,7 @@ end
 
 local function identity_path_matches(identity, path)
   if identity == nil or identity == vim.NIL then return true end
-  return platform.identity_path(M.paths.canonical(identity.path))
-    == platform.identity_path(M.paths.canonical(path))
+  return canonical_paths_match(identity.path, path)
 end
 
 local function is_array(value)
@@ -212,7 +223,8 @@ local function parse_transaction(bytes)
     local action = M.action.deserialize(value.action)
     if not action or (action.name ~= 'mv' and action.name ~= 'rm'
         and action.name ~= 'rmdir' and action.name ~= 'rs' and action.name ~= 'rsdir')
-      or action.src ~= value.source or action.dst ~= value.destination then
+      or not canonical_paths_match(action.src, value.source)
+      or not canonical_paths_match(action.dst, value.destination) then
       return nil
     end
   elseif value.kind == 'apply' then
@@ -237,7 +249,8 @@ local function parse_transaction(bytes)
     if not action or (action.name ~= 'mv' and action.name ~= 'rm'
         and action.name ~= 'rmdir' and action.name ~= 'rs' and action.name ~= 'rsdir'
         and action.name ~= 'touch' and action.name ~= 'mkdir')
-      or (action.src or nil) ~= source or action.dst ~= value.destination then
+      or not canonical_optional_paths_match(action.src, source)
+      or not canonical_paths_match(action.dst, value.destination) then
       return nil
     end
   elseif value.kind == 'group' then
@@ -273,7 +286,9 @@ local function parse_transaction(bytes)
         or not valid_identity(item.identity) or type(item.identity) ~= 'table'
         or type(item.identity.inode) ~= 'string'
         or not identity_path_matches(item.identity, item.src)
-        or member.name ~= 'mv' or member.src ~= item.src or member.dst ~= item.dst
+        or member.name ~= 'mv'
+        or not canonical_paths_match(member.src, item.src)
+        or not canonical_paths_match(member.dst, item.dst)
         or source_inodes[item.identity.inode]
         or before_by_path[path_key(item.src)] == nil
         or before_by_path[path_key(item.dst)] == nil then
@@ -818,10 +833,6 @@ local function recover_transaction(undo_path, redo_path, transaction_path)
   if not transaction then
     local message = 'history recovery journal is malformed; preserved at '
       .. transaction_path .. ' for manual inspection'
-    local decoded_ok, decoded = pcall(vim.json.decode, bytes)
-    if decoded_ok and type(decoded) == 'table' and decoded.kind == 'group' then
-      message = message .. '\nDEBUG group transaction: ' .. vim.inspect(decoded)
-    end
     M.ui.notify('direct: ' .. message, vim.log.levels.ERROR)
     return nil, message
   end
