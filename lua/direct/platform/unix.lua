@@ -22,9 +22,7 @@ function M.canonical_path(path)
 end
 
 function M.identity_path(path)
-  local normalized = M.canonical_path(path)
-  if normalized ~= '/' then normalized = normalized:gsub('/+$', '') end
-  return normalized == '' and '/' or normalized
+  return M.canonical_path(path)
 end
 
 function M.validation_path(path)

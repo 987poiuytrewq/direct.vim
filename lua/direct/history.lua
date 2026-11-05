@@ -135,7 +135,8 @@ end
 
 local function identity_path_matches(identity, path)
   if identity == nil or identity == vim.NIL then return true end
-  return platform.identity_path(identity.path) == platform.identity_path(path)
+  return platform.identity_path(M.paths.canonical(identity.path))
+    == platform.identity_path(M.paths.canonical(path))
 end
 
 local function is_array(value)
