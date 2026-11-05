@@ -147,7 +147,7 @@ local function main()
     -- Keep random temp paths out of default output so runs remain comparable.
     io.write(string.format('tmp:  %s\n', base))
   end
-  local total_specs, total_passed, total_failed = 0, 0, 0
+  local total_specs, total_passed, total_skipped, total_failed = 0, 0, 0, 0
   for _, spec in ipairs(specs) do
     H.reset_registry()
     local loaded, load_err = xpcall(function()
@@ -168,13 +168,14 @@ local function main()
         io.write(string.format('-- %s\n%s', spec.name, report.text))
         total_specs = total_specs + report.specs
         total_passed = total_passed + report.passed
+        total_skipped = total_skipped + report.skipped
         total_failed = total_failed + report.failed
       end
     end
   end
 
-  io.write(string.format('RUN: %d spec(s), %d passed, %d failed\n',
-    total_specs, total_passed, total_failed))
+  io.write(string.format('RUN: %d spec(s), %d passed, %d skipped, %d failed\n',
+    total_specs, total_passed, total_skipped, total_failed))
   return total_failed == 0
 end
 

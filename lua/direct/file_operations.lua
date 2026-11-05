@@ -1,6 +1,7 @@
 -- LSP workspace file-operation requests/notifications. Keep this independent of
 -- buffers: workspace clients are not necessarily attached to the `acwrite` view.
 local M = {}
+local paths = require('direct.paths')
 
 M._timeout_ms = 1200
 
@@ -13,9 +14,7 @@ local methods = {
 
 local function canonical(path)
   if type(path) ~= 'string' then return nil end
-  local normalized = vim.fs.normalize(vim.fn.fnamemodify(path, ':p'))
-  if package.config:sub(1, 1) == '\\' then normalized = normalized:gsub('\\', '/') end
-  return normalized
+  return paths.canonical(vim.fn.fnamemodify(path, ':p'))
 end
 
 local function under(path, root)

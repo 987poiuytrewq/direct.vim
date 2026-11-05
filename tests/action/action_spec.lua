@@ -37,7 +37,7 @@ H.describe('action', function()
     if vim.uv.fs_lstat(alternate) == nil then
       -- Case-sensitive filesystems have two distinct names here; this specific
       -- action contract applies only when the alternate spelling aliases src.
-      return
+      H.skip('the filesystem is case-sensitive')
     end
 
     local ok, err = M.Move(source, alternate)['do']()
@@ -54,7 +54,9 @@ H.describe('action', function()
     local sb = H.sandbox()
     local source = H.mkfile(sb.root, 'foo.txt', { 'preserve both names' })
     local destination = sb.root .. '/Foo.txt'
-    if vim.uv.fs_link(source, destination) ~= true then return end
+    if vim.uv.fs_link(source, destination) ~= true then
+      H.skip('hard links are unavailable on this filesystem')
+    end
 
     local ok, err = M.Move(source, destination)['do']()
 
@@ -100,13 +102,19 @@ H.describe('action', function()
       local sb = H.sandbox()
       H.mkdir(sb.root, 'realdir')
       H.mkfile(sb.root, 'realdir/file.txt', { 'x' })
-      pcall(vim.uv.fs_symlink, sb.root .. '/realdir', sb.root .. '/linkdir')
+      pcall(H.symlink, sb.root .. '/realdir', sb.root .. '/linkdir')
       H.assert_true(vim.uv.fs_lstat(sb.root .. '/linkdir') ~= nil, 'prefix symlink created')
 
       local buf = vim.api.nvim_create_buf(true, false)
       vim.api.nvim_buf_set_name(buf, sb.root .. '/linkdir/file.txt')
-      H.assert_eq(vim.api.nvim_buf_get_name(buf), sb.root .. '/realdir/file.txt',
-        'premise: nvim stored the resolved spelling')
+      local stored_name = vim.api.nvim_buf_get_name(buf)
+      if H.is_windows() then
+        H.assert_true(M.fs.same_path(stored_name, sb.root .. '/realdir/file.txt'),
+          'the stored symlink spelling denotes the target file')
+      else
+        H.assert_eq(stored_name, sb.root .. '/realdir/file.txt',
+          'premise: nvim stored the resolved spelling')
+      end
 
       H.assert_true(M.close_src_buffer(sb.root .. '/linkdir/file.txt') == true,
         'close_src_buffer succeeded for the unresolved spelling')
@@ -167,7 +175,7 @@ H.describe('action', function()
     H.mkfile(sb.root, 'f.txt', { 'f' })
     local src = sb.root .. '/f.txt'
     local base = M.paths.digest(src)
-    H.assert_true(vim.uv.fs_symlink(trash .. '/nowhere', trash .. '/' .. base) == true,
+    H.assert_true(H.symlink(trash .. '/nowhere', trash .. '/' .. base) == true,
       'dangling symlink occupying the base trash name')
     H.assert_false(vim.uv.fs_stat(trash .. '/' .. base) ~= nil,
       'the following check reports the name free')
@@ -445,7 +453,7 @@ H.describe('action', function()
     local sb = H.sandbox()
     H.mkfile(sb.root, 'source.txt', { 'source' })
     local occupied = sb.root .. '/target.log'
-    H.assert_true(vim.uv.fs_symlink(sb.root .. '/missing', occupied) == true,
+    H.assert_true(H.symlink(sb.root .. '/missing', occupied) == true,
       'dangling symlink created')
     H.assert_true(M.fs.taken(occupied .. '/'),
       'occupancy checks preserve the directory marker while finding the link')
@@ -484,35 +492,43 @@ H.describe('action', function()
         'Created c.txt', 'touch')
       H.assert_eq(M.MakeDirectory(sb.root .. '/d').describe(),
         'Created d', 'make directory')
+      local separator = package.config:sub(1, 1)
       H.assert_eq(M.Paste(sb.root .. '/reg', sb.root, { 'e' }, { 'e' }).describe(),
-        'Pasted into ./', 'paste carries the trailing separator')
+        'Pasted into .' .. separator, 'paste carries the trailing separator')
       H.assert_eq(M.Unpaste(sb.root, sb.root .. '/reg', { 'e' }, { 'e' }).describe(),
-        'Reversed paste into ./', 'unpaste')
+        'Reversed paste into .' .. separator, 'unpaste')
     end)
   end)
 
   H.it('serialize() emits canonical JSON records with fixed key order', function()
-    local sb = H.sandbox()
-    H.assert_eq(M.serialize(M.Move('/r/a', '/r/b')),
-      '{"op":"mv","src":"/r/a","dst":"/r/b"}', 'mv')
-    H.assert_eq(M.serialize(M.Touch('/r/t')), '{"op":"touch","dst":"/r/t"}', 'touch')
-    H.assert_eq(M.serialize(M.MakeDirectory('/r/d')),
-      '{"op":"mkdir","dst":"/r/d"}', 'mkdir')
-    H.assert_eq(M.serialize(M.Restore('/r/trash', '/r/a')),
-      '{"op":"rs","src":"/r/trash","dst":"/r/a"}', 'rs')
+    local root = M.paths.record_path(vim.fs.joinpath(vim.uv.cwd(), 'r'))
+    local a, b = root .. '/a', root .. '/b'
+    local t, d, trash = root .. '/t', root .. '/d', root .. '/trash'
+    H.assert_eq(M.serialize(M.Move(a, b)),
+      '{"op":"mv","src":' .. vim.json.encode(a) .. ',"dst":' .. vim.json.encode(b) .. '}', 'mv')
+    H.assert_eq(M.serialize(M.Touch(t)),
+      '{"op":"touch","dst":' .. vim.json.encode(t) .. '}', 'touch')
+    H.assert_eq(M.serialize(M.MakeDirectory(d)),
+      '{"op":"mkdir","dst":' .. vim.json.encode(d) .. '}', 'mkdir')
+    H.assert_eq(M.serialize(M.Restore(trash, a)),
+      '{"op":"rs","src":' .. vim.json.encode(trash) .. ',"dst":'
+        .. vim.json.encode(a) .. '}', 'rs')
 
-    local remove = M.Remove('/r/f')
+    local remove = M.Remove(root .. '/f')
     H.assert_eq(M.serialize(remove),
-      '{"op":"rm","src":"/r/f","dst":' .. vim.json.encode(remove.dst) .. '}',
+      '{"op":"rm","src":' .. vim.json.encode(M.paths.record_path(remove.src))
+        .. ',"dst":' .. vim.json.encode(M.paths.record_path(remove.dst)) .. '}',
       'rm stores the resolved trash dst')
 
     H.assert_eq(
-      M.serialize(M.Paste('/r/reg', '/r/dst', { 'a', 'b' }, { 'a', 'b' })),
-      '{"op":"p","src":"/r/reg","dst":"/r/dst",'
+      M.serialize(M.Paste(root .. '/reg', root .. '/dst', { 'a', 'b' }, { 'a', 'b' })),
+      '{"op":"p","src":' .. vim.json.encode(root .. '/reg') .. ',"dst":'
+        .. vim.json.encode(root .. '/dst') .. ','
         .. '"src_names":["a","b"],"dst_names":["a","b"]}', 'p name arrays')
     H.assert_eq(
-      M.serialize(M.Unpaste('/r/dst', '/r/reg', { 'a', 'b' }, { 'a', 'b' })),
-      '{"op":"up","src":"/r/dst","dst":"/r/reg",'
+      M.serialize(M.Unpaste(root .. '/dst', root .. '/reg', { 'a', 'b' }, { 'a', 'b' })),
+      '{"op":"up","src":' .. vim.json.encode(root .. '/dst') .. ',"dst":'
+        .. vim.json.encode(root .. '/reg') .. ','
         .. '"src_names":["a","b"],"dst_names":["a","b"]}', 'up name arrays')
   end)
 
@@ -521,18 +537,20 @@ H.describe('action', function()
     -- field. A normal path and a SPACE path are representable; a tab (the
     -- FIELD_SEPARATOR) and any other control character (a newline included) are
     -- not.
-    H.assert_nil(M.path_reason('/r/a.txt'), 'a normal path is representable')
-    H.assert_nil(M.path_reason('/r/my file.txt'), 'a space path is representable')
-    H.assert_eq(M.path_reason('/r/f\to'), 'contains a tab', 'a tab is refused')
-    H.assert_eq(M.path_reason('/r/f\nx'), 'contains a control character',
+    local root = M.paths.record_path(vim.fs.joinpath(vim.uv.cwd(), 'r'))
+    H.assert_nil(M.path_reason(root .. '/a.txt'), 'a normal path is representable')
+    H.assert_nil(M.path_reason(root .. '/my file.txt'), 'a space path is representable')
+    H.assert_eq(M.path_reason(root .. '/f\to'), 'contains a tab', 'a tab is refused')
+    H.assert_eq(M.path_reason(root .. '/f\nx'), 'contains a control character',
       'a newline is refused')
 
     -- serialize returns nil, err rather than emitting a corrupted line.
-    local line, err = M.serialize(M.Touch('/r/a\tb'))
+    local line, err = M.serialize(M.Touch(root .. '/a\tb'))
     H.assert_nil(line, 'a tab-carrying field emits no line')
     H.assert_true(type(err) == 'string' and #err > 0, 'serialize carries a reason')
 
-    H.assert_eq(M.serialize(M.Touch('/r/a b')), '{"op":"touch","dst":"/r/a b"}',
+    H.assert_eq(M.serialize(M.Touch(root .. '/a b')),
+      '{"op":"touch","dst":' .. vim.json.encode(root .. '/a b') .. '}',
       'a space path serializes verbatim')
   end)
 
@@ -564,41 +582,46 @@ H.describe('action', function()
     local cases = {
       { label = 'mv', a = M.Move(root .. '/a.txt', root .. '/b.txt'),
         check = function(rev, a)
-          return rev.name == 'mv' and rev.src == a.dst and rev.dst == a.src
+          return rev.name == 'mv' and rev.src == M.paths.record_path(a.dst)
+            and rev.dst == M.paths.record_path(a.src)
         end },
       { label = 'rm', a = M.Remove(root .. '/a.txt'),
         check = function(rev, a)
-          return rev.name == 'rs' and rev.src == a.dst and rev.dst == a.src
+          return rev.name == 'rs' and rev.src == M.paths.record_path(a.dst)
+            and rev.dst == M.paths.record_path(a.src)
         end },
       { label = 'rmdir', a = M.RemoveDirectory(root .. '/dir'),
         check = function(rev, a)
-          return rev.name == 'rsdir' and rev.src == a.dst and rev.dst == a.src
+          return rev.name == 'rsdir' and rev.src == M.paths.record_path(a.dst)
+            and rev.dst == M.paths.record_path(a.src)
         end },
       { label = 'rs', a = M.Restore(root .. '/trash1', root .. '/a.txt'),
         check = function(rev, a)
-          return rev.name == 'rm' and rev.src == a.dst
+          return rev.name == 'rm' and rev.src == M.paths.record_path(a.dst)
         end },
       { label = 'rsdir', a = M.RestoreDirectory(root .. '/trash2', root .. '/dir'),
         check = function(rev, a)
-          return rev.name == 'rmdir' and rev.src == a.dst
+          return rev.name == 'rmdir' and rev.src == M.paths.record_path(a.dst)
         end },
       { label = 'touch', a = M.Touch(root .. '/c.txt'),
         check = function(rev, a)
-          return rev.name == 'rm' and rev.src == a.dst
+          return rev.name == 'rm' and rev.src == M.paths.record_path(a.dst)
         end },
       { label = 'mkdir', a = M.MakeDirectory(root .. '/d'),
         check = function(rev, a)
-          return rev.name == 'rmdir' and rev.src == a.dst
+          return rev.name == 'rmdir' and rev.src == M.paths.record_path(a.dst)
         end },
       { label = 'p', a = M.Paste(reg, root, { 'x', 'y' }, { 'm', 'n' }),
         check = function(rev, a)
-          return rev.name == 'up' and rev.src == a.dst and rev.dst == a.src
+          return rev.name == 'up' and rev.src == M.paths.record_path(a.dst)
+            and rev.dst == M.paths.record_path(a.src)
             and rev.renames[1].src == 'm' and rev.renames[1].dst == 'x'
             and rev.renames[2].src == 'n' and rev.renames[2].dst == 'y'
         end },
       { label = 'up', a = M.Unpaste(root, reg, { 'p', 'q' }, { 'p', 'q' }),
         check = function(rev, a)
-          return rev.name == 'p' and rev.src == a.dst and rev.dst == a.src
+          return rev.name == 'p' and rev.src == M.paths.record_path(a.dst)
+            and rev.dst == M.paths.record_path(a.src)
             and rev.renames[1].src == 'p' and rev.renames[1].dst == 'p'
             and rev.renames[2].src == 'q' and rev.renames[2].dst == 'q'
         end },
@@ -613,13 +636,15 @@ H.describe('action', function()
     -- Pin the p/up serialization swapping verbatim (the renames inversion in
     -- the serialized form, which history will replay).
     local pa = M.Paste(reg, root, { 'x', 'y' }, { 'm', 'n' })
-    H.assert_eq(M.serialize(pa), '{"op":"p","src":' .. vim.json.encode(reg)
-      .. ',"dst":' .. vim.json.encode(root)
+    H.assert_eq(M.serialize(pa), '{"op":"p","src":'
+      .. vim.json.encode(M.paths.record_path(reg))
+      .. ',"dst":' .. vim.json.encode(M.paths.record_path(root))
       .. ',"src_names":["x","y"],"dst_names":["m","n"]}',
       'p serialized with both name arrays')
     local upa = M.reverse(M.serialize(pa))
-    H.assert_eq(M.serialize(upa), '{"op":"up","src":' .. vim.json.encode(root)
-      .. ',"dst":' .. vim.json.encode(reg)
+    H.assert_eq(M.serialize(upa), '{"op":"up","src":'
+      .. vim.json.encode(M.paths.record_path(root))
+      .. ',"dst":' .. vim.json.encode(M.paths.record_path(reg))
       .. ',"src_names":["m","n"],"dst_names":["x","y"]}',
       'the reversal swaps src/dst and inverts the name arrays')
     local back = M.reverse(M.serialize(upa))
@@ -640,9 +665,15 @@ H.describe('action', function()
   end)
 
   H.it('JSON records use canonical escaping and reject duplicate or extra keys', function()
-    local src = '/r/quote"\\slash/café'
-    local expected = '{"op":"mv","src":"/r/quote\\"\\\\slash/café","dst":"/r/b"}'
-    H.assert_eq(M.serialize(M.Move(src, '/r/b')), expected,
+    local root = M.paths.record_path(vim.fs.joinpath(vim.uv.cwd(), 'r'))
+    local src = root .. '/quote"\\slash/café'
+    if H.is_windows() then
+      src = vim.fs.joinpath(root, 'quote"', 'slash', 'café')
+    end
+    local dst = root .. '/b'
+    local expected = '{"op":"mv","src":' .. vim.json.encode(M.paths.record_path(src))
+      .. ',"dst":' .. vim.json.encode(dst) .. '}'
+    H.assert_eq(M.serialize(M.Move(src, dst)), expected,
       'quotes and backslashes are escaped; slash and UTF-8 stay literal')
     H.assert_eq(M.serialize(M.deserialize(expected)), expected,
       'decode and re-encode preserve canonical bytes')

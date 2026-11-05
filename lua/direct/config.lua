@@ -4,10 +4,11 @@
 
 local M = {}
 local constants = require('direct.constants')
+local platform = require('direct.platform')
 
 local defaults = {
   map_default_keys = true,
-  directory_separator = package.config:sub(1, 1),
+  directory_separator = platform.separator,
   show_hidden = true,
   respect_gitignore = true,
   indent_size = 2,
