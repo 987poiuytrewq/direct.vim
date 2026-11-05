@@ -800,7 +800,7 @@ H.describe('sync: safety guards', function()
 
     H.assert_nil(ok, 'the staging failure refuses the sync')
     H.assert_eq(reason, 'EACCES', 'the staging error is returned')
-    H.assert_notified('could not stage renames')
+    H.assert_notified('Action failed')
 
     H.assert_false(fs.taken(ws .. '/.direct-tmp-1'), 'the staged temp was consumed by rollback')
     H.assert_eq(vim.fn.readfile(ws .. '/a.txt'), { 'A' },
@@ -847,7 +847,8 @@ H.describe('sync: safety guards', function()
 
     local temp = ws .. '/.direct-tmp-1'
     H.assert_nil(ok, 'the staging failure refuses the sync')
-    H.assert_eq(reason, 'EACCES', 'staging failure is returned')
+    H.assert_true(reason:find('EACCES', 1, true) ~= nil,
+      'staging failure and any preserved recovery detail are returned')
     H.assert_true(occupant_created, 'the original source name was raced back in')
     H.assert_eq(vim.fn.readfile(ws .. '/a.txt'), { 'FOREIGN' },
       'rollback never overwrites the new occupant')
@@ -891,14 +892,15 @@ H.describe('sync: safety guards', function()
     restore()
 
     H.assert_nil(ok, 'late staging failure refuses sync')
-    H.assert_eq(reason, 'forced late staging failure', 'the staging error is returned')
+    H.assert_true(reason:find('ambiguous', 1, true) ~= nil,
+      'a replaced staging path is reported as ambiguous')
     H.assert_true(injected, 'a foreign object replaced the staged temp pathname')
     H.assert_eq(vim.fn.readfile(backup), { 'A' }, 'the original staged data survives elsewhere')
     H.assert_eq(vim.fn.readfile(temp), { 'FOREIGN TEMP' }, 'replacement temp is preserved')
     H.assert_nil(vim.uv.fs_stat(ws .. '/a.txt'),
       'rollback did not move the foreign temp into the source slot')
     H.assert_eq(vim.fn.readfile(ws .. '/b.txt'), { 'B' }, 'other source remains intact')
-    H.assert_notified('source identity changed: ' .. temp)
+    H.assert_notified('identity is ambiguous')
   end)
 
   H.it('a control-character path is refused before any change', function()

@@ -38,16 +38,33 @@ return function(M)
   -- caller must verify identity and restore only with no-replace, or report any
   -- stranded path instead of deleting it.
   -- The caller executes each Move from `overrides[src]` when present, while
-  -- `history.log` and `current_entry` keep using the original action, never a temp path.
+  -- history records keep the original action paths, never staging temps.
   --
-  -- This is the ONE staging mechanism: `Buffer:sync` applies a save through it and
-  -- `M.Group` applies a group reversal through it, so the reversal of a swap gets
-  -- exactly the protection the swap itself gets (the reported bug was that the
-  -- reversal had none: it renamed a live name over a name whose contents had not
-  -- been saved anywhere yet).
+  -- Journaled execution and the standalone Group executor share this plan.
   function M.stage_moves(actions)
+    local steps, staging_count = M.plan_move_steps(actions)
+    if not steps then return nil, staging_count end
+    if staging_count == 0 then return nil end
+    local overrides, temps, identities = {}, {}, {}
+    for index = 1, staging_count do
+      local step = steps[index]
+      local ok, err = M.fs.rename(step.src, step.dst)
+      if not ok then
+        return nil, err, temps, overrides, identities
+      end
+      overrides[step.src] = step.dst
+      identities[step.src] = step.identity
+      temps[#temps + 1] = step.dst
+    end
+    return { overrides = overrides, temps = temps, identities = identities }
+  end
+
+  -- plan_move_steps(actions) produces the exact staging and final rename sequence
+  -- without changing the filesystem. History persists this plan before executing
+  -- a group, so restart recovery never has to guess staging names.
+  function M.plan_move_steps(actions)
     actions = actions or {}
-    local function move_key(path)
+    local move_key = function(path)
       return type(path) == 'string' and M.paths.strip_trailing_separator(path) or path
     end
     local destinations, destinations_by_inode = {}, {}
@@ -57,15 +74,13 @@ return function(M)
         destinations[destination] = true
         local identity = M.fs.entry_identity(destination)
         if identity and identity.inode then
-          local bucket = destinations_by_inode[identity.inode]
-          if not bucket then
-            bucket = {}
-            destinations_by_inode[identity.inode] = bucket
-          end
+          local bucket = destinations_by_inode[identity.inode] or {}
+          destinations_by_inode[identity.inode] = bucket
           bucket[#bucket + 1] = destination
         end
       end
     end
+
     local function shares_destination(path)
       path = move_key(path)
       if destinations[path] then return true end
@@ -76,37 +91,58 @@ return function(M)
       end
       return false
     end
-    local stage_sources, needed = {}, false
+
+    local stage_sources = {}
     for _, act in ipairs(actions) do
       if act.name == 'mv' and act.src ~= nil and shares_destination(act.src) then
         stage_sources[move_key(act.src)] = true
-        needed = true
       end
     end
-    if not needed then
-      return nil
-    end
-    local overrides, temps, identities = {}, {}, {}
+
+    local overrides, staged_identities, reserved = {}, {}, {}
+    local stages = {}
     for _, act in ipairs(actions) do
       if act.name == 'mv' and act.src ~= nil and stage_sources[move_key(act.src)]
         and overrides[act.src] == nil then
-        local tmp = M.first_free_temp(parent_dir(act.src))
-        local identity = M.fs.entry_identity(act.src)
-        local ok, err = M.fs.rename(act.src, tmp)
-        if not ok then
-          -- return the temps accumulated so far ALONGSIDE the error
-          -- (and the partial overrides that name each temp's original path), so
-          -- the caller can report -- and, where it must, restore -- each entry
-          -- that is now parked at a temp path instead of returning the error
-          -- alone and orphaning them silently.
-          return nil, err, temps, overrides, identities
+        local parent = parent_dir(act.src)
+        local tmp = M.first_free_temp(parent)
+        while reserved[tmp] do
+          local suffix = tonumber(tmp:match('%.direct%-tmp%-(%d+)$')) or 0
+          tmp = M.fs.join(parent, '.direct-tmp-' .. (suffix + 1))
+        end
+        reserved[tmp] = true
+        local identity, stat = M.fs.entry_identity(act.src)
+        if not stat or not identity or not identity.inode then
+          return nil, 'cannot identify grouped move source: ' .. tostring(act.src)
         end
         overrides[act.src] = tmp
-        identities[act.src] = identity
-        temps[#temps + 1] = tmp
+        staged_identities[act.src] = identity
+        stages[#stages + 1] = {
+          src = act.src, dst = tmp,
+          identity = { path = vim.fs.normalize(act.src), inode = identity.inode },
+        }
       end
     end
-    return { overrides = overrides, temps = temps, identities = identities }
+
+    local steps = {}
+    for _, stage in ipairs(stages) do steps[#steps + 1] = stage end
+    for _, act in ipairs(actions) do
+      if act.name ~= 'mv' or type(act.src) ~= 'string'
+        or type(act.dst) ~= 'string' then
+        return nil, 'grouped move plan contains a non-move action'
+      end
+      local src = overrides[act.src] or act.src
+      local identity = staged_identities[act.src]
+        or M.fs.entry_identity(act.src)
+      if not identity or not identity.inode then
+        return nil, 'cannot identify grouped move source: ' .. tostring(act.src)
+      end
+      steps[#steps + 1] = {
+        src = src, dst = act.dst,
+        identity = { path = vim.fs.normalize(src), inode = identity.inode },
+      }
+    end
+    return steps, #stages
   end
 
   -- move_groups(actions) -> an ordered partition of the action list into the

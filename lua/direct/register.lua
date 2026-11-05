@@ -228,30 +228,29 @@ function M.paste(dst, name, callback)
     M.ui.notify('direct: cannot paste: ' .. tostring(begin_err), vim.log.levels.WARN)
     return nil, begin_err
   end
-  local locked, lock_err = M.history.lock.acquire()
-  if not locked then
+  local operation, lock_err = M.history.begin_paste(paste_action)
+  if not operation then
     M.pending.finish()
     M.ui.notify('direct: cannot paste: ' .. tostring(lock_err), vim.log.levels.ERROR)
     return nil, lock_err
   end
-  local lock_released = false
-  local function release_history_lock()
-    if lock_released then return end
-    lock_released = true
-    local released, release_err = M.history.lock.release()
-    if not released then
-      M.ui.notify('direct: could not release history lock: '
-        .. tostring(release_err), vim.log.levels.ERROR)
-    end
-  end
   local current_register = M.content()
   local current_names = current_register == src and M.fs.list_dir(src) or nil
   if current_register ~= src or not vim.deep_equal(current_names, names) then
-    release_history_lock()
+    M.history.finish_paste(operation)
     M.pending.finish()
     local message = 'register changed while preparing paste; retry the operation'
     M.ui.notify('direct: cannot paste: ' .. message, vim.log.levels.WARN)
     return nil, message
+  end
+  paste_action._before_copy = function(pair, source, destination)
+    return M.history.note_paste_pending(operation, pair, source, destination)
+  end
+  paste_action._after_copy = function(pair)
+    return M.history.note_paste_complete(operation, pair)
+  end
+  paste_action._on_copy_conflict = function(pair)
+    return M.history.cancel_paste_pending(operation, pair)
   end
   local completed, immediate_result, immediate_err = false, nil, nil
   local function finish(ok, result, execution_err)
@@ -269,10 +268,10 @@ function M.paste(dst, name, callback)
           local last = paste_action.renames[copied]
           if last then pasted_entry = M.paths.join(dst, last.dst) end
         end
-        local logged, log_err = M.history.log(paste_action)
-        if not logged then
+        local committed, commit_err = M.history.finish_paste(operation)
+        if not committed then
           M.ui.notify('direct: paste completed but history could not be written: '
-            .. tostring(log_err), vim.log.levels.ERROR)
+            .. tostring(commit_err), vim.log.levels.ERROR)
         end
         if ok then
           M.ui.notify(M.action.summarize({ paste_action }), vim.log.levels.INFO)
@@ -282,9 +281,15 @@ function M.paste(dst, name, callback)
         end
       elseif not ok then
         M.ui.notify('Failed to paste: ' .. tostring(execution_err), vim.log.levels.ERROR)
+      else
+        local committed, commit_err = M.history.finish_paste(operation)
+        if not committed then
+          M.ui.notify('direct: paste did not complete cleanly: '
+            .. tostring(commit_err), vim.log.levels.ERROR)
+        end
       end
     end, debug.traceback)
-    release_history_lock()
+    if operation.locked then M.history.finish_paste(operation) end
     M.pending.finish()
     if not final_ok then
       M.ui.notify('direct: paste completion failed: ' .. tostring(final_err),

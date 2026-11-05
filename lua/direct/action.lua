@@ -402,6 +402,13 @@ function M.Paste(src, dst, src_names, dst_names)
       process_next()
     end
     local function copy_pair(pair, full_src, full_dst, st)
+      if type(self._before_copy) == 'function' then
+        local ready, ready_err = self._before_copy(pair, full_src, full_dst)
+        if not ready then
+          fail(ready_err or 'could not journal paste entry')
+          return
+        end
+      end
       local called, ok, extra, code = pcall(function()
         if st.type == 'file' then
           return M.fs.copy_file_exclusive(full_src, full_dst)
@@ -415,6 +422,13 @@ function M.Paste(src, dst, src_names, dst_names)
         return
       end
       if not ok then
+        if code == 'EEXIST' and type(self._on_copy_conflict) == 'function' then
+          local cleared, clear_err = self._on_copy_conflict(pair)
+          if not cleared then
+            fail(clear_err or extra or code or 'destination exists')
+            return
+          end
+        end
         fail(extra or code or 'copy failed')
         return
       end
@@ -426,6 +440,13 @@ function M.Paste(src, dst, src_names, dst_names)
       last = full_dst
       copied[#copied + 1] = { src = pair.src, dst = pair.dst }
       index = index + 1
+      if type(self._after_copy) == 'function' then
+        local recorded, record_err = self._after_copy(pair, full_src, full_dst)
+        if not recorded then
+          fail(record_err or 'could not record pasted entry')
+          return
+        end
+      end
       process_next()
     end
     local function request_name(pair, full_src, st, attempts)
@@ -522,6 +543,20 @@ local function restore_unpaste_captures(captured)
 end
 
 local function capture_unpaste_item(item)
+  if item.quarantine then
+    local called, moved, err = pcall(M.fs.rename_noreplace,
+      item.path, item.quarantine, item.identity)
+    if not called then err, moved = tostring(moved), nil end
+    if not moved then return nil, err end
+    local identity, stat = M.fs.entry_identity(item.quarantine)
+    if identity == nil or identity.inode == nil
+      or item.identity == nil or identity.inode ~= item.identity.inode then
+      return nil, 'captured entry identity differs from the inspected source'
+    end
+    item.identity = identity
+    item.kind = stat and stat.type or nil
+    return true
+  end
   for _ = 1, 100 do
     local quarantine = M.fs.unique_temp_path(M.fs.dirname(item.path), 'unpaste')
     if type(quarantine) ~= 'string' then
@@ -593,13 +628,31 @@ function M.Unpaste(src, dst, src_names, dst_names)
         return unpaste_refusal('pasted entry does not match register content: '
           .. path .. (compare_err and (' (' .. tostring(compare_err) .. ')') or ''))
       end
-      items[#items + 1] = {
+      local item = {
         path = path,
         reference = reference,
         identity = identity,
         kind = stat.type,
         pair = pair,
       }
+      local planned = self._journal_items and self._journal_items[#items + 1]
+      if planned then
+        if planned.src ~= pair.src or planned.dst ~= pair.dst
+          or planned.identity.inode ~= identity.inode then
+          return unpaste_refusal('journaled Unpaste plan no longer matches: ' .. path)
+        end
+        item.quarantine = planned.quarantine
+      end
+      items[#items + 1] = item
+    end
+
+    if type(self._on_unpaste_begin) == 'function' then
+      local ready, ready_err = self._on_unpaste_begin(items)
+      if not ready then
+        return unpaste_refusal('could not prepare Unpaste recovery: '
+          .. tostring(ready_err))
+      end
+      self._journal_active = true
     end
 
     -- Phase B: atomically capture and re-verify every target. If any capture or
@@ -612,15 +665,44 @@ function M.Unpaste(src, dst, src_names, dst_names)
       if not ok then
         local reason = 'could not capture pasted entry: ' .. item.path
           .. ' (' .. tostring(err) .. ')'
-        restore_unpaste_captures(captured)
+        if not self._journal_active then
+          restore_unpaste_captures(captured)
+        else
+          for _, captured_item in ipairs(captured) do
+            if M.fs.taken(captured_item.quarantine) then
+              M.ui.notify('direct: Unpaste quarantine preserved at '
+                .. captured_item.quarantine, vim.log.levels.ERROR)
+            end
+          end
+        end
         return unpaste_refusal(reason)
+      end
+      if type(self._after_unpaste_capture) == 'function' then
+        local recorded, record_err = self._after_unpaste_capture(#captured, item)
+        if not recorded then
+          return unpaste_refusal('could not record captured Unpaste entry: '
+            .. tostring(record_err))
+        end
       end
       local matches, compare_err = compare_unpaste_contents(item.quarantine, item.reference)
       if matches ~= true then
         local reason = 'captured entry no longer matches register content: '
           .. item.path .. (compare_err and (' (' .. tostring(compare_err) .. ')') or '')
-        restore_unpaste_captures(captured)
+        if not self._journal_active then
+          restore_unpaste_captures(captured)
+        else
+          M.ui.notify('direct: Unpaste quarantine preserved at '
+            .. item.quarantine, vim.log.levels.ERROR)
+        end
         return unpaste_refusal(reason)
+      end
+    end
+
+    if type(self._before_unpaste_delete) == 'function' then
+      local ready, ready_err = self._before_unpaste_delete(captured)
+      if not ready then
+        return unpaste_refusal('could not prepare Unpaste deletion: '
+          .. tostring(ready_err))
       end
     end
 
@@ -675,6 +757,13 @@ function M.Unpaste(src, dst, src_names, dst_names)
       self._completed_renames[#self._completed_renames + 1] = {
         src = item.pair.src, dst = item.pair.dst,
       }
+      if type(self._after_unpaste_delete) == 'function' then
+        local recorded, record_err = self._after_unpaste_delete(i, item)
+        if not recorded then
+          return unpaste_refusal('could not record deleted Unpaste entry: '
+            .. tostring(record_err))
+        end
+      end
     end
     return true
   end

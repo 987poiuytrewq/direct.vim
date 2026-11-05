@@ -585,20 +585,19 @@ Run `:checkhealth direct` to print the resolved data home. Inside it:
     coordinates updates to both stacks; an interrupted stack rewrite is replayed
     on the next history access.
     Direct keeps an undo/redo source record until its filesystem reversal
-    succeeds. It journals simple sync actions and simple rename/trash/restore
-    reversals before executing them. On restart, when identity checks prove the
-    before/after state, Direct retries an action that did not start or commits
-    history for one that completed. If the filesystem state is ambiguous, Direct
-    keeps the journal and refuses further history operations until the paths are
-    inspected. Grouped moves and asynchronous paste/unpaste still have partial
-    crash windows and may require manual recovery.
+    succeeds. Its operation journal covers simple filesystem actions, grouped
+    move staging/final renames, and paste/unpaste progress. On restart, Direct
+    uses recorded identities and content checks to resume steps whose outcomes
+    are clear, then commits the paired stack update. Partial copies, changed
+    quarantines, malformed journals, and other ambiguous states are preserved;
+    further history operations stop until the affected paths are inspected.
 
     A persistent advisory lock coordinates Direct instances on the same host
-    that share a data home. Direct holds it across its synchronous filesystem
-    mutations and their history updates, and across asynchronous paste/undo
-    actions. The OS releases the lock if Neovim exits or crashes. Other tools do
-    not participate in this lock, so external filesystem changes can still race
-    Direct. Network filesystems and cross-host lock behavior are not guaranteed.
+    that share a data home. Direct holds it across sync actions and their history
+    updates, and across asynchronous paste/undo/redo actions. The OS releases the
+    lock if Neovim exits or crashes. Other tools do not participate in this lock,
+    so external filesystem changes can still race Direct. Network filesystems
+    and cross-host lock behavior are not guaranteed.
 
     Filesystem destinations use atomic no-replace placement. Darwin and Linux
     use their native exclusive-rename primitive; unsupported platforms or

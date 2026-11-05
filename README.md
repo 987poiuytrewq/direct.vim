@@ -601,6 +601,7 @@ State has no cache and is resolved on every use:
 
 Run `:checkhealth direct` to print the resolved data home. Inside it:
 
+- `.direct-history.lock` — persistent same-host advisory lock file;
 - `history/` — `undo.log` and `redo.log`, the filesystem undo/redo history;
 - `trash/` — removed entries, kept so an undo can restore them;
 - `register/` — the most recent yank, and its content pointer.
@@ -611,20 +612,27 @@ Undo and redo are stored as JSONL. Each stack begins with the exact header
 `{"format":"direct-history","version":1}` followed by one canonical JSON
 action record per line; paste and unpaste records store name lists as JSON
 arrays. Before an operation reads the register or changes the filesystem, direct
-validates its path inputs and classifies both history files from their raw
-bytes. Invalid UTF-8, control characters, malformed JSON, or unknown history
-formats are refused without changing the history, register, or filesystem.
+validates its path inputs and classifies both history files from their raw bytes.
+Invalid path inputs are refused without changing the history, register, or
+filesystem.
 
-Recognized legacy Lua v2/v3 logs and strictly framed Python-era tab logs are
-reset to an empty current-format history with a warning. They are never replayed
-or migrated, and no backup is created. Unknown, future, malformed, or unreadable
-logs are instead preserved byte-for-byte; the triggering operation is refused.
+Unsupported, malformed, legacy, or future history bytes are not replayed or
+migrated: both stacks are reset to empty current-format history without a backup
+or warning. Unreadable logs fail closed without running the requested operation.
 
-History rewrites use an exclusive temporary file in the same directory, then
-flush, close, and atomically rename it over the owned log. This protects each
-single-file rewrite, but does not make the full pop → filesystem action → append
-sequence transactional. A crash between those steps can leave history and disk
-out of sync; there is no cross-operation journal or inter-process lock.
+History rewrites use an exclusive temporary file in the same directory, sync and
+close it, then atomically rename it over the owned log and sync the parent
+directory where supported. A durable operation journal coordinates paired stack
+updates and filesystem recovery for simple actions, grouped moves, and paste /
+unpaste progress. Restart recovery resumes only when identities or content
+verification establish what happened. Ambiguous states preserve the journal and
+recovery artifacts, and block further history operations until inspection.
+
+Direct holds the advisory lock across sync mutations and their history commits,
+and across asynchronous paste/undo/redo work. The OS releases it if Neovim exits
+or crashes. Other tools do not participate in the lock, so external filesystem
+changes can still race Direct; network and cross-host lock behavior are not
+guaranteed.
 
 Filesystem destinations are placed with atomic no-replace operations. On Darwin
 and Linux, direct uses the platform's exclusive rename primitive; unsupported
@@ -642,7 +650,8 @@ direct restores it with no-replace or preserves and reports its exact temporary
 path instead of deleting newer data. A crash in that brief capture/verify/remove
 window can leave a `.direct-exdev-source-*` recovery directory. Concurrent
 writers can still change open files after comparison; there is no filesystem
-snapshot or inter-process lock. The final destination rename is atomic
+snapshot. The same-host Direct lock does not coordinate external tools or other
+hosts. The final destination rename is atomic
 no-replace, but source/temp inode checks and cleanup remain pathname operations.
 A same-user process can race a replacement after a check; in that narrow window
 direct may preserve and report a stranded temp or quarantine path for manual
@@ -654,11 +663,10 @@ guaranteed.
 The Lua rewrite uses a new on-disk format and does **not** migrate the Python-era
 data:
 
-- **History** — recognized Python-era tab logs and recognized Lua v2/v3 logs are
-  discarded and reset to empty JSONL history with a warning and no backup. They
-  are never executed or migrated, so their undo history does not survive. Old
-  space-framed Python logs and any unknown, malformed, or unreadable log are
-  preserved byte-for-byte and block the triggering operation.
+- **History** — unsupported, legacy, malformed, and future-format logs are
+  discarded and reset to empty JSONL history, without migration, backup, or
+  warning. Their undo history does not survive. Unreadable logs fail closed and
+  block the triggering operation.
 - **Register** — entries written by the Python version are still listed. Names
   containing spaces are supported by the JSONL format; names containing control
   characters or invalid UTF-8 are skipped with an error.
