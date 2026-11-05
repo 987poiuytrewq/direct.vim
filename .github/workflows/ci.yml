@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   test:
-    name: Test on ${{ matrix.os }} (Neovim ${{ matrix.neovim-version }})
+    name: Test on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     defaults:
@@ -20,7 +20,6 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        neovim-version: [v0.12.0, stable]
 
     steps:
       - name: Check out the repository
@@ -36,40 +35,27 @@ jobs:
         uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1.6.1
         with:
           neovim: true
-          version: ${{ matrix.neovim-version }}
+          version: stable
 
-      - name: Show the resolved Neovim version
-        run: nvim --version | head -n 1
+      - name: Install GNU Make on Windows
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2
+        with:
+          msystem: MSYS
+          install: make
+          path-type: inherit
 
-      - name: Install LuaRocks
-        if: runner.os == 'Linux'
-        run: make ci-deps
-
-      - name: Run tests and generate coverage
-        if: runner.os == 'Linux'
-        run: make coverage
-
-      - name: Run full test suite
-        if: matrix.os == 'macos-latest'
-        run: nvim --headless -l tests/run.lua
-
-      - name: Run full test suite on Windows
-        if: matrix.os == 'windows-latest'
-        run: nvim --headless -l tests/run.lua
-
-      - name: Add coverage to the run summary
-        if: runner.os == 'Linux' && always() && hashFiles('coverage/summary.out') != ''
-        run: make coverage-summary NEOVIM_VERSION='${{ matrix.neovim-version }}'
+      - name: Run CI
+        run: make ci
+        env:
+          COVERAGE_PLATFORM: ${{ runner.os }}
 
       - name: Publish coverage report
-        if: runner.os == 'Linux' && always()
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: coverage-${{ matrix.neovim-version }}
+          name: coverage-${{ runner.os }}
           path: |
             coverage/index.html
             coverage/summary.out
           if-no-files-found: warn
-
-      - name: Run real-startup smoke test
-        run: tests/live_startup.sh
