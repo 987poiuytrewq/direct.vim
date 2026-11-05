@@ -7,7 +7,13 @@ local function get_ffi()
   local loaded, module = pcall(require, 'ffi')
   if not loaded then return nil end
   ffi = module
-  pcall(ffi.cdef, 'int flock(int fd, int operation);')
+  local source = debug.getinfo(1, 'S').source
+  local declared, declaration_err = require('direct.platform.ffi_declarations')
+    .load(ffi, source, 'unix.h', 'direct_unix_ffi_declarations')
+  if not declared then
+    ffi = nil
+    return nil, declaration_err
+  end
   return ffi
 end
 
@@ -54,30 +60,26 @@ function M.create_symlink(target, link, _source_link)
 end
 
 function M.rename_noreplace(src, dst, sysname)
-  local ffi_ok, ffi = pcall(require, 'ffi')
-  if not ffi_ok then
+  local ffi_lib, ffi_err = get_ffi()
+  if not ffi_lib then
     return nil, 'atomic no-replace rename is unavailable (LuaJIT FFI unavailable)'
   end
-  pcall(ffi.cdef, [[
-    int renamex_np(const char *from, const char *to, unsigned int flags);
-    int renameat2(int olddirfd, const char *oldpath, int newdirfd,
-      const char *newpath, unsigned int flags);
-    char *strerror(int errnum);
-  ]])
 
   sysname = sysname or vim.uv.os_uname().sysname
   local ok, result = pcall(function()
     if sysname == 'Darwin' then
-      return ffi.C.renamex_np(src, dst, 0x00000004) -- RENAME_EXCL
+      return ffi_lib.C.renamex_np(src, dst, 0x00000004) -- RENAME_EXCL
     elseif sysname == 'Linux' then
-      return ffi.C.renameat2(-100, src, -100, dst, 0x00000001) -- RENAME_NOREPLACE
+      return ffi_lib.C.renameat2(-100, src, -100, dst, 0x00000001) -- RENAME_NOREPLACE
     end
     error('atomic no-replace rename is unavailable on ' .. tostring(sysname))
   end)
   if not ok then return nil, tostring(result) end
   if result == 0 then return true end
-  local code = ffi.errno()
-  local err_ok, err = pcall(function() return ffi.string(ffi.C.strerror(code)) end)
+  local code = ffi_lib.errno()
+  local err_ok, err = pcall(function()
+    return ffi_lib.string(ffi_lib.C.strerror(code))
+  end)
   local message = err_ok and err or ('errno ' .. tostring(code))
   if code == 17 then
     return nil, 'destination exists: ' .. dst, 'EEXIST'
@@ -116,9 +118,11 @@ function M.acquire_file_lock(path)
 end
 
 function M.release_file_lock(token)
-  local unlocked = ffi.C.flock(token.fd, 8) == 0
+  local lib = get_ffi()
+  if not lib then return nil, 'same-host history locking requires LuaJIT FFI' end
+  local unlocked = lib.C.flock(token.fd, 8) == 0
   local unlock_err = not unlocked and ('flock unlock failed (errno '
-    .. tostring(ffi.errno()) .. ')') or nil
+    .. tostring(lib.errno()) .. ')') or nil
   local closed, close_err = vim.uv.fs_close(token.fd)
   if not unlocked then return nil, unlock_err end
   if not closed then return nil, tostring(close_err or 'could not close history lock') end
