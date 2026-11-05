@@ -2199,14 +2199,7 @@ end
 
 function Buffer:sync(options)
   return history.with_lock(function()
-    local result, err = sync_locked(self, options)
-    if err == -1 and vim.uv.os_uname().sysname == 'Windows_NT' then
-      io.stderr:write('BUFFER SYNC DEBUG ' .. vim.inspect({
-        result = result, error = err, bufnr = vim.api.nvim_get_current_buf(),
-        root = self.root, pending = pending.is_pending(),
-      }) .. '\n')
-    end
-    return result, err
+    return sync_locked(self, options)
   end)
 end
 

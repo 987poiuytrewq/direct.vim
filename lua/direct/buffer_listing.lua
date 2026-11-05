@@ -3,7 +3,6 @@ local M = {}
 local fs = require('direct.fs')
 local git = require('direct.git')
 local paths = require('direct.paths')
-local snapshot_debug_count = 0
 
 local function path_identity(path)
   return fs.path_identity(path, fs.stat(path))
@@ -179,16 +178,6 @@ local function get_directory_snapshot(state, path)
   local identity = path_identity(path)
   for _, snapshot in ipairs(state and state.directory_snapshots or {}) do
     if snapshot_matches_identity(snapshot, identity) then return snapshot end
-  end
-  local root_identity = state and path_identity(state.root)
-  if vim.uv.os_uname().sysname == 'Windows_NT' and snapshot_debug_count < 100 then
-    snapshot_debug_count = snapshot_debug_count + 1
-    io.stderr:write('SNAPSHOT DEBUG current=' .. vim.inspect(identity)
-      .. ' requested=' .. vim.inspect(path)
-      .. ' root=' .. vim.inspect({ path = state and state.root, identity = root_identity })
-      .. ' stored=' .. vim.inspect(vim.tbl_map(function(snapshot)
-        return { path = snapshot.path, identity = snapshot_identity(snapshot) }
-      end, state and state.directory_snapshots or {})) .. '\n')
   end
   return nil
 end
