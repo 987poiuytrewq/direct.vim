@@ -180,7 +180,10 @@ local function get_directory_snapshot(state, path)
   for _, snapshot in ipairs(state and state.directory_snapshots or {}) do
     if snapshot_matches_identity(snapshot, identity) then return snapshot end
   end
-  if vim.uv.os_uname().sysname == 'Windows_NT' and snapshot_debug_count < 3 then
+  local root_identity = state and path_identity(state.root)
+  if vim.uv.os_uname().sysname == 'Windows_NT'
+    and identity and root_identity and identity.path == root_identity.path
+    and snapshot_debug_count < 3 then
     snapshot_debug_count = snapshot_debug_count + 1
     io.stderr:write('SNAPSHOT DEBUG current=' .. vim.inspect(identity)
       .. ' stored=' .. vim.inspect(state and state.directory_snapshots or {}) .. '\n')
