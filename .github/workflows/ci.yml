@@ -26,16 +26,11 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Neovim
-        # `version: stable` is resolved dynamically at run time, so the exact
-        # Neovim build CI exercises can drift without any change to this file.
-        # This commit SHA is pinned deliberately, for auditability, instead of
-        # referencing the `v1.6.1` tag: `v1.6.1` is a lightweight tag that
-        # resolves straight to this same commit, so a reviewer can verify the
-        # pin, and it changes only through an explicit edit.
+        # Pin the minimum supported version; the Makefile enforces the same floor.
         uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1.6.1
         with:
           neovim: true
-          version: stable
+          version: v0.12.0
 
       - name: Install GNU Make on Windows
         if: runner.os == 'Windows'
