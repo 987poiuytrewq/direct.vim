@@ -68,6 +68,12 @@ summary. The normal `make test` run does not need LuaRocks or LuaCov. CI runs
 downloadable artifact, and displays the coverage summary directly in the run
 summary.
 
+## Scripted demos
+
+Record the sectioned terminal tour with asciinema using `./demo/demo.sh`. Run it
+headlessly and verify the fixture changes using `./demo/demo.sh --check`. See
+[`demo/README.md`](demo/README.md) for the sections, key controls, and options.
+
 ## Install
 
 With Neovim's built-in `vim.pack`:
