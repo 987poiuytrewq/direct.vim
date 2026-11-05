@@ -1970,6 +1970,8 @@ local function sync_locked(self, options)
     local preflight, preflight_err = history.preflight(inputs)
     if not preflight then
       vim.bo[bufnr].modified = true
+      ui.notify('Refusing to sync: history preflight failed: '
+        .. tostring(preflight_err), vim.log.levels.ERROR)
       return nil, preflight_err
     end
   end
