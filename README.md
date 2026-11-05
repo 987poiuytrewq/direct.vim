@@ -99,6 +99,7 @@ All mappings are buffer-local to direct listings, except the global `-`.
 | Key              | Action                                              |
 |------------------|-----------------------------------------------------|
 | `-`              | List the current file's directory, or go to the parent |
+| `z-`             | Go to the parent and expand the directory you left  |
 | `<CR>`, double-click | Open the file or directory                      |
 | `zo` `zc` `za`   | Expand, collapse or toggle one directory            |
 | `zO` `zC` `zA`   | The same, recursively                               |
@@ -236,11 +237,13 @@ direct.vim is built so that a mistake can be undone:
   existing file is never silently overwritten.
 - A save is checked against the filesystem before anything is changed. If the
   directory has changed since it was listed, the save is refused.
-- Undo history is stored as versioned JSONL under `$XDG_DATA_HOME/direct` (or
-  `~/.local/share/direct`). A history file it can't read is preserved and never
-  overwritten.
+- Undo history is stored on disk under `$XDG_DATA_HOME/direct` (or
+  `~/.local/share/direct`) and journaled, so an interrupted operation can be
+  finished or reported after a crash.
+- Neovim instances on the same machine share a lock, so they don't change the
+  filesystem or the history at the same time.
 
-There is no lock between processes, and network filesystems are not guaranteed
+Other programs don't use the lock, and network filesystems are not guaranteed
 to work. Windows paths are handled, but native Windows support has not been
 verified. `:help direct.vim-data` explains exactly what is guaranteed.
 
@@ -252,8 +255,8 @@ This README is an overview. The full reference is in Neovim:
 :help direct.vim
 ```
 
-It covers every command, option, mapping and highlight group, the sync and
-ambiguity rules, the data directory layout, and how to upgrade from the old
+It covers every command, option, mapping and highlight group, the Lua API, the
+sync and ambiguity rules, the data directory layout, and how to upgrade from the old
 Python version.
 
 ## Development
