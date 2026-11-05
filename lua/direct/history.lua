@@ -818,6 +818,10 @@ local function recover_transaction(undo_path, redo_path, transaction_path)
   if not transaction then
     local message = 'history recovery journal is malformed; preserved at '
       .. transaction_path .. ' for manual inspection'
+    local decoded_ok, decoded = pcall(vim.json.decode, bytes)
+    if decoded_ok and type(decoded) == 'table' and decoded.kind == 'group' then
+      message = message .. '\nDEBUG group transaction: ' .. vim.inspect(decoded)
+    end
     M.ui.notify('direct: ' .. message, vim.log.levels.ERROR)
     return nil, message
   end
