@@ -133,6 +133,16 @@ function M.previous_change()
   return buffer.previous_change()
 end
 
+function M.next_file()
+  if not guard('DirectNextFile') then return nil end
+  return buffer.next_file()
+end
+
+function M.previous_file()
+  if not guard('DirectPreviousFile') then return nil end
+  return buffer.previous_file()
+end
+
 function M.undo()
   if not guard('DirectUndo') then
     return nil
@@ -252,6 +262,8 @@ local protected_actions = {
   show_git_status = 'show the Git-status view',
   next_change = 'navigate to the next changed entry',
   previous_change = 'navigate to the previous changed entry',
+  next_file = 'navigate to the next file',
+  previous_file = 'navigate to the previous file',
   undo = 'undo the last filesystem action',
   redo = 'redo the last filesystem action',
   yank = 'copy the selected entries to the Direct register',

@@ -110,6 +110,14 @@ vim.api.nvim_create_user_command('DirectPreviousChange', function()
   require('direct').previous_change()
 end, { nargs = 0, desc = 'direct: navigate to the previous changed entry' })
 
+vim.api.nvim_create_user_command('DirectNextFile', function()
+  require('direct').next_file()
+end, { nargs = 0, desc = 'direct: navigate to the next file' })
+
+vim.api.nvim_create_user_command('DirectPreviousFile', function()
+  require('direct').previous_file()
+end, { nargs = 0, desc = 'direct: navigate to the previous file' })
+
 vim.api.nvim_create_user_command('DirectUndo', function()
   require('direct').undo()
 end, { nargs = 0, desc = 'direct: undo the last filesystem action' })
