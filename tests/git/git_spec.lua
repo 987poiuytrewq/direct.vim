@@ -464,9 +464,9 @@ H.describe('Git status display', function()
     local statuses = marks_by_row(0, 'direct-listing-git-status')
 
     for group, target in pairs({
-      DirectGitAdded = 'DiffAdd',
-      DirectGitDeleted = 'DiffDelete',
-      DirectGitModified = 'DiffChange',
+      DirectGitAdded = 'Added',
+      DirectGitDeleted = 'Removed',
+      DirectGitModified = 'Changed',
       DirectGitRenamed = 'DirectGitModified',
       DirectGitStaged = 'DirectGitAdded',
       DirectGitConflict = 'ErrorMsg',
