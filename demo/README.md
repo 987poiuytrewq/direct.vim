@@ -10,8 +10,9 @@ repository with a couple of changed files, so Git status shows from the first
 frame, and its `build/` and `debug.log` are ignored and so hidden.
 
 It starts straight in with a file operation. Each scene has a caption card
-naming what's happening, with the keys it uses underneath (the GIF has no
-keystroke overlay):
+naming what's happening. Under the title, each key appears as a key cap at
+the moment it's typed, with the latest one highlighted, since the GIF has no
+keystroke overlay:
 
 1. **Rename a file.** `cw` renames `scratch.txt` to `notes.txt`, and `:w`
    applies it.

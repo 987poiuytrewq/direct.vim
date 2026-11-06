@@ -116,9 +116,12 @@ if has_bufferline then
 end
 
 -- DemoCaption(title, keys) shows a caption card near the bottom of the
--- screen: the title in bold, and under it the keys the scene uses, as key
--- caps. The GIF has no keystroke overlay, so this line shows what's pressed.
--- An empty title hides the card. drive.expect calls this with
+-- screen: the title in bold, and under it room for the keys the scene uses
+-- (separated by two spaces in `keys`). DemoKey() then reveals those keys one
+-- at a time, as key caps, at the moment each is typed; the GIF has no
+-- keystroke overlay, so this is how it shows what's pressed. The card is
+-- sized for all of its keys up front, so it doesn't grow as they appear.
+-- An empty title hides the card. drive.expect calls these with
 -- `nvim --server ... --remote-expr`, so captions never appear as keystrokes.
 local function colour(group, attr)
   return vim.api.nvim_get_hl(0, { name = group, link = false })[attr]
@@ -128,19 +131,58 @@ local function set_caption_colours()
   local accent = colour('Function', 'fg') or 0x7aa2f7
   local normal_bg = colour('Normal', 'bg') or 0x1a1b26
   local card_bg = colour('NormalFloat', 'bg') or colour('Pmenu', 'bg') or normal_bg
-  local muted = colour('Comment', 'fg') or 0x565f89
   local key_fg = colour('String', 'fg') or 0x9ece6a
   local key_bg = colour('Visual', 'bg') or colour('CursorLine', 'bg') or normal_bg
   vim.api.nvim_set_hl(0, 'DemoCaption', { bg = card_bg })
   vim.api.nvim_set_hl(0, 'DemoCaptionBorder', { fg = accent, bg = card_bg })
   vim.api.nvim_set_hl(0, 'DemoCaptionTitle', { fg = accent, bg = card_bg, bold = true })
-  vim.api.nvim_set_hl(0, 'DemoCaptionText', { fg = muted, bg = card_bg })
   vim.api.nvim_set_hl(0, 'DemoCaptionKey', { fg = key_fg, bg = key_bg, bold = true })
+  -- The key just typed stands out from the ones before it.
+  vim.api.nvim_set_hl(0, 'DemoCaptionKeyNew', { fg = card_bg, bg = accent, bold = true })
 end
 set_caption_colours()
 
-local caption = { buf = nil, win = nil, ns = vim.api.nvim_create_namespace('demo_caption') }
+local caption = {
+  buf = nil,
+  win = nil,
+  ns = vim.api.nvim_create_namespace('demo_caption'),
+  keys = {},  -- the scene's keys
+  shown = 0,  -- how many of them have been typed so far
+}
 local PAD = 3
+
+local function draw_caption()
+  local title = caption.title
+  local pad = string.rep(' ', PAD)
+
+  -- Each typed key becomes a cap with a space of padding on either side,
+  -- and two spaces between caps. Keys not typed yet leave the line blank.
+  local key_line, spans = '', {}
+  for i = 1, caption.shown do
+    if key_line ~= '' then
+      key_line = key_line .. '  '
+    end
+    local start = #key_line
+    key_line = key_line .. ' ' .. caption.keys[i] .. ' '
+    spans[#spans + 1] = { start, #key_line, i == caption.shown }
+  end
+
+  local lines = { '', pad .. title }
+  if #caption.keys > 0 then
+    lines[#lines + 1] = ''
+    lines[#lines + 1] = pad .. key_line
+  end
+  lines[#lines + 1] = ''
+
+  vim.api.nvim_buf_set_lines(caption.buf, 0, -1, false, lines)
+  vim.api.nvim_buf_clear_namespace(caption.buf, caption.ns, 0, -1)
+  vim.hl.range(caption.buf, caption.ns, 'DemoCaptionTitle', { 1, PAD }, { 1, PAD + #title })
+  for _, span in ipairs(spans) do
+    vim.hl.range(caption.buf, caption.ns, span[3] and 'DemoCaptionKeyNew' or 'DemoCaptionKey',
+      { 3, PAD + span[1] }, { 3, PAD + span[2] })
+  end
+  vim.cmd.redraw()
+end
 
 function _G.DemoCaption(title, keys)
   if caption.win and vim.api.nvim_win_is_valid(caption.win) then
@@ -155,50 +197,42 @@ function _G.DemoCaption(title, keys)
     caption.buf = vim.api.nvim_create_buf(false, true)
   end
 
-  -- Keys are separated by double spaces in the tour, e.g. 'cw  :w'. Each one
-  -- becomes a key cap with a space of padding on either side.
-  local key_line, key_spans = '', {}
-  for key in vim.gsplit(keys or '', '%s%s+') do
-    if key ~= '' then
-      if key_line ~= '' then
-        key_line = key_line .. '  '
-      end
-      local start = #key_line
-      key_line = key_line .. ' ' .. key .. ' '
-      key_spans[#key_spans + 1] = { start, #key_line }
-    end
-  end
+  caption.title = title
+  caption.keys = vim.tbl_filter(function(key)
+    return key ~= ''
+  end, vim.split(keys or '', '%s%s+'))
+  caption.shown = 0
 
-  local width = math.max(vim.fn.strdisplaywidth(title), vim.fn.strdisplaywidth(key_line))
-  local pad = string.rep(' ', PAD)
-  local lines = { '', pad .. title }
-  if key_line ~= '' then
-    lines[#lines + 1] = ''
-    lines[#lines + 1] = pad .. key_line
+  -- Size the card for the title and all of its keys.
+  local all_keys = ''
+  for _, key in ipairs(caption.keys) do
+    all_keys = all_keys .. (all_keys == '' and '' or '  ') .. ' ' .. key .. ' '
   end
-  lines[#lines + 1] = ''
+  local width = math.max(vim.fn.strdisplaywidth(title), vim.fn.strdisplaywidth(all_keys))
+    + PAD * 2
+  local height = #caption.keys > 0 and 5 or 3
 
-  vim.api.nvim_buf_set_lines(caption.buf, 0, -1, false, lines)
-  vim.api.nvim_buf_clear_namespace(caption.buf, caption.ns, 0, -1)
-  vim.hl.range(caption.buf, caption.ns, 'DemoCaptionTitle', { 1, PAD }, { 1, PAD + #title })
-  for _, span in ipairs(key_spans) do
-    vim.hl.range(caption.buf, caption.ns, 'DemoCaptionKey',
-      { 3, PAD + span[1] }, { 3, PAD + span[2] })
-  end
-
-  local total_width = width + PAD * 2
   caption.win = vim.api.nvim_open_win(caption.buf, false, {
     relative = 'editor',
-    row = vim.o.lines - vim.o.cmdheight - #lines - 4,
-    col = math.floor((vim.o.columns - total_width) / 2),
-    width = total_width,
-    height = #lines,
+    row = vim.o.lines - vim.o.cmdheight - height - 4,
+    col = math.floor((vim.o.columns - width) / 2),
+    width = width,
+    height = height,
     style = 'minimal',
     border = 'rounded',
     focusable = false,
     zindex = 200,
   })
   vim.wo[caption.win].winhighlight = 'Normal:DemoCaption,FloatBorder:DemoCaptionBorder'
-  vim.cmd.redraw()
+  draw_caption()
+  return true
+end
+
+-- DemoKey() reveals the caption's next key, as it's typed.
+function _G.DemoKey()
+  if caption.win and vim.api.nvim_win_is_valid(caption.win) and caption.shown < #caption.keys then
+    caption.shown = caption.shown + 1
+    draw_caption()
+  end
   return true
 end

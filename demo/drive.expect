@@ -13,6 +13,11 @@ if {$argc != 6} {
 
 lassign $argv asciinema cast_file nvim_command force nvim socket
 
+# The terminal fits the tallest listing (the gs view, 15 rows) and the caption
+# card below it with a little room, and the widest caption and messages.
+set cols 74
+set rows 27
+
 set env(TERM) xterm-256color
 set env(NVIM_TEST) 1
 
@@ -70,15 +75,25 @@ proc caption {title {keys ""}} {
   }
 }
 
+# Reveal the caption's next key cap. Call it just before typing that key, so
+# the cap appears as the key is pressed.
+proc typed {} {
+  global nvim socket
+  if {[catch {exec $nvim --server $socket --remote-expr "v:lua.DemoKey()" 2>@1} err]} {
+    puts stderr "demo: could not show key: $err"
+    exit 1
+  }
+}
+
 proc vim_string {text} {
   return "'[string map {' ''} $text]'"
 }
 
 if {$asciinema eq ""} {
   # No recording: run Neovim in a terminal the size of the recording's.
-  spawn -noecho sh -c "stty rows 30 cols 100; exec $nvim_command"
+  spawn -noecho sh -c "stty rows $rows cols $cols; exec $nvim_command"
 } else {
-  set record_args [list $asciinema rec --capture-input --window-size 100x30 \
+  set record_args [list $asciinema rec --capture-input --window-size ${cols}x${rows} \
     --title "direct.vim: edit your filesystem like a buffer" -c $nvim_command --return]
   if {$force eq "1"} {
     lappend record_args --overwrite
@@ -93,23 +108,31 @@ if {$asciinema eq ""} {
 # 1. Rename: edit a name and save.
 wait_for {scratch\.txt}
 after 400
-caption "Rename a file by editing its name" "/sc  cw  :w"
+caption "Rename a file by editing its name" "/sc  cw  Esc  :w"
 after 600
+typed
 find_row "sc"
+typed
 key "cw" 250
 type_text "notes"
+typed
 key "\033" 600
+typed
 write_listing
 wait_for {notes\.txt}
 after 800
 
 # 2. Create: add a line; missing parent folders are created too.
-caption "Add a line to create a file, folders included" "o  :w"
+caption "Add a line to create a file, folders included" "G  o  Esc  :w"
 after 600
+typed
 key "G"
+typed
 key "o"
 type_text "docs/guide/getting-started.md"
+typed
 key "\033" 600
+typed
 write_listing
 wait_for {getting-started\.md}
 after 1000
@@ -117,48 +140,68 @@ after 1000
 # 3. Delete: remove the line. Then undo and redo it, on disk.
 caption "Delete a line to delete the file" "/not  dd  :w"
 after 600
+typed
 find_row "not"
+typed
 key "dd" 500
+typed
 write_listing
 after 600
 caption "Undo and redo work on the filesystem" "u  Ctrl-r"
 after 600
+typed
 key "u"
 wait_for {notes\.txt}
 after 800
+typed
 key "\022"
 after 900
 key "zM" 800
 
 # 4. Browse into the tree and rename a file inside it.
-caption "Expand folders in place, and edit inside them" "zo  cw  :w"
+caption "Expand folders in place, and edit inside them" "/lua  zo  j  zo  /ut  cw  Esc  :w"
 after 600
+typed
 find_row "lua"
+typed
 key "zo"
 wait_for {my-plugin/}
+typed
 key "j"
+typed
 key "zo"
 wait_for {utils\.lua}
 after 400
+typed
 find_row "ut"
+typed
 key "cw" 250
 type_text "strings"
+typed
 key "\033" 600
+typed
 write_listing
 wait_for {strings\.lua}
 after 800
 
+# Collapse lua/ again, so the listing stays short enough for the terminal.
+key "zM" 800
+
 # 5. Rename several files with :s. 'inccommand' previews the result live.
-caption "Rename many at once, with any Vim command" ":%s/_test/_spec/  :w"
+caption "Rename many at once, with any Vim command" "/te  zo  :%s/_test/_spec/  :w"
 after 600
+typed
 find_row "te"
+typed
 key "zo"
 wait_for {config_test\.lua}
 after 400
+typed
 key ":" 150
 type_text "%s/_test/_spec/"
 after 400
 key "\r" 600
+typed
 write_listing
 wait_for {config_spec\.lua}
 after 900
@@ -166,17 +209,24 @@ key "zM" 800
 
 # 6. Copy a folder. Pasting next to the original asks for a new name; the
 # prompt starts with the old name, so clear it with Ctrl-u first.
-caption "Copy whole folders" "yy  p"
+caption "Copy whole folders" "/ex  zo  j  yy  k  p  Ctrl-u"
 after 600
+typed
 find_row "ex"
+typed
 key "zo"
 wait_for {minimal/}
+typed
 key "j"
+typed
 key "yy" 900
+typed
 key "k"
+typed
 key "p"
 wait_for {already exists}
 after 600
+typed
 key "\025" 300
 type_text "advanced"
 after 400
@@ -186,12 +236,15 @@ after 1000
 
 # 7. Git: show only what changed, then stage a file.
 key "zM" 800
-caption "See what changed, and stage it" "gs  ga"
+caption "See what changed, and stage it" "gs  /re  ga"
 after 600
+typed
 key "gs"
 wait_for {getting-started\.md}
 after 1100
+typed
 find_row "re"
+typed
 key "ga"
 after 1100
 
@@ -199,6 +252,7 @@ after 1100
 key "gs"
 wait_for {LICENSE}
 caption "direct.vim: edit your filesystem like a buffer" ":help direct.vim"
+typed
 after 2500
 caption ""
 key "ZQ" 500
