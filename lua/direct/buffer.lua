@@ -165,6 +165,37 @@ function M.previous_change()
   return M.navigate_git_status(-1)
 end
 
+-- Move to the next/previous materialized file row, skipping directories. Like
+-- Git-status navigation this follows visible listing order and never wraps.
+function M.navigate_file(direction)
+  local bufnr = vim.api.nvim_get_current_buf()
+  local state = states[bufnr]
+  if not state or (direction ~= 1 and direction ~= -1) then return false end
+
+  local cursor_row = vim.api.nvim_win_get_cursor(0)[1] - 1
+  local row_ids = row_ids_by_row(bufnr)
+  local line_count = vim.api.nvim_buf_line_count(bufnr)
+  local row = cursor_row + direction
+  while row >= 0 and row < line_count do
+    local id = row_ids[row]
+    local record = id and state.rows[id]
+    if record and not is_dir_line(record.name) then
+      vim.api.nvim_win_set_cursor(0, { row + 1, 0 })
+      return true
+    end
+    row = row + direction
+  end
+  return false
+end
+
+function M.next_file()
+  return M.navigate_file(1)
+end
+
+function M.previous_file()
+  return M.navigate_file(-1)
+end
+
 local function is_deleted_record(record)
   return record ~= nil and record.deleted_kind ~= nil
 end

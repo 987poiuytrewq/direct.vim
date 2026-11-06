@@ -272,6 +272,11 @@ consider rows currently materialized in the listing (so collapsed descendants
 are not targets). Use `:DirectNextChange` and `:DirectPreviousChange` for the
 same navigation without the default mappings.
 
+Use `]f` and `[f` to move to the next and previous visible file, skipping
+directories. Expanded subdirectory files are included; collapsed or filtered-out
+entries are not, and navigation does not wrap. The `:DirectNextFile` and
+`:DirectPreviousFile` commands provide the same navigation without mappings.
+
 The symbols can be customized independently by status:
 
 ```lua
@@ -532,6 +537,8 @@ use their existing synchronous staging path.
 | `:DirectGitStatus` | none | Enter the expanded Git-status-only view without toggling it off. |
 | `:DirectNextChange` | none | Navigate to the next visible entry with a Git change. |
 | `:DirectPreviousChange` | none | Navigate to the previous visible entry with a Git change. |
+| `:DirectNextFile` | none | Navigate to the next visible file, skipping directories. |
+| `:DirectPreviousFile` | none | Navigate to the previous visible file, skipping directories. |
 | `:DirectUndo` | none | Undo the last filesystem action. |
 | `:DirectRedo` | none | Redo the last undone action. |
 | `:DirectYank` | range (default: current line) | Yank the ranged entries. |
@@ -540,10 +547,11 @@ use their existing synchronous staging path.
 
 `:DirectSync`, `:DirectFoldAll`, `:DirectUnfoldAll`, `:DirectToggleHidden`,
 `:DirectToggleGitIgnore`, `:DirectToggleGitStatus`, `:DirectGitStatus`,
-`:DirectNextChange`, `:DirectPreviousChange`, `:DirectUndo`, `:DirectRedo`,
+`:DirectNextChange`, `:DirectPreviousChange`, `:DirectNextFile`,
+`:DirectPreviousFile`, `:DirectUndo`, `:DirectRedo`,
 `:DirectYank`, `:DirectPaste` (no argument),
-`:DirectPasteAs`, `:DirectRun`, and the public `open()`, `next_change()`, and
-`previous_change()` APIs report an error and do
+`:DirectPasteAs`, `:DirectRun`, and the public `open()`, `next_change()`,
+`previous_change()`, `next_file()`, and `previous_file()` APIs report an error and do
 nothing when the current buffer is not a direct buffer. `open()` is also used by
 the direct-buffer entry mappings. `:DirectPaste {dir}` is the exception: it
 pastes into an explicitly named directory and never touches the current buffer,
@@ -589,6 +597,8 @@ Buffer-local, in a direct buffer (all mappings follow `map_default_keys`):
 | normal | `gs` | `:DirectToggleGitStatus` |
 | normal | `]c` | `:DirectNextChange` |
 | normal | `[c` | `:DirectPreviousChange` |
+| normal | `]f` | `:DirectNextFile` |
+| normal | `[f` | `:DirectPreviousFile` |
 
 The buffer-local `-` wins over the global `-` inside a direct buffer. All
 buffer-local mappings, including fold and mouse mappings, are omitted when

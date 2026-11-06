@@ -186,6 +186,8 @@ M.BUFFER_MAPS = {
   { mode = 'n', lhs = 'gs', rhs = '<Cmd>DirectToggleGitStatus<CR>' },
   { mode = 'n', lhs = ']c', rhs = '<Cmd>DirectNextChange<CR>' },
   { mode = 'n', lhs = '[c', rhs = '<Cmd>DirectPreviousChange<CR>' },
+  { mode = 'n', lhs = ']f', rhs = '<Cmd>DirectNextFile<CR>' },
+  { mode = 'n', lhs = '[f', rhs = '<Cmd>DirectPreviousFile<CR>' },
 }
 
 -- The loaded buffers whose filetype is `direct`: the retrofit targets for

@@ -210,6 +210,12 @@ Only rows currently materialized in the listing are considered; collapsed or
 filtered-out entries are not navigation targets. Run `:DirectNextChange` or
 `:DirectPreviousChange` for the same navigation without the default mappings.
 
+In a direct listing, `]f` and `[f` move to the next and previous visible files,
+skipping directory rows. Expanded subdirectory files are included; collapsed or
+filtered-out entries are not targets. Navigation stops at the beginning or end
+and does not wrap. Run `:DirectNextFile` or `:DirectPreviousFile` for the same
+navigation without the default mappings.
+
 Status symbols can be configured independently by category:
 
     require('direct').setup({
@@ -462,6 +468,14 @@ existing synchronous staging behavior.
         Move to the previous visible entry with a Git change. Ignored entries
         are skipped; navigation stops at the beginning and does not wrap.
 
+    :DirectNextFile
+        Move to the next visible file row, skipping directories. Expanded
+        subdirectory files are included; navigation does not wrap.
+
+    :DirectPreviousFile
+        Move to the previous visible file row, skipping directories. Expanded
+        subdirectory files are included; navigation does not wrap.
+
     :DirectUndo
         Undo the last filesystem action.
 
@@ -497,10 +511,11 @@ existing synchronous staging behavior.
 `:DirectSync`, `:DirectFoldAll`, `:DirectUnfoldAll`,
 `open()` and `open_parent_expanded()` (the public APIs used by the entry
 mappings),
-`:DirectNextChange`, `:DirectPreviousChange`, `:DirectUndo`, `:DirectRedo`,
+`:DirectNextChange`, `:DirectPreviousChange`, `:DirectNextFile`,
+`:DirectPreviousFile`, `:DirectUndo`, `:DirectRedo`,
 `:DirectYank`, `:DirectPaste` (no argument),
-`:DirectPasteAs`, `:DirectRun`, `:DirectGit`, and the public `next_change()` and
-`previous_change()` APIs report an error and do nothing
+`:DirectPasteAs`, `:DirectRun`, `:DirectGit`, and the public `next_change()`,
+`previous_change()`, `next_file()` and `previous_file()` APIs report an error and do nothing
 when the current buffer is not a direct buffer. `:DirectRun` does not refresh Git
 status; use `:DirectGit` when status decorations should refresh after completion.
 The listing commands `:DirectList`, `:DirectListBuffer` and
@@ -545,6 +560,8 @@ Buffer-local, in a direct buffer (all mappings follow `map_default_keys`):
     normal      gs          :DirectToggleGitStatus
     normal      ]c          :DirectNextChange
     normal      [c          :DirectPreviousChange
+    normal      ]f          :DirectNextFile
+    normal      [f          :DirectPreviousFile
 
 The buffer-local `-` wins over the global `-` inside a direct buffer. All
 buffer-local mappings, including fold and mouse mappings, are omitted when
