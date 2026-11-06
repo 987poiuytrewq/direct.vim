@@ -9,25 +9,28 @@ The tour works on a small Neovim plugin project, `~/my-plugin`. It's a Git
 repository with a couple of changed files, so Git status shows from the first
 frame, and its `build/` and `debug.log` are ignored and so hidden.
 
-Each scene has a caption that names what's about to happen:
+It starts straight in with a file operation. Each scene has a caption card
+naming what's happening, with the keys it uses underneath (the GIF has no
+keystroke overlay):
 
-1. **Edit your filesystem like a buffer.** The listing, with icons and Git
-   status.
-2. **Browse a project as a tree.** `zo` expands `lua/` and `lua/my-plugin/`.
-3. **Rename a file by editing its name.** `cw` renames `utils.lua` to
-   `strings.lua`, and `:w` applies it.
-4. **Rename many at once.** `:%s/_test/_spec/` renames three test files in one
-   save.
-5. **Create a file, parent folders included.** A new line,
+1. **Rename a file.** `cw` renames `scratch.txt` to `notes.txt`, and `:w`
+   applies it.
+2. **Create a file, folders included.** A new line,
    `docs/guide/getting-started.md`, creates both folders and the file.
-6. **Delete a line to delete the file.** `dd` on `scratch.txt`, then `:w`.
-7. **Undo it on disk.** `u` brings `scratch.txt` back.
-8. **Redo it.** `Ctrl-r` deletes it again.
-9. **Copy whole folders.** `yy` and `p` copy `examples/minimal/`, and the
+3. **Delete a file, then undo and redo it on disk.** `dd` and `:w` delete
+   `notes.txt`, `u` brings it back, and `Ctrl-r` deletes it again.
+4. **Expand folders and edit inside them.** `zo` opens `lua/my-plugin/`, and
+   `cw` renames `utils.lua` to `strings.lua`.
+5. **Rename many at once.** `:%s/_test/_spec/` renames three test files in one
+   save.
+6. **Copy whole folders.** `yy` and `p` copy `examples/minimal/`, and the
    "already exists" prompt names the copy `examples/advanced/`.
-10. **Show only what changed.** `gs` shows everything the tour changed.
-11. **Stage a file.** `ga` stages `README.md`.
-12. **`:help direct.vim`.** `gs` returns to the full listing.
+7. **See what changed, and stage it.** `gs` shows only changed files, and `ga`
+   stages `README.md`.
+8. **Back to the full listing**, with the title and `:help direct.vim`.
+
+Neovim starts inside the project, so messages show paths relative to it.
+Searches type only enough of a name to match one line.
 
 ## Files
 

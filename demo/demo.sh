@@ -129,7 +129,7 @@ validate_fixture() {
     examples/minimal/init.lua examples/advanced/init.lua; do
     [[ -e "$root/$path" ]] || { echo "demo: expected $path to exist" >&2; failed=1; }
   done
-  for path in lua/my-plugin/utils.lua tests/config_test.lua scratch.txt; do
+  for path in lua/my-plugin/utils.lua tests/config_test.lua scratch.txt notes.txt; do
     [[ ! -e "$root/$path" ]] || { echo "demo: expected $path to be gone" >&2; failed=1; }
   done
   git -C "$root" diff --cached --name-only | grep -qx README.md \
@@ -152,7 +152,9 @@ run_tour() (
 
   # The socket lets drive.expect show captions without typing them.
   socket="$sandbox/nvim.sock"
-  printf -v command '%q ' "$NVIM" --listen "$socket" -u "$SCRIPT_DIR/init.lua" -- "$workspace"
+  # Start inside the project, so messages show paths relative to it.
+  cd "$workspace"
+  printf -v command '%q ' "$NVIM" --listen "$socket" -u "$SCRIPT_DIR/init.lua" -- .
   if [[ "$MODE" == check ]]; then
     # The same tour, typed into a plain terminal instead of asciinema's.
     echo 'Checking the demo tour (this takes as long as a recording)'
@@ -173,6 +175,10 @@ run_tour() (
   validate_fixture "$workspace"
   echo 'Passed: demo tour'
 )
+
+# The tour runs from inside the project, so make these paths absolute first.
+[[ "$CAST_DIR" == /* ]] || CAST_DIR="$PWD/$CAST_DIR"
+[[ "$PLUGIN_DIR" == /* ]] || PLUGIN_DIR="$PWD/$PLUGIN_DIR"
 
 install_plugins
 run_tour
