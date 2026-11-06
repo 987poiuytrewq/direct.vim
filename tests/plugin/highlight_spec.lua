@@ -337,7 +337,11 @@ H.describe('listing filename highlights', function()
   H.it('renders generic file icons and aligns rows for file-only and combined settings', function()
     clean_buffers()
     local config = require('direct.config')
-    config.setup({ show_folder_icons = false, show_file_icons = true })
+    config.setup({
+      show_folder_icons = false,
+      show_file_icons = true,
+      show_filetype_icons = false,
+    })
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
     H.mkdir(ws, 'folder')
@@ -361,7 +365,11 @@ H.describe('listing filename highlights', function()
     H.assert_eq(vim.api.nvim_get_hl(0, { name = 'DirectFileIcon', link = true }),
       { default = true, link = 'Normal' }, 'file icon group links to Normal by default')
 
-    config.setup({ show_folder_icons = true, show_file_icons = true })
+    config.setup({
+      show_folder_icons = true,
+      show_file_icons = true,
+      show_filetype_icons = false,
+    })
     listing:list()
     assert_folder_icon(0, 0, 0, '\u{f07b}')
     for row = 1, 2 do
@@ -386,6 +394,7 @@ H.describe('listing filename highlights', function()
     config.setup({
       show_folder_icons = true,
       show_file_icons = true,
+      show_filetype_icons = false,
       icons = { file = 'F', folder = 'D', folder_open = 'O' },
     })
     local sb = H.sandbox()
@@ -400,6 +409,45 @@ H.describe('listing filename highlights', function()
 
     listing:expand(1)
     assert_folder_icon(0, 0, 0, 'O')
+  end)
+
+  H.it('renders filetype icons through the optional devicons provider and preserves folder icons', function()
+    clean_buffers()
+    local config = require('direct.config')
+    config.setup({ show_folder_icons = true, show_file_icons = true })
+    local previous = package.loaded['nvim-web-devicons']
+    local requests = {}
+    package.loaded['nvim-web-devicons'] = {
+      get_icon_by_filetype = function(filetype, opts)
+        requests[#requests + 1] = { filetype = filetype, opts = opts }
+        if filetype == 'lua' then return 'L', 'TestLuaIcon' end
+      end,
+    }
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkdir(ws, 'source.lua')
+    H.mkfile(ws, 'script.lua', '')
+    H.mkfile(ws, 'script.py', '')
+    local listing = buffer.list(ws)
+    package.loaded['nvim-web-devicons'] = previous
+
+    H.assert_eq(H.buf_lines(), { 'source.lua/', 'script.lua', 'script.py' })
+    H.assert_eq(icon_mark(0, 0)[4].virt_text,
+      { { '\u{f07b} ', 'DirectFolderIcon' } },
+      'directories keep their existing folder icons')
+    H.assert_eq(icon_mark(0, 1)[4].virt_text,
+      { { 'L ', 'TestLuaIcon' } }, 'recognized filetypes use the devicons glyph and highlight')
+    H.assert_eq(icon_mark(0, 2)[4].virt_text,
+      { { FILE_ICON .. ' ', 'DirectFileIcon' } }, 'a provider without a matching icon falls back to the generic glyph')
+    H.assert_eq(requests, {
+      { filetype = 'lua', opts = { default = false } },
+      { filetype = 'python', opts = { default = false } },
+    }, 'lookups use Neovim filetypes and disable provider generic fallbacks')
+
+    config.setup({ show_folder_icons = true, show_file_icons = true, show_filetype_icons = false })
+    listing:list()
+    H.assert_eq(icon_mark(0, 1)[4].virt_text,
+      { { FILE_ICON .. ' ', 'DirectFileIcon' } }, 'the option disables filetype icons')
   end)
 
   H.it('styles hidden names and their optional icons with Comment', function()
