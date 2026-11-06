@@ -59,7 +59,7 @@ the latest.
 
 ## Requirements
 
-- Neovim **0.12** or later
+- Neovim **0.12** or later, on Linux, macOS or Windows
 - Git, for status and ignore filtering (optional)
 - A [Nerd Font](https://www.nerdfonts.com/), for the default icons (optional;
   you can turn icons off or replace them)
@@ -281,8 +281,7 @@ direct.vim is built so that a mistake can be undone:
   filesystem or the history at the same time.
 
 Other programs don't use the lock, and network filesystems are not guaranteed
-to work. Windows paths are handled, but native Windows support has not been
-verified. `:help direct.vim-data` explains exactly what is guaranteed.
+to work. `:help direct.vim-data` explains exactly what is guaranteed.
 
 ## Documentation
 

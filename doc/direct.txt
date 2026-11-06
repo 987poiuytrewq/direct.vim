@@ -56,7 +56,7 @@ direct.vim is pure Lua and replaces |netrw| for directory buffers.
 ==============================================================================
 2. Requirements                                      *direct.vim-requirements*
 
-    - Neovim 0.12 or later.
+    - Neovim 0.12 or later, on Linux, macOS or Windows.
     - Git, for Git status and Git-ignore filtering (optional). Ignore
       filtering is on by default; see |direct-respect_gitignore|.
     - A Nerd Font with the Font Awesome glyphs, for the default icons
@@ -284,10 +284,10 @@ one does not scan or move its target.
 
 Windows ~
 
-Names are checked against Windows rules: backslashes, drive prefixes, reserved
-device names (including with extensions), and trailing dots or spaces are
-rejected. Native Windows filesystem traversal has not been verified, and
-Windows is not officially supported.
+direct.vim runs on Windows as well as Linux and macOS. On Windows, names are
+also checked against Windows' rules: backslashes, drive prefixes, reserved
+device names (such as `CON` or `NUL`, including with an extension), and
+trailing dots or spaces are rejected when you save.
 
 ==============================================================================
 6. Undo and redo                                             *direct.vim-undo*
