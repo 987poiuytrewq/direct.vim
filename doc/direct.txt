@@ -647,9 +647,9 @@ definitions are kept.
     DirectFileIcon              file icons                    |hl-Normal|
     DirectHiddenFolderIcon      hidden folder icons           Comment
     DirectHiddenFileIcon        hidden file icons             Comment
-    DirectGitAdded              added symbol                  |hl-DiffAdd|
-    DirectGitDeleted            deleted symbol                |hl-DiffDelete|
-    DirectGitModified           modified symbol               |hl-DiffChange|
+    DirectGitAdded              added symbol                  |hl-Added|
+    DirectGitDeleted            deleted symbol                |hl-Removed|
+    DirectGitModified           modified symbol               |hl-Changed|
     DirectGitRenamed            renamed symbol               DirectGitModified
     DirectGitConflict           conflict symbol               |hl-ErrorMsg|
     DirectGitIgnored            ignored symbol                Comment

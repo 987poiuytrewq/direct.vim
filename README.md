@@ -171,7 +171,7 @@ colour scheme. To change one, use `vim.api.nvim_set_hl()`:
 | `DirectDirectory`                           | `Directory`             |
 | `DirectHiddenFolderIcon`, `DirectHiddenFileIcon` | `Comment`          |
 | `DirectGitDeletedFile`, `DirectGitDeletedDirectory` | `ErrorMsg`      |
-| `DirectGit*` status groups                  | `DiffAdd`, `DiffChange`, `DiffDelete`, `ErrorMsg`, `Comment` |
+| `DirectGit*` status groups                  | `Added`, `Changed`, `Removed`, `ErrorMsg`, `Comment` |
 
 `:help direct.vim` lists every group.
 
