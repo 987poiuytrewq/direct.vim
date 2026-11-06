@@ -112,8 +112,8 @@ if has_bufferline then
 end
 
 -- DemoCaption(text) shows a caption near the bottom of the screen; an empty
--- text hides it. tour.vim calls it directly, and drive.expect calls it with
--- `nvim --server ... --remote-expr`, so captions never appear as keystrokes.
+-- text hides it. drive.expect calls it with `nvim --server ... --remote-expr`,
+-- so captions never appear as keystrokes.
 local function set_caption_colours()
   local accent = vim.api.nvim_get_hl(0, { name = 'Function', link = false }).fg or 0x7aa2f7
   local dark = vim.api.nvim_get_hl(0, { name = 'Normal', link = false }).bg or 0x1a1b26

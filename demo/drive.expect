@@ -1,6 +1,7 @@
 #!/usr/bin/expect -f
-# Records the demo tour. Keep this in step with tour.vim, its headless twin:
-# each numbered section here matches one there.
+# Plays the demo tour: types its keys into a terminal and waits for the
+# screen to change. With an asciinema executable it records the tour; with an
+# empty one (demo.sh --check) it plays the same tour in a plain terminal.
 
 set timeout 20
 log_user 0
@@ -67,13 +68,18 @@ proc caption {text} {
   }
 }
 
-set record_args [list $asciinema rec --capture-input --window-size 100x30 \
-  --title "direct.vim: edit your filesystem like a buffer" -c $nvim_command --return]
-if {$force eq "1"} {
-  lappend record_args --overwrite
+if {$asciinema eq ""} {
+  # No recording: run Neovim in a terminal the size of the recording's.
+  spawn -noecho sh -c "stty rows 30 cols 100; exec $nvim_command"
+} else {
+  set record_args [list $asciinema rec --capture-input --window-size 100x30 \
+    --title "direct.vim: edit your filesystem like a buffer" -c $nvim_command --return]
+  if {$force eq "1"} {
+    lappend record_args --overwrite
+  }
+  lappend record_args $cast_file
+  spawn -noecho {*}$record_args
 }
-lappend record_args $cast_file
-eval spawn -noecho $record_args
 
 # 1. The project listing: icons, Git status, and no ignored files.
 wait_for {scratch\.txt}
@@ -192,6 +198,6 @@ key "ZQ" 500
 expect eof
 set result [wait]
 if {[lindex $result 3] != 0} {
-  puts stderr "demo: asciinema recording command failed: $result"
+  puts stderr "demo: the tour ended with an error: $result"
   exit 1
 }

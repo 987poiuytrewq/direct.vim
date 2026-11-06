@@ -31,12 +31,10 @@ Each scene has a caption that names what's about to happen:
 
 ## Files
 
-- `drive.expect` records the tour. It types the keys into asciinema's
-  terminal, so the recording's keystroke overlay shows them. Captions are
-  sent to Neovim over its `--listen` socket, so they don't show up as
-  keystrokes.
-- `tour.vim` is the same tour, run headlessly by `--check`. Keep the two in
-  step: their numbered sections match.
+- `drive.expect` plays the tour. It types the keys into asciinema's terminal,
+  so the recording's keystroke overlay shows them. Captions are sent to
+  Neovim over its `--listen` socket, so they don't show up as keystrokes.
+  `--check` plays the same script in a plain terminal instead of asciinema's.
 - `init.lua` is the demo's Neovim config. It uses kickstart.nvim's options and
   the plugins most setups have: tokyonight, lualine, bufferline and
   nvim-web-devicons. It also shortens paths in messages to `~/my-plugin`.
@@ -49,7 +47,7 @@ Each scene has a caption that names what's about to happen:
 make demo          # record the tour and convert it to demo/tour.gif
 make demo-record   # only record demo/casts/tour.cast
 make demo-gif      # only convert the recording to demo/tour.gif
-make demo-check    # play the tour headlessly and check the result
+make demo-check    # play the tour without recording, and check the result
 ```
 
 `make demo-gif` uses [agg](https://github.com/asciinema/agg). Set `DEMO_FONT`
@@ -61,11 +59,12 @@ to a Nerd Font you have installed (default: `JetBrainsMono Nerd Font`), and
 ```sh
 ./demo/demo.sh            # record demo/casts/tour.cast
 ./demo/demo.sh --force    # replace an existing recording
-./demo/demo.sh --check    # play the tour headlessly and check the result
+./demo/demo.sh --check    # play the tour without recording, and check the result
 ```
 
 Recording needs Neovim 0.12+, Git, asciinema 3 and Expect, and the GIF needs
-agg; `--check` needs only Neovim and Git. Use a terminal font with Nerd Font icons.
+agg; `--check` needs only Neovim, Git and Expect. A check takes as long as a
+recording, about a minute. Use a terminal font with Nerd Font icons.
 
 The first run downloads the plugins, at pinned versions, into `demo/.plugins/`
 (ignored by Git). Set `PLUGIN_DIR` to keep them somewhere else. Without them,

@@ -61,7 +61,7 @@ demo-gif:
 	@command -v $(AGG) >/dev/null 2>&1 || { echo 'agg is required to convert the recording (set AGG=/path/to/agg if needed)' >&2; exit 1; }
 	$(AGG) --font-family '$(DEMO_FONT)' $(DEMO_CAST) $(DEMO_GIF)
 
-# Play the tour headlessly and check its result, without recording.
+# Play the tour without recording it, and check its result.
 demo-check: check-nvim
 	NVIM=$(NVIM) ./demo/demo.sh --check
 

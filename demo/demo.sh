@@ -19,8 +19,8 @@ Records one continuous tour of a small Neovim plugin project: browsing,
 renaming, creating, deleting with undo, copying folders, and Git.
 
 Options:
-  --check   run the tour headlessly and verify its filesystem results;
-            does not require asciinema and does not create a recording
+  --check   play the tour without recording it and verify the result;
+            does not require asciinema
   --force   replace an existing recording
 
 Set CAST_DIR to choose another recording directory, and PLUGIN_DIR to choose
@@ -50,7 +50,7 @@ if [[ "$MODE" == record ]] && ! command -v "$ASCIINEMA" >/dev/null 2>&1; then
   echo "demo: asciinema executable not found: $ASCIINEMA (use --check to validate without recording)" >&2
   exit 1
 fi
-if [[ "$MODE" == record ]] && ! command -v "$EXPECT" >/dev/null 2>&1; then
+if ! command -v "$EXPECT" >/dev/null 2>&1; then
   echo "demo: Expect is required to send real keystrokes: $EXPECT" >&2
   exit 1
 fi
@@ -147,16 +147,17 @@ run_tour() (
 
   export XDG_DATA_HOME="$sandbox/data"
   export DIRECT_DEMO_REPO="$REPO_ROOT"
-  export DIRECT_DEMO_SCRIPT_DIR="$SCRIPT_DIR"
   export DIRECT_DEMO_WORKSPACE="$workspace"
   export DIRECT_DEMO_PLUGINS="$PLUGIN_DIR"
 
+  # The socket lets drive.expect show captions without typing them.
+  socket="$sandbox/nvim.sock"
+  printf -v command '%q ' "$NVIM" --listen "$socket" -u "$SCRIPT_DIR/init.lua" -- "$workspace"
   if [[ "$MODE" == check ]]; then
-    echo 'Checking the continuous demo tour'
-    export DIRECT_DEMO_SCENARIO_FILE="$SCRIPT_DIR/tour.vim"
-    "$NVIM" --headless -u "$SCRIPT_DIR/init.lua" \
-      -c 'execute "source " . fnameescape($DIRECT_DEMO_SCENARIO_FILE)' \
-      -- "$workspace"
+    # The same tour, typed into a plain terminal instead of asciinema's.
+    echo 'Checking the demo tour (this takes as long as a recording)'
+    "$EXPECT" -f "$SCRIPT_DIR/drive.expect" \
+      "" "" "$command" "$FORCE" "$NVIM" "$socket"
   else
     mkdir -p "$CAST_DIR"
     cast_file="$CAST_DIR/tour.cast"
@@ -164,9 +165,6 @@ run_tour() (
       echo "demo: recording already exists: $cast_file (pass --force to replace it)" >&2
       return 1
     fi
-    # The socket lets drive.expect show captions without typing them.
-    socket="$sandbox/nvim.sock"
-    printf -v command '%q ' "$NVIM" --listen "$socket" -u "$SCRIPT_DIR/init.lua" -- "$workspace"
     echo "Recording the demo tour -> $cast_file"
     "$EXPECT" -f "$SCRIPT_DIR/drive.expect" \
       "$ASCIINEMA" "$cast_file" "$command" "$FORCE" "$NVIM" "$socket"

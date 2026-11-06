@@ -283,8 +283,8 @@ latest stable release on every pull request.
 `make demo` records a scripted tour of direct.vim with
 [asciinema](https://asciinema.org/) and converts it to `demo/tour.gif` with
 [agg](https://github.com/asciinema/agg). The tour uses a throwaway Git
-repository and data directory. `make demo-check` runs the same tour headlessly
-and checks the result. See [`demo/README.md`](demo/README.md) for details.
+repository and data directory. `make demo-check` plays the same tour without
+recording it and checks the result. See [`demo/README.md`](demo/README.md) for details.
 
 ## License
 
