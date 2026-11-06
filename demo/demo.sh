@@ -62,7 +62,7 @@ fi
 # The plugins most Neovim setups have, so the demo looks familiar. They are
 # downloaded once, at pinned versions, into PLUGIN_DIR (ignored by Git).
 PLUGINS=(
-  "tokyonight.nvim https://github.com/folke/tokyonight.nvim v4.14.1"
+  "catppuccin https://github.com/catppuccin/nvim v2.0.0"
   "nvim-web-devicons https://github.com/nvim-tree/nvim-web-devicons v0.100"
   "lualine.nvim https://github.com/nvim-lualine/lualine.nvim 221ce6b2d999187044529f49da6554a92f740a96"
   "bufferline.nvim https://github.com/akinsho/bufferline.nvim v4.9.1"

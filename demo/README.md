@@ -39,8 +39,9 @@ Searches type only enough of a name to match one line.
   Neovim over its `--listen` socket, so they don't show up as keystrokes.
   `--check` plays the same script in a plain terminal instead of asciinema's.
 - `init.lua` is the demo's Neovim config. It uses kickstart.nvim's options and
-  the plugins most setups have: tokyonight, lualine, bufferline and
-  nvim-web-devicons. It also shortens paths in messages to `~/my-plugin`.
+  the plugins most setups have: catppuccin (mocha), lualine, bufferline and
+  nvim-web-devicons, and keeps messages to one line so they never stop the
+  tour at a "Press ENTER" prompt.
 - `demo.sh` creates the project, downloads the plugins, runs the tour, and
   checks the project ends up as expected.
 

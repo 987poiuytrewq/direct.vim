@@ -1,12 +1,12 @@
 -- Neovim setup for the scripted demo tour. It aims to look like a typical
 -- setup: kickstart.nvim's options, plus the plugins most configs have
--- (tokyonight, lualine, bufferline and nvim-web-devicons). demo.sh downloads
+-- (catppuccin, lualine, bufferline and nvim-web-devicons). demo.sh downloads
 -- those into demo/.plugins; without them the demo falls back to a plain look.
 vim.opt.runtimepath:prepend(vim.env.DIRECT_DEMO_REPO)
 
 local plugin_dir = vim.env.DIRECT_DEMO_PLUGINS
 if plugin_dir and plugin_dir ~= '' then
-  for _, name in ipairs({ 'tokyonight.nvim', 'nvim-web-devicons', 'lualine.nvim', 'bufferline.nvim' }) do
+  for _, name in ipairs({ 'catppuccin', 'nvim-web-devicons', 'lualine.nvim', 'bufferline.nvim' }) do
     local path = plugin_dir .. '/' .. name
     if vim.uv.fs_stat(path) then
       vim.opt.runtimepath:append(path)
@@ -38,7 +38,7 @@ vim.o.shiftwidth = 2
 vim.o.expandtab = true
 vim.opt.wildignore:append('.git')
 
-if not pcall(vim.cmd.colorscheme, 'tokyonight-night') then
+if not pcall(vim.cmd.colorscheme, 'catppuccin-mocha') then
   vim.o.background = 'dark'
   vim.cmd.colorscheme('default')
 end
