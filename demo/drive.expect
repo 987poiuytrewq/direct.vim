@@ -59,7 +59,9 @@ proc write_listing {} {
 proc caption {text} {
   global nvim socket
   set quoted "'[string map {' ''} $text]'"
-  if {[catch {exec $nvim --server $socket --remote-expr "v:lua.DemoCaption($quoted)"} err]} {
+  # Some builds print the reply ("true") on stderr, which exec would treat as
+  # a failure; 2>@1 captures it, so only a non-zero exit status fails.
+  if {[catch {exec $nvim --server $socket --remote-expr "v:lua.DemoCaption($quoted)" 2>@1} err]} {
     puts stderr "demo: could not show caption: $err"
     exit 1
   }
