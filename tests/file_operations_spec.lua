@@ -3,6 +3,12 @@ local operations = require('direct.file_operations')
 local buffer = require('direct.buffer')
 local pending = require('direct.pending')
 
+-- How long to wait for asynchronous work (an LSP round trip, a deferred sync)
+-- to finish. vim.wait returns as soon as the condition holds, so this only
+-- bounds a real failure. Slow CI runners, Windows in particular, can take
+-- more than a few hundred milliseconds.
+local ASYNC_WAIT_MS = 3000
+
 local function with_clients(clients, fn)
   local get_clients = vim.lsp.get_clients
   vim.lsp.get_clients = function() return clients end
@@ -242,7 +248,7 @@ H.describe('LSP file operations', function()
         newUri = vim.uri_from_fname(root .. '/b') } }, function(ok, failed)
         finished = { ok, failed }
       end, function(message) warnings[#warnings + 1] = message end)
-      H.assert_true(vim.wait(300, function() return finished ~= nil end, 5))
+      H.assert_true(vim.wait(ASYNC_WAIT_MS, function() return finished ~= nil end, 5))
       operations._timeout_ms = nil
     end)
     vim.lsp.util.apply_workspace_edit = apply
@@ -312,7 +318,7 @@ H.describe('LSP file operations', function()
       vim.cmd('write')
       H.assert_true(listing ~= nil)
       H.assert_true(pending.is_pending())
-      H.assert_true(vim.wait(300, function()
+      H.assert_true(vim.wait(ASYNC_WAIT_MS, function()
         return vim.uv.fs_stat(root .. '/after.txt') ~= nil and not pending.is_pending()
       end, 5))
     end)
@@ -350,7 +356,7 @@ H.describe('LSP file operations', function()
       vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'after.txt' })
       vim.bo.modified = true
       H.assert_true(listing:sync())
-      H.assert_true(vim.wait(300, function()
+      H.assert_true(vim.wait(ASYNC_WAIT_MS, function()
         return vim.uv.fs_stat(root .. '/after.txt') ~= nil and not pending.is_pending()
       end, 5))
       operations._timeout_ms = nil
@@ -380,7 +386,7 @@ H.describe('LSP file operations', function()
       vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'after.txt' })
       vim.bo.modified = true
       H.assert_true(listing:sync())
-      H.assert_true(vim.wait(300, function() return not pending.is_pending() end, 5))
+      H.assert_true(vim.wait(ASYNC_WAIT_MS, function() return not pending.is_pending() end, 5))
     end)
     vim.lsp.util.apply_workspace_edit = apply
     H.assert_true(vim.uv.fs_stat(root .. '/before.txt') ~= nil)
@@ -406,7 +412,7 @@ H.describe('LSP file operations', function()
       vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'after.txt' })
       vim.bo.modified = true
       H.assert_true(listing:sync())
-      H.assert_true(vim.wait(300, function() return not pending.is_pending() end, 5),
+      H.assert_true(vim.wait(ASYNC_WAIT_MS, function() return not pending.is_pending() end, 5),
         'malformed response must release Direct pending guard')
     end)
     vim.notify = saved_notify
@@ -444,7 +450,7 @@ H.describe('LSP file operations', function()
       vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'renamed.txt' })
       vim.bo.modified = true
       H.assert_true(listing:sync())
-      H.assert_true(vim.wait(300, function() return not pending.is_pending() end, 5))
+      H.assert_true(vim.wait(ASYNC_WAIT_MS, function() return not pending.is_pending() end, 5))
     end)
     H.assert_eq(vim.fn.readfile(sb.root .. '/side/lsp-source.txt'), { 'workspace edit source' })
     H.assert_eq(vim.fn.readfile(sb.root .. '/side/lsp-destination.txt'),
@@ -481,7 +487,7 @@ H.describe('LSP file operations', function()
       vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'renamed.txt' })
       vim.bo.modified = true
       H.assert_true(listing:sync())
-      H.assert_true(vim.wait(300, function() return not pending.is_pending() end, 5))
+      H.assert_true(vim.wait(ASYNC_WAIT_MS, function() return not pending.is_pending() end, 5))
     end)
     vim.fn.confirm = confirm
     H.assert_true(vim.uv.fs_stat(root .. '/before.txt') ~= nil)
@@ -548,13 +554,13 @@ H.describe('LSP file operations', function()
       H.assert_true(history.log(action.Move(source, destination)))
       local done
       history.undo_async(function(result) done = result end)
-      H.assert_true(vim.wait(300, function() return done ~= nil end, 5))
+      H.assert_true(vim.wait(ASYNC_WAIT_MS, function() return done ~= nil end, 5))
       H.assert_true(fs.stat(source) ~= nil)
       H.assert_nil(fs.stat(destination))
       H.assert_true(fs.stat(root .. '/server-edit-1') ~= nil)
       done = nil
       history.redo_async(function(result) done = result end)
-      H.assert_true(vim.wait(300, function() return done ~= nil end, 5))
+      H.assert_true(vim.wait(ASYNC_WAIT_MS, function() return done ~= nil end, 5))
       H.assert_nil(fs.stat(source))
       H.assert_true(fs.stat(destination) ~= nil)
       H.assert_true(fs.stat(root .. '/server-edit-2') ~= nil)
@@ -606,14 +612,14 @@ H.describe('LSP file operations', function()
       file_operations._timeout_ms = 15
       local done
       history.undo_async(function(result, err) done = { result, err } end)
-      H.assert_true(vim.wait(300, function() return done ~= nil end, 5))
+      H.assert_true(vim.wait(ASYNC_WAIT_MS, function() return done ~= nil end, 5))
       H.assert_true(done[1] ~= nil, tostring(done[2]))
       H.assert_true(fs.stat(source) ~= nil)
       H.assert_false(history.pending.is_pending(), 'undo must release the history guard')
       done = nil
       history.redo_async(function(result, err) done = { result, err } end)
       H.assert_eq(requested, 2, 'redo must send a second willRename request')
-      H.assert_true(vim.wait(300, function() return not history.pending.is_pending() end, 5),
+      H.assert_true(vim.wait(ASYNC_WAIT_MS, function() return not history.pending.is_pending() end, 5),
         'history guard should clear after the willRename timeout')
       H.assert_true(done ~= nil, table.concat(warnings, '\n'))
       H.assert_true(done[1] ~= nil, tostring(done[2]))
@@ -654,7 +660,7 @@ H.describe('LSP file operations', function()
       H.assert_true(history.log(action.Move(source, destination)))
       local done
       history.undo_async(function(result, err) done = { result, err } end)
-      H.assert_true(vim.wait(300, function() return done ~= nil end, 5))
+      H.assert_true(vim.wait(ASYNC_WAIT_MS, function() return done ~= nil end, 5))
       H.assert_nil(done[1])
       H.assert_true(tostring(done[2]):find('destination is occupied', 1, true) ~= nil)
       H.assert_false(history.pending.is_pending())
@@ -685,7 +691,7 @@ H.describe('LSP file operations', function()
       H.assert_true(listing:sync())
       vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'other.txt' })
       vim.schedule(function() respond(nil, nil) end)
-      H.assert_true(vim.wait(300, function() return not pending.is_pending() end, 5))
+      H.assert_true(vim.wait(ASYNC_WAIT_MS, function() return not pending.is_pending() end, 5))
     end)
     H.assert_true(vim.uv.fs_stat(root .. '/before.txt') ~= nil)
     H.assert_nil(vim.uv.fs_stat(root .. '/after.txt'))
@@ -791,7 +797,7 @@ H.describe('LSP file operations', function()
       vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'after.txt' })
       vim.bo.modified = true
       H.assert_true(listing:sync())
-      H.assert_true(vim.wait(300, function() return not pending.is_pending() end, 5))
+      H.assert_true(vim.wait(ASYNC_WAIT_MS, function() return not pending.is_pending() end, 5))
     end)
     vim.notify = saved_notify
     vim.lsp.util.apply_workspace_edit = apply
@@ -832,7 +838,7 @@ H.describe('LSP file operations', function()
       vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'after.txt' })
       vim.bo.modified = true
       H.assert_true(listing:sync())
-      H.assert_true(vim.wait(300, function() return not pending.is_pending() end, 5))
+      H.assert_true(vim.wait(ASYNC_WAIT_MS, function() return not pending.is_pending() end, 5))
     end)
     vim.notify = saved_notify
     vim.lsp.util.apply_workspace_edit = apply
@@ -878,7 +884,7 @@ H.describe('LSP file operations', function()
       vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'after.txt' })
       vim.bo.modified = true
       H.assert_true(listing:sync())
-      H.assert_true(vim.wait(300, function() return not pending.is_pending() end, 5))
+      H.assert_true(vim.wait(ASYNC_WAIT_MS, function() return not pending.is_pending() end, 5))
     end)
     vim.notify = saved_notify
     vim.lsp.util.apply_workspace_edit = apply
@@ -924,7 +930,7 @@ H.describe('LSP file operations', function()
         vim.bo.modified = true
         local synced, sync_err = listing:sync()
         H.assert_true(synced == true, tostring(sync_err) .. '\n' .. H.messages())
-        H.assert_true(vim.wait(300, function() return not pending.is_pending() end, 5))
+        H.assert_true(vim.wait(ASYNC_WAIT_MS, function() return not pending.is_pending() end, 5))
       end
       rename_to('first.txt')
       H.assert_eq(vim.uv.fs_stat(root .. '/new.txt').type, 'file')
@@ -971,7 +977,7 @@ H.describe('LSP file operations', function()
         vim.api.nvim_buf_set_lines(0, 0, -1, false, { name })
         vim.bo.modified = true
         H.assert_true(listing:sync())
-        H.assert_true(vim.wait(300, function() return not pending.is_pending() end, 5))
+        H.assert_true(vim.wait(ASYNC_WAIT_MS, function() return not pending.is_pending() end, 5))
       end
       rename_to('rejected.txt')
       H.assert_true(vim.uv.fs_stat(direct_root .. '/before.txt') ~= nil,
@@ -1015,7 +1021,7 @@ H.describe('LSP file operations', function()
         newUri = vim.uri_from_fname(root .. '/after.txt') } }, function(ok, err)
         result = { ok, err }
       end)
-      H.assert_true(vim.wait(300, function() return result ~= nil end, 5))
+      H.assert_true(vim.wait(ASYNC_WAIT_MS, function() return result ~= nil end, 5))
     end)
     H.assert_true(result[1], tostring(result[2]))
     H.assert_nil(vim.uv.fs_lstat(root .. '/regular.txt'))
@@ -1091,12 +1097,12 @@ H.describe('LSP file operations', function()
       H.assert_true(history.log(action.Touch(path)))
       local done
       history.undo_async(function(result) done = result end)
-      H.assert_true(vim.wait(300, function() return done ~= nil end, 5))
+      H.assert_true(vim.wait(ASYNC_WAIT_MS, function() return done ~= nil end, 5))
       H.assert_nil(fs.stat(path))
       H.assert_eq(calls[1][1], 'workspace/didDeleteFiles')
       done = nil
       history.redo_async(function(result) done = result end)
-      H.assert_true(vim.wait(300, function() return done ~= nil end, 5))
+      H.assert_true(vim.wait(ASYNC_WAIT_MS, function() return done ~= nil end, 5))
       H.assert_true(fs.stat(path) ~= nil)
     end)
     H.assert_eq(calls[2][1], 'workspace/didCreateFiles')
