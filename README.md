@@ -18,6 +18,44 @@ the changes. Every filesystem change can be undone and redone.
   stage/reset/restore keys, and `.gitignore` filtering.
 - **No dependencies.** Pure Lua, no Python, and no icon plugin required.
 
+## How it compares
+
+direct.vim is **not** a sidebar file tree, and it doesn't preview files. If
+that's what you want, use [neo-tree](https://github.com/nvim-neo-tree/neo-tree.nvim)
+or [nvim-tree](https://github.com/nvim-tree/nvim-tree.lua).
+
+It's closest to [oil.nvim](https://github.com/stevearc/oil.nvim) and
+[mini.files](https://github.com/echasnovski/mini.nvim/blob/main/readmes/mini-files.md):
+all three turn a directory into a buffer you edit and save. The differences:
+
+- **Trees you can edit.** direct.vim expands folders in place, and you can
+  edit, move and re-indent entries across the whole tree in one save. oil.nvim
+  shows one folder per buffer, and mini.files shows folders as columns.
+- **Undo on disk.** `u` and `Ctrl-r` undo and redo renames, creates, deletes
+  and pastes after they're saved, and the history survives restarts. The
+  others can send deletions to a trash folder, but saved changes can't be
+  undone.
+- **Git built in.** Status symbols and colours, a changed-files-only view and
+  staging keys, with no extra plugins. oil.nvim has third-party extensions for
+  Git status.
+- **No previews or remote files.** oil.nvim and mini.files preview files, and
+  oil.nvim can browse SSH and S3. direct.vim does neither.
+
+|  | direct.vim | oil.nvim | mini.files | neo-tree, nvim-tree | netrw |
+|---|:---:|:---:|:---:|:---:|:---:|
+| Change files by editing text | ✓ | ✓ | ✓ | — | — |
+| Layout | Buffer, folders expand as a tree | Buffer, one folder | Floating columns | Sidebar tree | Buffer, list or tree |
+| Edit across expanded folders | ✓ | — | — | — | — |
+| Undo changes after saving | ✓ | — | — | — | — |
+| Git status built in | ✓ | Via extensions | — | ✓ | — |
+| LSP file operations | ✓ | ✓ | ✓ | Via a plugin | — |
+| File preview | — | ✓ | ✓ | ✓ | ✓ |
+| Sidebar | — | — | — | ✓ | ✓ |
+| Remote filesystems | — | ✓ | — | — | ✓ |
+
+Based on each project's documentation in November 2026; check their docs for
+the latest.
+
 ## Requirements
 
 - Neovim **0.12** or later
@@ -253,22 +291,33 @@ Python version.
 
 ## Development
 
-The tests run in Neovim's embedded Lua and have no other dependencies:
+On macOS, install the prerequisites with [Homebrew](https://brew.sh/):
+
+```sh
+brew install neovim git                    # tests and coverage
+brew install asciinema agg expect          # demo recording
+brew install --cask font-jetbrains-mono-nerd-font
+```
+
+The font is only needed for the demo GIF, which renders the file icons with
+it.
+
+The tests run in Neovim's embedded Lua and need only Neovim 0.12 or later:
 
 ```sh
 make test
 ```
 
-For coverage, install [LuaRocks](https://luarocks.org/) for Lua 5.1, then run:
+For coverage, `make coverage` fetches [LuaCov](https://github.com/lunarmodules/luacov)
+with Git into the ignored `.rocks/` directory, then runs the suite with it:
 
 ```sh
-make install          # installs LuaCov into ./.rocks
-make coverage         # writes coverage/index.html
-make coverage-summary # writes coverage/summary.md
+make coverage          # writes coverage/index.html and coverage/summary.out
+make coverage-summary  # writes coverage/summary.md
 ```
 
-CI runs the suite on Linux, macOS and Windows against Neovim 0.12.0 and the
-latest stable release on every pull request.
+CI runs the suite with coverage on Linux, macOS and Windows against Neovim
+0.12.0, and checks the demo tour, on every pull request.
 
 ### Demo recording
 
