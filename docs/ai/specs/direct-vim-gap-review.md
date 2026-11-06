@@ -1,7 +1,9 @@
 # Spec: direct.vim gap review follow-ups
 
 **Status:** PROPOSED. Nothing here has been implemented yet. This replaces
-`direct-vim-remaining-improvements.md`, whose slices have all shipped.
+`direct-vim-remaining-improvements.md`. Its main pieces (JSONL history,
+no-overwrite moves, exclusive `touch`, the safeguard on undoing a paste)
+appear in the current code, but that was not checked item by item.
 
 **Source:** a static review of the code at `debabf2` (November 2026). The
 findings come from reading the code; none has been reproduced in a running
