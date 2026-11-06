@@ -1,40 +1,79 @@
-# Scripted demos
+# Scripted demo
 
-`demo.sh` records one continuous, repeatable terminal tour of Direct with
-asciinema. The opening listing is a menu of three sections; the script enters
-each section, demonstrates its workflow, and returns to the menu:
+`demo.sh` records a one-minute tour of direct.vim with asciinema, for the top
+of the project README.
 
-- `01-file-edits/` — rename, create, delete, and filesystem undo/redo.
-- `02-browse-and-move/` — expand/collapse a folder and move a child to its parent.
-- `03-copy-and-paste/` — copy a directory tree using `yy` and `p`.
+## The tour
 
-The recording sends normal terminal keys for navigation and edits; `:w` is the
-only Ex command it types. With the demo's `map_default_keys = true`, `u` and
-`<C-r>` invoke filesystem undo and redo. Use `:undo` and `:redo` for listing text
-history.
+The tour works on a small Neovim plugin project, `~/my-plugin`. It's a Git
+repository with a couple of changed files, so Git status shows from the first
+frame, and its `build/` and `debug.log` are ignored and so hidden.
 
-Each section uses a small fixture with action-oriented names such as
-`rename-me.txt`, `delete-me.txt`, and `move-from/move-me.txt`. The file-edit
-section also shows a hidden file and an expandable hidden folder. The tour uses a
-disposable Git repository and isolated `XDG_DATA_HOME`; it does not touch the
-user's files or Direct data. Both file and folder icons are enabled (a Nerd Font
-is needed to render them), and Git status colors are enabled.
+It starts straight in with a file operation. Each scene has a caption card
+naming what's happening, with the keys it uses underneath (the GIF has no
+keystroke overlay):
+
+1. **Rename a file.** `cw` renames `scratch.txt` to `notes.txt`, and `:w`
+   applies it.
+2. **Create a file, folders included.** A new line,
+   `docs/guide/getting-started.md`, creates both folders and the file.
+3. **Delete a file, then undo and redo it on disk.** `dd` and `:w` delete
+   `notes.txt`, `u` brings it back, and `Ctrl-r` deletes it again.
+4. **Expand folders and edit inside them.** `zo` opens `lua/my-plugin/`, and
+   `cw` renames `utils.lua` to `strings.lua`.
+5. **Rename many at once.** `:%s/_test/_spec/` renames three test files in one
+   save.
+6. **Copy whole folders.** `yy` and `p` copy `examples/minimal/`, and the
+   "already exists" prompt names the copy `examples/advanced/`.
+7. **See what changed, and stage it.** `gs` shows only changed files, and `ga`
+   stages `README.md`.
+8. **Back to the full listing**, with the title and `:help direct.vim`.
+
+Neovim starts inside the project, so messages show paths relative to it.
+Searches type only enough of a name to match one line.
+
+## Files
+
+- `drive.expect` plays the tour. It types the keys into asciinema's terminal,
+  so the recording's keystroke overlay shows them. Captions are sent to
+  Neovim over its `--listen` socket, so they don't show up as keystrokes.
+  `--check` plays the same script in a plain terminal instead of asciinema's.
+- `init.lua` is the demo's Neovim config. It uses kickstart.nvim's options and
+  the plugins most setups have: catppuccin (mocha), lualine, bufferline and
+  nvim-web-devicons, and keeps messages to one line so they never stop the
+  tour at a "Press ENTER" prompt.
+- `demo.sh` creates the project, downloads the plugins, runs the tour, and
+  checks the project ends up as expected.
+
+## Usage
 
 ```sh
-./demo/demo.sh
-./demo/demo.sh --force
+make demo          # record the tour and convert it to demo/tour.gif
+make demo-record   # only record demo/casts/tour.cast
+make demo-gif      # only convert the recording to demo/tour.gif
+make demo-check    # play the tour without recording, and check the result
 ```
 
-Recordings are written to `demo/casts/` by default. Set `CAST_DIR` to choose a
-different directory. Existing recordings are never overwritten unless `--force`
-is supplied. Recordings capture actual terminal input, so the asciinema player
-can show its keystroke overlay. The tour only types safe names into its disposable
-fixture. Run it headlessly and validate its filesystem result without asciinema
-or Expect using:
+`make demo-gif` uses [agg](https://github.com/asciinema/agg). Set `DEMO_FONT`
+to a Nerd Font you have installed (default: `JetBrainsMono Nerd Font`), and
+`DEMO_GIF` to write the GIF somewhere else.
+
+`demo.sh` can also be run directly:
 
 ```sh
-./demo/demo.sh --check
+./demo/demo.sh            # record demo/casts/tour.cast
+./demo/demo.sh --force    # replace an existing recording
+./demo/demo.sh --check    # play the tour without recording, and check the result
 ```
 
-The fixture and plugin data are removed after each run. `nvim` and Neovim 0.12+
-and Git are required for `--check`; recording also requires asciinema and Expect.
+Recording needs Neovim 0.12+, Git, asciinema 3 and Expect, and the GIF needs
+agg; `--check` needs only Neovim, Git and Expect. A check takes as long as a
+recording, about a minute. Use a terminal font with Nerd Font icons.
+
+The first run downloads the plugins, at pinned versions, into `demo/.plugins/`
+(ignored by Git). Set `PLUGIN_DIR` to keep them somewhere else. Without them,
+the demo uses Neovim's default colour scheme and a plain status line.
+
+Recordings go to `demo/casts/` (also ignored); set `CAST_DIR` to change that.
+The project and the demo's data directory are temporary and removed after each
+run, so the tour never touches your own files or direct.vim history.

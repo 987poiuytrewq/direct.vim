@@ -1,92 +1,527 @@
-direct.txt  Edit directories in Neovim.                          *direct.txt*
+*direct.txt*                              Edit your filesystem like a buffer
 
+                                  DIRECT.VIM
 
-CONTENTS                                      *direct.vim-contents* *direct.vim*
+                                                         *direct.vim* *direct*
+==============================================================================
+CONTENTS                                                 *direct.vim-contents*
 
-    1. Intro ............................................... |direct.vim-intro|
-    2. Requirements ................................. |direct.vim-requirements|
-    3. Setup ............................................... |direct.vim-setup|
-    4. Navigate ......................................... |direct.vim-navigate|
-    5. Edit ................................................. |direct.vim-edit|
-    6. Undo / Redo ......................................... |direct.vim-undo|
-    7. Yank / Paste ........................................ |direct.vim-yank|
-    8. Commands ......................................... |direct.vim-commands|
-    9. Mappings ......................................... |direct.vim-mappings|
-   10. Data directory ..................................... |direct.vim-data|
-   11. Upgrading from the Python version ................. |direct.vim-upgrade|
-   12. Licence ........................................... |direct.vim-licence|
+     1. Introduction ...................................... |direct.vim-intro|
+     2. Requirements ............................... |direct.vim-requirements|
+     3. Quick start .................................. |direct.vim-quickstart|
+     4. Navigating ..................................... |direct.vim-navigate|
+     5. Editing ............................................ |direct.vim-edit|
+     6. Undo and redo ...................................... |direct.vim-undo|
+     7. Yank and paste ..................................... |direct.vim-yank|
+     8. Git ................................................. |direct.vim-git|
+     9. Running commands .................................... |direct.vim-run|
+    10. LSP file operations ................................. |direct.vim-lsp|
+    11. Configuration ..................................... |direct.vim-setup|
+    12. Highlights ................................... |direct.vim-highlights|
+    13. Commands ....................................... |direct.vim-commands|
+    14. Mappings ....................................... |direct.vim-mappings|
+    15. Lua API ............................................. |direct.vim-api|
+    16. Data and safety .................................... |direct.vim-data|
+    17. Upgrading from the Python version ............... |direct.vim-upgrade|
+    18. Licence ......................................... |direct.vim-licence|
 
 ==============================================================================
-1. Intro                                                      *direct.vim-intro*
+1. Introduction                                             *direct.vim-intro*
 
-Load a directory into a buffer with each root-level line corresponding to a file
-or subdirectory. Edit those root rows to create, rename, or delete filesystem
-entries. Directories can also be expanded for browsing; their child rows are
-materialized in the buffer and removed when collapsed.
+direct.vim lists a directory in a buffer, one line per entry. Rename, create,
+delete and move files with ordinary Vim editing, then |:write| to apply the
+changes to the filesystem.
+>
+    src/
+      components/
+        button.lua
+      init.lua
+    docs/
+    README.md
+<
+Features:
 
-    - navigate around the filesystem easily
-    - rename, create and delete files and directories
-    - yank and paste files and directories
-    - full undo and redo history for every filesystem change
+    - Edit with any Vim command: |cw|, |dd|, |o|, |:s|, macros, and so on.
+    - Expand directories in place with the usual fold keys, and move entries
+      by changing their indentation.
+    - Undo and redo every filesystem change with |u| and |CTRL-R|. The
+      history is kept on disk.
+    - Yank and paste files and whole directory trees.
+    - See Git status, filter to changed files, stage and restore entries, and
+      hide Git-ignored files.
+    - Language servers are told about renames, creates and deletes.
 
-Filename highlights ~
-
-Visible directories use DirectDirectory (default link Directory) at any
-indentation depth. Hidden directories and files use their Comment defaults.
-When icons are enabled, hidden directory and file icons also use the Comment
-style; visible directory and file icons retain their Directory and Normal
-defaults. These highlight groups can be customized in a colorscheme or with
-`nvim_set_hl()`:
-
-    DirectDirectory             visible directory names (Directory)
-    DirectHiddenDirectory       hidden directory names (Comment)
-    DirectHiddenFile            hidden file names (Comment)
-    DirectFolderIcon            visible folder icons (Directory)
-    DirectFileIcon              file icons (Normal)
-    DirectHiddenFolderIcon      hidden folder icons (Comment)
-    DirectHiddenFileIcon        hidden file icons (Comment)
-    DirectGitAdded              added status symbol (DiffAdd)
-    DirectGitDeleted            deleted status symbol (DiffDelete)
-    DirectGitModified           modified status symbol (DiffChange)
-    DirectGitRenamed            renamed status symbol (DirectGitModified)
-    DirectGitConflict           conflict status symbol (ErrorMsg)
-    DirectGitIgnored            ignored status symbol (Comment)
-    DirectGitStaged             staged status symbol (DirectGitAdded)
-    DirectGitDeletedFile        deleted tracked file name (ErrorMsg)
-    DirectGitDeletedDirectory   deleted tracked directory name (ErrorMsg)
-
-Defaults are reapplied after a ColorScheme event without replacing
-user-defined groups. Listing files receive no filename-, filetype-, or
-special-name-derived highlights; Git status styling is described below.
-
-Direct loads its listing syntax locally, including when Neovim's global syntax
-loader is disabled.
+direct.vim is pure Lua and replaces |netrw| for directory buffers.
 
 ==============================================================================
-2. Requirements                                        *direct.vim-requirements*
+2. Requirements                                      *direct.vim-requirements*
 
-    - Neovim >= 0.12
-    - No Python: the plugin is pure Lua. Git status and Git-ignore filtering use
-      the Git command-line executable. Git-ignore filtering is on by default;
-      set `respect_gitignore = false` to disable it.
+    - Neovim 0.12 or later.
+    - Git, for Git status and Git-ignore filtering (optional). Ignore
+      filtering is on by default; see |direct-respect_gitignore|.
+    - A Nerd Font with the Font Awesome glyphs, for the default icons
+      (optional). See |direct-icons|.
 
-Run `:checkhealth direct` to confirm the version and the data home in use:
-
+No Python and no icon plugin are needed. To check the Neovim version and the
+data directory in use, run:
+>
     :checkhealth direct
+<
+==============================================================================
+3. Quick start                                         *direct.vim-quickstart*
+
+1. Open a directory. Any of these work:
+>
+    nvim .
+    :edit some/dir/
+    :DirectList some/dir
+<
+   Or press `-` in any buffer to list the directory of the current file.
+
+2. Move around. <CR> opens the entry under the cursor and `-` goes up to the
+   parent directory. `zo` expands a directory in place.
+
+3. Edit the listing, then save with |:write|:
+
+    To...       Do this ~
+    Rename      Change a name, e.g. `old.txt` to `new.txt`.
+    Create      Add a line, e.g. `notes.md` or `reports/2026/summary.md`.
+    Delete      Delete the line. The entry is yanked, so `p` puts it back.
+    Move        Re-indent the line under another expanded directory.
+
+4. Press `u` to undo the filesystem change.
+
+Directory names end with the separator (`archive/`); file names do not. At the
+root level, save one kind of change at a time. If direct.vim can't tell what
+you meant, the save is refused and nothing on disk changes. See
+|direct.vim-edit| for the full rules.
 
 ==============================================================================
-3. Setup                                                    *direct.vim-setup*
+4. Navigating                                            *direct.vim-navigate*
 
-`setup()` is optional; the defaults apply when it is never called.
+Opening a listing ~
 
+In normal mode, `-` lists the directory of the current file. In a buffer with
+no file name, or with a non-empty 'buftype', it lists the working directory
+instead. You can also open a directory with `:edit foo/` or by starting Neovim
+on it.
+
+Moving between directories ~
+
+In a listing:
+
+    <CR>        Open the entry under the cursor. A directory opens a new
+                listing and a file opens the file. Double-clicking an entry
+                does the same.
+    -           Go up to the parent directory.
+    z-          Go up to the parent directory and expand the directory you
+                came from.
+
+Expanding directories ~
+
+Directories can be expanded in place, so the listing becomes a tree. The
+initial listing is always flat.
+
+    zo          Expand one directory level.
+    za          Expand or collapse one directory.
+    zc          Collapse one directory.
+    zO          Expand a directory recursively.
+    zA          Expand or collapse a directory recursively.
+    zC          Collapse a directory recursively.
+    zR          Expand all directories (|:DirectUnfoldAll|).
+    zM          Collapse all directories (|:DirectFoldAll|).
+
+Children are read lazily, one level at a time. Expanding an already expanded
+directory does not re-read or duplicate its children. Collapsing removes the
+child rows from the buffer, and expanding again re-reads the directory.
+
+Recursive expansion (`zO`, `zA`, `zR` and |:DirectUnfoldAll|) is unlimited by
+default. Set |direct-max_recursive_expand_depth| to cap it. The cap does not
+affect one-level `zo` and `za`.
+
+With folder icons enabled and mouse input on (for example `:set mouse=a`),
+clicking a folder icon expands or collapses that directory. Clicking elsewhere
+places the cursor as usual.
+
+Jumping ~
+
+    ]d  [d      Next or previous directory row, including directories inside
+                expanded subtrees. Collapsed descendants are skipped, and the
+                expansion state does not change.
+    ]f  [f      Next or previous visible file row, skipping directories.
+                Files in expanded subdirectories are included; navigation does
+                not wrap.
+    ]c  [c      Next or previous entry with a Git change. See
+                |direct.vim-git-navigate|.
+
+==============================================================================
+5. Editing                                                   *direct.vim-edit*
+
+Edit a listing as you would any file, using any Vim command. When you save,
+direct.vim compares the buffer with the filesystem, applies the differences,
+and lists the directory again.
+
+Rename, create and delete ~
+                                                         *direct.vim-classify*
+At the root level, each save is classified as exactly one of these:
+
+    Rename      Change the text of an existing line.
+    Create      Add new lines anywhere.
+    Delete      Delete lines. Deleted entries are yanked first, so you can
+                paste them back with `p`.
+
+An edit that both adds and deletes root rows, or that leaves a duplicated
+line, is ambiguous. The error names both sides of the comparison. Nothing is
+changed, no history is written, and the buffer stays modified so you can fix
+it.
+
+Directories and files ~
+                                                   *direct.vim-separator-rule*
+A directory is always written with a trailing separator, and a file never has
+one. The line decides what is created or renamed, not the filesystem:
+
+    - Adding `bar` creates a file, and adding `bar/` creates a directory.
+    - Renaming the directory `foo/` to `foo` replaces it with a file.
+
+The separator is the platform's filesystem separator by default. Set
+|direct-directory_separator| to `/` or `\` to choose a different one. The
+separator is reserved inside entry names, so an entry whose name contains it
+is left out of the editable listing.
+
+Creating nested paths ~
+
+A new line can contain a relative path, such as `reports/2026/summary.txt`.
+direct.vim creates the file and any missing parent directories. A path ending
+in the separator, such as `reports/2026/`, creates a directory. After the
+save, the new parent directories are expanded and the cursor moves to the last
+added entry. Parent directories are recorded separately in the history, so `u`
+and `<C-r>` undo and redo them in the right order.
+
+Nested paths are only for new entries. A rename changes a single name.
+
+These are refused when you save:
+
+    - Absolute paths.
+    - Empty components, such as `a//b`.
+    - `.` or `..` components, such as `a/../b`.
+    - Components that begin with whitespace.
+
+Editing expanded directories ~
+                                                        *direct.vim-tree-edit*
+Each expanded directory is its own edit scope. Edit, add or delete its
+children just as you would at the root. Changes in several expanded
+directories are combined into one save.
+
+Indentation defines the tree. Root rows have no indentation, and each level
+adds |direct-indent_size| spaces (2 by default). Every child must sit under a
+directory.
+
+To move an entry, change its indentation or move its line beneath another
+expanded directory. The entry keeps its contents. New rows can be nested under
+a directory created in the same edit. Renamed and moved directories carry
+their contents and keep their visible expansions where possible.
+
+Deleting a directory row deletes its whole tree, including expanded
+descendants, and yanks it first. To keep some of the descendants, re-indent
+them under another directory in the same edit.
+
+If you move or rename a directory and also edit its descendants, you may need
+to save the two changes separately. direct.vim refuses the save when it can't
+determine a safe order for the filesystem actions.
+
+When a whole line is replaced, direct.vim treats it as a rename only when the
+surrounding entries make the pairing unambiguous. Otherwise the save is
+refused. Root-level edits always follow the rename/create/delete rules above.
+
+What gets checked before a save ~
+
+Before changing anything, direct.vim checks the whole edit. Any of the
+following refuses the entire save. Nothing is yanked, changed on disk or
+written to history:
+
+    - Invalid indentation, or a child without a parent directory.
+    - Two rows with the same destination.
+    - A row whose original entry can no longer be identified.
+    - An expanded directory whose contents changed on disk since it was
+      listed.
+    - A filter change that affects the save. See |direct.vim-filters|.
+
+Text undo of expansions ~
+
+Expanding and collapsing are ordinary text changes, so |:undo| after a
+collapse restores the child rows, and |:redo| collapses again. Redo can only
+restore entry identities when the undo sequence and the directory contents are
+exactly as they were. If they aren't, those rows are treated as unsafe to
+save, open or yank.
+
+Filters ~
+                                                          *direct.vim-filters*
+Four independent filters can hide entries from a listing:
+
+    - 'wildignore'.
+    - Dotfiles, when |direct-show_hidden| is off (toggle with `gh`).
+    - Git-ignored entries, when |direct-respect_gitignore| is on (toggle with
+      `gi`).
+    - The Git-status-only view (toggle with `gs`).
+
+Hidden entries are left out of the save. They are never treated as deleted,
+including entries that appear on disk later and match the filters.
+
+Each listing records the filters it was made with. Changing an option doesn't
+affect an existing listing; list the directory again to apply it.
+
+A save is refused if it would:
+
+    - Create or rename to a path occupied by a hidden entry.
+    - Move a directory that contains a hidden entry, or an entry the listing
+      can't show, such as a dangling symlink or a FIFO.
+
+Directory-only 'wildignore' patterns such as `cache/` also protect matching
+nested directories. Directory symlinks are treated as single entries: renaming
+one does not scan or move its target.
+
+Windows ~
+
+Names are checked against Windows rules: backslashes, drive prefixes, reserved
+device names (including with extensions), and trailing dots or spaces are
+rejected. Native Windows filesystem traversal has not been verified, and
+Windows is not officially supported.
+
+==============================================================================
+6. Undo and redo                                             *direct.vim-undo*
+
+In a listing, `u` and `<C-r>` undo and redo the last filesystem action, such
+as a save or a paste. They are the same as |:DirectUndo| and |:DirectRedo|.
+
+The history is stored on disk, so it survives restarting Neovim and is shared
+by every listing. See |direct.vim-data|.
+
+Use |:undo| and |:redo| to undo text changes in the listing. Text undo only
+changes buffer lines; it never renames, creates, deletes or restores anything
+on disk.
+
+==============================================================================
+7. Yank and paste                                            *direct.vim-yank*
+
+Yanking ~
+
+`yy` and `Y` yank the entry on the current line, and `y` in Visual mode yanks
+the selected lines. Directories are yanked with all their contents. Entries
+inside expanded directories can be yanked too.
+
+The yank is copied into direct.vim's own register in the data directory, so it
+is shared between Neovim instances. It is separate from Vim's registers.
+
+Pasting ~
+
+`p` and `P` paste into the directory under the cursor. On a file, they paste
+into the file's directory. |:DirectPaste| with a directory argument pastes
+there from any buffer, and |:DirectPasteAs| pastes under a new name.
+
+If an entry with the same name already exists, you are prompted for another
+name ("File already exists. Paste as:"). The prompt uses |vim.ui.input()|.
+Cancelling, giving an empty answer or giving an invalid name skips that entry.
+A name that still clashes is asked again, up to ten times. While a prompt is
+open, saves, pastes, undo and redo are refused.
+
+Entries pasted before a later one is skipped or fails are kept and recorded in
+the history. If every entry is skipped, nothing is recorded.
+
+Undoing a paste ~
+                                                          *direct.vim-unpaste*
+Pastes are in the undo history like any other change. Before removing
+anything, undo checks every pasted file, directory tree and symlink against
+the register. If any of them is missing, changed or unreadable, or the
+register has been replaced by a newer yank, the whole undo is refused and the
+history entry is kept.
+
+Matching entries are first moved to `.direct-unpaste-*` paths in the same
+directory and checked again. Only those captured paths are deleted, so a new
+file created under the original name is never removed. If the capture fails,
+direct.vim restores what it captured without overwriting anything. A
+quarantine path it can't restore is kept and reported so you can recover it.
+
+Limits: a crash during deletion can leave `.direct-unpaste-*` paths behind. A
+replacement with identical contents can't be told apart from the original
+paste. Another process that has the files open can still change them between
+the check and the deletion.
+
+==============================================================================
+8. Git                                                        *direct.vim-git*
+
+In a Git repository, direct.vim shows the status of each entry and offers a
+few Git shortcuts. Turn the status display off with |direct-git.enabled|.
+Ignore filtering is controlled separately by |direct-respect_gitignore|.
+
+Status display ~
+                                                       *direct.vim-git-status*
+Git status is read once each time a listing is refreshed. To update it, list
+the directory again, or use |:DirectGit|, which refreshes it for you.
+
+Each row shows a two-slot status component, right-aligned at the edge of the
+window. The first slot is the index (staged) status and the second is the
+worktree status. It is virtual text, so it doesn't change the buffer lines.
+Very long rows may leave less room for it.
+
+    Default glyph   Status ~
+                   added (also untracked files and copies)
+                   modified (type changes `T` are shown as modified)
+                   deleted
+                   renamed
+                   ignored
+                   staged
+                   conflict
+
+A change that is only staged shows its type and the staged check. A worktree
+change leaves the second slot blank. When both the index and the worktree have
+changes, both types are shown. Untracked files show the added glyph and a
+blank slot. Directories combine the status of their contents, separately for
+the index and the worktree.
+
+Names and icons are coloured to match the first (leftmost) symbol: the index
+status when there is one, otherwise the worktree status. See
+|direct.vim-highlights| for the groups.
+
+Change the glyphs with |direct-git.symbols|, or hide the status component with
+|direct-git.show_symbols| while keeping the colours.
+
+Deleted files ~
+                                                      *direct.vim-git-deleted*
+Tracked files that were deleted from disk are shown as protected rows, and so
+are directories that contain them. Their names use the colour of their status.
+Hide these rows with |direct-git.show_deleted|.
+
+You can expand and collapse deleted rows, run |:DirectRun| or |:DirectGit| on
+them, and stage, reset or restore them with `ga`, `gr` and `gc`. Edits, opens,
+yanks and pastes on them are ignored.
+
+Showing only changes ~
+                                                         *direct.vim-git-view*
+`gs` (|:DirectToggleGitStatus|) switches to a view that shows only entries
+with a Git status, with every directory expanded. Press it again to return to
+the normal listing. |:DirectGitStatus| switches to the view without toggling
+it off.
+
+Directories that contain changes stay visible, and their children are filtered
+the same way. The view combines with the other filters (|direct.vim-filters|),
+and the entries it hides are never treated as deleted. Outside a repository,
+or with |direct-git.enabled| off, the view is empty. These commands are
+refused while the listing has unsaved edits.
+
+Jumping between changes ~
+                                                     *direct.vim-git-navigate*
+`]c` and `[c` (|:DirectNextChange| and |:DirectPreviousChange|) move to the
+next and previous entry with a Git change, in any listing. They skip ignored
+entries, only look at rows currently in the buffer (not collapsed or hidden
+ones), and stop at the ends rather than wrapping.
+
+Staging ~
+
+    ga          `git add -- {entry}`
+    gr          `git reset -- {entry}`
+    gc          `git checkout -- {entry}`
+
+These run through |:DirectGit|, so the status display refreshes when they
+finish.
+
+Ignore filtering ~
+                                                       *direct.vim-git-ignore*
+With |direct-respect_gitignore| on (the default), Git-ignored entries are
+hidden. `gi` (|:DirectToggleGitIgnore|) toggles the filter in the current
+listing; it is refused while the listing has unsaved edits, and it collapses
+expanded directories.
+
+The filter asks Git itself, so it follows root and nested `.gitignore` files,
+negations, anchoring, escaped patterns, `.git/info/exclude` and your global
+excludes file. Tracked files are never hidden, and neither are directories
+that contain tracked files. Outside a repository the filter has no effect.
+
+Git must be installed when the filter is on. If an ignore query fails inside a
+repository, the listing fails rather than guessing.
+
+If the ignore rules or the set of tracked files change after a directory is
+listed, saving is refused before anything changes. List the directory again to
+pick up the new rules. To detect changes, direct.vim currently walks the whole
+repository looking for ignore files, so very large repositories take longer to
+list and save. A change in a nested repository's ignore file can require a
+re-list even when it doesn't affect the current listing.
+
+==============================================================================
+9. Running commands                                           *direct.vim-run*
+
+|:DirectRun| runs a shell command on the entry under the cursor:
+>
+    :DirectRun wc -l {}
+    :DirectRun open {}
+<
+Each `{}` is replaced with the shell-escaped absolute path of the entry. Leave
+`{}` unquoted, so that paths with spaces stay one argument. The command must
+contain `{}`.
+
+The command runs asynchronously, from the listing's directory. Its output and
+exit status are shown when it finishes. The current row must be an existing
+entry or a deleted tracked file (|direct.vim-git-deleted|).
+
+|:DirectGit| works the same way and also refreshes the Git status in the
+listing when the command finishes. It doesn't re-list the directory or change
+the buffer text. Successful commands are quiet, and failures show the exit
+status and output.
+>
+    :DirectGit git add -p -- {}
+    :DirectGit git restore --staged -- {}
+<
+==============================================================================
+10. LSP file operations                                       *direct.vim-lsp*
+
+direct.vim tells language servers about the filesystem changes it makes, so
+they can, for example, update imports when a file is renamed. Only servers
+that advertise the matching `workspace.fileOperations` capability are
+contacted, and their file and glob filters are respected where Neovim exposes
+them.
+
+    Event                           When ~
+    `workspace/willRenameFiles`       Before a rename. The server can return
+                                    edits, such as import updates.
+    `workspace/didRenameFiles`        After a rename.
+    `workspace/didCreateFiles`        After entries are created or pasted.
+    `workspace/didDeleteFiles`        After entries are deleted.
+
+Servers are chosen by whether their workspace covers the paths, not by whether
+they are attached to the listing buffer. Paths are sent as `file:` URIs.
+
+Renames ~
+
+The `willRenameFiles` request is asynchronous. |:write| returns straight away,
+and the listing stays modified until the servers reply. Other direct.vim
+filesystem operations are refused in the meantime.
+
+Edits returned by servers are applied in client-ID order. If a server returns
+an error or doesn't reply within the timeout, you get a warning and the rename
+goes ahead without that server's edits. If an edit can't be applied, the
+rename is refused; edits already applied by other servers are kept. Before
+renaming, direct.vim checks the listing and the filesystem again, in case the
+edits changed them.
+
+Notifications ~
+
+Notifications are only sent for changes that succeeded, including pastes, undo
+and redo. Internal paths (trash, register, temporary and quarantine paths) are
+never reported, and yanking on its own sends nothing.
+
+==============================================================================
+11. Configuration                                           *direct.vim-setup*
+                                                              *direct.setup()*
+Calling `setup()` is optional. These are the defaults:
+>lua
     require('direct').setup({
-      directory_separator = package.config:sub(1, 1), -- '/' or '\\'; defaults to the filesystem separator
-      map_default_keys = true, -- set false to install no default mappings
-      show_hidden = true, -- set false to hide dot-prefixed entries
-      respect_gitignore = true, -- set false to show Git-ignored entries
-      indent_size = 2, -- spaces per tree level; must be an integer greater than 1
-      show_folder_icons = true, -- show Font Awesome folder icons
-      show_file_icons = true, -- show a generic Font Awesome file icon
+      map_default_keys = true,
+      show_hidden = true,
+      respect_gitignore = true,
+      indent_size = 2,
+      directory_separator = package.config:sub(1, 1),
+      max_recursive_expand_depth = false,
+      show_folder_icons = true,
+      show_file_icons = true,
       icons = {
         file = '\u{f15b}',
         folder = '\u{f07b}',
@@ -95,129 +530,101 @@ Run `:checkhealth direct` to confirm the version and the data home in use:
         deleted_folder = '\u{f114}',
         deleted_folder_open = '\u{f115}',
       },
-      max_recursive_expand_depth = false, -- false means unlimited
       git = {
         enabled = true,
         show_symbols = true,
         show_deleted = true,
         symbols = {
-          added = '\u{f067}', modified = '\u{f01f}', deleted = '\u{f068}',
-          renamed = '\u{f061}', staged = '\u{f00c}', conflict = '\u{f00d}',
+          added = '\u{f067}',
+          deleted = '\u{f068}',
+          modified = '\u{f01f}',
+          renamed = '\u{f061}',
+          ignored = '\u{f070}',
+          staged = '\u{f00c}',
+          conflict = '\u{f00d}',
         },
       },
     })
+<
+You can call `setup()` more than once. Each call replaces the previous options
+rather than merging with them. An unknown or invalid option is reported as an
+error, and its default is used instead.
 
-`setup()` is idempotent, may be called more than once, and reports an unknown
-option name as an error instead of silently ignoring it. See
-|direct.vim-mappings| for `map_default_keys`.
+                                                     *direct-map_default_keys*
+map_default_keys        boolean (default: `true`)
+    Install the global `-` mapping and the buffer-local mappings in
+    listings. Set to `false` to install none of them. See
+    |direct.vim-mappings|.
 
-`directory_separator` defaults to the filesystem separator and controls the
-trailing marker used for directory rows. Set it to `/` or `\\` to choose a
-different marker; configure it before opening Direct listings.
+                                                          *direct-show_hidden*
+show_hidden             boolean (default: `true`)
+    Show entries whose names start with a dot. `gh` (|:DirectToggleHidden|)
+    toggles this in the current listing.
 
-`indent_size` defaults to 2 spaces per tree level. Set it to an integer greater
-than 1 to change the indentation width used to display and edit expanded trees.
+                                                    *direct-respect_gitignore*
+respect_gitignore       boolean (default: `true`)
+    Hide Git-ignored entries. `gi` (|:DirectToggleGitIgnore|) toggles this in
+    the current listing. See |direct.vim-git-ignore|.
 
-`max_recursive_expand_depth` defaults to `false` (unlimited). Set it to a
-positive integer to cap the directory levels opened by recursive commands
-`zO`, `zA`, `zR`, and `:DirectUnfoldAll`. The cap does not restrict one-level
-`zo`/`za` browsing.
+                                                          *direct-indent_size*
+indent_size             integer (default: `2`)
+    Spaces per tree level in expanded directories. Must be greater than 1.
 
-Dot-prefixed files and directories are visible by default. Set
-`show_hidden = false` to hide them. `:DirectToggleHidden` (also mapped to `gh`)
-switches the current direct buffer's view. It refuses while the listing has
-unsaved edits, refreshes from disk, and collapses expanded subtrees so every
-visible level uses the same filter.
+                                                  *direct-directory_separator*
+directory_separator     `'/'` or `'\'` (default: the platform separator)
+    The trailing marker that identifies directory rows. Set it before
+    opening listings. See |direct.vim-separator-rule|.
 
-Git-ignore filtering is enabled by default. Set `respect_gitignore = false` to
-show ignored entries. In a direct listing, `gi` (or
-`:DirectToggleGitIgnore`) toggles this filter. It refuses while the listing has
-unsaved edits, refreshes from disk, and collapses expanded subtrees so every
-visible level uses the same rules.
+                                           *direct-max_recursive_expand_depth*
+max_recursive_expand_depth   `false` or positive integer (default: `false`)
+    The maximum number of levels that `zO`, `zA`, `zR` and
+    |:DirectUnfoldAll| expand. `false` means unlimited. One-level `zo` and
+    `za` are not affected.
 
-In a direct listing, `gs` (or `:DirectToggleGitStatus`) toggles a view showing
-only entries with a Git status and recursively expands all directories. Use
-`:DirectGitStatus` to enter the view without toggling it off when already there.
-Directories with changed descendants are included, and their children are
-filtered the same way. These commands refuse while the listing has unsaved
-edits. Outside a Git repository, or when `git.enabled = false`, the filtered
-view is empty. Entries hidden by this view are not treated as deletion sources
-during sync.
+                           *direct-show_folder_icons* *direct-show_file_icons*
+show_folder_icons       boolean (default: `true`)
+show_file_icons         boolean (default: `true`)
+    Show icons before folder and file names. When only one kind is shown,
+    the other kind keeps a blank space so the names stay aligned. Icons are
+    virtual text, so they don't affect the buffer lines.
 
-File and folder icons ~
+                                                                *direct-icons*
+icons                   table
+    The glyphs used for icons. Any key you leave out keeps its default.
+    The same glyphs are used for every file, whatever its type.
 
-`show_folder_icons` and `show_file_icons` both default to `true`. The default
-Font Awesome Nerd Font glyphs are U+F15B (`file`), U+F07B (`folder`), and U+F07C
-(`folder_open`). Deleted tracked rows use the regular-outline U+F016
-(`deleted_file`), U+F114 (`deleted_folder`), and U+F115
-(`deleted_folder_open`) variants. These glyphs are used regardless of filetype.
-When only one kind of icon is enabled,
-the other kind reserves a blank icon slot so entry names stay aligned. Icons are
-virtual text, so buffer lines and filesystem behavior are unchanged. No icon
-plugin or other dependency is required.
-Customize any of these glyphs with the corresponding key in the `icons` table.
-Git status colors icons and filenames to match the first (leftmost) status
-symbol: the index status when present, otherwise the worktree status.
-With folder icons enabled, click a folder icon to expand or collapse that
-directory in place. Mouse input must be enabled in Neovim (for example,
-`:set mouse=a`). Clicking elsewhere in the listing retains normal cursor
-placement.
+    Key                     Default ~
+    `file`                    U+F15B  (file)
+    `folder`                  U+F07B  (folder)
+    `folder_open`             U+F07C  (open folder)
+    `deleted_file`            U+F016  (outlined file)
+    `deleted_folder`          U+F114  (outlined folder)
+    `deleted_folder_open`     U+F115  (outlined open folder)
 
-Git status ~
+    The `deleted_*` icons are used for deleted tracked files
+    (|direct.vim-git-deleted|).
 
-In a Git repository, direct reads porcelain status once per listing refresh and
-shows a Neo-tree-style status component, right-aligned at the end of each row.
-It is virtual text and does not change buffer lines; its two status slots have
-one space between them. Set `git.show_symbols =
-false` to hide the status component; it defaults to `true`. Filename and icon
-colors still match the first (leftmost) status symbol, using the index status
-when present and otherwise the worktree status. `T` is normalized to `M`; untracked `??`
-maps to `_A` and displays the added symbol. Ignored `!!` entries display the
-ignored symbol.
+                                                          *direct-git.enabled*
+git.enabled             boolean (default: `true`)
+    Show Git status. Turning this off doesn't affect
+    |direct-respect_gitignore|.
 
-Default glyphs are `` added, `` modified, `` deleted, `` renamed, ``
-ignored, `` staged, and `` conflict. A staged-only change shows its type
-glyph and the staged check; a worktree-only change leaves the second slot blank.
-When both porcelain columns have changes, both change-type glyphs are shown.
-Untracked `??` displays the added glyph followed by a blank slot. Copies use the
-added glyph, matching Neo-tree's status component. Directories aggregate changed
-descendants independently in the index and worktree columns. Re-list to refresh
-Git status.
+                                                     *direct-git.show_symbols*
+git.show_symbols        boolean (default: `true`)
+    Show the right-aligned status symbols. When `false`, names and icons are
+    still coloured and the Git views still work.
 
-Status text uses `virt_text_pos = 'eol_right_align'`, so it aligns to the right
-edge of the window without reserving sign columns. Very long rows may leave less
-space for the component.
+                                                     *direct-git.show_deleted*
+git.show_deleted        boolean (default: `true`)
+    Show rows for deleted tracked files (|direct.vim-git-deleted|). Has no
+    effect when |direct-git.enabled| is off.
 
-Missing tracked files and directories containing deleted tracked descendants
-appear as protected rows. Their names use the same color as the first status
-symbol, including staged-only tombstones. Set
-`git.show_deleted = false` to hide these synthetic rows while retaining Git
-status on entries that still exist. This option has no effect when Git status is
-disabled; it defaults to `true`.
-
-Press `gs` or run `:DirectToggleGitStatus` to show only entries with a status and
-recursively expand the view; press it again to restore the normal listing. Use
-`:DirectGitStatus` to enter the filtered view without toggling it off when
-already active. This filter composes with hidden, wildignore, and Git-ignore
-filtering. Entries it hides are not treated as deletion sources during sync.
-Directories with changed descendants remain visible, and their children use the
-same filter.
-
-In a direct listing, `]c` moves to the next visible entry with a Git change and
-`[c` moves to the previous one. These mappings also work in the normal listing,
-skip ignored entries, and stop at the beginning or end rather than wrapping.
-Only rows currently materialized in the listing are considered; collapsed or
-filtered-out entries are not navigation targets. Run `:DirectNextChange` or
-`:DirectPreviousChange` for the same navigation without the default mappings.
-
-In a direct listing, `]f` and `[f` move to the next and previous visible files,
-skipping directory rows. Expanded subdirectory files are included; collapsed or
-filtered-out entries are not targets. Navigation stops at the beginning or end
-and does not wrap. Run `:DirectNextFile` or `:DirectPreviousFile` for the same
-navigation without the default mappings.
-
-Status symbols can be configured independently by category:
-
+                                                          *direct-git.symbols*
+git.symbols             table
+    The status glyphs: `added`, `deleted`, `modified`, `renamed`, `ignored`,
+    `staged` and `conflict`. Each one must be a single display cell, or an
+    empty string to hide that marker. Keys you leave out keep their defaults.
+>lua
     require('direct').setup({
       git = {
         symbols = {
@@ -226,436 +633,334 @@ Status symbols can be configured independently by category:
         },
       },
     })
+<
+==============================================================================
+12. Highlights                                         *direct.vim-highlights*
 
-Every `icons` entry and each `git.symbols` category can be customized through
-`setup()`. Set a status symbol to an empty string to hide that marker. The status
-highlight groups link to `DiffAdd`, `DiffDelete`, `DiffChange`, `ErrorMsg`, and
-`Comment` by default, so they follow the colorscheme. Override a `DirectGit*`
-group to customize it. Set `git.enabled = false` to disable Git status display; this does
-not affect Git-ignore filtering. `git.show_symbols = false` hides only the
-right-aligned symbols, leaving filename/icon coloring and Git-aware views active.
+Every group links to a standard group by default, so it follows your colour
+scheme. Override them in your colour scheme or with |nvim_set_hl()|. The
+defaults are applied again after a |ColorScheme| event, but your own
+definitions are kept.
 
-Deleted tracked rows always use `DirectGitDeletedFile` or
-`DirectGitDeletedDirectory` for their names. Deleted rows can be targeted with
-`:DirectRun` or `:DirectGit`, expanded/collapsed with the `z` commands, and
-staged/reset/restored with `ga`, `gr`, and `gc`. Other listing edits, opens,
-yanks, and pastes on these rows are ignored.
+    Group                       Used for                      Default link ~
+    DirectDirectory             directory names               |hl-Directory|
+    DirectHiddenDirectory       hidden directory names        Comment
+    DirectHiddenFile            hidden file names             Comment
+    DirectFolderIcon            folder icons                  |hl-Directory|
+    DirectFileIcon              file icons                    |hl-Normal|
+    DirectHiddenFolderIcon      hidden folder icons           Comment
+    DirectHiddenFileIcon        hidden file icons             Comment
+    DirectGitAdded              added symbol                  |hl-Added|
+    DirectGitDeleted            deleted symbol                |hl-Removed|
+    DirectGitModified           modified symbol               |hl-Changed|
+    DirectGitRenamed            renamed symbol               DirectGitModified
+    DirectGitConflict           conflict symbol               |hl-ErrorMsg|
+    DirectGitIgnored            ignored symbol                Comment
+    DirectGitStaged             staged symbol                 DirectGitAdded
+    DirectGitDeletedFile        deleted tracked file names    |hl-ErrorMsg|
+    DirectGitDeletedDirectory   deleted tracked dir names     |hl-ErrorMsg|
 
-Git-ignore filtering is on by default. Set `respect_gitignore = false` to show
-ignored entries; press `gi` or run `:DirectToggleGitIgnore` to toggle the current
-listing. When enabled, it uses Git's own matching for root and nested
-`.gitignore` files, negations,
-anchoring, escaped patterns, `.git/info/exclude`, and the configured global
-excludes file. Tracked files remain visible, as do directories containing
-tracked descendants. Outside a repository this filter has no effect. Git must
-be available when the option is enabled; if an ignore query fails in a detected
-repository, listing fails safely instead of guessing. If effective ignore rules,
-excludes, or tracked index membership change after listing, sync refuses before
-filesystem or history effects; re-list to refresh the rule snapshot. The
-fingerprint is deliberately conservative: it currently walks the full repository
-to find ignore sources, so large trees incur a full-tree scan when listing or
-validating sync. A change to a nested repository's ignore source may require a
-re-list even when that source did not affect the current view.
+Files get no highlighting based on their name or type. Changed entries are
+coloured by their Git status (|direct.vim-git-status|).
+
+Listings use their own syntax file, which loads even when Neovim's global
+syntax loading is turned off.
 
 ==============================================================================
-4. Navigate                                              *direct.vim-navigate*
+13. Commands                                             *direct.vim-commands*
 
-In normal mode, `-` lists the directory of the current file, or the working
-directory when the buffer is not tied to one (a buffer with no file name, or a
-non-empty `&buftype` such as a direct listing). You can also open a directory
-with `:edit foo/`, or by starting Neovim on it.
+Unless noted otherwise, these commands work only in a listing. In any other
+buffer they report an error and do nothing.
 
-Once a directory is listed, `-` goes up to its parent directory and `<Enter>`
-opens the entry under the cursor: a directory line opens a new listing, a file
-line opens the file. Double-clicking an entry opens it the same way. This is
-enough to move around the filesystem without remembering any extra command.
-Use `z-` to go up to the parent listing and expand the directory you came from.
+Opening listings ~
+                                                                 *:DirectList*
+:DirectList {dir}
+    List {dir}. Completes directory names. Works from any buffer.
 
-Use `zo` or `za` on a directory to expand it in place. Children are read lazily,
-one level at a time; repeating an expansion does not re-read or duplicate them.
-`zO` or `zA` recursively expands a directory, and `zC` recursively collapses
-it. `zR` expands all root directories and `zM` collapses them all. Recursive
-opening respects |direct.vim-setup|'s `max_recursive_expand_depth`; the initial
-listing remains flat.
+                                                           *:DirectListBuffer*
+:DirectListBuffer
+    List the directory of the current file. In a buffer with no file name,
+    or with a non-empty 'buftype', list the working directory instead.
+    Works from any buffer.
 
-==============================================================================
-5. Edit                                                      *direct.vim-edit*
+                                                              *:DirectListCwd*
+:DirectListCwd
+    List the working directory. Works from any buffer.
 
-When viewing a directory, edit its listing as if you were editing a file, using
-any Vim command (`di`, `o`, `:s`, macros, and so on). Saving synchronises the
-changes with the filesystem and then re-lists the directory.
+Editing ~
+                                                                 *:DirectSync*
+:DirectSync
+    Apply the edits in the listing to the filesystem. |:write| does the same.
 
-At the root level, a save is classified as exactly one of rename, create or
-delete:
+                                                                 *:DirectUndo*
+:DirectUndo
+    Undo the last filesystem action.
 
-    - Rename: edit the line of the file or directory you want to rename, and
-      save.
-    - Create: add new lines at any location, and save. A new relative path such
-      as `reports/2026/summary.txt` creates the file and missing parent
-      directories. A path ending in the configured `directory_separator`, such
-      as `reports/2026/` on POSIX, creates a directory at that path. After
-      saving nested paths, their parent directories are expanded and the cursor
-      moves to the last added entry.
-    - Delete: delete the lines for the entries you want to remove, and save.
-      Deleted entries are yanked automatically, so you can paste them back.
+                                                                 *:DirectRedo*
+:DirectRedo
+    Redo the last undone filesystem action.
 
-The directory-separator rule ~
+                                                                 *:DirectYank*
+:[range]DirectYank
+    Yank the entries in [range]. The default is the current line.
 
-A directory must always be written with a trailing configured separator, and a
-file must never have one: the line, not the filesystem, decides what will be
-created or renamed. By default this is the filesystem separator; set
-`directory_separator` to `/` or `\\` to override it. Renaming a marked `foo`
-directory to `foo` replaces it with a file, and adding an unmarked `bar` creates
-a file while marked `bar` creates a directory.
-The selected marker is reserved inside entry names; entries containing it are
-omitted from the editable listing to keep the row grammar unambiguous.
+                                                                *:DirectPaste*
+:DirectPaste [dir]
+    With no argument, paste into the directory under the cursor (or the
+    directory of the file under the cursor) and refresh the listing.
+    With [dir], paste into [dir] without touching the current buffer. With
+    [dir], it works from any buffer.
 
-At the root level, an edit that both adds and deletes entries, or that leaves a
-duplicated line, is reported as ambiguous, naming both sides of the comparison.
-Nothing is changed, no history is written, and the buffer stays modified so you
-can fix it.
+                                                              *:DirectPasteAs*
+:DirectPasteAs {name}
+    Paste into the directory under the cursor (or the directory of the file
+    under the cursor) as {name}.
 
-`&wildignore`, dot-hidden visibility, Git-ignore filtering, and the `gs`
-Git-status-only view are independent; entries hidden by any active filter are
-omitted. `&wildignore` keeps its existing behavior.
-Each directory captures the filters and matches used for that listing. Changing
-an option does not change an existing listing's sync rules; re-list to refresh
-them. Filtered entries are excluded from sync, and sync is refused before
-filesystem or history effects if an add/rename would use an occupied filtered
-path or a directory move would carry a filtered descendant. Newly appearing
-entries matching the captured filters are not treated as delete sources.
-Directory symlinks are treated as leaves when renamed; their targets are not
-scanned or moved.
+Viewing ~
+                                                              *:DirectFoldAll*
+:DirectFoldAll
+    Collapse all expanded directories. The same as `zM`.
 
-Expanded rows ~
+                                                            *:DirectUnfoldAll*
+:DirectUnfoldAll
+    Expand all directories recursively, up to
+    |direct-max_recursive_expand_depth|. The same as `zR`.
 
-Every expanded directory is an independent edit scope. Edit, add, or delete its
-children just as at the root. Directory lines end in `/`; files do not. Changes
-in multiple expanded directories are combined during one sync, and deleted
-entries are auto-yanked before removal.
+                                                         *:DirectToggleHidden*
+:DirectToggleHidden
+    Show or hide dotfiles in this listing. The listing is refreshed from
+    disk and expanded directories are collapsed. Refused while the listing
+    has unsaved edits.
 
-Indentation defines parentage: root rows have no leading spaces, direct children
-have two spaces, and each additional level adds two more. A child must be under a
-directory. Change a row's indentation or move it beneath another expanded
-directory to move it; the entry and its contents are preserved. New rows may be
-nested under a directory created in the same edit. Directory renames and moves
-carry their contents and retain visible expansions when possible.
+                                                      *:DirectToggleGitIgnore*
+:DirectToggleGitIgnore
+    Turn Git-ignore filtering on or off in this listing. The listing is
+    refreshed from disk and expanded directories are collapsed. Refused
+    while the listing has unsaved edits.
 
-Before syncing an edited subtree, direct verifies that its directory contents
-have not changed on disk since expansion. Invalid indentation, missing parents,
-duplicate destinations, lost identities, or a stale snapshot refuse the whole
-sync before auto-yank, filesystem, or history effects. A whole-line replacement
-whose identity is lost is paired as a rename only when sibling identities make
-that pairing unambiguous; otherwise the save is refused. Root-level edits retain
-the existing rename/create/delete classifier and ambiguity rules.
+Git ~
+                                                      *:DirectToggleGitStatus*
+:DirectToggleGitStatus
+    Switch to or from the view that shows only changed entries
+    (|direct.vim-git-view|). Refused while the listing has unsaved edits.
 
-Deleting a directory row removes and auto-yanks its whole tree, including
-materialized descendants, unless you reindent surviving rows under another
-directory in the same edit to move them out first. Moving or renaming a directory
-together with separate edits to its descendants must be saved in separate syncs
-when their filesystem action order would otherwise be ambiguous. Expansion and
-collapse remain ordinary text-undo changes. `:undo` after collapse restores child
-rows and identities; `:redo` re-applies the collapse. Redo restores materialized
-identities only when the original undo sequence and exact directory snapshot
-still match. A changed or ambiguous snapshot remains unsafe to save, open, or yank.
-Path components beginning with whitespace and paths that could escape the listed
-directory (absolute paths, empty components such as `a//b`, or `.`/`..` components
-such as `a/../b`) are refused at save time. Nested paths are supported for new
-entries only; renames remain single-component names. Newly created parent
-directories are recorded separately, so `u` and `<C-r>` can undo and redo them
-in the correct order.
+                                                            *:DirectGitStatus*
+:DirectGitStatus
+    Switch to the changed-entries view, and stay in it if it is already
+    active.
 
-Windows-specific component checks reject backslashes, drive prefixes, reserved
-device names (including extension aliases), and trailing dots or spaces that
-Win32 would normalize. Native Windows filesystem traversal has not been
-verified; this documentation does not claim Windows support.
+                                                           *:DirectNextChange*
+:DirectNextChange
+    Move to the next visible entry with a Git change. Ignored entries are
+    skipped, and it stops at the last one rather than wrapping.
 
-==============================================================================
-6. Undo / Redo                                                 *direct.vim-undo*
+                                                       *:DirectPreviousChange*
+:DirectPreviousChange
+    Move to the previous visible entry with a Git change. Ignored entries are
+    skipped, and it stops at the first one rather than wrapping.
 
-In a direct buffer, `u` and `<C-r>` undo and redo the last filesystem action
-performed by Direct, such as a sync or paste. They invoke the same actions as
-`:DirectUndo` and `:DirectRedo`.
+                                                            *:DirectNextFile*
+:DirectNextFile
+    Move to the next visible file row, skipping directories. Files in expanded
+    subdirectories are included; navigation stops at the end and does not wrap.
 
-Use `:undo` and `:redo` for Neovim text undo and redo in the listing. Text undo
-only changes buffer lines; it does not rename, create, delete, or restore
-anything on disk.
+                                                        *:DirectPreviousFile*
+:DirectPreviousFile
+    Move to the previous visible file row, skipping directories. Files in
+    expanded subdirectories are included; navigation stops at the beginning
+    and does not wrap.
+
+Running commands ~
+                                                                  *:DirectRun*
+:DirectRun {command}
+    Run {command} on the entry under the cursor. See |direct.vim-run|.
+    Does not refresh Git status.
+
+                                                                  *:DirectGit*
+:DirectGit {command}
+    Like |:DirectRun|, then refresh the Git status in the listing.
 
 ==============================================================================
-7. Yank / Paste                                                *direct.vim-yank*
+14. Mappings                                             *direct.vim-mappings*
 
-`yy` and `Y` yank the file or directory on the current line, and a visual `y`
-yanks the selected range. `p` and `P` paste into the directory under the cursor,
-or into a file's parent directory when the cursor is on a file. Entries inside
-expanded directories use their displayed directory, too. Directories are yanked
-recursively, so you can copy directory trees around the filesystem.
+All mappings are installed only when |direct-map_default_keys| is on.
 
-If an entry with the same name already exists, you are prompted
-(`File already exists. Paste as: `, or `Directory ...`) and can paste it under
-another name. An empty answer skips that entry and leaves the original
-untouched.
+Global, in Normal mode:
 
-Yank, paste, undo and redo all work on the filesystem through the same history,
-so `:DirectUndo` reverses a paste as well.
+    -           |:DirectListBuffer|
 
-Undoing a paste verifies every pasted file, exact directory tree, or symlink
-target against the current register copy before changing anything. A missing,
-changed, unreadable, or re-yanked register refuses the entire Unpaste and keeps
-the history entry. Matching entries are atomically captured to unique
-same-directory `.direct-unpaste-*` paths and rechecked before deletion. If
-capture fails, Direct restores what it can with no-replace; a blocked quarantine
-is preserved and reported for manual recovery. Deletion uses only captured
-quarantine paths, never the original paste name, so a new object appearing at
-that name is not removed. A crash or failure during deletion can leave
-quarantine debris. Identical-content replacements are indistinguishable from
-the original paste; open handles and competing same-user processes can still
-race checks because there is no filesystem snapshot or inter-process lock.
+In a listing (buffer-local):
 
-Paste name clashes use Neovim's callback-based `vim.ui.input`; there is no
-synchronous prompt fallback. Cancel, an empty answer, or an invalid basename
-skips that entry. A still-colliding answer is retried up to ten times. Entries
-copied before a later skip or error are retained and recorded; if all entries
-are skipped, no history action or success notice is produced. While a prompt is
-pending, sync, paste, undo, and redo are refused. History writes and listing
-refresh wait until the callback flow completes. Grouped moves retain their
-existing synchronous staging behavior.
+    Mode    Key             Action ~
+    n       <CR>            open the entry under the cursor
+    n       <2-LeftMouse>   open the entry under the cursor
+    n       <LeftMouse>     on a folder icon, expand or collapse it
+    n       -               go to the parent directory
+    n       z-              go to the parent and expand the directory you left
+    n       zo              expand one directory level
+    n       za              expand or collapse one directory
+    n       zc              collapse one directory
+    n       zO              expand a directory recursively
+    n       zA              expand or collapse a directory recursively
+    n       zC              collapse a directory recursively
+    n       zR              expand all directories
+    n       zM              collapse all directories
+    n       ]d  [d          next or previous directory row
+    n       ]f  [f          next or previous visible file row
+    n       u               |:DirectUndo|
+    n       <C-r>           |:DirectRedo|
+    n       yy  Y           |:DirectYank| on the current line
+    v       y               |:DirectYank| on the selected lines
+    n       p  P            |:DirectPaste|
+    n       gh              |:DirectToggleHidden|
+    n       gi              |:DirectToggleGitIgnore|
+    n       gs              |:DirectToggleGitStatus|
+    n       ]c  [c          |:DirectNextChange| and |:DirectPreviousChange|
+    n       ga              `:DirectGit git add -- {}`
+    n       gr              `:DirectGit git reset -- {}`
+    n       gc              `:DirectGit git checkout -- {}`
+
+In a listing, the buffer-local `-` takes priority over the global one.
+
+To use your own keys, set |direct-map_default_keys| to `false` and map the
+commands or the |direct.vim-api| functions yourself, for example:
+>lua
+    vim.keymap.set('n', '<leader>e', '<Cmd>DirectListBuffer<CR>')
+<
+==============================================================================
+15. Lua API                                                   *direct.vim-api*
+
+The functions in `require('direct')` mirror the commands:
+
+    Function                    Equivalent ~
+    `setup(opts)`                 |direct.setup()|
+    `list(path)`                  |:DirectList|
+    `list_buffer()`               |:DirectListBuffer|
+    `list_cwd()`                  |:DirectListCwd|
+    `open()`                      `<CR>`
+    `open_parent_expanded()`      `z-`
+    `sync()`                      |:DirectSync|
+    `undo()`  `redo()`              |:DirectUndo|  |:DirectRedo|
+    `yank(first, last)`           |:DirectYank| on lines {first} to {last}
+    `paste(dir)`                  |:DirectPaste|
+    `paste_as(name)`              |:DirectPasteAs|
+    `fold_all()`  `unfold_all()`    |:DirectFoldAll|  |:DirectUnfoldAll|
+    `toggle_hidden()`             |:DirectToggleHidden|
+    `toggle_gitignore()`          |:DirectToggleGitIgnore|
+    `toggle_git_status()`         |:DirectToggleGitStatus|
+    `show_git_status()`           |:DirectGitStatus|
+    `next_change()`               |:DirectNextChange|
+    `previous_change()`           |:DirectPreviousChange|
+    `next_file()`                 |:DirectNextFile|
+    `previous_file()`             |:DirectPreviousFile|
+    `run(command)`                |:DirectRun|
+    `git(command)`                |:DirectGit|
+
+Like their commands, `list()`, `list_buffer()`, `list_cwd()` and
+`paste(dir)` with a directory work from any buffer. The others report an
+error outside a listing.
 
 ==============================================================================
-8. Commands                                                *direct.vim-commands*
+16. Data and safety                                          *direct.vim-data*
 
-    :DirectList {dir}
-        List {dir} in a direct buffer. {dir} completes as a directory.
+Data directory ~
 
-    :DirectListBuffer
-        List the directory of the current file, or the working directory when
-        the buffer is not tied to one (no file name, or a non-empty
-        `&buftype`).
+direct.vim keeps its state in:
 
-    :DirectListCwd
-        List the current working directory.
+    1. `$XDG_DATA_HOME/direct`, when `$XDG_DATA_HOME` is set and not empty;
+    2. otherwise `$HOME/.local/share/direct`;
+    3. if neither variable is set, Neovim's standard data directory, with a
+       warning.
 
-    :DirectSync
-        Classify and apply the edits in the current buffer. Also runs on
-        `:write` (`BufWriteCmd`).
+The location is worked out each time it is used. `:checkhealth direct` shows
+the current one. It contains:
 
-    :DirectFoldAll
-        Collapse all expanded directories in the current listing.
+    `history/`               `undo.log`, `redo.log` and the transaction
+                           journal
+    `trash/`                 deleted entries, kept so undo can restore them
+    `register/`              the latest yank
+    `.direct-history.lock`   persistent same-host advisory lock file
 
-    :DirectUnfoldAll
-        Recursively expand all directories in the current listing.
+History format ~
+                                                   *direct.vim-history-format*
+`undo.log` and `redo.log` are JSONL files. Each starts with the header
+`{"format":"direct-history","version":1}`, followed by one JSON action per
+line. Both files are checked before the register is read or the filesystem is
+changed.
 
-    :DirectToggleHidden
-        Toggle dot-hidden entries in the current direct listing and refresh its
-        view. Refuses if the listing has unsaved edits.
+A history file that can't be read stops the operation. Unsupported, malformed,
+legacy or future history bytes are not replayed or migrated: both stacks are
+reset to empty without a backup or warning.
 
-    :DirectToggleGitIgnore
-        Toggle Git-ignore filtering in the current direct listing. Refuses if
-        the listing has unsaved edits.
+Crash safety ~
 
-    :DirectToggleGitStatus
-        Toggle the Git-status-only view in the current direct listing. Refuses
-        if the listing has unsaved edits.
+Each history file is rewritten through an exclusive temporary file in the same
+directory, synced and closed, then atomically renamed over the old file. The
+containing directory is synced where supported. A durable operation journal
+coordinates paired stack updates and filesystem recovery for simple actions,
+grouped moves and paste/unpaste progress. On restart, recorded identities and
+content checks let Direct resume steps whose outcomes are clear, then commit the
+paired stack update. Partial copies, changed quarantines, malformed journals
+and other ambiguous states are preserved; further history operations stop
+until the affected paths are inspected.
 
-    :DirectGitStatus
-        Enter the recursively expanded Git-status-only view in the current
-        direct listing without toggling it off when already active.
+Locking ~
 
-    :DirectNextChange
-        Move to the next visible entry with a Git change. Ignored entries are
-        skipped; navigation stops at the end and does not wrap.
+Neovim instances on the same machine that share a data directory coordinate
+through an advisory lock. It is held across sync actions and their history
+updates, and across asynchronous paste/undo/redo actions. The operating system
+releases it if Neovim exits or crashes.
 
-    :DirectPreviousChange
-        Move to the previous visible entry with a Git change. Ignored entries
-        are skipped; navigation stops at the beginning and does not wrap.
+Other programs don't use this lock, so they can still change files while
+direct.vim is working. Locking across machines and on network filesystems is
+not guaranteed.
 
-    :DirectNextFile
-        Move to the next visible file row, skipping directories. Expanded
-        subdirectory files are included; navigation does not wrap.
+Filesystem changes ~
 
-    :DirectPreviousFile
-        Move to the previous visible file row, skipping directories. Expanded
-        subdirectory files are included; navigation does not wrap.
+direct.vim never overwrites an existing entry:
 
-    :DirectUndo
-        Undo the last filesystem action.
+    - Moves and renames use the platform's atomic no-replace operation (on
+      Darwin, Linux and Windows). Platforms or filesystems without one are
+      refused.
+    - New files are created exclusively, and creating a directory fails if
+      the path exists.
+    - Symlinks are recreated, not followed. FIFOs, sockets and device files
+      can't be moved across filesystems.
 
-    :DirectRedo
-        Redo the last undone action.
+Moving across filesystems ~
+                                                            *direct.vim-exdev*
+A move to another filesystem is done as a copy. The file or tree is copied to
+a temporary path in the destination directory, then renamed into place
+without replacing anything.
 
-    :DirectYank
-        Yank the selected entries (a range; the default is the current line).
+Before the original is removed, it is moved to a temporary directory next to
+it and compared with the copy. If it changed or can't be checked, it is put
+back, or its temporary path is reported, rather than deleted. A crash at this
+point can leave a `.direct-exdev-source-*` directory to recover. If the copy
+is in place but the original can't be removed, both paths are reported and two
+copies may remain.
 
-    :DirectPaste [dir]
-        With no argument, paste into the directory under the cursor (or a file's
-        parent directory) and refresh the listing. With {dir}, paste into {dir}
-        and leave the current buffer untouched.
-
-    :DirectPasteAs {name}
-        Paste into the cursor row's directory (or a file's parent directory) as
-        {name}.
-
-    :DirectRun {command}
-        Run {command} asynchronously in the shell, with the listing directory
-        as the working directory. Each literal {} is replaced by the
-        shell-escaped absolute path of the current entry; leave {} unquoted.
-        The command must contain {} and the current row must name an existing
-        entry, except for a tracked Git-deleted row. Captured output and exit
-        status are reported when it finishes. DirectRun does not refresh Git
-        status.
-
-    :DirectGit {command}
-        Run {command} like :DirectRun, then refresh Git status decorations in
-        the originating loaded listing when it completes. It does not re-list
-        or change buffer text.
-
-`:DirectSync`, `:DirectFoldAll`, `:DirectUnfoldAll`,
-`open()` and `open_parent_expanded()` (the public APIs used by the entry
-mappings),
-`:DirectNextChange`, `:DirectPreviousChange`, `:DirectNextFile`,
-`:DirectPreviousFile`, `:DirectUndo`, `:DirectRedo`,
-`:DirectYank`, `:DirectPaste` (no argument),
-`:DirectPasteAs`, `:DirectRun`, `:DirectGit`, and the public `next_change()`,
-`previous_change()`, `next_file()` and `previous_file()` APIs report an error and do nothing
-when the current buffer is not a direct buffer. `:DirectRun` does not refresh Git
-status; use `:DirectGit` when status decorations should refresh after completion.
-The listing commands `:DirectList`, `:DirectListBuffer` and
-`:DirectListCwd` remain available from ordinary buffers; they list a directory
-without operating on the current buffer's listing. `:DirectPaste {dir}` is also
-available from an ordinary buffer: it pastes into the explicitly named
-directory and never touches the current buffer.
+Limits: a program that has a file open can still change it after the
+comparison. A process run by the same user could swap a path between a check
+and the next step; if that happens, direct.vim keeps the temporary path and
+reports it so you can recover it. Network filesystems are not guaranteed.
 
 ==============================================================================
-9. Mappings                                                *direct.vim-mappings*
+17. Upgrading from the Python version                     *direct.vim-upgrade*
 
-Global (normal mode), installed when `map_default_keys` is true:
+The Lua version uses a new data format and doesn't migrate the Python
+version's data:
 
-    -           :DirectListBuffer~
-
-Buffer-local, in a direct buffer (all mappings follow `map_default_keys`):
-
-    Mode        Key         Action ~
-    normal      <CR>        open the entry under the cursor
-    normal      zo          lazily expand one directory level
-    normal      za          expand or collapse one directory
-    normal      zc          collapse one directory
-    normal      zO          recursively expand a directory
-    normal      zA          recursively expand or collapse a directory
-    normal      zC          recursively collapse a directory
-    normal      zR          recursively expand all root directories
-    normal      zM          collapse all root directories
-    normal      [d          jump to the previous visible directory row
-    normal      ]d          jump to the next visible directory row
-    normal      -           open ../ (the parent directory)
-    normal      z-          open ../ and expand the directory just left
-    normal      u           undo the last filesystem action
-    normal      <C-r>       redo the last filesystem action
-    normal      yy, Y       :DirectYank (current line)
-    visual      y           :DirectYank (selected range)
-    normal      p, P        :DirectPaste
-    normal      gh          :DirectToggleHidden
-    normal      gi          :DirectToggleGitIgnore
-    normal      ga          :DirectGit git add -- {}
-    normal      gr          :DirectGit git reset -- {}
-    normal      gc          :DirectGit git checkout -- {}
-    normal      gs          :DirectToggleGitStatus
-    normal      ]c          :DirectNextChange
-    normal      [c          :DirectPreviousChange
-    normal      ]f          :DirectNextFile
-    normal      [f          :DirectPreviousFile
-
-The buffer-local `-` wins over the global `-` inside a direct buffer. All
-buffer-local mappings, including fold and mouse mappings, are omitted when
-`map_default_keys` is false.
-`[d` and `]d` include nested directories currently shown in expanded subtrees;
-collapsed descendants are skipped. They move the cursor only and do not alter
-expansion state.
-`:DirectUnfoldAll` and `:DirectFoldAll` provide command-line equivalents of `zR`
-and `zM`.
+    - History: old history is discarded and replaced with empty stacks,
+      without migration or backup. A history file that can't be read still
+      blocks operations.
+    - Register: entries yanked with the Python version still appear. Names
+      with spaces are supported. Names with control characters or invalid
+      UTF-8 are skipped with an error.
+    - Trash: entries deleted with the Python version can still be restored.
 
 ==============================================================================
-10. Data directory                                          *direct.vim-data*
-
-State has no cache and is resolved on every use:
-
-    1. $XDG_DATA_HOME/direct when $XDG_DATA_HOME is set and non-empty;
-    2. otherwise $HOME/.local/share/direct (falling back to Neovim's standard
-       data directory, with a warning, when neither variable is set).
-
-Run `:checkhealth direct` to print the resolved data home. Inside it:
-
-    .direct-history.lock   persistent same-host advisory lock file
-    history/    undo.log and redo.log, plus the paired transaction journal
-    trash/      removed entries, kept so an undo can restore them
-    register/   the most recent yank, and its content pointer
-
-    Undo and redo use JSONL. Each stack begins with the exact header
-    {"format":"direct-history","version":1}, followed by one canonical JSON
-    action record per line. Paste/unpaste names are JSON arrays. Before reading
-    the register or changing the filesystem, Direct validates path inputs and
-    classifies both history files from raw bytes. Unreadable files fail closed.
-    Unsupported, malformed, legacy, or future history bytes are silently
-    discarded and both stacks are reset; history is not migrated or backed up.
-
-    Every stack rewrite uses an exclusive same-directory temporary file, syncs
-    the file, closes it, atomically renames it, and syncs the containing
-    directory where the platform supports it. A durable transaction snapshot
-    coordinates updates to both stacks; an interrupted stack rewrite is replayed
-    on the next history access.
-    Direct keeps an undo/redo source record until its filesystem reversal
-    succeeds. Its operation journal covers simple filesystem actions, grouped
-    move staging/final renames, and paste/unpaste progress. On restart, Direct
-    uses recorded identities and content checks to resume steps whose outcomes
-    are clear, then commits the paired stack update. Partial copies, changed
-    quarantines, malformed journals, and other ambiguous states are preserved;
-    further history operations stop until the affected paths are inspected.
-
-    A persistent advisory lock coordinates Direct instances on the same host
-    that share a data home. Direct holds it across sync actions and their history
-    updates, and across asynchronous paste/undo/redo actions. The OS releases the
-    lock if Neovim exits or crashes. Other tools do not participate in this lock,
-    so external filesystem changes can still race Direct. Network filesystems
-    and cross-host lock behavior are not guaranteed.
-
-    Filesystem destinations use atomic no-replace placement. Darwin, Linux, and
-    Windows use native exclusive-move primitives; unsupported platforms or
-    filesystems fail closed. Touch uses exclusive file creation, and mkdir
-    refuses an existing destination. Cross-device moves copy files to an
-    exclusive temporary file and directories to a private temporary tree in the
-    destination parent before no-replace placement. Symlinks are recreated, not
-    followed; FIFO, socket, and device sources are refused. If placement
-    commits but source removal fails, both paths are reported and the destination
-    is recorded; two copies may remain. Network filesystems and unsupported
-    filesystem semantics are not guaranteed. Before removing an EXDEV source,
-    direct atomically captures it in a private temporary directory beside the
-    source and compares copied file bytes or recursive directory contents and
-    symlink targets. If they differ or cannot be verified, direct restores the
-    source with no-replace or preserves and reports its temporary path. A crash
-    in this brief capture/verify/remove window can leave a
-    `.direct-exdev-source-*` recovery directory. Concurrent external writers can
-    still change open files after comparison; there is no content snapshot. The
-    same-host Direct lock does not coordinate external tools or other hosts. The
-    final destination rename is atomic no-replace, but source/temp
-    inode checks and cleanup remain pathname operations. A same-user process can
-    race a replacement after a check; in that narrow window direct may preserve
-    and report a stranded temp or quarantine path for manual recovery.
-
-==============================================================================
-11. Upgrading from the Python version                       *direct.vim-upgrade*
-
-The Lua rewrite uses a new on-disk format and does not migrate the Python-era
-data:
-
-    - History: any unsupported, malformed, legacy, or future history bytes are
-      silently discarded and reset to empty current-format stacks, without
-      migration or backup. Unreadable history still blocks the operation.
-    - Register: entries written by the Python version are still listed. Names
-      with spaces are supported by the JSONL format; names with control
-      characters or invalid UTF-8 are skipped with an error.
-    - Trash: Python-era trash entries are still read, so an entry removed
-      before the upgrade can still be restored.
-
-==============================================================================
-12. Licence                                                 *direct.vim-licence*
+18. Licence                                               *direct.vim-licence*
 
 Copyright (c) 2017-2026 Duncan Williams
 
@@ -678,4 +983,4 @@ COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-vim:ft=help
+ vim:tw=78:ts=8:ft=help:norl:
