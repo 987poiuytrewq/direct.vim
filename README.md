@@ -97,8 +97,8 @@ automatically.
 
 1. Open a directory: run `nvim .`, run `:edit some/dir/`, or press `-` in any
    file to list its directory.
-2. Move around: `<Enter>` opens the entry under the cursor and `-` goes up to
-   the parent directory.
+2. Move around: `<Enter>` or a double-click opens the entry under the cursor,
+   and `-` goes up to the parent directory.
 3. Edit the listing, then `:w`:
 
 | To…    | Do this                                                     |
@@ -149,9 +149,9 @@ All mappings are buffer-local to direct listings, except the global `-`.
 | `]c` `[c`        | Next or previous changed entry                      |
 | `ga` `gr` `gc`   | `git add`, `git reset` or `git checkout` the entry  |
 
-With mouse support on (`:set mouse=a`), click a folder icon to expand or
-collapse it. To turn off every default mapping, set
-`map_default_keys = false`.
+With mouse support on (`:set mouse=a`), double-click an entry to open it, and
+click a folder icon to expand or collapse that folder. To turn off every
+default mapping, set `map_default_keys = false`.
 
 ## Configuration
 
