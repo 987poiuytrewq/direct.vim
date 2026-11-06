@@ -63,14 +63,13 @@ return function(M)
   local function checked_string(value, what)
     local reason = M.path_reason(value)
     if not reason then
-      local canonical = M.paths.root(value)
-      local spelling = M.paths.strip_trailing_separator(value)
-      if canonical ~= spelling then reason = 'path must be absolute and canonical' end
+      local valid, path_err = M.paths.validate_canonical_path(value)
+      if not valid then reason = path_err end
     end
     if reason then
       return nil, 'cannot serialize action: ' .. reason .. ': ' .. tostring(value)
     end
-    return encode_string(value)
+    return encode_string(M.paths.record_path(value))
   end
 
   local function encoded_move(src, dst)
@@ -441,11 +440,9 @@ return function(M)
     end
     if record.op ~= 'g' then
       for _, field in ipairs(kind.fields) do
-        local reason = M.path_reason(record[field])
-        if not reason then
-          local canonical = M.paths.root(record[field])
-          local spelling = M.paths.strip_trailing_separator(record[field])
-          if canonical ~= spelling then reason = 'path must be absolute and canonical' end
+        local valid, reason = M.paths.validate_canonical_path(record[field])
+        if valid and M.paths.record_path(record[field]) ~= record[field] then
+          reason = 'path must be absolute and canonical'
         end
         if reason then return nil, reason .. ': ' .. tostring(record[field]) end
       end
@@ -470,11 +467,9 @@ return function(M)
           return nil, 'a group move requires exactly src and dst'
         end
         for _, field in ipairs({ 'src', 'dst' }) do
-          local reason = M.path_reason(move[field])
-          if not reason then
-            local canonical = M.paths.root(move[field])
-            local spelling = M.paths.strip_trailing_separator(move[field])
-            if canonical ~= spelling then reason = 'path must be absolute and canonical' end
+          local valid, reason = M.paths.validate_canonical_path(move[field])
+          if valid and M.paths.record_path(move[field]) ~= move[field] then
+            reason = 'path must be absolute and canonical'
           end
           if reason then return nil, reason .. ': ' .. tostring(move[field]) end
         end

@@ -300,13 +300,7 @@ local function path_without_marker(path)
 end
 
 local function relative_path(root, path)
-  local function normalize(value)
-    value = vim.fs.normalize(tostring(value))
-    if package.config:sub(1, 1) == '\\' then value = value:gsub('\\', '/') end
-    if value:match('^%a:/$') then return value end
-    value = value:gsub('/+$', '')
-    return value == '' and '/' or value
-  end
+  local function normalize(value) return paths.canonical(tostring(value)) end
   root, path = normalize(root), normalize(path)
   if path == root then return '' end
   local prefix = root

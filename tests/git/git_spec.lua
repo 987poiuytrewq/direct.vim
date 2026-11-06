@@ -182,7 +182,7 @@ H.describe('Git status display', function()
     for _, name in ipairs({ 'staged-type.txt', 'worktree-type.txt' }) do
       local path = vim.fs.joinpath(root, name)
       H.assert_true(vim.uv.fs_unlink(path), 'remove the tracked regular file')
-      H.assert_true(vim.uv.fs_symlink('target', path), 'replace it with a symlink')
+      H.assert_true(H.symlink('target', path), 'replace it with a symlink')
     end
     git(root, 'add', 'staged-type.txt')
 

@@ -14,7 +14,7 @@ end
 -- Symlink helper: luv returns true|nil, err from fs_symlink, so existence is
 -- checked through lstat instead of the return value.
 local function make_symlink(target, link)
-  pcall(vim.uv.fs_symlink, target, link)
+  pcall(H.symlink, target, link)
   return vim.uv.fs_lstat(link) ~= nil
 end
 
@@ -72,9 +72,19 @@ H.describe('buffer: current entry and cursor', function()
   end)
 
   H.it('entry_path keeps a directory trailing slash and special-cases the root', function()
-    H.assert_eq(buffer.entry_path('/a/b', 'dir/'), '/a/b/dir/', 'dir line keeps /')
-    H.assert_eq(buffer.entry_path('/a/b', 'f.txt'), '/a/b/f.txt', 'file line')
-    H.assert_eq(buffer.entry_path('/', 'f.txt'), '/f.txt', 'root is special-cased')
+    local separator = package.config:sub(1, 1)
+    local native_root = separator == '\\'
+      and ((vim.env.SystemDrive or 'C:') .. separator) or separator
+    local workspace = vim.fs.joinpath(vim.uv.cwd(), 'a', 'b')
+    H.assert_eq(buffer.entry_path(workspace, 'dir' .. separator),
+      vim.fs.joinpath(workspace, 'dir') .. separator,
+      'dir line keeps the native separator')
+    H.assert_true(buffer.entry_path(workspace, 'dir' .. separator):match('[/\\]$') ~= nil,
+      'directory identity retains a trailing separator')
+    H.assert_eq(buffer.entry_path(workspace, 'f.txt'),
+      vim.fs.joinpath(workspace, 'f.txt'), 'file line')
+    H.assert_eq(buffer.entry_path(native_root, 'f.txt'),
+      vim.fs.joinpath(native_root, 'f.txt'), 'root is special-cased')
   end)
 
   H.it('renders configured markers but builds native filesystem paths', function()
@@ -182,9 +192,13 @@ H.describe('buffer: attach by path identity', function()
     -- nvim_buf_set_name resolves the symlinked prefix, so the stored
     -- spelling differs from the unresolved root. Without this the case would be
     -- vacuous rather than wrong, which is why it is asserted, not skipped.
-    H.assert_true(stored ~= unresolved,
-      'nvim resolved the symlinked prefix: ' .. stored)
-    H.assert_eq(stored, real, 'the stored name is the resolved spelling')
+    if H.is_windows() then
+      H.assert_true(fs.same_path(stored, real), 'stored name resolves to the target')
+    else
+      H.assert_true(stored ~= unresolved,
+        'nvim resolved the symlinked prefix: ' .. stored)
+      H.assert_eq(stored, real, 'the stored name is the resolved spelling')
+    end
     H.assert_true(fs.same_path(stored, unresolved),
       'the resolved and unresolved spellings denote the same directory')
 

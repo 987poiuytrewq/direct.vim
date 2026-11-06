@@ -13,7 +13,7 @@ end
 -- Symlink helper: luv returns true|nil, err from fs_symlink, so existence is
 -- checked through lstat instead of the return value.
 local function make_symlink(target, link)
-  pcall(vim.uv.fs_symlink, target, link)
+  pcall(H.symlink, target, link)
   return vim.uv.fs_lstat(link) ~= nil
 end
 
@@ -203,7 +203,7 @@ H.describe('buffer: listing and path identity', function()
     local source = H.mkfile(ws, 'source.txt', '')
     local alias = ws .. '/hardlink.txt'
     local linked = vim.uv.fs_link(source, alias)
-    if not linked then return end
+    if not linked then H.skip('hard links are unavailable on this filesystem') end
 
     local listing = buffer.list(ws)
     local ns = vim.api.nvim_get_namespaces()['direct-listing-rows']

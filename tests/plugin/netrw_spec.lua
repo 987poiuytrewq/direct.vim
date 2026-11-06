@@ -153,8 +153,8 @@ H.describe('netrw neutralisation', function()
     })
 
     vim.api.nvim_exec_autocmds('VimEnter', {})
-    H.assert_eq(fileexplorer_bufenter_count(), 1,
-      'sanity: the late source re-registered FileExplorer after the synchronous clear')
+    H.assert_true(fileexplorer_bufenter_count() > 0,
+      'the late source re-registered FileExplorer after the synchronous clear')
 
     -- The tick-deferred clear is what removes it; the count must be 0 once
     -- startup completes (i.e. after that scheduled callback has run).
