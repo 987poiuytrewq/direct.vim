@@ -56,19 +56,30 @@ require('direct').setup({
 })
 
 -- The fixture lives in a temporary directory; show it as ~/my-plugin.
-local root = vim.fs.normalize(vim.env.DIRECT_DEMO_WORKSPACE or vim.fn.getcwd())
+-- Resolve links first: on macOS the temporary directory is a link
+-- (/var -> /private/var), and buffer names use the resolved path.
+local function real(path)
+  return vim.fs.normalize(vim.uv.fs_realpath(path) or path)
+end
+
+local root = real(vim.env.DIRECT_DEMO_WORKSPACE or vim.fn.getcwd())
 local display_root = '~/' .. vim.fs.basename(root)
 
 function _G.DemoStatus()
-  local name = vim.fs.normalize(vim.api.nvim_buf_get_name(0))
-  return (name:gsub(vim.pesc(root), display_root))
+  local name = real(vim.api.nvim_buf_get_name(0))
+  if name == root or name:sub(1, #root + 1) == root .. '/' then
+    return display_root .. name:sub(#root + 1)
+  end
+  return name
 end
 
 -- Show paths in messages relative to the working directory, which demo.sh
 -- sets to the project, as a user working in it would see them.
 local function relative_paths(text)
-  local cwd = vim.fs.normalize(vim.fn.getcwd())
-  return (text:gsub(vim.pesc(cwd) .. '/?', ''))
+  for _, dir in ipairs({ real(vim.fn.getcwd()), vim.fs.normalize(vim.fn.getcwd()) }) do
+    text = text:gsub(vim.pesc(dir) .. '/?', '')
+  end
+  return text
 end
 
 -- Keep messages on one line, with short paths. A message wider than the
