@@ -16,7 +16,8 @@ the changes. Every filesystem change can be undone and redone.
 - **Yank and paste files.** `yy` and `p` copy files and whole directory trees.
 - **Git integration.** Status symbols and colours, a changed-files-only view,
   stage/reset/restore keys, and `.gitignore` filtering.
-- **No dependencies.** Pure Lua, no Python, and no icon plugin required.
+- **No dependencies.** Pure Lua and no Python. Icons work without an icon
+  plugin, and use filetype icons when nvim-web-devicons is installed.
 
 ## How it compares
 
@@ -62,6 +63,9 @@ the latest.
 - Git, for status and ignore filtering (optional)
 - A [Nerd Font](https://www.nerdfonts.com/), for the default icons (optional;
   you can turn icons off or replace them)
+- [nvim-web-devicons](https://github.com/nvim-tree/nvim-web-devicons), for icons
+  that match each file's type (optional; without it, files use one generic
+  icon)
 
 Run `:checkhealth direct` to check your setup.
 
@@ -135,6 +139,7 @@ All mappings are buffer-local to direct listings, except the global `-`.
 | `zO` `zC` `zA`   | The same, recursively                               |
 | `zR` `zM`        | Expand or collapse everything                       |
 | `]d` `[d`        | Next or previous directory row                      |
+| `]f` `[f`        | Next or previous file row                           |
 | `u` `<C-r>`      | Undo or redo the last filesystem change             |
 | `yy` `Y`, visual `y` | Yank entries                                    |
 | `p` `P`          | Paste into the directory under the cursor           |
@@ -162,6 +167,7 @@ require('direct').setup({
   max_recursive_expand_depth = false, -- limit for zO/zR; false = unlimited
   show_folder_icons = true,
   show_file_icons = true,
+  show_filetype_icons = true,        -- filetype icons, via nvim-web-devicons
   icons = {
     file = '\u{f15b}',
     folder = '\u{f07b}',
@@ -255,6 +261,7 @@ through `willRenameFiles`, so they can update imports before the file moves.
 | `:DirectToggleHidden`      | Show or hide dotfiles                                 |
 | `:DirectToggleGitIgnore`   | Toggle `.gitignore` filtering                         |
 | `:DirectToggleGitStatus` / `:DirectGitStatus` | Toggle, or enter, the changed-only view |
+| `:DirectNextFile` / `:DirectPreviousFile` | Jump between files, skipping directories |
 | `:DirectNextChange` / `:DirectPreviousChange` | Jump between changed entries       |
 | `:DirectRun {cmd}` / `:DirectGit {cmd}` | Run a command on the current entry       |
 

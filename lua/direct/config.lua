@@ -14,6 +14,7 @@ local defaults = {
   indent_size = 2,
   show_folder_icons = true,
   show_file_icons = true,
+  show_filetype_icons = true,
   icons = {
     file = '\u{f15b}',
     folder = '\u{f07b}',
@@ -186,6 +187,8 @@ M.BUFFER_MAPS = {
   { mode = 'n', lhs = 'gs', rhs = '<Cmd>DirectToggleGitStatus<CR>' },
   { mode = 'n', lhs = ']c', rhs = '<Cmd>DirectNextChange<CR>' },
   { mode = 'n', lhs = '[c', rhs = '<Cmd>DirectPreviousChange<CR>' },
+  { mode = 'n', lhs = ']f', rhs = '<Cmd>DirectNextFile<CR>' },
+  { mode = 'n', lhs = '[f', rhs = '<Cmd>DirectPreviousFile<CR>' },
 }
 
 -- The loaded buffers whose filetype is `direct`: the retrofit targets for
@@ -324,7 +327,8 @@ function M.setup(opts)
         'direct: directory_separator must be "/" or "\\\\"', vim.log.levels.ERROR)
     elseif key == 'icons' then
       next_options.icons = resolve_icon_options(value)
-    elseif (key == 'show_hidden' or key == 'respect_gitignore')
+    elseif (key == 'show_hidden' or key == 'respect_gitignore'
+        or key == 'show_filetype_icons')
       and type(value) ~= 'boolean' then
       require('direct.ui').notify(
         string.format('direct: %s must be a boolean', key), vim.log.levels.ERROR)

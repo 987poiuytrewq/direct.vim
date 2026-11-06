@@ -67,6 +67,8 @@ local EXPECTED_N = {
   ['gs'] = '<Cmd>DirectToggleGitStatus<CR>',
   [']c'] = '<Cmd>DirectNextChange<CR>',
   ['[c'] = '<Cmd>DirectPreviousChange<CR>',
+  [']f'] = '<Cmd>DirectNextFile<CR>',
+  ['[f'] = '<Cmd>DirectPreviousFile<CR>',
 }
 
 local EXPECTED_V = {
@@ -85,6 +87,8 @@ local EXPECTED_CMDS = {
   DirectGitStatus = { nargs = '0' },
   DirectNextChange = { nargs = '0' },
   DirectPreviousChange = { nargs = '0' },
+  DirectNextFile = { nargs = '0' },
+  DirectPreviousFile = { nargs = '0' },
   DirectToggleGitIgnore = { nargs = '0' },
   DirectUndo = { nargs = '0' },
   DirectRedo = { nargs = '0' },
@@ -195,7 +199,7 @@ H.describe('entry: direct-buffer guard', function()
       'toggle_gitignore',
       'toggle_git_status',
       'show_git_status',
-      'next_change', 'previous_change',
+      'next_change', 'previous_change', 'next_file', 'previous_file',
       'sync', 'fold_all', 'unfold_all', 'undo', 'redo', 'yank', 'paste', 'paste_as', 'run', 'git' }
     local actual = {}
     for name, value in pairs(api) do
@@ -228,6 +232,10 @@ H.describe('entry: direct-buffer guard', function()
         call = function(api) return api.next_change() end },
       { name = 'DirectPreviousChange',
         call = function(api) return api.previous_change() end },
+      { name = 'DirectNextFile',
+        call = function(api) return api.next_file() end },
+      { name = 'DirectPreviousFile',
+        call = function(api) return api.previous_file() end },
       { name = 'DirectPaste', call = function(api) return api.paste() end },
       { name = 'DirectPasteAs', call = function(api) return api.paste_as('x.txt') end },
       { name = 'DirectRun', call = function(api) return api.run('echo {}') end },

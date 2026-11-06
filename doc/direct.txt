@@ -61,8 +61,10 @@ direct.vim is pure Lua and replaces |netrw| for directory buffers.
       filtering is on by default; see |direct-respect_gitignore|.
     - A Nerd Font with the Font Awesome glyphs, for the default icons
       (optional). See |direct-icons|.
+    - nvim-web-devicons, for icons that match each file's type (optional).
+      See |direct-show_filetype_icons|.
 
-No Python and no icon plugin are needed. To check the Neovim version and the
+No Python is needed. To check the Neovim version and the
 data directory in use, run:
 >
     :checkhealth direct
@@ -148,6 +150,9 @@ Jumping ~
     ]d  [d      Next or previous directory row, including directories inside
                 expanded subtrees. Collapsed descendants are skipped, and the
                 expansion state does not change.
+    ]f  [f      Next or previous file row, skipping directories. Files
+                inside expanded subtrees count; collapsed or hidden entries
+                don't, and it stops at the ends rather than wrapping.
     ]c  [c      Next or previous entry with a Git change. See
                 |direct.vim-git-navigate|.
 
@@ -519,6 +524,7 @@ Calling `setup()` is optional. These are the defaults:
       max_recursive_expand_depth = false,
       show_folder_icons = true,
       show_file_icons = true,
+      show_filetype_icons = true,
       icons = {
         file = '\u{f15b}',
         folder = '\u{f07b}',
@@ -585,10 +591,19 @@ show_file_icons         boolean (default: `true`)
     the other kind keeps a blank space so the names stay aligned. Icons are
     virtual text, so they don't affect the buffer lines.
 
+                                                  *direct-show_filetype_icons*
+show_filetype_icons     boolean (default: `true`)
+    Give files the icon and colour for their filetype, from nvim-web-devicons
+    (the same lookup bufferline.nvim uses). Without nvim-web-devicons, or for
+    a filetype it doesn't know, files use `icons.file`. Set to `false` to use
+    `icons.file` for every file. Folders and deleted tracked files keep their
+    own icons. Has no effect when |direct-show_file_icons| is off.
+
                                                                 *direct-icons*
 icons                   table
     The glyphs used for icons. Any key you leave out keeps its default.
-    The same glyphs are used for every file, whatever its type.
+    `file` is used for every file unless |direct-show_filetype_icons| finds
+    an icon for its type.
 
     Key                     Default ~
     `file`                    U+F15B  (file)
@@ -647,9 +662,9 @@ definitions are kept.
     DirectFileIcon              file icons                    |hl-Normal|
     DirectHiddenFolderIcon      hidden folder icons           Comment
     DirectHiddenFileIcon        hidden file icons             Comment
-    DirectGitAdded              added symbol                  |hl-Added|
-    DirectGitDeleted            deleted symbol                |hl-Removed|
-    DirectGitModified           modified symbol               |hl-Changed|
+    DirectGitAdded              added symbol                  Added
+    DirectGitDeleted            deleted symbol                Removed
+    DirectGitModified           modified symbol               Changed
     DirectGitRenamed            renamed symbol               DirectGitModified
     DirectGitConflict           conflict symbol               |hl-ErrorMsg|
     DirectGitIgnored            ignored symbol                Comment
@@ -657,8 +672,10 @@ definitions are kept.
     DirectGitDeletedFile        deleted tracked file names    |hl-ErrorMsg|
     DirectGitDeletedDirectory   deleted tracked dir names     |hl-ErrorMsg|
 
-Files get no highlighting based on their name or type. Changed entries are
-coloured by their Git status (|direct.vim-git-status|).
+File names get no highlighting based on their name or type. With
+|direct-show_filetype_icons|, file icons use nvim-web-devicons' colour for
+their type. Changed entries are coloured by their Git status
+(|direct.vim-git-status|).
 
 Listings use their own syntax file, which loads even when Neovim's global
 syntax loading is turned off.
@@ -756,6 +773,18 @@ Git ~
     Move to the previous visible entry with a Git change. Ignored entries are
     skipped, and it stops at the first one rather than wrapping.
 
+Navigating ~
+                                                             *:DirectNextFile*
+:DirectNextFile
+    Move to the next visible file row, skipping directories. Files inside
+    expanded subtrees count. It stops at the last one rather than wrapping.
+
+                                                         *:DirectPreviousFile*
+:DirectPreviousFile
+    Move to the previous visible file row, skipping directories. Files
+    inside expanded subtrees count. It stops at the first one rather than
+    wrapping.
+
 Running commands ~
                                                                   *:DirectRun*
 :DirectRun {command}
@@ -800,6 +829,7 @@ In a listing (buffer-local):
     n       gh              |:DirectToggleHidden|
     n       gi              |:DirectToggleGitIgnore|
     n       gs              |:DirectToggleGitStatus|
+    n       ]f  [f          |:DirectNextFile| and |:DirectPreviousFile|
     n       ]c  [c          |:DirectNextChange| and |:DirectPreviousChange|
     n       ga              `:DirectGit git add -- {}`
     n       gr              `:DirectGit git reset -- {}`
@@ -836,6 +866,8 @@ The functions in `require('direct')` mirror the commands:
     `show_git_status()`           |:DirectGitStatus|
     `next_change()`               |:DirectNextChange|
     `previous_change()`           |:DirectPreviousChange|
+    `next_file()`                 |:DirectNextFile|
+    `previous_file()`             |:DirectPreviousFile|
     `run(command)`                |:DirectRun|
     `git(command)`                |:DirectGit|
 
@@ -883,20 +915,22 @@ Directories are synced too, where the platform supports it. A transaction
 journal keeps the undo and redo stacks consistent, and an interrupted rewrite
 is finished the next time the history is used.
 
-An undo or redo entry is kept until its filesystem change has succeeded. Most
-actions (saves, grouped moves, renames, trash and restore, and pastes and
-their undo) are written to the journal before they run. After a crash,
-direct.vim checks the filesystem: it retries an action that hadn't started, or
-records one that had finished. If it can't tell which happened, for example
-because the crash came between a change and its checkpoint, it keeps the
-journal and refuses further undo and redo until you inspect the paths it
+An undo or redo entry is kept until its filesystem change has succeeded.
+Actions are written to the journal before they run: simple changes, the
+staging and final renames of grouped moves, and the progress of pastes and
+their undo. After a crash, direct.vim uses the recorded identities and
+content checks to finish the steps whose outcome is clear, then updates the
+history to match. If it can't tell what happened, for example with a partial
+copy, a changed quarantine path or a damaged journal, it keeps everything as
+it is and refuses further undo and redo until you inspect the paths it
 reports.
 
 Locking ~
 
 Neovim instances on the same machine that share a data directory coordinate
 through an advisory lock. It is held while direct.vim changes the filesystem
-and updates the history, including during asynchronous pastes and undos. The
+and updates the history, including during asynchronous pastes, undos and
+redos. The
 operating system releases it if Neovim exits or crashes.
 
 Other programs don't use this lock, so they can still change files while
@@ -907,8 +941,8 @@ Filesystem changes ~
 
 direct.vim never overwrites an existing entry:
 
-    - Moves and renames use the platform's atomic no-replace rename (on Linux
-      and macOS). Platforms or filesystems without one are refused.
+    - Moves and renames use the platform's atomic no-replace move (on Linux,
+      macOS and Windows). Platforms or filesystems without one are refused.
     - New files are created exclusively, and creating a directory fails if
       the path exists.
     - Symlinks are recreated, not followed. FIFOs, sockets and device files
