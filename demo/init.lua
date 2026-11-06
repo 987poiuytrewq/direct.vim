@@ -83,13 +83,27 @@ vim.notify = function(message, level, opts)
   return notify(message, level, opts)
 end
 
+-- After a prompt, Neovim continues the next message on the prompt's line
+-- ("Paste as: advancedPasted into examples/"). Redraw before passing the
+-- answer on, so the message that follows starts on a clear line.
+local ui_input = vim.ui.input
+vim.ui.input = function(opts, on_confirm)
+  return ui_input(opts, function(value)
+    vim.cmd.redraw()
+    on_confirm(value)
+  end)
+end
+
 local has_lualine, lualine = pcall(require, 'lualine')
 if has_lualine then
   lualine.setup({
     options = { globalstatus = true },
     sections = {
       lualine_b = { 'branch' },
-      lualine_c = { { 'v:lua.DemoStatus()' } },
+      -- A function, not a 'v:lua...' string: lualine reads strings that
+      -- start with 'v:' as Vim variables, which fails on every redraw and
+      -- leaves the status line empty.
+      lualine_c = { _G.DemoStatus },
       lualine_x = { { function() return 'direct.vim' end } },
       lualine_y = {},
       lualine_z = {},
@@ -106,8 +120,11 @@ if has_bufferline then
       always_show_bufferline = true,
       show_buffer_close_icons = false,
       show_close_icon = false,
-      -- Listings are named after their directory, which ends in a separator.
+      -- Name listings after their directory, with a trailing separator.
       name_formatter = function(buf)
+        if vim.fn.isdirectory(buf.path) == 0 then
+          return buf.name
+        end
         local name = vim.fs.basename(vim.fs.normalize(buf.path))
         return name ~= '' and name .. '/' or buf.name
       end,
