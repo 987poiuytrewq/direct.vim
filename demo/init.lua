@@ -117,11 +117,12 @@ end
 
 -- DemoCaption(title, keys) shows a caption card near the bottom of the
 -- screen: the title in bold, and under it room for the keys the scene uses
--- (separated by two spaces in `keys`). DemoKey() then reveals those keys one
--- at a time, as key caps, at the moment each is typed; the GIF has no
--- keystroke overlay, so this is how it shows what's pressed. The card is
--- sized for all of its keys up front, so it doesn't grow as they appear.
--- An empty title hides the card. drive.expect calls these with
+-- (separated by two spaces in `keys`). Each key cap appears the moment its
+-- first key reaches Neovim (see the vim.on_key handler below), so the caps
+-- keep exact time with the typing; the GIF has no keystroke overlay, so this
+-- is how it shows what's pressed. The card is sized for all of its keys up
+-- front, so it doesn't grow as they appear. With `show_all`, every cap shows
+-- at once. An empty title hides the card. drive.expect calls this with
 -- `nvim --server ... --remote-expr`, so captions never appear as keystrokes.
 local function colour(group, attr)
   return vim.api.nvim_get_hl(0, { name = group, link = false })[attr]
@@ -148,6 +149,7 @@ local caption = {
   ns = vim.api.nvim_create_namespace('demo_caption'),
   keys = {},  -- the scene's keys
   shown = 0,  -- how many of them have been typed so far
+  rest = '',  -- keys of the current cap still to arrive
 }
 local PAD = 3
 
@@ -184,7 +186,7 @@ local function draw_caption()
   vim.cmd.redraw()
 end
 
-function _G.DemoCaption(title, keys)
+function _G.DemoCaption(title, keys, show_all)
   if caption.win and vim.api.nvim_win_is_valid(caption.win) then
     vim.api.nvim_win_close(caption.win, true)
   end
@@ -201,7 +203,8 @@ function _G.DemoCaption(title, keys)
   caption.keys = vim.tbl_filter(function(key)
     return key ~= ''
   end, vim.split(keys or '', '%s%s+'))
-  caption.shown = 0
+  caption.shown = show_all and #caption.keys or 0
+  caption.rest = ''
 
   -- Size the card for the title and all of its keys.
   local all_keys = ''
@@ -228,11 +231,32 @@ function _G.DemoCaption(title, keys)
   return true
 end
 
--- DemoKey() reveals the caption's next key, as it's typed.
-function _G.DemoKey()
-  if caption.win and vim.api.nvim_win_is_valid(caption.win) and caption.shown < #caption.keys then
-    caption.shown = caption.shown + 1
-    draw_caption()
+-- Reveal each cap as its keys are typed. A cap is a short key sequence, such
+-- as "/sc", "zo" or "Ctrl-u". The next cap appears when its first key
+-- arrives; its remaining keys are then consumed, so the "c" in "/sc" can't
+-- reveal a following "cw" early. Other keys, such as typed text, are ignored.
+local CAP_KEYS = { Esc = '\27', ['Ctrl-r'] = '\18', ['Ctrl-u'] = '\21' }
+
+vim.on_key(function(_, typed)
+  if not typed or typed == '' or not (caption.win and vim.api.nvim_win_is_valid(caption.win)) then
+    return
   end
-  return true
-end
+  if caption.rest ~= '' then
+    if caption.rest:sub(1, #typed) == typed then
+      caption.rest = caption.rest:sub(#typed + 1)
+      return
+    end
+    caption.rest = ''
+  end
+  local next_cap = caption.keys[caption.shown + 1]
+  if not next_cap then
+    return
+  end
+  local bytes = CAP_KEYS[next_cap] or next_cap
+  if bytes:sub(1, #typed) == typed then
+    caption.shown = caption.shown + 1
+    caption.rest = bytes:sub(#typed + 1)
+    -- Drawing changes a buffer, which isn't allowed inside on_key.
+    vim.schedule(draw_caption)
+  end
+end)

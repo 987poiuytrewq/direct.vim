@@ -64,23 +64,14 @@ proc write_listing {} {
 # it doesn't appear in the recording's keystroke overlay. The caption shows a
 # title and, under it, the keys the scene uses (separated by two spaces). An
 # empty title hides it.
-proc caption {title {keys ""}} {
+proc caption {title {keys ""} {show_all 0}} {
   global nvim socket
-  set args "[vim_string $title], [vim_string $keys]"
+  set all [expr {$show_all ? "v:true" : "v:false"}]
+  set args "[vim_string $title], [vim_string $keys], $all"
   # Some builds print the reply ("true") on stderr, which exec would treat as
   # a failure; 2>@1 captures it, so only a non-zero exit status fails.
   if {[catch {exec $nvim --server $socket --remote-expr "v:lua.DemoCaption($args)" 2>@1} err]} {
     puts stderr "demo: could not show caption: $err"
-    exit 1
-  }
-}
-
-# Reveal the caption's next key cap. Call it just before typing that key, so
-# the cap appears as the key is pressed.
-proc typed {} {
-  global nvim socket
-  if {[catch {exec $nvim --server $socket --remote-expr "v:lua.DemoKey()" 2>@1} err]} {
-    puts stderr "demo: could not show key: $err"
     exit 1
   }
 }
@@ -107,153 +98,117 @@ if {$asciinema eq ""} {
 
 # 1. Rename: edit a name and save.
 wait_for {scratch\.txt}
-after 400
+after 300
 caption "Rename a file by editing its name" "/sc  cw  Esc  :w"
-after 600
-typed
+after 400
 find_row "sc"
-typed
 key "cw" 250
 type_text "notes"
-typed
 key "\033" 600
-typed
 write_listing
 wait_for {notes\.txt}
-after 800
+after 600
 
 # 2. Create: add a line; missing parent folders are created too.
 caption "Add a line to create a file, folders included" "G  o  Esc  :w"
-after 600
-typed
+after 400
 key "G"
-typed
 key "o"
 type_text "docs/guide/getting-started.md"
-typed
 key "\033" 600
-typed
 write_listing
 wait_for {getting-started\.md}
-after 1000
+after 800
 
 # 3. Delete: remove the line. Then undo and redo it, on disk.
 caption "Delete a line to delete the file" "/not  dd  :w"
-after 600
-typed
+after 400
 find_row "not"
-typed
 key "dd" 500
-typed
 write_listing
-after 600
+after 400
 caption "Undo and redo work on the filesystem" "u  Ctrl-r"
-after 600
-typed
+after 400
 key "u"
 wait_for {notes\.txt}
-after 800
-typed
+after 600
 key "\022"
-after 900
+after 700
 key "zM" 800
 
 # 4. Browse into the tree and rename a file inside it.
 caption "Expand folders in place, and edit inside them" "/lua  zo  j  zo  /ut  cw  Esc  :w"
-after 600
-typed
+after 400
 find_row "lua"
-typed
 key "zo"
 wait_for {my-plugin/}
-typed
 key "j"
-typed
 key "zo"
 wait_for {utils\.lua}
-after 400
-typed
+after 300
 find_row "ut"
-typed
 key "cw" 250
 type_text "strings"
-typed
 key "\033" 600
-typed
 write_listing
 wait_for {strings\.lua}
-after 800
+after 600
 
 # Collapse lua/ again, so the listing stays short enough for the terminal.
 key "zM" 800
 
 # 5. Rename several files with :s. 'inccommand' previews the result live.
 caption "Rename many at once, with any Vim command" "/te  zo  :%s/_test/_spec/  :w"
-after 600
-typed
+after 400
 find_row "te"
-typed
 key "zo"
 wait_for {config_test\.lua}
-after 400
-typed
+after 300
 key ":" 150
 type_text "%s/_test/_spec/"
-after 400
+after 300
 key "\r" 600
-typed
 write_listing
 wait_for {config_spec\.lua}
-after 900
+after 700
 key "zM" 800
 
 # 6. Copy a folder. Pasting next to the original asks for a new name; the
 # prompt starts with the old name, so clear it with Ctrl-u first.
 caption "Copy whole folders" "/ex  zo  j  yy  k  p  Ctrl-u"
-after 600
-typed
+after 400
 find_row "ex"
-typed
 key "zo"
 wait_for {minimal/}
-typed
 key "j"
-typed
 key "yy" 900
-typed
 key "k"
-typed
 key "p"
 wait_for {already exists}
-after 600
-typed
+after 400
 key "\025" 300
 type_text "advanced"
-after 400
+after 300
 key "\r"
 wait_for {advanced/}
-after 1000
+after 800
 
 # 7. Git: show only what changed, then stage a file.
 key "zM" 800
 caption "See what changed, and stage it" "gs  /re  ga"
-after 600
-typed
+after 400
 key "gs"
 wait_for {getting-started\.md}
-after 1100
-typed
+after 800
 find_row "re"
-typed
 key "ga"
-after 1100
+after 800
 
 # 8. Back to the full listing.
 key "gs"
 wait_for {LICENSE}
-caption "direct.vim: edit your filesystem like a buffer" ":help direct.vim"
-typed
-after 2500
+caption "direct.vim: edit your filesystem like a buffer" ":help direct.vim" 1
+after 2000
 caption ""
 key "ZQ" 500
 
