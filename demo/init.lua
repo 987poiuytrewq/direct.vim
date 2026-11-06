@@ -234,8 +234,18 @@ end
 -- Reveal each cap as its keys are typed. A cap is a short key sequence, such
 -- as "/sc", "zo" or "Ctrl-u". The next cap appears when its first key
 -- arrives; its remaining keys are then consumed, so the "c" in "/sc" can't
--- reveal a following "cw" early. Other keys, such as typed text, are ignored.
-local CAP_KEYS = { Esc = '\27', ['Ctrl-r'] = '\18', ['Ctrl-u'] = '\21' }
+-- reveal a following "cw" early. A cap that starts with / or : also consumes
+-- the Enter that runs it, so that Enter can't reveal a following "Enter" cap.
+-- Other keys, such as typed text, are ignored.
+local CAP_KEYS = { Esc = '\27', Enter = '\r', ['Ctrl-r'] = '\18', ['Ctrl-u'] = '\21' }
+
+local function cap_bytes(cap)
+  if CAP_KEYS[cap] then
+    return CAP_KEYS[cap]
+  end
+  local first = cap:sub(1, 1)
+  return (first == '/' or first == ':') and cap .. '\r' or cap
+end
 
 vim.on_key(function(_, typed)
   if not typed or typed == '' or not (caption.win and vim.api.nvim_win_is_valid(caption.win)) then
@@ -252,7 +262,7 @@ vim.on_key(function(_, typed)
   if not next_cap then
     return
   end
-  local bytes = CAP_KEYS[next_cap] or next_cap
+  local bytes = cap_bytes(next_cap)
   if bytes:sub(1, #typed) == typed then
     caption.shown = caption.shown + 1
     caption.rest = bytes:sub(#typed + 1)

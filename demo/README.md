@@ -20,15 +20,17 @@ keystroke overlay:
    `docs/guide/getting-started.md`, creates both folders and the file.
 3. **Delete a file, then undo and redo it on disk.** `dd` and `:w` delete
    `notes.txt`, `u` brings it back, and `Ctrl-r` deletes it again.
-4. **Expand folders and edit inside them.** `zo` opens `lua/my-plugin/`, and
-   `cw` renames `utils.lua` to `strings.lua`.
-5. **Rename many at once.** `:%s/_test/_spec/` renames three test files in one
+4. **Open files and folders.** `Enter` opens `README.md`, and `-` goes back
+   to the listing; `Enter` on `docs/` lists that folder, and `-` goes back up.
+5. **Expand folders and edit inside them.** `zO` opens `lua/` and everything
+   under it, and `cw` renames `utils.lua` to `strings.lua`.
+6. **Rename many at once.** `:%s/_test/_spec/` renames three test files in one
    save.
-6. **Copy whole folders.** `yy` and `p` copy `examples/minimal/`, and the
+7. **Copy whole folders.** `yy` and `p` copy `examples/minimal/`, and the
    "already exists" prompt names the copy `examples/advanced/`.
-7. **See what changed, and stage it.** `gs` shows only changed files, and `ga`
+8. **See what changed, and stage it.** `gs` shows only changed files, and `ga`
    stages `README.md`.
-8. **Back to the full listing**, with the title and `:help direct.vim`.
+9. **Back to the full listing**, with the title and `:help direct.vim`.
 
 Neovim starts inside the project, so messages show paths relative to it.
 Searches type only enough of a name to match one line.

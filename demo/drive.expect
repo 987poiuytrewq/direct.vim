@@ -109,10 +109,10 @@ write_listing
 wait_for {notes\.txt}
 after 600
 
-# 2. Create: add a line; missing parent folders are created too.
-caption "Add a line to create a file, folders included" "G  o  Esc  :w"
+# 2. Create: add a line; missing parent folders are created too. The cursor
+# is still on notes.txt, the last row, so o adds the new line at the end.
+caption "Add a line to create a file, folders included" "o  Esc  :w"
 after 400
-key "G"
 key "o"
 type_text "docs/guide/getting-started.md"
 key "\033" 600
@@ -136,14 +136,31 @@ key "\022"
 after 700
 key "zM" 800
 
-# 4. Browse into the tree and rename a file inside it.
-caption "Expand folders in place, and edit inside them" "/lua  zo  j  zo  /ut  cw  Esc  :w"
+# 4. Open a file and a folder, going back up with - each time. ("/re" would
+# also match .gitignore, so search for "rea".)
+caption "Open files and folders, and go back with -" "/rea  Enter  -  /docs  Enter  -"
+after 400
+find_row "rea"
+key "\r"
+wait_for {small, fast Neovim plugin}
+after 900
+key "-"
+wait_for {LICENSE}
+after 400
+find_row "docs"
+key "\r"
+wait_for {guide/}
+after 900
+key "-"
+wait_for {LICENSE}
+after 600
+
+# 5. Browse into the tree and rename a file inside it. zO opens lua/ and
+# everything under it.
+caption "Expand folders in place, and edit inside them" "/lua  zO  /ut  cw  Esc  :w"
 after 400
 find_row "lua"
-key "zo"
-wait_for {my-plugin/}
-key "j"
-key "zo"
+key "zO"
 wait_for {utils\.lua}
 after 300
 find_row "ut"
@@ -157,7 +174,7 @@ after 600
 # Collapse lua/ again, so the listing stays short enough for the terminal.
 key "zM" 800
 
-# 5. Rename several files with :s. 'inccommand' previews the result live.
+# 6. Rename several files with :s. 'inccommand' previews the result live.
 caption "Rename many at once, with any Vim command" "/te  zo  :%s/_test/_spec/  :w"
 after 400
 find_row "te"
@@ -173,7 +190,7 @@ wait_for {config_spec\.lua}
 after 700
 key "zM" 800
 
-# 6. Copy a folder. Pasting next to the original asks for a new name; the
+# 7. Copy a folder. Pasting next to the original asks for a new name; the
 # prompt starts with the old name, so clear it with Ctrl-u first.
 caption "Copy whole folders" "/ex  zo  j  yy  k  p  Ctrl-u"
 after 400
@@ -193,7 +210,7 @@ key "\r"
 wait_for {advanced/}
 after 800
 
-# 7. Git: show only what changed, then stage a file.
+# 8. Git: show only what changed, then stage a file.
 key "zM" 800
 caption "See what changed, and stage it" "gs  /re  ga"
 after 400
@@ -204,7 +221,7 @@ find_row "re"
 key "ga"
 after 800
 
-# 8. Back to the full listing.
+# 9. Back to the full listing.
 key "gs"
 wait_for {LICENSE}
 caption "direct.vim: edit your filesystem like a buffer" ":help direct.vim" 1
