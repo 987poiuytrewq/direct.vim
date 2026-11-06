@@ -45,7 +45,13 @@ H.describe('DirectRun', function()
     local expected = ('git add {} && printf %s {}'):gsub('%{%}', function()
       return vim.fn.shellescape(path)
     end)
-    H.assert_eq(launched.argv[#launched.argv], expected,
+    local actual = launched.argv[#launched.argv]
+    if H.is_windows() then
+      H.assert_eq(launched.argv[2], '/d', 'uses a non-interactive cmd instance')
+      H.assert_eq(launched.argv[3], '/c', 'runs the batch command')
+      actual = table.concat(vim.fn.readfile(actual), '\n')
+    end
+    H.assert_eq(actual, expected,
       'replaces each placeholder with one shell-escaped absolute path')
     H.assert_eq(launched.opts.cwd, ws, 'runs in the listing directory')
     H.assert_true(launched.opts.text, 'captures text output')
@@ -68,7 +74,9 @@ H.describe('DirectRun', function()
     vim.api.nvim_win_set_cursor(0, { 2, 0 })
     H.capture_messages()
 
-    vim.cmd([[DirectRun printf '%s' {} ; exit 7]])
+    local command = H.is_windows()
+      and 'echo {} & exit /b 7' or [[printf '%s' {} ; exit 7]]
+    vim.cmd('DirectRun ' .. command)
     H.assert_true(vim.wait(3000, function()
       return H.messages():find(path, 1, true) ~= nil
     end), 'shell receives the expanded child path as one argument')
@@ -187,7 +195,12 @@ H.describe('DirectRun', function()
     vim.api.nvim_win_set_cursor(0, { row, 0 })
 
     local direct = require('direct')
-    local shell_command = direct.run('test ! -e {}')
+    local shell_command
+    if H.is_windows() then
+      shell_command = direct.run('if exist {} (exit /b 1) else (exit /b 0)')
+    else
+      shell_command = direct.run('test ! -e {}')
+    end
     H.assert_not_nil(shell_command, 'DirectRun accepts a missing tracked row')
     H.assert_eq(shell_command:wait().code, 0,
       'DirectRun receives the absent path for an arbitrary command')

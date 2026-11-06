@@ -24,6 +24,8 @@ local rows = require('direct.buffer_rows')
 local states = rows.states
 local namespace = rows.namespace
 local deleted_guards = {}
+local state_generations = {}
+local next_state_generation = 0
 local next_id = rows.next_id
 local set_row_mark = rows.set_row_mark
 local row_ids_by_row = rows.row_ids_by_row
@@ -538,6 +540,9 @@ local function ensure_direct_syntax(bufnr)
 end
 
 local function set_options(bufnr)
+  next_state_generation = next_state_generation + 1
+  local generation = next_state_generation
+  state_generations[bufnr] = generation
   vim.bo[bufnr].buftype = 'acwrite'
   vim.bo[bufnr].buflisted = true
   vim.bo[bufnr].swapfile = false
@@ -554,6 +559,8 @@ local function set_options(bufnr)
     group = group,
     buffer = bufnr,
     callback = function()
+      if state_generations[bufnr] ~= generation then return end
+      state_generations[bufnr] = nil
       local operation = pending_sync[bufnr]
       if operation then
         if operation.cancel then operation.cancel() end
@@ -1925,8 +1932,7 @@ local function sync_locked(self, options)
         end, debug.traceback)
         operation.cleanup()
         if not ran then
-          ui.notify('direct: async rename completion failed: '
-            .. tostring(callback_err), vim.log.levels.ERROR)
+          ui.report_error('finish the directory rename', callback_err)
         end
       end
       local started, cancel = pcall(file_operations.will_rename, files, finish, nil,
@@ -1957,6 +1963,8 @@ local function sync_locked(self, options)
     local preflight, preflight_err = history.preflight(inputs)
     if not preflight then
       vim.bo[bufnr].modified = true
+      ui.notify('Refusing to sync: history preflight failed: '
+        .. tostring(preflight_err), vim.log.levels.ERROR)
       return nil, preflight_err
     end
   end

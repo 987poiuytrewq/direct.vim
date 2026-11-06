@@ -449,7 +449,7 @@ local function swap_line(ws)
     local ws = H.mkdir(sb.root, 'ws')
     local link = ws .. '/a.txt'
     local target = 'missing-target'
-    H.assert_true(vim.uv.fs_symlink(target, link) ~= nil,
+    H.assert_true(H.symlink(target, link) ~= nil,
       'create the dangling symlink fixture')
     H.mkfile(ws, 'b.txt', { 'CONTENT-B' })
     local group = action.Group({
@@ -596,8 +596,10 @@ local function swap_line(ws)
     H.assert_nil(vim.uv.fs_lstat(src_a), 'group rollback did not move foreign data to src')
     H.assert_eq(vim.fn.readfile(src_b), { 'B' }, 'the unstaged source remains')
     local reported = false
+    local expected_temp = vim.fs.normalize(temp):gsub('\\', '/')
     for _, message in ipairs(notices) do
-      if message:find('source identity changed: ' .. temp, 1, true) then
+      local normalized_message = message:gsub('\\', '/')
+      if normalized_message:find('source identity changed: ' .. expected_temp, 1, true) then
         reported = true
       end
     end

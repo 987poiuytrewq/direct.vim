@@ -721,6 +721,36 @@ H.describe('history', function()
     interrupted_reverse(true)
   end)
 
+  H.it('an uncheckpointed async paste output is preserved as ambiguous after restart', function()
+    local sb = H.sandbox()
+    local source = H.mkdir(sb.root, 'register')
+    local destination = H.mkdir(sb.root, 'destination')
+    H.mkfile(source, 'file.txt', { 'expected payload' })
+    H.mkfile(destination, 'file.txt', { 'unrelated occupant' })
+    local paste = action.Paste(source, destination, { 'file.txt' }, { 'file.txt' })
+    local operation = assert(history.begin_paste(paste))
+    local pair = paste.renames[1]
+    local source_path, destination_path = source .. '/file.txt', destination .. '/file.txt'
+    H.assert_true(history.note_paste_pending(operation, pair,
+      source_path, destination_path), 'the pending destination is durably recorded')
+    H.assert_true(history.lock.release(), 'simulate process exit and OS lock release')
+
+    with_fresh_process(function()
+      local fresh_history = require('direct.history')
+      local state, err = fresh_history.preflight()
+      H.assert_nil(state, 'an unrelated occupant is not mistaken for Direct output')
+      H.assert_true(type(err) == 'string' and err:find('ambiguous', 1, true) ~= nil,
+        'recovery explains the ambiguous destination')
+    end)
+
+    H.assert_eq(vim.fn.readfile(destination_path), { 'unrelated occupant' },
+      'the occupant is preserved')
+    H.assert_eq(vim.fn.readfile(vim.fs.joinpath(history_dir(sb), 'undo.log')),
+      { MARKER }, 'no paste record is committed')
+    H.assert_true(fs.exists(vim.fs.joinpath(history_dir(sb), 'transaction.json')),
+      'the ambiguous transaction journal remains for inspection')
+  end)
+
   H.it('a paired history transaction is replayed after a simulated mid-commit crash', function()
     local sb = H.sandbox()
     H.assert_true(history.preflight() ~= nil, 'initialize the history directory')

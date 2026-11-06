@@ -5,6 +5,7 @@ local M = {}
 local action = require('direct.action')
 local paths = require('direct.paths')
 local history_format = require('direct.history_format')
+local platform = require('direct.platform')
 
 M.FORMAT = 'direct-operation-journal'
 M.VERSION = 1
@@ -39,7 +40,20 @@ end
 
 local function identity_path_matches(identity, path)
   if identity == nil or identity == vim.NIL then return true end
-  return identity.path == vim.fs.normalize(path)
+  return platform.identity_path(paths.canonical(identity.path))
+    == platform.identity_path(paths.canonical(path))
+end
+
+local function canonical_paths_match(a, b)
+  if type(a) ~= 'string' or type(b) ~= 'string' then return false end
+  return platform.identity_path(paths.canonical(a))
+    == platform.identity_path(paths.canonical(b))
+end
+
+local function canonical_optional_paths_match(a, b)
+  if a == nil or a == vim.NIL then return b == nil or b == vim.NIL end
+  if b == nil or b == vim.NIL then return false end
+  return canonical_paths_match(a, b)
 end
 
 local function valid_move_steps(steps, next_step, staging_count)
@@ -202,7 +216,8 @@ function M.parse(bytes)
       or type(value.source_identity.inode) ~= 'string'
       or not identity_path_matches(value.source_identity, value.source)
       or not identity_path_matches(value.destination_identity, value.destination)
-      or reversal.src ~= value.source or reversal.dst ~= value.destination then
+      or not canonical_paths_match(reversal.src, value.source)
+      or not canonical_paths_match(reversal.dst, value.destination) then
       return nil
     end
   elseif value.kind == 'apply' then
@@ -238,8 +253,8 @@ function M.parse(bytes)
         or not valid_identity(value.destination_identity)
         or not identity_path_matches(value.source_identity, source)
         or not identity_path_matches(value.destination_identity, value.destination)
-        or (filesystem_action.src or nil) ~= source
-        or filesystem_action.dst ~= value.destination then
+        or not canonical_optional_paths_match(filesystem_action.src, source)
+        or not canonical_paths_match(filesystem_action.dst, value.destination) then
         return nil
       end
     end

@@ -6,6 +6,7 @@ function M.new(deps)
   local action = deps.action
   local header = deps.header
   local ui = deps.ui
+  local identity_paths_equal = deps.identity_paths_equal
   local write_transaction = deps.write_transaction
   local clear_transaction = deps.clear_transaction
   local commit_stacks = deps.commit_stacks
@@ -15,7 +16,7 @@ function M.new(deps)
     if actual == vim.NIL then actual = nil end
     if expected == nil or actual == nil then return expected == actual end
     if expected.inode and actual.inode then return expected.inode == actual.inode end
-    return expected.path == actual.path
+    return identity_paths_equal(expected.path, actual.path)
   end
 
   local function reverse_operation_status(transaction)

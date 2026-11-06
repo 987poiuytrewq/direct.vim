@@ -67,7 +67,7 @@ H.describe('fs', function()
     H.mkdir(sb.root, 'outer/sub')
     H.mkfile(sb.root, 'outer/sub/x.txt', { 'x' })
     local link = sb.root .. '/alias'
-    H.assert_true(vim.uv.fs_symlink(sb.root .. '/outer', link) == true, 'created prefix symlink')
+    H.assert_true(H.symlink(sb.root .. '/outer', link) == true, 'created prefix symlink')
 
     local through_link = link .. '/sub/x.txt'
     local direct = sb.root .. '/outer/sub/x.txt'
@@ -102,7 +102,9 @@ H.describe('fs', function()
     local sb = H.sandbox()
     local target = H.mkfile(sb.root, 'target.txt', '')
     local alias = sb.root .. '/alias.txt'
-    if not vim.uv.fs_symlink(target, alias) then return end
+    if not H.symlink(target, alias) then
+      H.skip('symbolic links are unavailable on this filesystem')
+    end
 
     local index = fs.path_identity_index({ target })
     H.assert_true(fs.path_identity_index_contains(index, alias),
@@ -183,9 +185,9 @@ H.describe('fs', function()
     H.mkfile(root, 'a.txt', { 'a' })
     H.mkdir(root, 'zdir')
     H.mkdir(root, 'adir')
-    vim.uv.fs_symlink(root .. '/zdir', root .. '/linkdir')
-    vim.uv.fs_symlink(root .. '/a.txt', root .. '/linkfile')
-    vim.uv.fs_symlink(root .. '/missing', root .. '/broken')
+    H.symlink(root .. '/zdir', root .. '/linkdir')
+    H.symlink(root .. '/a.txt', root .. '/linkfile')
+    H.symlink(root .. '/missing', root .. '/broken')
 
     H.assert_eq(fs.read_dir_lines(root),
       { 'adir/', 'linkdir/', 'zdir/', 'a.txt', 'b.txt', 'linkfile' },
@@ -446,9 +448,10 @@ H.describe('fs', function()
   H.it('EXDEV refuses a top-level FIFO before any copy or blocking open', function()
     local sb = H.sandbox()
     local fifo = sb.root .. '/pipe'
-    vim.fn.system({ 'mkfifo', fifo })
+    local created, reason = H.mkfifo(fifo)
+    if not created then H.skip(reason) end
     local st = vim.uv.fs_lstat(fifo)
-    if st == nil or st.type ~= 'fifo' then return end
+    if st == nil or st.type ~= 'fifo' then H.skip('the host did not create a FIFO') end
     local dst = sb.root .. '/moved-pipe'
     local real = fs.rename_noreplace
     local restore_rename = H.stub(fs, 'rename_noreplace', function(src, target)
@@ -476,9 +479,10 @@ H.describe('fs', function()
 
   H.it('EXDEV recreates a top-level symlink without following its target', function()
     local sb = H.sandbox()
-    local target = H.mkfile(sb.root, 'target.txt', { 'TARGET' })
+    local target = H.mkdir(sb.root, 'target-dir')
+    H.mkfile(target, 'target.txt', { 'TARGET' })
     local src, dst = sb.root .. '/source-link', sb.root .. '/dest-link'
-    H.assert_true(vim.uv.fs_symlink(target, src) == true, 'source symlink created')
+    H.assert_true(H.symlink(target, src) == true, 'source symlink created')
     local real = fs.rename_noreplace
     local restore = H.stub(fs, 'rename_noreplace', function(from, to)
       if from == src and to == dst then
@@ -493,7 +497,11 @@ H.describe('fs', function()
     H.assert_true(ok == true, 'symlink move succeeded: ' .. tostring(err))
     H.assert_nil(vim.uv.fs_lstat(src), 'source link removed')
     H.assert_eq(vim.uv.fs_readlink(dst), target, 'link target text is recreated')
-    H.assert_eq(vim.fn.readfile(target), { 'TARGET' }, 'target bytes remain unchanged')
+    H.assert_true(fs.is_dir(dst), 'the directory symlink retains its target kind')
+    H.assert_eq(vim.fn.readfile(dst .. '/target.txt'), { 'TARGET' },
+      'the link resolves to the unchanged target contents')
+    H.assert_eq(vim.fn.readfile(target .. '/target.txt'), { 'TARGET' },
+      'target bytes remain unchanged')
   end)
 
   H.it('a non-EXDEV rename error propagates and leaves the source intact', function()
@@ -526,7 +534,7 @@ H.describe('fs', function()
     H.mkfile(sb.root, 'src.txt', { 'SOURCE' })
     local system = vim.uv.os_uname().sysname
     local ok, err = fs.rename_noreplace(src, dst)
-    if system ~= 'Darwin' and system ~= 'Linux' then
+    if system ~= 'Darwin' and system ~= 'Linux' and not H.is_windows() then
       H.assert_nil(ok, 'unsupported platforms fail closed: ' .. tostring(err))
       H.assert_eq(vim.fn.readfile(src), { 'SOURCE' }, 'source stays on unsupported platforms')
       return
@@ -609,7 +617,7 @@ H.describe('fs', function()
     H.mkfile(root, 'sub/b.txt', { 'b' })
     -- Nested, and reached only AFTER a.txt and sub/b.txt have been copied, so
     -- the no-partial-destination assertion also pins the cleanup.
-    pcall(vim.uv.fs_symlink, root .. '/a.txt', root .. '/sub/link')
+    pcall(H.symlink, root .. '/a.txt', root .. '/sub/link')
     H.assert_true(vim.uv.fs_lstat(root .. '/sub/link') ~= nil, 'nested symlink created')
 
     local ok, err = fs.copy_tree(root, sb.root .. '/dst', { require_complete = true })
@@ -629,7 +637,7 @@ H.describe('fs', function()
     H.mkfile(root, 'a.txt', { 'a' })
     H.mkdir(root, 'sub')
     H.mkfile(root, 'sub/b.txt', { 'b' })
-    pcall(vim.uv.fs_symlink, root .. '/a.txt', root .. '/sub/link')
+    pcall(H.symlink, root .. '/a.txt', root .. '/sub/link')
     H.assert_true(vim.uv.fs_lstat(root .. '/sub/link') ~= nil, 'nested symlink created')
 
     local dst = sb.root .. '/dst'
@@ -648,8 +656,9 @@ H.describe('fs', function()
   H.it('an EXDEV move recreates symlinks without following them', function()
     local sb = H.sandbox()
     local root = H.mkdir(sb.root, 'tree')
-    H.mkfile(root, 'a.txt', { 'a' })
-    pcall(vim.uv.fs_symlink, root .. '/a.txt', root .. '/link')
+    local target = H.mkdir(sb.root, 'target-dir')
+    H.mkfile(target, 'a.txt', { 'a' })
+    pcall(H.symlink, target, root .. '/link')
     H.assert_true(vim.uv.fs_lstat(root .. '/link') ~= nil, 'symlink created')
 
     local dst = sb.root .. '/moved'
@@ -665,11 +674,13 @@ H.describe('fs', function()
 
     H.assert_true(ok == true, 'the complete move succeeds: ' .. tostring(err))
     H.assert_false(fs.exists(root), 'source tree removed after commit')
-    H.assert_fs_eq(dst, { 'a.txt', 'link@' }, 'tree and symlink were recreated')
-    H.assert_eq(vim.uv.fs_readlink(dst .. '/link'), root .. '/a.txt',
+    H.assert_fs_eq(dst, { 'link@' }, 'symlink was recreated without copying its target')
+    H.assert_eq(vim.uv.fs_readlink(dst .. '/link'), target,
       'symlink target text is copied verbatim')
-    H.assert_eq(vim.fn.readfile(dst .. '/a.txt'), { 'a' },
+    H.assert_true(fs.is_dir(dst .. '/link'), 'the directory symlink retains its target kind')
+    H.assert_eq(vim.fn.readfile(dst .. '/link/a.txt'), { 'a' },
       'file is copied separately; symlink is not followed')
+    H.assert_eq(vim.fn.readfile(target .. '/a.txt'), { 'a' }, 'target remains unchanged')
   end)
 
   H.it('copy_tree with require_complete refuses a FIFO, leaving no destination', function()
@@ -677,13 +688,11 @@ H.describe('fs', function()
     local root = H.mkdir(sb.root, 'tree')
     H.mkfile(root, 'a.txt', { 'a' })
     local fifo = root .. '/pipe'
-    -- mkfifo is an external tool; the harness has no skip primitive, so a
-    -- platform without it returns early (the symlink cases pin the walk).
-    -- Guarded by lstat, never by the exit status alone.
-    vim.fn.system({ 'mkfifo', fifo })
+    local created, reason = H.mkfifo(fifo)
+    if not created then H.skip(reason) end
     local st = vim.uv.fs_lstat(fifo)
     if st == nil or st.type ~= 'fifo' then
-      return
+      H.skip('the host did not create a FIFO')
     end
     local ok, err = fs.copy_tree(root, sb.root .. '/dst', { require_complete = true })
     H.assert_nil(ok, 'copy_tree refuses a FIFO')
@@ -695,10 +704,14 @@ H.describe('fs', function()
   -- vim.fs.dir can make an unreadable directory look empty, hiding data before
   -- an EXDEV move removes the source. The copy walk probes with fs_scandir; this
   -- fixture puts the locked subtree last to verify partial-copy cleanup. Root
-  -- bypasses permission bits, so the test returns early there.
+  -- bypasses permission bits, and Windows does not implement POSIX directory
+  -- permission semantics, so those hosts report the test as skipped.
   H.it('copy_tree with require_complete refuses an unreadable directory, leaving no destination', function()
+    if H.is_windows() then
+      H.skip('POSIX directory permission semantics are unavailable on Windows')
+    end
     if vim.uv.getuid ~= nil and vim.uv.getuid() == 0 then
-      return
+      H.skip('root bypasses directory permission bits')
     end
     local sb = H.sandbox()
     local root = H.mkdir(sb.root, 'tree')
@@ -727,8 +740,11 @@ H.describe('fs', function()
   -- Best-effort copies may skip unreadable subtrees, but must report them rather
   -- than silently creating an empty stand-in.
   H.it('copy_tree without require_complete reports an unreadable directory it skipped', function()
+    if H.is_windows() then
+      H.skip('POSIX directory permission semantics are unavailable on Windows')
+    end
     if vim.uv.getuid ~= nil and vim.uv.getuid() == 0 then
-      return
+      H.skip('root bypasses directory permission bits')
     end
     local sb = H.sandbox()
     local root = H.mkdir(sb.root, 'tree')
@@ -771,7 +787,7 @@ H.describe('fs', function()
         injected = true
         -- A symlink because it is portable; a FIFO/socket/device is refused by
         -- the same branch (and is pinned by the FIFO test above).
-        vim.uv.fs_symlink(root .. '/a.txt', root .. '/late')
+        H.symlink(root .. '/a.txt', root .. '/late')
       end
       return real_mkdir(path, mode)
     end)
@@ -799,7 +815,7 @@ H.describe('fs', function()
     local restore = H.stub(fs, 'mkdirp', function(path)
       if not injected then
         injected = true
-        vim.uv.fs_symlink(root .. '/a.txt', root .. '/late')
+        H.symlink(root .. '/a.txt', root .. '/late')
       end
       return real_mkdirp(path)
     end)
@@ -862,7 +878,7 @@ H.describe('fs', function()
     local sb = H.sandbox()
     local root = H.mkdir(sb.root, 'tree')
     H.mkfile(root, 'a.txt', { 'a' })
-    pcall(vim.uv.fs_symlink, root .. '/a.txt', root .. '/link')
+    pcall(H.symlink, root .. '/a.txt', root .. '/link')
     H.assert_true(vim.uv.fs_lstat(root .. '/link') ~= nil, 'symlink created')
     local dst = H.mkdir(sb.root, 'dst')
     H.mkfile(dst, 'keep.txt', { 'KEEP' })
@@ -941,7 +957,7 @@ H.describe('fs', function()
         vim.fn.writefile({ 'FOREIGN' }, dst .. '/foreign.txt')
         -- The refusal trigger, sorted last so the copy's own partials exist:
         -- 'a.txt' and 'sub/b.txt' are already copied when the walk reaches it.
-        vim.uv.fs_symlink(root .. '/a.txt', root .. '/zz-late')
+        H.symlink(root .. '/a.txt', root .. '/zz-late')
       end
       return ok, err
     end)
@@ -975,7 +991,7 @@ H.describe('fs', function()
     local root = H.mkdir(sb.root, 'tree')
     H.mkfile(root, 'a.txt', { 'a' })
     H.mkfile(root, 'sub/b.txt', { 'b' })
-    pcall(vim.uv.fs_symlink, root .. '/a.txt', root .. '/zz-link')
+    pcall(H.symlink, root .. '/a.txt', root .. '/zz-link')
     H.assert_true(vim.uv.fs_lstat(root .. '/zz-link') ~= nil, 'symlink created')
 
     local primitives = { 'mkdirp', 'mkdir_exclusive', 'copy_file',
@@ -1015,7 +1031,7 @@ H.describe('fs', function()
     local root = H.mkdir(sb.root, 'tree')
     H.mkfile(root, 'a.txt', { 'a' })
     local dst = sb.root .. '/dst'
-    H.assert_true(vim.uv.fs_symlink(sb.root .. '/nowhere', dst) == true,
+    H.assert_true(H.symlink(sb.root .. '/nowhere', dst) == true,
       'dangling symlink occupying the destination name')
     H.assert_true(fs.taken(dst) == true,
       'the shared helper counts a dangling symlink as taken')
@@ -1108,11 +1124,14 @@ H.describe('fs', function()
     H.assert_eq(fs.list_dir(sb.root), { 'a.txt', 'b.txt', 'c.txt', 'data', 'sub' },
       'list_dir sorted ascending')
 
-    H.assert_eq(fs.basename('/a/b/'), 'b', 'basename strips trailing slash')
-    H.assert_eq(fs.basename('/a/b'), 'b', 'basename without trailing slash')
-    H.assert_eq(fs.dirname('/a/b/c'), '/a/b', 'dirname')
-    H.assert_eq(fs.join('/a', 'b', 'c'), '/a/b/c', 'join')
-    H.assert_true(fs.abspath('x'):sub(1, 1) == '/', 'abspath is absolute')
+    local separator = package.config:sub(1, 1)
+    local a_b = vim.fs.joinpath('a', 'b')
+    local a_b_c = vim.fs.joinpath('a', 'b', 'c')
+    H.assert_eq(fs.basename(a_b .. separator), 'b', 'basename strips trailing separator')
+    H.assert_eq(fs.basename(a_b), 'b', 'basename without trailing separator')
+    H.assert_eq(fs.dirname(a_b_c), a_b, 'dirname')
+    H.assert_eq(fs.join('a', 'b', 'c'), a_b_c, 'join')
+    H.assert_true(H.is_absolute_path(fs.abspath('x')), 'abspath is absolute')
     H.assert_eq(fs.realpath(sb.root .. '/a.txt'), vim.uv.fs_realpath(sb.root .. '/a.txt'),
       'realpath resolves')
     H.assert_eq(fs.realpath(sb.root .. '/missing'), sb.root .. '/missing',

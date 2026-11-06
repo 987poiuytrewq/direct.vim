@@ -599,8 +599,8 @@ Run `:checkhealth direct` to print the resolved data home. Inside it:
     so external filesystem changes can still race Direct. Network filesystems
     and cross-host lock behavior are not guaranteed.
 
-    Filesystem destinations use atomic no-replace placement. Darwin and Linux
-    use their native exclusive-rename primitive; unsupported platforms or
+    Filesystem destinations use atomic no-replace placement. Darwin, Linux, and
+    Windows use native exclusive-move primitives; unsupported platforms or
     filesystems fail closed. Touch uses exclusive file creation, and mkdir
     refuses an existing destination. Cross-device moves copy files to an
     exclusive temporary file and directories to a private temporary tree in the

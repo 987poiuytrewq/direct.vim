@@ -5,6 +5,7 @@ local M = {}
 local log_mod = require('direct.log')
 local format = require('direct.history_format')
 local transaction_codec = require('direct.history_transaction')
+local platform = require('direct.platform')
 local recovery
 M.action = require('direct.action')
 M.paths = require('direct.paths')
@@ -15,6 +16,12 @@ local file_operations = require('direct.file_operations')
 
 local TRANSACTION_FORMAT = transaction_codec.FORMAT
 local TRANSACTION_VERSION = transaction_codec.VERSION
+
+local function identity_paths_equal(a, b)
+  if type(a) ~= 'string' or type(b) ~= 'string' then return false end
+  return platform.identity_path(M.paths.canonical(a))
+    == platform.identity_path(M.paths.canonical(b))
+end
 
 local function rename_files(action, files, paths)
   if action.name == 'mv' then
@@ -243,8 +250,8 @@ local function reverse_intent(state, which, reversal, inverse)
     undo = next_undo,
     redo = next_redo,
     action = inverse,
-    source = reversal.src,
-    destination = reversal.dst,
+    source = M.paths.record_path(reversal.src),
+    destination = M.paths.record_path(reversal.dst),
     source_identity = source_identity,
     destination_identity = destination_identity or vim.NIL,
   }
@@ -354,8 +361,8 @@ local function write_apply_intent(state, action, record)
     undo = next_undo,
     redo = next_redo,
     action = record,
-    source = source or vim.NIL,
-    destination = destination,
+    source = source and M.paths.record_path(source) or vim.NIL,
+    destination = M.paths.record_path(destination),
     source_identity = source_identity or vim.NIL,
     destination_identity = destination_identity or vim.NIL,
   }
@@ -506,6 +513,7 @@ recovery = require('direct.history_recovery').new({
   action = M.action,
   header = M.HEADER,
   ui = M.ui,
+  identity_paths_equal = identity_paths_equal,
   write_transaction = write_operation_transaction,
   clear_transaction = clear_transaction,
   commit_stacks = commit_stacks,

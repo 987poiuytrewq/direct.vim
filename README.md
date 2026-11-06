@@ -68,6 +68,12 @@ summary. The normal `make test` run does not need LuaRocks or LuaCov. CI runs
 downloadable artifact, and displays the coverage summary directly in the run
 summary.
 
+## Scripted demos
+
+Record the sectioned terminal tour with asciinema using `./demo/demo.sh`. Run it
+headlessly and verify the fixture changes using `./demo/demo.sh --check`. See
+[`demo/README.md`](demo/README.md) for the sections, key controls, and options.
+
 ## Install
 
 With Neovim's built-in `vim.pack`:
@@ -634,9 +640,9 @@ or crashes. Other tools do not participate in the lock, so external filesystem
 changes can still race Direct; network and cross-host lock behavior are not
 guaranteed.
 
-Filesystem destinations are placed with atomic no-replace operations. On Darwin
-and Linux, direct uses the platform's exclusive rename primitive; unsupported
-platforms or filesystems fail closed. `touch` uses exclusive file creation and
+Filesystem destinations are placed with atomic no-replace operations. On Darwin,
+Linux, and Windows, direct uses the platform's exclusive move primitive;
+unsupported platforms or filesystems fail closed. `touch` uses exclusive file creation and
 directory creation refuses an existing path. For cross-device moves, files are
 copied to an exclusive temporary file and directories to a private temporary
 tree in the destination parent before no-replace placement. Symlinks are

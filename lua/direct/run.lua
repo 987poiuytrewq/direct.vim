@@ -4,11 +4,14 @@ local M = {}
 
 local buffer = require('direct.buffer')
 local fs = require('direct.fs')
+local platform = require('direct.platform')
 local ui = require('direct.ui')
 
 local function report_result(result, quiet_success)
   if quiet_success and result.code == 0 then return end
-  local message = string.format('direct: command exited with status %d', result.code)
+  local message = result.code == 0
+    and 'direct: command completed successfully (exit status 0)'
+    or string.format('direct: command failed with exit status %d', result.code)
   local stdout = (result.stdout or ''):gsub('%s+$', '')
   local stderr = (result.stderr or ''):gsub('%s+$', '')
   if stdout ~= '' then message = message .. '\nstdout:\n' .. stdout end
@@ -48,30 +51,36 @@ function M.current_entry(command, on_complete, opts)
     return nil, err
   end
 
-  local escaped_path = vim.fn.shellescape(path)
+  local escaped_path = platform.shellescape_path(path, vim.o.shell)
   local expanded = command:gsub('%{%}', function() return escaped_path end)
-  local argv = { vim.o.shell }
-  for _, flag in ipairs(vim.split(vim.o.shellcmdflag, '%s+', { trimempty = true })) do
-    argv[#argv + 1] = flag
+  local argv, command_file, command_err = platform.command_argv(
+    vim.o.shell, vim.o.shellcmdflag, expanded)
+  if not argv then
+    local err = 'could not prepare shell command: ' .. tostring(command_err)
+    ui.notify('direct: ' .. err, vim.log.levels.ERROR)
+    return nil, err
   end
-  argv[#argv + 1] = expanded
 
   local ok, process = pcall(vim.system, argv, {
     cwd = listing.root,
     text = true,
   }, function(result)
     vim.schedule(function()
-      report_result(result, opts.quiet_success)
+      platform.cleanup_command(command_file)
+      local reported, report_err = pcall(report_result, result, opts.quiet_success)
+      if not reported then
+        ui.report_error('report the command result', report_err)
+      end
       if on_complete then
         local completed, err = pcall(on_complete, result, bufnr, listing.root)
         if not completed then
-          ui.notify('direct: command completion callback failed: ' .. tostring(err),
-            vim.log.levels.WARN)
+          ui.report_error('refresh after the command', err, vim.log.levels.WARN)
         end
       end
     end)
   end)
   if not ok then
+    platform.cleanup_command(command_file)
     local err = 'could not start shell command: ' .. tostring(process)
     ui.notify('direct: ' .. err, vim.log.levels.ERROR)
     return nil, err

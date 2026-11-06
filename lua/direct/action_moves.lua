@@ -119,7 +119,7 @@ return function(M)
         staged_identities[act.src] = identity
         stages[#stages + 1] = {
           src = act.src, dst = tmp,
-          identity = { path = vim.fs.normalize(act.src), inode = identity.inode },
+          identity = { path = M.paths.canonical(act.src), inode = identity.inode },
         }
       end
     end
@@ -139,7 +139,7 @@ return function(M)
       end
       steps[#steps + 1] = {
         src = src, dst = act.dst,
-        identity = { path = vim.fs.normalize(src), inode = identity.inode },
+        identity = { path = M.paths.canonical(src), inode = identity.inode },
       }
     end
     return steps, #stages

@@ -4,6 +4,7 @@
 
 local M = {}
 M.uv = vim.uv
+local platform = require('direct.platform')
 local temp_sequence = 0
 
 local function temp_candidate(parent, tag)
@@ -26,14 +27,19 @@ local function is_eexist(err, code)
       or err:find('exists', 1, true) ~= nil))
 end
 
-local function identity_key(stat)
+local function identity_key(stat, path)
+  local windows_identity = platform.file_identity(path, true)
+  if windows_identity then return windows_identity end
   if not stat or stat.dev == nil or stat.ino == nil then return nil end
   return tostring(stat.dev) .. ':' .. tostring(stat.ino)
 end
 
+-- libuv needs the Windows directory-symlink flag when recreating a link whose
+-- target is a directory. Resolve through the source link so relative targets
+-- are interpreted relative to the link's parent, not the process cwd.
 local function remove_file_if_same(path, identity)
   local now = M.uv.fs_lstat(path)
-  if identity ~= nil and identity_key(now) == identity then
+  if identity ~= nil and identity_key(now, path) == identity then
     return M.rm_file(path)
   end
   return nil, 'temporary path changed; preserved at ' .. tostring(path)
@@ -41,7 +47,7 @@ end
 
 local function remove_dir_if_same(path, identity)
   local now = M.uv.fs_lstat(path)
-  if identity ~= nil and identity_key(now) == identity then
+  if identity ~= nil and identity_key(now, path) == identity then
     local ok, err = M.uv.fs_rmdir(path)
     if ok then return true end
     return nil, err
@@ -187,8 +193,11 @@ end
 -- deliberately treated as unknown and use the normalized-name fallback.
 function M.path_identity(path, st)
   if type(path) ~= 'string' then return nil end
-  local identity = { path = require('direct.paths').canonical(path) }
-  if st and st.dev ~= nil and st.ino ~= nil and st.dev ~= 0 and st.ino ~= 0 then
+  local paths = require('direct.paths')
+  local identity = { path = platform.identity_path(path) }
+  identity.inode = platform.file_identity(path, st and st.type == 'link')
+  if not identity.inode and st and st.dev ~= nil and st.ino ~= nil
+    and st.dev ~= 0 and st.ino ~= 0 then
     identity.inode = tostring(st.dev) .. ':' .. tostring(st.ino)
   end
   return identity
@@ -198,6 +207,21 @@ function M.path_identities_match(a, b)
   if not a or not b then return false end
   if a.inode and b.inode then return a.inode == b.inode end
   return a.path == b.path
+end
+
+local function index_identity(index, identity)
+  index.by_path[identity.path] = true
+  if identity.inode then
+    index.by_inode[identity.inode] = true
+  else
+    index.unknown_by_path[identity.path] = true
+  end
+end
+
+local function index_contains_identity(index, identity)
+  if identity.inode and index.by_inode[identity.inode] then return true end
+  if identity.inode then return index.unknown_by_path[identity.path] == true end
+  return index.by_path[identity.path] == true
 end
 
 -- A lookup index for same_path-style membership checks. This keeps aliases
@@ -214,23 +238,14 @@ end
 function M.path_identity_index_add(index, path)
   local identity = M.path_identity(path, M.stat(path))
   if not identity then return false end
-  index.by_path[identity.path] = true
-  if identity.inode then
-    index.by_inode[identity.inode] = true
-  else
-    index.unknown_by_path[identity.path] = true
-  end
+  index_identity(index, identity)
   return true
 end
 
 function M.path_identity_index_contains(index, path)
   local identity = M.path_identity(path, M.stat(path))
   if not identity then return false end
-  if identity.inode then
-    return index.by_inode[identity.inode] == true
-      or index.unknown_by_path[identity.path] == true
-  end
-  return index.by_path[identity.path] == true
+  return index_contains_identity(index, identity)
 end
 
 local function index_identities(paths)
@@ -239,12 +254,7 @@ local function index_identities(paths)
   for _, path in ipairs(paths) do
     local identity = M.path_identity(path, M.stat(path))
     if identity then
-      index.by_path[identity.path] = true
-      if identity.inode then
-        index.by_inode[identity.inode] = true
-      else
-        index.unknown_by_path[identity.path] = true
-      end
+      index_identity(index, identity)
     end
   end
   return index
@@ -254,11 +264,7 @@ local function ignored(path, st, index)
   if not index then return false end
   local identity = M.path_identity(path, st)
   if not identity then return false end
-  if identity.inode then
-    return index.by_inode[identity.inode] == true
-      or index.unknown_by_path[identity.path] == true
-  end
-  return index.by_path[identity.path] == true
+  return index_contains_identity(index, identity)
 end
 
 -- read_dir_lines(root, ignore_set) -> the listing pipeline as a string array
@@ -333,18 +339,6 @@ function M.same_path(a, b)
   if type(a) ~= 'string' or type(b) ~= 'string' then
     return nil, 'invalid path'
   end
-  if package.config:sub(1, 1) == '\\' then
-    -- Some Windows stat providers report inode values that are not unique for
-    -- directory paths. Prefer canonical spelling and resolved path identity so
-    -- a parent listing can never be mistaken for one of its child directories.
-    local paths = require('direct.paths')
-    local normalized_a = paths.canonical(a):lower()
-    local normalized_b = paths.canonical(b):lower()
-    if normalized_a == normalized_b then return true end
-    local real_a, real_b = M.realpath(a), M.realpath(b)
-    return real_a ~= nil and real_b ~= nil
-      and paths.canonical(real_a):lower() == paths.canonical(real_b):lower()
-  end
   return M.path_identities_match(
     M.path_identity(a, M.stat(a)), M.path_identity(b, M.stat(b)))
 end
@@ -381,7 +375,7 @@ function M.same_entry(a, b)
   if parent_a == '' then parent_a = '/' end
   if parent_b == '' then parent_b = '/' end
   if parent_a ~= parent_b and not M.same_path(parent_a, parent_b) then return false end
-  local identity_a, stat_a = M.entry_identity(normalized_a)
+  local identity_a = M.entry_identity(normalized_a)
   local identity_b = M.entry_identity(normalized_b)
   if not (identity_a and identity_b and identity_a.inode
     and identity_a.inode == identity_b.inode) then
@@ -398,8 +392,10 @@ function M.same_entry(a, b)
     local name = vim.uv.fs_scandir_next(scan)
     if name == nil then break end
     if name == name_a or name == name_b then
-      local stat = lstat(vim.fs.joinpath(parent_a, name))
-      if stat and stat.dev == stat_a.dev and stat.ino == stat_a.ino then
+      local entry_path = vim.fs.joinpath(parent_a, name)
+      local stat = lstat(entry_path)
+      local same_identity = identity_key(stat, entry_path) == identity_a.inode
+      if same_identity then
         matching_entries = matching_entries + 1
       end
     end
@@ -475,8 +471,6 @@ end
 -- occupied destination, and checking M.taken(dst) first leaves a TOCTOU window.
 -- Use the native atomic exclusive-rename operation on each supported platform;
 -- if unavailable, fail closed rather than placing onto a user path.
-local windows_ffi_declared = false
-local windows_kernel32
 function M.rename_noreplace(src, dst, expected_source_identity)
   if type(src) ~= 'string' or src == '' or type(dst) ~= 'string' or dst == '' then
     return nil, 'invalid path'
@@ -486,93 +480,14 @@ function M.rename_noreplace(src, dst, expected_source_identity)
   end
   src = require('direct.paths').strip_trailing_separator(src)
   dst = require('direct.paths').strip_trailing_separator(dst)
-  if package.config:sub(1, 1) == '\\' then
-    src, dst = src:gsub('/', '\\'), dst:gsub('/', '\\')
-  end
   if expected_source_identity ~= nil then
-    local actual = identity_key(M.uv.fs_lstat(src))
+    local actual = identity_key(M.uv.fs_lstat(src), src)
     if expected_source_identity.inode == nil
       or actual ~= expected_source_identity.inode then
       return nil, 'source identity changed: ' .. src, 'ESTALE'
     end
   end
-  local ffi_ok, ffi = pcall(require, 'ffi')
-  if not ffi_ok then
-    return nil, 'atomic no-replace rename is unavailable (LuaJIT FFI unavailable)'
-  end
-  pcall(ffi.cdef, [[
-    int renamex_np(const char *from, const char *to, unsigned int flags);
-    int renameat2(int olddirfd, const char *oldpath, int newdirfd,
-      const char *newpath, unsigned int flags);
-    char *strerror(int errnum);
-  ]])
-
-  local sysname = M.uv.os_uname().sysname
-  local ok, result = pcall(function()
-    if sysname == 'Windows_NT' then
-      if not windows_ffi_declared then
-        local declared, declaration_err = pcall(ffi.cdef, [[
-          typedef unsigned short direct_WCHAR;
-          int __stdcall MultiByteToWideChar(unsigned int CodePage, unsigned long dwFlags,
-            const char *lpMultiByteStr, int cbMultiByte, direct_WCHAR *lpWideCharStr,
-            int cchWideChar);
-          int __stdcall MoveFileW(const direct_WCHAR *lpExistingFileName,
-            const direct_WCHAR *lpNewFileName);
-          unsigned long __stdcall GetLastError(void);
-        ]])
-        if not declared and not pcall(ffi.typeof, 'direct_WCHAR') then
-          error(declaration_err)
-        end
-        windows_ffi_declared = true
-      end
-      windows_kernel32 = windows_kernel32 or ffi.load('kernel32')
-      local function wide(value)
-        local count = windows_kernel32.MultiByteToWideChar(65001, 0, value, -1, nil, 0)
-        if count == 0 then error('could not convert UTF-8 path to UTF-16') end
-        local output = ffi.new('direct_WCHAR[?]', count)
-        if windows_kernel32.MultiByteToWideChar(65001, 0, value, -1, output, count) == 0 then
-          error('could not convert UTF-8 path to UTF-16')
-        end
-        return output
-      end
-      local moved = windows_kernel32.MoveFileW(wide(src), wide(dst))
-      if moved ~= 0 then return 0 end
-      return -tonumber(windows_kernel32.GetLastError())
-    elseif sysname == 'Darwin' then
-      -- macOS RENAME_EXCL (renamex_np): atomically refuse an existing target.
-      return ffi.C.renamex_np(src, dst, 0x00000004)
-    elseif sysname == 'Linux' then
-      -- Linux RENAME_NOREPLACE (renameat2), with both paths relative to cwd.
-      return ffi.C.renameat2(-100, src, -100, dst, 0x00000001)
-    end
-    error('atomic no-replace rename is unavailable on ' .. tostring(sysname))
-  end)
-  if not ok then
-    return nil, tostring(result)
-  end
-  if result == 0 then
-    return true
-  end
-  if sysname == 'Windows_NT' then
-    local code = -result
-    if code == 80 or code == 183 then
-      return nil, 'destination exists: ' .. dst, 'EEXIST'
-    elseif code == 17 then
-      return nil, 'EXDEV: cross-device move', 'EXDEV'
-    end
-    return nil, 'Windows error ' .. tostring(code), code
-  end
-  local code = ffi.errno()
-  local err_ok, err = pcall(function()
-    return ffi.string(ffi.C.strerror(code))
-  end)
-  local message = err_ok and err or ('errno ' .. tostring(code))
-  if code == 17 then
-    return nil, 'destination exists: ' .. dst, 'EEXIST'
-  elseif code == 18 then
-    return nil, 'EXDEV: ' .. tostring(message), 'EXDEV'
-  end
-  return nil, tostring(message), code
+  return platform.rename_noreplace(src, dst, M.uv.os_uname().sysname)
 end
 
 -- copy_file(src, dst) -> true | nil, err, code (vim.uv.fs_copyfile preserves
@@ -717,7 +632,7 @@ local function copy_dir(from, to, ctx)
   end
   if not existed then
     ctx.created[#ctx.created + 1] = {
-      path = to, dir = true, identity = identity_key(M.uv.fs_lstat(to)),
+      path = to, dir = true, identity = identity_key(M.uv.fs_lstat(to), to),
     }
   end
   local names = M.list_dir(from)
@@ -743,12 +658,13 @@ local function copy_dir(from, to, ctx)
       if not target then
         return nil, 'cannot read symlink: ' .. tostring(read_err)
       end
-      local linked, link_err, link_code = M.uv.fs_symlink(target, child_to)
+      local linked, link_err, link_code = platform.create_symlink(target, child_to, child_from)
       if not linked then
         return nil, tostring(link_err or link_code or 'cannot recreate symlink')
       end
       ctx.created[#ctx.created + 1] = {
-        path = child_to, dir = false, identity = identity_key(M.uv.fs_lstat(child_to)),
+        path = child_to, dir = false,
+        identity = identity_key(M.uv.fs_lstat(child_to), child_to),
       }
     else
       -- A plain file. Recorded BEFORE the copy, so a half-written file is
@@ -778,12 +694,12 @@ local function copy_dir(from, to, ctx)
           -- A failed exclusive copy may leave its partial file behind. Capture
           -- its inode so cleanup cannot unlink a replacement at this pathname.
           local entry = ctx.created[#ctx.created]
-          entry.identity = identity_key(M.uv.fs_lstat(child_to))
+          entry.identity = identity_key(M.uv.fs_lstat(child_to), child_to)
         end
         return nil, cerr
       end
       if not child_taken then
-        ctx.created[#ctx.created].identity = identity_key(M.uv.fs_lstat(child_to))
+        ctx.created[#ctx.created].identity = identity_key(M.uv.fs_lstat(child_to), child_to)
       end
     end
   end
@@ -877,7 +793,7 @@ local function allocate_private_dir(dst, tag)
     local candidate = temp_candidate(parent, tag)
     local ok, err, code = M.mkdir_exclusive(candidate, 448) -- private mode 0700
     if ok then
-      return candidate, identity_key(M.uv.fs_lstat(candidate))
+      return candidate, identity_key(M.uv.fs_lstat(candidate), candidate)
     end
     if not is_eexist(err, code) then return nil, err, code end
   end
@@ -1086,7 +1002,7 @@ local function remove_source_after_copy(src, dst, kind, original_identity)
     return true
   end
 
-  local captured_identity = identity_key(M.uv.fs_lstat(quarantine))
+  local captured_identity = identity_key(M.uv.fs_lstat(quarantine), quarantine)
   if original_identity == nil or captured_identity ~= original_identity then
     return restore_quarantined_source(quarantine_dir, dir_identity, quarantine,
       src, dst, 'source identity changed before removal')
@@ -1122,7 +1038,7 @@ local function move_exdev_file(src, dst, source_identity)
     copied, copy_err, copy_code = M.copy_file_exclusive(src, temp)
     if copied then break end
     if not is_eexist(copy_err, copy_code) then
-      local partial_identity = identity_key(M.uv.fs_lstat(temp))
+      local partial_identity = identity_key(M.uv.fs_lstat(temp), temp)
       if partial_identity ~= nil then
         local cleanup_ok, cleanup_err = remove_file_if_same(temp, partial_identity)
         if not cleanup_ok then
@@ -1178,7 +1094,7 @@ local function move_exdev_link(src, dst, source_identity)
     if not temp_dir then return nil, temp_dir_identity or link_err, link_code end
     temp = M.join(temp_dir, 'payload')
     local linked
-    linked, link_err, link_code = M.uv.fs_symlink(target, temp)
+    linked, link_err, link_code = platform.create_symlink(target, temp, src)
     if linked then break end
     cleanup_private_dir(temp_dir, temp_dir_identity)
     if not is_eexist(link_err, link_code) then return nil, link_err, link_code end
@@ -1221,7 +1137,7 @@ function M.move_exdev(src, dst)
   dst = require('direct.paths').strip_trailing_separator(dst)
   local source = M.uv.fs_lstat(src)
   if not source then return nil, 'cannot stat source: ' .. tostring(src) end
-  local source_identity = identity_key(source)
+  local source_identity = identity_key(source, src)
   if source.type == 'file' then
     return move_exdev_file(src, dst, source_identity)
   elseif source.type == 'link' then

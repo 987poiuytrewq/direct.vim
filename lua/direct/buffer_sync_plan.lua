@@ -1,6 +1,7 @@
 -- Pure classification and validation for converting edited listing rows to actions.
 return function(deps)
   local paths = require('direct.paths')
+  local platform = require('direct.platform')
   local action_mod = deps.action_mod
   local entry_path = deps.entry_path
   local is_dir_line = deps.is_dir_line
@@ -82,31 +83,13 @@ return function(deps)
     if line:match('^%s') then return 'root names may not begin with whitespace' end
     local component = line
     if is_dir_line(component) then component = component:sub(1, -2) end
-    local current_path_style = package.config:sub(1, 1) == '\\' and 'win32' or 'posix'
-    local selected_separator = (path_style == nil or path_style == current_path_style)
+    local selected_separator = (path_style == nil or path_style == platform.path_style)
       and component:find(directory_separator(), 1, true) ~= nil
     if component == '' or component == '.' or component == '..'
       or component:find('/', 1, true) or selected_separator then
       return 'invalid path component'
     end
-    local windows = path_style == 'win32'
-      or (path_style == nil and package.config:sub(1, 1) == '\\')
-    if windows then
-      if component:find('\\', 1, true) or component:match('^%a:') then
-        return 'invalid Windows path component'
-      end
-      if component:match('[%. ]$') then
-        return 'Windows path components may not end in a dot or space'
-      end
-      local device = component:match('^([^%.]+)') or component
-      device = device:gsub('[%. ]+$', '')
-      device = device:upper()
-      if device == 'CON' or device == 'PRN' or device == 'AUX' or device == 'NUL'
-        or device:match('^COM[1-9]$') or device:match('^LPT[1-9]$') then
-        return 'reserved Windows device name'
-      end
-    end
-    return nil
+    return platform.component_path_reason(component, path_style)
   end
 
   -- A nested entry is still one root-buffer row, but its separator-delimited

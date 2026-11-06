@@ -54,7 +54,9 @@ H.describe('platform path compatibility', function()
       'nested' .. marker,
       'nested' .. marker .. 'child.txt',
     })
-    H.assert_true(listing:sync() == true, 'configured directory rows sync successfully')
+    local synced, sync_err = listing:sync()
+    H.assert_true(synced == true,
+      'configured directory rows sync successfully: ' .. tostring(sync_err))
     H.assert_true(fs.is_dir(vim.fs.joinpath(root, 'created')))
     H.assert_true(fs.is_file(vim.fs.joinpath(root, 'nested', 'child.txt')))
     H.assert_not_nil(buffer._component_reason('bad' .. marker .. 'name'),
