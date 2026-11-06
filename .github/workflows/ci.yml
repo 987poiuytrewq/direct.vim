@@ -54,3 +54,29 @@ jobs:
             coverage/index.html
             coverage/summary.out
           if-no-files-found: warn
+
+  demo:
+    # Plays the README demo tour without recording it, so a change that breaks
+    # the tour fails here instead of the next time the demo is recorded.
+    name: Check the demo tour
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Neovim
+        uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1.6.1
+        with:
+          neovim: true
+          version: v0.12.0
+
+      - name: Install Expect
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends --yes expect
+
+      - name: Check the demo tour
+        run: make demo-check

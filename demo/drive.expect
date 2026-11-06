@@ -1,23 +1,27 @@
 #!/usr/bin/expect -f
+# Plays the demo tour: types its keys into a terminal and waits for the
+# screen to change. With an asciinema executable it records the tour; with an
+# empty one (demo.sh --check) it plays the same tour in a plain terminal.
 
 set timeout 20
 log_user 0
 
-if {$argc != 4} {
-  puts stderr "usage: drive.expect ASCIINEMA CAST NVIM_COMMAND FORCE"
+if {$argc != 6} {
+  puts stderr "usage: drive.expect ASCIINEMA CAST NVIM_COMMAND FORCE NVIM SOCKET"
   exit 2
 }
 
-set asciinema [lindex $argv 0]
-set cast_file [lindex $argv 1]
-set nvim_command [lindex $argv 2]
-set force [lindex $argv 3]
+lassign $argv asciinema cast_file nvim_command force nvim socket
+
+# The terminal fits the tallest listing (the gs view, 15 rows) and the caption
+# card below it with a little room, and the widest caption and messages.
+set cols 74
+set rows 27
 
 set env(TERM) xterm-256color
 set env(NVIM_TEST) 1
 
 proc wait_for {pattern} {
-  global timeout
   expect {
     -re $pattern {}
     timeout {
@@ -39,7 +43,7 @@ proc key {keys {delay 350}} {
 proc type_text {text} {
   foreach character [split $text ""] {
     send -- $character
-    after 160
+    after 90
   }
 }
 
@@ -53,111 +57,181 @@ proc write_listing {} {
   key ":" 150
   key "w" 150
   key "\r" 450
-  after 900
+  after 450
 }
 
-set record_args [list $asciinema rec --capture-input --window-size 100x30 \
-  --title "Direct: browse and edit files" -c $nvim_command --return]
-if {$force eq "1"} {
-  lappend record_args --overwrite
+# Show a caption without typing anything: it is set over Neovim's socket, so
+# it doesn't appear in the recording's keystroke overlay. The caption shows a
+# title and, under it, the keys the scene uses (separated by two spaces). An
+# empty title hides it.
+proc caption {title {keys ""} {show_all 0}} {
+  global nvim socket
+  set all [expr {$show_all ? "v:true" : "v:false"}]
+  set args "[vim_string $title], [vim_string $keys], $all"
+  # Some builds print the reply ("true") on stderr, which exec would treat as
+  # a failure; 2>@1 captures it, so only a non-zero exit status fails.
+  if {[catch {exec $nvim --server $socket --remote-expr "v:lua.DemoCaption($args)" 2>@1} err]} {
+    puts stderr "demo: could not show caption: $err"
+    exit 1
+  }
 }
-lappend record_args $cast_file
-eval spawn -noecho $record_args
 
-# Section menu.
-wait_for {01-file-edits/}
-after 1800
-key "\r"
-wait_for {rename-me\.txt}
+proc vim_string {text} {
+  return "'[string map {' ''} $text]'"
+}
 
-# Hidden entries are visible by default; expand the hidden folder in place.
-find_row {\.demo-settings/}
-key "zo"
-wait_for {\.editor-settings}
-after 1000
-key "zc"
+if {$asciinema eq ""} {
+  # No recording: run Neovim in a terminal the size of the recording's.
+  spawn -noecho sh -c "stty rows $rows cols $cols; exec $nvim_command"
+} else {
+  set record_args [list $asciinema rec --capture-input --window-size ${cols}x${rows} \
+    --title "direct.vim: edit your filesystem like a buffer" -c $nvim_command --return]
+  if {$force eq "1"} {
+    lappend record_args --overwrite
+  }
+  lappend record_args $cast_file
+  spawn -noecho {*}$record_args
+}
+
+# Searches type just enough of a name to match one line of the listing as it
+# is at that point (with 'ignorecase', so "l" would also match LICENSE).
+
+# 1. Rename: edit a name and save.
+wait_for {scratch\.txt}
+after 300
+caption "Rename a file by editing its name" "/sc  cw  Esc  :w"
+after 400
+find_row "sc"
+key "cw" 250
+type_text "notes"
+key "\033" 600
+write_listing
+wait_for {notes\.txt}
 after 600
 
-# 1. Rename and save, then undo/redo the filesystem action with u/C-r.
-key "G"
-key "c$" 250
-type_text "renamed-file.txt"
-key "\033" 450
-write_listing
-key "u"
-after 1100
-key "\022"
-after 1100
-
-key "G"
+# 2. Create: add a line; missing parent folders are created too. The cursor
+# is still on notes.txt, the last row, so o adds the new line at the end.
+caption "Add a line to create a file, folders included" "o  Esc  :w"
+after 400
 key "o"
-type_text "created-folder/"
-key "\033" 450
+type_text "docs/guide/getting-started.md"
+key "\033" 600
 write_listing
+wait_for {getting-started\.md}
+after 800
 
-key "G"
-key "o"
-type_text "created-file.txt"
-key "\033" 450
+# 3. Delete: remove the line. Then undo and redo it, on disk.
+caption "Delete a line to delete the file" "/not  dd  :w"
+after 400
+find_row "not"
+key "dd" 500
 write_listing
-
-find_row "delete-me.txt"
-key "dd" 400
-write_listing
+after 400
+caption "Undo and redo work on the filesystem" "u  Ctrl-r"
+after 400
 key "u"
-after 1100
+wait_for {notes\.txt}
+after 600
 key "\022"
-after 1100
-key "-"
-wait_for {02-browse-and-move/}
+after 700
+key "zM" 800
 
-# 2. Expand a folder and move its child to the parent with the << keys.
-key "gg"
-key "j"
+# 4. Open a file and a folder, going back up with - each time. ("/re" would
+# also match .gitignore, so search for "rea".)
+caption "Open files and folders, and go back with -" "/rea  Enter  -  /docs  Enter  -"
+after 400
+find_row "rea"
 key "\r"
-wait_for {move-from/}
-key "gg"
-key "zo"
-wait_for {move-me\.txt}
-key "j"
-key "j"
-key "<<" 400
-write_listing
-key "gg"
-key "zc"
-after 900
-key "zo"
+wait_for {small, fast Neovim plugin}
 after 900
 key "-"
-wait_for {03-copy-and-paste/}
-
-# 3. Copy a directory tree into another folder with yy and p.
-key "gg"
-key "j"
-key "j"
+wait_for {LICENSE}
+after 400
+find_row "docs"
 key "\r"
-wait_for {copy-from/}
-key "gg"
-key "yy"
-key "j"
-key "p" 600
-wait_for {copy-from/}
-key "j"
-key "zo"
-key "j"
-key "zo"
-wait_for {nested-example\.txt}
-key "u"
-after 1100
-key "\022"
-after 1100
+wait_for {guide/}
+after 900
 key "-"
-wait_for {03-copy-and-paste/}
+wait_for {LICENSE}
+after 600
+
+# 5. Browse into the tree and rename a file inside it. zO opens lua/ and
+# everything under it.
+caption "Expand folders in place, and edit inside them" "/lua  zO  /ut  cw  Esc  :w"
+after 400
+find_row "lua"
+key "zO"
+wait_for {utils\.lua}
+after 300
+find_row "ut"
+key "cw" 250
+type_text "strings"
+key "\033" 600
+write_listing
+wait_for {strings\.lua}
+after 600
+
+# Collapse lua/ again, so the listing stays short enough for the terminal.
+key "zM" 800
+
+# 6. Rename several files with :s. 'inccommand' previews the result live.
+caption "Rename many at once, with any Vim command" "/te  zo  :%s/_test/_spec/  :w"
+after 400
+find_row "te"
+key "zo"
+wait_for {config_test\.lua}
+after 300
+key ":" 150
+type_text "%s/_test/_spec/"
+after 300
+key "\r" 600
+write_listing
+wait_for {config_spec\.lua}
+after 700
+key "zM" 800
+
+# 7. Copy a folder. Pasting next to the original asks for a new name; the
+# prompt starts with the old name, so clear it with Ctrl-u first.
+caption "Copy whole folders" "/ex  zo  j  yy  k  p  Ctrl-u"
+after 400
+find_row "ex"
+key "zo"
+wait_for {minimal/}
+key "j"
+key "yy" 900
+key "k"
+key "p"
+wait_for {already exists}
+after 400
+key "\025" 300
+type_text "advanced"
+after 300
+key "\r"
+wait_for {advanced/}
+after 800
+
+# 8. Git: show only what changed, then stage a file.
+key "zM" 800
+caption "See what changed, and stage it" "gs  /re  ga"
+after 400
+key "gs"
+wait_for {getting-started\.md}
+after 800
+find_row "re"
+key "ga"
+after 800
+
+# 9. Back to the full listing.
+key "gs"
+wait_for {LICENSE}
+caption "direct.vim: edit your filesystem like a buffer" ":help direct.vim" 1
+after 2000
+caption ""
 key "ZQ" 500
 
 expect eof
 set result [wait]
 if {[lindex $result 3] != 0} {
-  puts stderr "demo: asciinema recording command failed: $result"
+  puts stderr "demo: the tour ended with an error: $result"
   exit 1
 }
