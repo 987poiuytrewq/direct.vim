@@ -6,7 +6,7 @@ direct.vim lists a directory in a Neovim buffer, one line per entry. Rename,
 create, delete and move files with ordinary Vim editing, then `:write` to apply
 the changes. Every filesystem change can be undone and redone.
 
-![direct.vim demo: renaming, creating and deleting files by editing a listing, undoing on disk, opening files and folders, renaming with :s, copying a folder, and staging with Git](demo/tour.gif)
+<img src="demo/tour.gif" width="365" alt="direct.vim demo: renaming, creating and deleting files by editing a listing, undoing on disk, opening files and folders, renaming with :s, copying a folder, and staging with Git">
 
 - **Edit with Vim.** Use `cw`, `dd`, `o`, `:s`, macros or anything else, then `:w`.
 - **Browse as a tree.** Expand directories in place with the usual fold keys
