@@ -86,7 +86,8 @@ Run `:checkhealth direct` to confirm the version and the data home in use:
       respect_gitignore = true, -- set false to show Git-ignored entries
       indent_size = 2, -- spaces per tree level; must be an integer greater than 1
       show_folder_icons = true, -- show Font Awesome folder icons
-      show_file_icons = true, -- show a generic Font Awesome file icon
+      show_file_icons = true, -- show file icons (type-specific when available)
+      show_filetype_icons = true, -- use nvim-web-devicons icons for recognized filetypes
       icons = {
         file = '\u{f15b}',
         folder = '\u{f07b}',
@@ -146,15 +147,22 @@ during sync.
 
 File and folder icons ~
 
-`show_folder_icons` and `show_file_icons` both default to `true`. The default
-Font Awesome Nerd Font glyphs are U+F15B (`file`), U+F07B (`folder`), and U+F07C
-(`folder_open`). Deleted tracked rows use the regular-outline U+F016
+`show_folder_icons`, `show_file_icons`, and `show_filetype_icons` default to
+`true`. When available, `nvim-web-devicons` supplies recognized filetype
+glyphs and highlights, using the same filetype lookup supported by
+bufferline.nvim. Set `show_filetype_icons = false` to use the generic file glyph
+instead. The provider is optional; missing providers and unrecognized filetypes
+fall back to `icons.file`. Directories retain the default Font Awesome Nerd
+Font glyphs U+F07B (`folder`) and U+F07C (`folder_open`), and deleted tracked
+files retain their special icon. The generic file glyph is U+F15B (`file`).
+Deleted tracked rows use the regular-outline U+F016
 (`deleted_file`), U+F114 (`deleted_folder`), and U+F115
-(`deleted_folder_open`) variants. These glyphs are used regardless of filetype.
+(`deleted_folder_open`) variants.
 When only one kind of icon is enabled,
 the other kind reserves a blank icon slot so entry names stay aligned. Icons are
 virtual text, so buffer lines and filesystem behavior are unchanged. No icon
-plugin or other dependency is required.
+plugin is required for the generic and folder icons; `nvim-web-devicons` is
+optional and only needed for filetype-specific icons.
 Customize any of these glyphs with the corresponding key in the `icons` table.
 Git status colors icons and filenames to match the first (leftmost) status
 symbol: the index status when present, otherwise the worktree status.

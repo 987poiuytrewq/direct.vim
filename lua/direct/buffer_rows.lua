@@ -89,6 +89,22 @@ local function is_dir_line(line)
   return paths.is_directory_name(line)
 end
 
+-- Use the same filetype-to-icon lookup supported by bufferline.nvim. The
+-- provider stays optional; callers fall back to the configured generic file
+-- glyph when it is unavailable or has no icon for this filetype.
+local function filetype_icon(name, devicons)
+  if not devicons or type(devicons.get_icon_by_filetype) ~= 'function' then
+    return nil
+  end
+  local filename = paths.strip_directory_marker(name)
+  local ok, filetype = pcall(vim.filetype.match, { filename = filename })
+  if not ok or type(filetype) ~= 'string' or filetype == '' then return nil end
+  local icon_ok, glyph, group = pcall(devicons.get_icon_by_filetype,
+    filetype, { default = false })
+  if not icon_ok or type(glyph) ~= 'string' or glyph == '' then return nil end
+  return glyph, group
+end
+
 -- Refresh display-only icons. When either kind is enabled, every row gets an
 -- icon slot: rows whose icon is disabled receive a two-cell spacer so names
 -- remain aligned. Buffer text and row identities are never changed here.
@@ -96,6 +112,11 @@ local function refresh_icons(bufnr, state, row_ids)
   local options = require('direct.config').options
   local show_folders = options.show_folder_icons == true
   local show_files = options.show_file_icons == true
+  local devicons
+  if show_files and options.show_filetype_icons == true then
+    local ok, provider = pcall(require, 'nvim-web-devicons')
+    if ok then devicons = provider end
+  end
   if options.git.enabled and state.git_status == nil then
     state.git_status = git.read(state.root) or false
   end
@@ -138,6 +159,18 @@ local function refresh_icons(bufnr, state, row_ids)
       elseif enabled then
         base_glyph = options.icons.file
         base_group = hidden and 'DirectHiddenFileIcon' or 'DirectFileIcon'
+        -- Keep the dedicated deleted-file glyph for Git tombstones. Regular
+        -- files use their filetype icon when the optional provider recognizes
+        -- their Neovim filetype.
+        if rec.deleted_kind ~= 'file' and options.show_filetype_icons == true then
+          local glyph, group = filetype_icon(rec.name, devicons)
+          if glyph then
+            base_glyph = glyph
+            if not hidden and type(group) == 'string' and group ~= '' then
+              base_group = group
+            end
+          end
+        end
       end
       if enabled then
         glyph, group = base_glyph, base_group

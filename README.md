@@ -145,7 +145,8 @@ require('direct').setup({
   respect_gitignore = true, -- set false to show Git-ignored entries
   indent_size = 2, -- spaces per tree level; must be an integer greater than 1
   show_folder_icons = true, -- show Font Awesome folder icons
-  show_file_icons = true, -- show a generic Font Awesome file icon
+  show_file_icons = true, -- show file icons (type-specific when available)
+  show_filetype_icons = true, -- use nvim-web-devicons icons for recognized filetypes
   icons = {
     file = '\u{f15b}',
     folder = '\u{f07b}',
@@ -191,7 +192,8 @@ Configuration defaults:
 | `respect_gitignore` | `true` | Apply Git ignore rules to listings; tracked files remain visible. `gi` toggles the current view. |
 | `indent_size` | `2` | Number of spaces per tree level; must be an integer greater than 1. |
 | `show_folder_icons` | `true` | Show folder icons. |
-| `show_file_icons` | `true` | Show generic file icons. |
+| `show_file_icons` | `true` | Show file icons (type-specific when available, otherwise generic). |
+| `show_filetype_icons` | `true` | Use filetype-specific icons when nvim-web-devicons is available. |
 | `icons.file` | U+F15B | Font Awesome file glyph. |
 | `icons.folder` | U+F07B | Font Awesome folder glyph. |
 | `icons.folder_open` | U+F07C | Font Awesome open-folder glyph. |
@@ -210,13 +212,20 @@ Run `:checkhealth direct` to check the Neovim version and data directory.
 ### File and folder icons
 
 Set `show_folder_icons = false` to hide inline directory glyphs, and
-`show_file_icons = false` to hide generic file icons; both default to `true`.
+`show_file_icons = false` to hide file icons; both default to `true`.
+With `show_filetype_icons = true` (the default), recognized files use the
+filetype glyph and highlight provided by `nvim-web-devicons`, as in
+bufferline.nvim. Set it to `false` to use the configured generic file glyph
+instead. `nvim-web-devicons` is optional: without it, or when it has no icon for
+a filetype, Direct falls back to `icons.file`. Directories keep their regular
+closed/open folder icons, and deleted tracked files keep their deleted-file
+glyph.
 A Font Awesome Nerd Font is required to render them. Collapsed directories use
 `nf-fa-folder` (U+F07B), expanded directories use `nf-fa-folder-open` (U+F07C),
-and files use `nf-fa-file` (U+F15B), regardless of filetype. When only one kind
-of icon is enabled, the other kind reserves a blank icon slot so entry names
-stay aligned. Icons are virtual text, so the listing lines and filesystem
-behavior are unchanged. No icon plugin or other dependency is required.
+and unrecognized files use `nf-fa-file` (U+F15B). When only one kind of icon is
+enabled, the other kind reserves a blank icon slot so entry names stay aligned.
+Icons are virtual text, so the listing lines and filesystem behavior are
+unchanged. No icon plugin or other dependency is required.
 Deleted tracked rows use the regular-outline `nf-fa-file-o` and
 `nf-fa-folder-o` glyphs; expanded deleted folders use `nf-fa-folder-open-o`.
 Set `icons.file`, `icons.folder`, `icons.folder_open`, and the `deleted_*`
