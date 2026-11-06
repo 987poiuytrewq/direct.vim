@@ -5,8 +5,12 @@ SUDO ?= sudo
 LUACOV_VERSION ?= 0.17.0
 LUACOV_REPORTERS_VERSION ?= 0.1.0
 NEOVIM_VERSION ?= local
+AGG ?= agg
+DEMO_FONT ?= JetBrainsMono Nerd Font
+DEMO_CAST ?= demo/casts/tour.cast
+DEMO_GIF ?= demo/tour.gif
 
-.PHONY: ci-deps install test coverage coverage-summary check-nvim check-luarocks
+.PHONY: ci-deps install test coverage coverage-summary demo demo-record demo-gif demo-check check-nvim check-luarocks
 
 ci-deps:
 	$(SUDO) $(APT_GET) update
@@ -44,6 +48,22 @@ coverage-summary:
 	@cat coverage/summary.out >> coverage/summary.md
 	@printf '```\n' >> coverage/summary.md
 	@if test -n "$$GITHUB_STEP_SUMMARY"; then cat coverage/summary.md >> "$$GITHUB_STEP_SUMMARY"; else cat coverage/summary.md; fi
+
+# The README demo: record the tour with asciinema, then convert it to a GIF
+# with agg. DEMO_FONT must be a Nerd Font, so the icons render.
+demo: demo-record demo-gif
+
+demo-record: check-nvim
+	NVIM=$(NVIM) CAST_DIR=$(abspath $(dir $(DEMO_CAST))) ./demo/demo.sh --force
+
+demo-gif:
+	@test -s $(DEMO_CAST) || { echo 'Run make demo-record before make demo-gif' >&2; exit 1; }
+	@command -v $(AGG) >/dev/null 2>&1 || { echo 'agg is required to convert the recording (set AGG=/path/to/agg if needed)' >&2; exit 1; }
+	$(AGG) --font-family '$(DEMO_FONT)' $(DEMO_CAST) $(DEMO_GIF)
+
+# Play the tour headlessly and check its result, without recording.
+demo-check: check-nvim
+	NVIM=$(NVIM) ./demo/demo.sh --check
 
 check-nvim:
 	@command -v $(NVIM) >/dev/null 2>&1 || { echo 'Neovim >= 0.12 is required (set NVIM=/path/to/nvim if needed)' >&2; exit 1; }

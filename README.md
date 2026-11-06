@@ -280,10 +280,11 @@ latest stable release on every pull request.
 
 ### Demo recording
 
-`./demo/demo.sh` records a scripted tour of direct.vim with
-[asciinema](https://asciinema.org/), using a throwaway Git repository and data
-directory. `./demo/demo.sh --check` runs the same tour headlessly and checks
-the result. See [`demo/README.md`](demo/README.md) for details.
+`make demo` records a scripted tour of direct.vim with
+[asciinema](https://asciinema.org/) and converts it to `demo/tour.gif` with
+[agg](https://github.com/asciinema/agg). The tour uses a throwaway Git
+repository and data directory. `make demo-check` runs the same tour headlessly
+and checks the result. See [`demo/README.md`](demo/README.md) for details.
 
 ## License
 
