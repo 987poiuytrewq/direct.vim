@@ -52,7 +52,7 @@ proc write_listing {} {
   key ":" 150
   key "w" 150
   key "\r" 450
-  after 900
+  after 450
 }
 
 # Show a caption without typing anything: it is set over Neovim's socket, so
@@ -92,82 +92,82 @@ if {$asciinema eq ""} {
 
 # 1. Rename: edit a name and save.
 wait_for {scratch\.txt}
-after 800
+after 400
 caption "Rename a file by editing its name" "/sc  cw  :w"
-after 1200
+after 600
 find_row "sc"
 key "cw" 250
 type_text "notes"
 key "\033" 600
 write_listing
 wait_for {notes\.txt}
-after 1600
+after 800
 
 # 2. Create: add a line; missing parent folders are created too.
 caption "Add a line to create a file, folders included" "o  :w"
-after 1200
+after 600
 key "G"
 key "o"
 type_text "docs/guide/getting-started.md"
 key "\033" 600
 write_listing
 wait_for {getting-started\.md}
-after 2000
+after 1000
 
 # 3. Delete: remove the line. Then undo and redo it, on disk.
 caption "Delete a line to delete the file" "/not  dd  :w"
-after 1200
+after 600
 find_row "not"
 key "dd" 500
 write_listing
-after 1300
+after 600
 caption "Undo and redo work on the filesystem" "u  Ctrl-r"
-after 1200
+after 600
 key "u"
 wait_for {notes\.txt}
-after 1500
+after 800
 key "\022"
-after 1800
+after 900
 key "zM" 800
 
 # 4. Browse into the tree and rename a file inside it.
 caption "Expand folders in place, and edit inside them" "zo  cw  :w"
-after 1200
+after 600
 find_row "lua"
 key "zo"
 wait_for {my-plugin/}
 key "j"
 key "zo"
 wait_for {utils\.lua}
-after 900
+after 400
 find_row "ut"
 key "cw" 250
 type_text "strings"
 key "\033" 600
 write_listing
 wait_for {strings\.lua}
-after 1600
+after 800
 
 # 5. Rename several files with :s. 'inccommand' previews the result live.
 caption "Rename many at once, with any Vim command" ":%s/_test/_spec/  :w"
-after 1200
+after 600
 find_row "te"
 key "zo"
 wait_for {config_test\.lua}
-after 900
+after 400
 key ":" 150
 type_text "%s/_test/_spec/"
-after 900
+after 400
 key "\r" 600
 write_listing
 wait_for {config_spec\.lua}
-after 1800
+after 900
 key "zM" 800
 
 # 6. Copy a folder. Pasting next to the original asks for a new name; the
 # prompt starts with the old name, so clear it with Ctrl-u first.
 caption "Copy whole folders" "yy  p"
-after 1200
+after 600
 find_row "ex"
 key "zo"
 wait_for {minimal/}
@@ -176,30 +176,30 @@ key "yy" 900
 key "k"
 key "p"
 wait_for {already exists}
-after 1100
+after 600
 key "\025" 300
 type_text "advanced"
 after 400
 key "\r"
 wait_for {advanced/}
-after 2000
+after 1000
 
 # 7. Git: show only what changed, then stage a file.
 key "zM" 800
 caption "See what changed, and stage it" "gs  ga"
-after 1200
+after 600
 key "gs"
 wait_for {getting-started\.md}
-after 2200
+after 1100
 find_row "re"
 key "ga"
-after 2200
+after 1100
 
 # 8. Back to the full listing.
 key "gs"
 wait_for {LICENSE}
 caption "direct.vim: edit your filesystem like a buffer" ":help direct.vim"
-after 3500
+after 2500
 caption ""
 key "ZQ" 500
 
