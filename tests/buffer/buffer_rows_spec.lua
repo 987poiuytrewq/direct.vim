@@ -1,6 +1,6 @@
 -- buffer_rows_spec.lua -- row identity, rendering, and stale-state safety.
 local H = require('tests.support.harness')
-local buffer = require('direct.buffer')
+local buffer = require('direct.buffer.buffer')
 local fs = require('direct.fs')
 local paths = require('direct.paths')
 

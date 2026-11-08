@@ -5,8 +5,8 @@ local M = {}
 
 M.fs = require('direct.fs')
 M.paths = require('direct.paths')
-M.action = require('direct.action')
-M.history = require('direct.history')
+M.action = require('direct.action.action')
+M.history = require('direct.history.history')
 M.log = require('direct.log')
 M.ui = require('direct.ui')
 M.pending = require('direct.pending')

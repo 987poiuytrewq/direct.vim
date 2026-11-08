@@ -636,17 +636,19 @@ end
 
 -- run_all() executes every registered describe()/it() with per-spec and
 -- per-test isolation and returns a report:
---   { text, suites, specs, passed, failed }
+--   { text, failures, suites, specs, passed, failed }
 -- _begin_file / _end_file are wrapped so a cleanup failure is reported instead
 -- of aborting the whole test file.
 function M.run_all()
   local lines = {}
+  local failures = {}
   local total_passed, total_skipped, total_failed, total_specs = 0, 0, 0, 0
 
   local begin_ok, begin_err = xpcall(M._begin_file, debug.traceback)
   if not begin_ok then
     total_failed = total_failed + 1
-    lines[#lines + 1] = string.format('  FAIL <setup> :: _begin_file\n%s', begin_err)
+    lines[#lines + 1] = '  FAIL <setup> :: _begin_file'
+    failures[#failures + 1] = { name = '<setup> :: _begin_file', trace = tostring(begin_err) }
   else
     for _, suite in ipairs(M._suites) do
       local passed, skipped, failed = 0, 0, 0
@@ -674,7 +676,11 @@ function M.run_all()
             suite.name, test.name, err.reason)
         else
           failed = failed + 1
-          lines[#lines + 1] = string.format('  FAIL %s :: %s\n%s', suite.name, test.name, err)
+          lines[#lines + 1] = string.format('  FAIL %s :: %s', suite.name, test.name)
+          failures[#failures + 1] = {
+            name = string.format('%s :: %s', suite.name, test.name),
+            trace = tostring(err),
+          }
         end
         if M._verbose and #M._assert_log > 0 then
           lines[#lines + 1] = table.concat(M._assert_log, '\n')
@@ -691,11 +697,13 @@ function M.run_all()
   local end_ok, end_err = xpcall(M._end_file, debug.traceback)
   if not end_ok then
     total_failed = total_failed + 1
-    lines[#lines + 1] = string.format('  FAIL <teardown> :: _end_file\n%s', end_err)
+    lines[#lines + 1] = '  FAIL <teardown> :: _end_file'
+    failures[#failures + 1] = { name = '<teardown> :: _end_file', trace = tostring(end_err) }
   end
 
   return {
     text = table.concat(lines, '\n') .. '\n',
+    failures = failures,
     suites = #M._suites,
     specs = total_specs,
     passed = total_passed,

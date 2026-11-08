@@ -3,10 +3,10 @@ local M = {}
 
 function M.new()
   local H = require('tests.support.harness')
-  local buffer = require('direct.buffer')
+  local buffer = require('direct.buffer.buffer')
   local fs = require('direct.fs')
   local paths = require('direct.paths')
-  local history = require('direct.history')
+  local history = require('direct.history.history')
   local register = require('direct.register')
   local fixtures = require('tests.support.history_fixtures')
 
@@ -20,10 +20,10 @@ function M.new()
 
   -- The command facade should share the test's captured buffer state module.
   local function route_write_to_test_buffer()
-    package.loaded['direct.buffer'] = buffer
+    package.loaded['direct.buffer.buffer'] = buffer
     package.loaded['direct'] = nil
     require('direct')
-    assert(require('direct.buffer') == buffer,
+    assert(require('direct.buffer.buffer') == buffer,
       'DirectSync facade must share the test buffer state registry')
   end
 

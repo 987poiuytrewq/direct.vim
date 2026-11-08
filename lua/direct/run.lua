@@ -2,7 +2,7 @@
 
 local M = {}
 
-local buffer = require('direct.buffer')
+local buffer = require('direct.buffer.buffer')
 local fs = require('direct.fs')
 local platform = require('direct.platform')
 local ui = require('direct.ui')

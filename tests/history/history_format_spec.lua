@@ -1,7 +1,7 @@
 -- Only current history is supported. Everything else is reset silently; action
 -- records from unsupported bytes are never replayed.
 local H = require('tests.support.harness')
-local format = require('direct.history_format')
+local format = require('direct.history.format')
 local fixtures = require('tests.support.history_fixtures')
 
 local function bytes(lines)

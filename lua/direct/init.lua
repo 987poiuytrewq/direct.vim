@@ -4,9 +4,9 @@
 
 local M = {}
 
-local buffer = require('direct.buffer')
+local buffer = require('direct.buffer.buffer')
 local register = require('direct.register')
-local history = require('direct.history')
+local history = require('direct.history.history')
 local config = require('direct.config')
 local ui = require('direct.ui')
 local constants = require('direct.constants')

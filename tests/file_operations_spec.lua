@@ -1,6 +1,6 @@
 local H = require('tests.support.harness')
 local operations = require('direct.file_operations')
-local buffer = require('direct.buffer')
+local buffer = require('direct.buffer.buffer')
 local pending = require('direct.pending')
 
 -- How long to wait for asynchronous work (an LSP round trip, a deferred sync)
@@ -126,8 +126,8 @@ H.describe('LSP file operations', function()
     opted.notify = function(_, method, params) got = { method, params } end
     with_clients({ opted }, function()
       operations.emit_actions({
-        require('direct.action').Touch(root .. '/file.txt'),
-        require('direct.action').MakeDirectory(root .. '/directory'),
+        require('direct.action.action').Touch(root .. '/file.txt'),
+        require('direct.action.action').MakeDirectory(root .. '/directory'),
       }, { [1] = true, [2] = true })
     end)
     H.assert_eq(got[1], 'workspace/didCreateFiles')
@@ -288,7 +288,7 @@ H.describe('LSP file operations', function()
     local note_buf = vim.api.nvim_get_current_buf()
     local requested, notifications = {}, {}
     local unsupported_calls = 0
-    package.loaded['direct.buffer'] = buffer
+    package.loaded['direct.buffer.buffer'] = buffer
     package.loaded['direct'] = nil
     require('direct')
     local opted = client(12, { willRename = true, didRename = true }, sb.root,
@@ -548,7 +548,7 @@ H.describe('LSP file operations', function()
       edits[#edits + 1] = edit
       return apply(edit, 'utf-16')
     end
-    local history, action, fs = require('direct.history'), require('direct.action'), require('direct.fs')
+    local history, action, fs = require('direct.history.history'), require('direct.action.action'), require('direct.fs')
     with_clients({ opted }, function()
       H.assert_true(fs.rename(source, destination))
       H.assert_true(history.log(action.Move(source, destination)))
@@ -602,7 +602,7 @@ H.describe('LSP file operations', function()
     vim.notify = function(message)
       warnings[#warnings + 1] = tostring(message)
     end
-    local history, action, fs = require('direct.history'), require('direct.action'), require('direct.fs')
+    local history, action, fs = require('direct.history.history'), require('direct.action.action'), require('direct.fs')
     local file_operations = require('direct.file_operations')
     local original_timeout = file_operations._timeout_ms
     with_clients({ opted }, function()
@@ -653,7 +653,7 @@ H.describe('LSP file operations', function()
         return true, 1
       end)
     opted.notify = function() notifications = notifications + 1 end
-    local history, action, fs = require('direct.history'), require('direct.action'), require('direct.fs')
+    local history, action, fs = require('direct.history.history'), require('direct.action.action'), require('direct.fs')
     with_clients({ opted }, function()
       H.mkfile(root, 'before.txt', 'direct contents')
       H.assert_true(fs.rename(source, destination))
@@ -1040,7 +1040,7 @@ H.describe('LSP file operations', function()
     opted.notify = function(_, method, params)
       calls[#calls + 1] = { method, params }
     end
-    local action = require('direct.action')
+    local action = require('direct.action.action')
     local register_root = H.mkdir(sb.root, 'register-content')
     H.mkfile(register_root, 'copied.txt', 'copied')
     local target_root = H.mkdir(root, 'target')
@@ -1091,8 +1091,8 @@ H.describe('LSP file operations', function()
       calls[#calls + 1] = { method, params }
     end
     local fs = require('direct.fs')
-    local action = require('direct.action')
-    local history = require('direct.history')
+    local action = require('direct.action.action')
+    local history = require('direct.history.history')
     with_clients({ opted }, function()
       H.assert_true(history.log(action.Touch(path)))
       local done

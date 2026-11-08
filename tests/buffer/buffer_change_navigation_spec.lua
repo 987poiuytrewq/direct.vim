@@ -1,7 +1,7 @@
 -- buffer_change_navigation_spec.lua -- navigation among changed listing rows.
 
 local H = require('tests.support.harness')
-local buffer = require('direct.buffer')
+local buffer = require('direct.buffer.buffer')
 
 local function git(root, ...)
   local args = { 'git', '-C', root }

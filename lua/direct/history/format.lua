@@ -5,7 +5,7 @@ local M = {}
 M.HEADER = '{"format":"direct-history","version":1}'
 
 local paths = require('direct.paths')
-local action = require('direct.action')
+local action = require('direct.action.action')
 
 local function split_lines(bytes)
   local lines, first = {}, 1

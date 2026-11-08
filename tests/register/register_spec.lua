@@ -6,9 +6,9 @@ local H = require('tests.support.harness')
 local reg = require('direct.register')
 local paths = require('direct.paths')
 local fs = require('direct.fs')
-local history = require('direct.history')
+local history = require('direct.history.history')
 -- The attempt cap lets this test fail instead of hanging if the prompt loops.
-local action = require('direct.action')
+local action = require('direct.action.action')
 local fixtures = require('tests.support.history_fixtures')
 
 H.describe('register', function()
@@ -749,7 +749,7 @@ H.describe('register', function()
 
     local ws = H.mkdir(sb.root, 'ws')
     require('direct').list(ws)
-    local buffer = require('direct.buffer')
+    local buffer = require('direct.buffer.buffer')
     local called = 0
     local restore = H.stub(buffer, 'restore', function()
       called = called + 1

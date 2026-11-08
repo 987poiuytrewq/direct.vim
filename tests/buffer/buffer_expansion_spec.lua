@@ -1,6 +1,6 @@
 -- buffer_expansion_spec.lua -- expansion, collapse, and undo behavior.
 local H = require('tests.support.harness')
-local buffer = require('direct.buffer')
+local buffer = require('direct.buffer.buffer')
 local fs = require('direct.fs')
 local paths = require('direct.paths')
 
@@ -457,7 +457,7 @@ H.describe('buffer: expansion and collapse lifecycle', function()
     local sub = H.mkdir(ws, 'sub')
     H.mkfile(sub, 'inside.txt', { 'inside' })
     local listing = buffer.list(ws)
-    local history = require('direct.history')
+    local history = require('direct.history.history')
     local register = require('direct.register')
     local history_calls, yank_calls = 0, 0
     local original_log, original_yank = history.log, register.yank

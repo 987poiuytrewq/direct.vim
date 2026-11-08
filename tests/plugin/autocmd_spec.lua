@@ -1,7 +1,7 @@
 -- tests/autocmd_spec.lua -- ownership and re-source behavior for autocmds.
 
 local H = require('tests.support.harness')
-local buffer = require('direct.buffer')
+local buffer = require('direct.buffer.buffer')
 
 local function count_autocmds(event, bufnr)
   return #vim.api.nvim_get_autocmds({ event = event, buffer = bufnr })
@@ -26,7 +26,7 @@ H.describe('autocmd ownership', function()
     pcall(vim.cmd, '%bwipeout!')
     -- The harness re-sources modules at file boundaries; use the same buffer
     -- module instance that the DirectSync command will resolve below.
-    buffer = require('direct.buffer')
+    buffer = require('direct.buffer.buffer')
     local sb = H.sandbox()
     local first_dir = H.mkdir(sb.root, 'first')
     local second_dir = H.mkdir(sb.root, 'second')

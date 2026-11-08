@@ -2,7 +2,7 @@
 -- Covers reversals, pathname identity, trash handling, and paste behavior.
 
 local H = require('tests.support.harness')
-local M = require('direct.action')
+local M = require('direct.action.action')
 local paths = require('direct.paths')
 
 H.describe('action', function()
