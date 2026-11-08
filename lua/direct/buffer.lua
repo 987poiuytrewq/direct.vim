@@ -577,6 +577,9 @@ local function set_options(bufnr)
   vim.bo[bufnr].buftype = 'acwrite'
   vim.bo[bufnr].buflisted = true
   vim.bo[bufnr].swapfile = false
+  -- Keep a dirty listing available while navigating to another directory even
+  -- when the user's global 'hidden' option is off.
+  vim.bo[bufnr].bufhidden = 'hide'
   vim.bo[bufnr].filetype = constants.FILETYPE
   ensure_direct_syntax(bufnr)
   -- BufWriteCmd <buffer>: modified listings sync, while a clean `:write`
@@ -695,6 +698,22 @@ function M.Buffer(path)
   return self
 end
 
+local function modified_listing_reason()
+  return 'cannot refresh a listing with unsaved edits; sync or discard them first'
+end
+
+local function modified_listing_at(root)
+  for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_valid(bufnr) then
+      local name = vim.api.nvim_buf_get_name(bufnr)
+      if name ~= '' and vim.bo[bufnr].filetype == constants.FILETYPE
+        and vim.bo[bufnr].modified and fs.same_path(name, root) then
+        return bufnr
+      end
+    end
+  end
+end
+
 -- Attach to the current buffer's directory without listing; the caller decides when to refresh.
 function M.restore()
   local name = vim.api.nvim_buf_get_name(vim.api.nvim_get_current_buf())
@@ -702,9 +721,17 @@ function M.restore()
 end
 
 -- List a directory in an attached direct buffer.
-function M.list(path)
-  local buffer = M.Buffer(path)
-  buffer:list()
+function M.list(path, options)
+  options = options or {}
+  local root = paths.root(path)
+  if not options.discard and modified_listing_at(root) then
+    local reason = modified_listing_reason()
+    ui.notify('direct: ' .. reason, vim.log.levels.ERROR)
+    return nil, reason
+  end
+  local buffer = M.Buffer(root)
+  local listed, err = buffer:list(options)
+  if not listed then return nil, err end
   return buffer
 end
 
@@ -746,8 +773,16 @@ end
 -- uses) drops every unrepresentable line BEFORE the set, notifies per dropped
 -- entry, and lists the survivors. A ' ' (space) name is NOT dropped: a space is
 -- representable and must still list.
-function Buffer:list()
+function Buffer:list(options)
+  options = options or {}
   local bufnr = vim.api.nvim_get_current_buf()
+  if vim.bo[bufnr].filetype == constants.FILETYPE
+    and vim.bo[bufnr].modified
+    and not options.discard and not options.allow_modified then
+    local reason = modified_listing_reason()
+    ui.notify('direct: ' .. reason, vim.log.levels.ERROR)
+    return nil, reason
+  end
   local old_state = states[bufnr]
   local view_git_status_only = old_state
     and old_state.view_git_status_only == true or false
@@ -2106,7 +2141,7 @@ local function sync_locked(self, options)
       table.sort(reopen, function(a, b) return a.depth < b.depth end)
     end
   end
-  self:list()
+  self:list({ allow_modified = true })
   -- Re-materialize only the edited scopes, now from the filesystem's committed
   -- state. Other expanded branches retain their original identities and view.
   for _, target in ipairs(reopen) do
@@ -2207,8 +2242,15 @@ function Buffer:open(line)
   if not path then return nil, 'row identity is unavailable' end
   local direct_buf = vim.api.nvim_get_current_buf()
   if is_dir_line(record and record.name or line) then
-    M.list(path)
+    local listed, list_err = M.list(path)
+    if not listed then return nil, list_err end
   else
+    if vim.bo[direct_buf].filetype == constants.FILETYPE
+      and vim.bo[direct_buf].modified then
+      local reason = 'cannot open a file with unsaved edits; sync or discard them first'
+      ui.notify('direct: ' .. reason, vim.log.levels.ERROR)
+      return nil, reason
+    end
     vim.cmd('edit ' .. vim.fn.fnameescape(path))
     if vim.api.nvim_buf_is_valid(direct_buf)
       and vim.api.nvim_get_current_buf() ~= direct_buf then
@@ -2322,7 +2364,7 @@ end
 function Buffer:refresh_after_paste(destination, pasted_entry)
   local bufnr = vim.api.nvim_get_current_buf()
   local state = states[bufnr]
-  if not state then return self:list() end
+  if not state then return self:list({ allow_modified = true }) end
 
   local expanded_paths, destination_id = {}, nil
   for id in pairs(state.expanded or {}) do
@@ -2346,7 +2388,7 @@ function Buffer:refresh_after_paste(destination, pasted_entry)
     remove_expanded_subtree(bufnr, state, destination_id)
   end
 
-  local ok, err = self:list()
+  local ok, err = self:list({ allow_modified = true })
   if not ok then return nil, err end
 
   local function visible_row(path)

@@ -152,6 +152,92 @@ H.describe('buffer: listing and path identity', function()
       'row paths match the reloaded directory contents')
   end)
 
+  H.it('refuses to re-list a modified directory buffer without changing it', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkfile(ws, 'old.txt', '')
+    local listing = require('direct').list(ws)
+    local buf = vim.api.nvim_get_current_buf()
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'unsaved rename.txt' })
+    vim.bo[buf].modified = true
+    H.mkfile(ws, 'new.txt', '')
+    H.capture_messages()
+
+    local result = require('direct').list(ws)
+
+    H.assert_nil(result, 're-listing a modified buffer is refused')
+    H.assert_eq(vim.api.nvim_get_current_buf(), buf, 'the current buffer is unchanged')
+    H.assert_buf_eq({ 'unsaved rename.txt' }, buf, 'unsaved text is preserved')
+    H.assert_true(vim.bo[buf].modified, 'the buffer stays modified')
+    H.assert_notified('unsaved edits', vim.log.levels.ERROR)
+  end)
+
+  H.it('refuses Buffer:list on a modified listing', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkfile(ws, 'old.txt', '')
+    local listing = buffer.list(ws)
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'unsaved rename.txt' })
+    vim.bo.modified = true
+    H.capture_messages()
+
+    local result = listing:list()
+
+    H.assert_nil(result, 'direct refresh is refused')
+    H.assert_buf_eq({ 'unsaved rename.txt' }, 0, 'unsaved text is preserved')
+    H.assert_true(vim.bo.modified, 'the buffer stays modified')
+    H.assert_notified('unsaved edits', vim.log.levels.ERROR)
+  end)
+
+  H.it('refuses to open a file from a modified listing', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkfile(ws, 'file.txt', { 'on disk' })
+    local listing = buffer.list(ws)
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'edited row', 'file.txt' })
+    vim.bo.modified = true
+    local buf = vim.api.nvim_get_current_buf()
+    H.capture_messages()
+
+    local result = listing:open('file.txt')
+
+    H.assert_nil(result, 'opening a file from a modified listing is refused')
+    H.assert_eq(vim.api.nvim_get_current_buf(), buf, 'the listing remains current')
+    H.assert_buf_eq({ 'edited row', 'file.txt' }, buf, 'unsaved text is preserved')
+    H.assert_true(vim.bo[buf].modified, 'the buffer stays modified')
+    H.assert_eq(vim.fn.readfile(ws .. '/file.txt'), { 'on disk' },
+      'the file is not opened or changed')
+    H.assert_notified('unsaved edits', vim.log.levels.ERROR)
+  end)
+
+  H.it('does not switch back to a modified listing when navigating up', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local sub = H.mkdir(ws, 'sub')
+    H.mkfile(sub, 'child.txt', '')
+    local listing = buffer.list(ws)
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'unsaved root edit' })
+    vim.bo.modified = true
+    local root_buf = vim.api.nvim_get_current_buf()
+    H.assert_true(listing:open('sub/'), 'a directory can be opened safely')
+    local child_buf = vim.api.nvim_get_current_buf()
+    H.assert_true(child_buf ~= root_buf, 'the child listing is current')
+    H.capture_messages()
+
+    local result = require('direct').list(ws)
+
+    H.assert_nil(result, 'returning to the modified listing is refused')
+    H.assert_eq(vim.api.nvim_get_current_buf(), child_buf,
+      'the current child listing is unchanged')
+    H.assert_buf_eq({ 'unsaved root edit' }, root_buf, 'the parent edit is preserved')
+    H.assert_true(vim.bo[root_buf].modified, 'the parent stays modified')
+    H.assert_notified('unsaved edits', vim.log.levels.ERROR)
+  end)
+
   H.it('reuses identity when a filesystem entry is replaced at the same path', function()
     clean_buffers()
     local sb = H.sandbox()

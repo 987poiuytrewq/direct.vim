@@ -63,16 +63,16 @@ vim.api.nvim_create_autocmd('VimEnter', {
 })
 
 vim.api.nvim_create_user_command('DirectList', function(args)
-  require('direct').list(args.args)
-end, { nargs = 1, complete = 'dir', desc = 'direct: list a directory' })
+  require('direct').list(args.args, { discard = args.bang })
+end, { nargs = 1, bang = true, complete = 'dir', desc = 'direct: list a directory' })
 
-vim.api.nvim_create_user_command('DirectListBuffer', function()
-  require('direct').list_buffer()
-end, { nargs = 0, desc = "direct: list the current buffer's directory" })
+vim.api.nvim_create_user_command('DirectListBuffer', function(args)
+  require('direct').list_buffer({ discard = args.bang })
+end, { nargs = 0, bang = true, desc = "direct: list the current buffer's directory" })
 
-vim.api.nvim_create_user_command('DirectListCwd', function()
-  require('direct').list_cwd()
-end, { nargs = 0, desc = 'direct: list the current working directory' })
+vim.api.nvim_create_user_command('DirectListCwd', function(args)
+  require('direct').list_cwd({ discard = args.bang })
+end, { nargs = 0, bang = true, desc = 'direct: list the current working directory' })
 
 vim.api.nvim_create_user_command('DirectSync', function()
   require('direct').sync()

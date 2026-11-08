@@ -367,7 +367,8 @@ H.describe('hidden and Git-ignore filtering', function()
     H.assert_false(H.exists(root, 'new-file'), 'no filesystem action ran')
     H.assert_notified('ignore rules changed', vim.log.levels.ERROR)
 
-    H.assert_true(listing:list(), 're-list refreshes the filter snapshot')
+    H.assert_true(listing:list({ discard = true }),
+      'explicit discard re-lists and refreshes the filter snapshot')
     vim.api.nvim_buf_set_lines(0, -1, -1, false, { 'new-file' })
     H.assert_true(listing:sync(), 'sync succeeds against the refreshed snapshot')
     H.assert_true(H.exists(root, 'new-file'), 'the new visible addition is created')
@@ -434,7 +435,8 @@ H.describe('hidden and Git-ignore filtering', function()
     H.assert_true(H.exists(root, 'secret/important.txt'),
       'the newly ignored path is not used as a deletion source')
 
-    H.assert_true(listing:list(), 're-list captures the new repository context')
+    H.assert_true(listing:list({ discard = true }),
+      'explicit discard re-lists and captures the new repository context')
     H.assert_buf_eq({ 'visible' }, 0, 'the Git-ignored directory is now filtered')
     vim.api.nvim_buf_set_lines(0, 0, -1, false, { '' })
     vim.bo.modified = true
@@ -502,7 +504,8 @@ H.describe('hidden and Git-ignore filtering', function()
     H.assert_true(vim.bo.modified, 'the buffer edit remains pending')
     H.assert_notified('ignore rules changed', vim.log.levels.ERROR)
 
-    H.assert_true(listing:list(), 're-list accepts the updated index snapshot')
+    H.assert_true(listing:list({ discard = true }),
+      'explicit discard re-lists and accepts the updated index snapshot')
     H.assert_true(contains(H.buf_lines(), 'new.log'), 'tracked ignored file is now visible')
   end)
 
@@ -575,7 +578,8 @@ H.describe('hidden and Git-ignore filtering', function()
     H.assert_notified('ignore rules changed', vim.log.levels.ERROR)
     H.assert_false(H.exists(root, 'new-file'), 'the failed sync performs no additions')
 
-    H.assert_true(listing:list(), 're-list accepts the changed global exclude')
+    H.assert_true(listing:list({ discard = true }),
+      'explicit discard re-lists and accepts the changed global exclude')
     vim.api.nvim_buf_set_lines(0, -1, -1, false, { 'new-file-2' })
     H.mkfile(root, '.git/info/exclude', 'other.tmp\n')
     H.capture_messages()
@@ -616,7 +620,8 @@ H.describe('hidden and Git-ignore filtering', function()
       H.assert_true(vim.bo.modified, 'the buffer edit remains pending')
       H.assert_notified('ignore rules changed', vim.log.levels.ERROR)
 
-      H.assert_true(listing:list(), 're-list accepts the changed default excludes')
+      H.assert_true(listing:list({ discard = true }),
+        'explicit discard re-lists and accepts the changed default excludes')
       H.assert_true(contains(H.buf_lines(), 'hidden.tmp'),
         'the formerly ignored file is visible after re-list')
       vim.api.nvim_buf_set_lines(0, -1, -1, false, { 'added-after-relist' })
@@ -649,7 +654,8 @@ H.describe('hidden and Git-ignore filtering', function()
       H.assert_eq(H.fs_snapshot(root), before, 'the formerly visible file is not deleted')
       H.assert_notified('ignore rules changed', vim.log.levels.ERROR)
 
-      H.assert_true(listing:list(), 're-list captures the newly-created file')
+      H.assert_true(listing:list({ discard = true }),
+        'explicit discard re-lists and captures the newly-created file')
       H.assert_false(contains(H.buf_lines(), 'newly-ignored.tmp'),
         'the new default rule now hides the file')
     end)
@@ -709,7 +715,8 @@ H.describe('hidden and Git-ignore filtering', function()
     H.assert_true(vim.bo.modified, 'the alias listing edit remains pending')
     H.assert_notified('ignore rules changed', vim.log.levels.ERROR)
 
-    H.assert_true(listing:list(), 're-list through the alias refreshes safely')
+    H.assert_true(listing:list({ discard = true }),
+      'explicit discard re-lists through the alias safely')
     H.assert_true(contains(H.buf_lines(), 'hidden.tmp'),
       'the formerly ignored entry is visible through the alias')
   end)
