@@ -167,7 +167,7 @@ require('direct').setup({
   max_recursive_expand_depth = false, -- limit for zO/zR; false = unlimited
   show_folder_icons = true,
   show_file_icons = true,
-  show_filetype_icons = true,        -- filetype icons, via nvim-web-devicons
+  show_filetype_icons = true,        -- bufferline-style filename icons via nvim-web-devicons
   icons = {
     file = '\u{f15b}',
     folder = '\u{f07b}',
@@ -196,6 +196,11 @@ require('direct').setup({
 You can call `setup()` more than once. Each call replaces the previous options,
 and unknown or invalid options are reported as errors instead of being silently
 ignored.
+
+With `show_filetype_icons` enabled, file icons use bufferline.nvim's built-in
+basename-based nvim-web-devicons lookup. The dependency is optional; Direct uses
+`icons.file` when it is unavailable. Set the option to `false` to use the
+generic glyph for every file.
 
 ### Highlights
 

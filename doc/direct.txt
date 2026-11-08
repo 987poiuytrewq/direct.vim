@@ -593,17 +593,18 @@ show_file_icons         boolean (default: `true`)
 
                                                   *direct-show_filetype_icons*
 show_filetype_icons     boolean (default: `true`)
-    Give files the icon and colour for their filetype, from nvim-web-devicons
-    (the same lookup bufferline.nvim uses). Without nvim-web-devicons, or for
-    a filetype it doesn't know, files use `icons.file`. Set to `false` to use
-    `icons.file` for every file. Folders and deleted tracked files keep their
-    own icons. Has no effect when |direct-show_file_icons| is off.
+    Use bufferline.nvim's built-in nvim-web-devicons lookup for files: match the
+    basename (including exact filename overrides), then the extension, with the
+    provider's default icon as a fallback. Without nvim-web-devicons, files use
+    `icons.file`. Set to `false` to use `icons.file` for every file. Folders and
+    deleted tracked files keep their own icons. Has no effect when
+    |direct-show_file_icons| is off.
 
                                                                 *direct-icons*
 icons                   table
     The glyphs used for icons. Any key you leave out keeps its default.
-    `file` is used for every file unless |direct-show_filetype_icons| finds
-    an icon for its type.
+    `file` is used when filetype icons are disabled or nvim-web-devicons is not
+    available.
 
     Key                     Default ~
     `file`                    U+F15B  (file)
