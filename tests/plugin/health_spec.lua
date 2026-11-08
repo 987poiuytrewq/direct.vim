@@ -20,5 +20,7 @@ H.describe('health: :checkhealth direct', function()
     H.assert_true(text:find('OK', 1, true) ~= nil, 'the version check is OK on this runtime')
     H.assert_true(text:find('data directory: ' .. paths.data_home(), 1, true) ~= nil,
       'the report names the resolved data directory')
+    H.assert_true(text:find('trash size: 0 bytes', 1, true) ~= nil,
+      'the report includes the trash size')
   end)
 end)

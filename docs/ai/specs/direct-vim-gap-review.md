@@ -1,6 +1,6 @@
 # Spec: direct.vim gap review follow-ups
 
-**Status:** S1, S2 and S3 are complete; the remaining tasks are proposed and have
+**Status:** S1, S2, S3 and S4 are complete; the remaining tasks are proposed and have
 not been checked item by item. This replaces `direct-vim-remaining-improvements.md`.
 Its main pieces (JSONL history, no-overwrite moves, exclusive `touch`, the
 safeguard on undoing a paste) appear in the current code, but that was not
@@ -29,7 +29,7 @@ the problem, or to record that it can't be reproduced.
 | S1 | P1 | Complete | Stop opening, navigating or refreshing from throwing away unsaved listing edits |
 | S2 | P1 | Complete | Make `u` / `<C-r>` safe when the listing has unsaved edits, and make clear what they undo |
 | S3 | P1 | Complete | Keep a damaged or unrecognised history file instead of wiping it |
-| S4 | P2 | Proposed | Add a way to see, restore from and empty the trash, and keep it from growing forever |
+| S4 | P2 | Complete | Add a way to see, restore from and empty the trash, and keep it from growing forever |
 | S5 | P2 | Proposed | Ask before `gc` discards Git changes, and review the `gc` / `gr` key clashes |
 | S6 | P4 | Proposed | Put the lock file inside the `direct/` data directory |
 | R1 | P2 | Proposed | Stop `git status` from freezing the editor |
@@ -157,6 +157,15 @@ byte for byte and block the operation. An old-format file is backed up and
 then reset, with a warning. The reset command creates a backup.
 
 ### S4 — No way to manage the trash (P2)
+
+**Status: COMPLETE.** Trash entries now have sidecars with original paths and
+deletion times. `:DirectTrash` lists entries; its `restore` and `empty`
+subcommands never overwrite destinations, and history-referenced entries are
+protected unless `!` is used. Optional age/size retention is off by default,
+and `:checkhealth direct` reports trash size. Cross-filesystem directory
+deletions warn that they will copy the tree to trash. Regression tests cover
+metadata, undo/redo reservations, restore, protection, force, retention, and
+health output. `make test` passes.
 
 **Problem.** Deleted entries go to `<data>/trash/<sha256>`
 (`lua/direct/action.lua`, `first_free_trash`) and are never removed. There's

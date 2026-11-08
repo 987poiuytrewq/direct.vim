@@ -200,15 +200,16 @@ H.describe('action', function()
       'file restored with content')
     H.assert_true(M.RestoreDirectory(rmdir.dst, rmdir.src)['do']() ~= nil,
       'restore directory succeeds')
-    -- Restore moves the content out and leaves an EMPTY MARKER at the
-    -- trash slot, so the trash dir holds two marker entries alongside the
-    -- restored workspace (an empty file and an empty directory).
+    -- Restore moves the content out and leaves an empty marker plus metadata
+    -- sidecar at each trash slot, so redo can safely reuse its reserved name.
     H.assert_fs_eq(sb.root, {
       'data/',
       'data/direct/',
       'data/direct/trash/',
       'data/direct/trash/' .. paths.digest(sb.root .. '/f.txt'),
+      'data/direct/trash/' .. paths.digest(sb.root .. '/f.txt') .. '.direct-trash.json',
       'data/direct/trash/' .. paths.digest(sb.root .. '/dir1') .. '/',
+      'data/direct/trash/' .. paths.digest(sb.root .. '/dir1') .. '.direct-trash.json',
       'dir1/',
       'dir1/sub.txt',
       'f.txt',
@@ -240,16 +241,22 @@ H.describe('action', function()
     H.assert_eq(vim.fs.basename(t2), vim.fs.basename(t1) .. '-1',
       'the second entry is the first free -<n> sibling')
 
-    -- No nesting: the trash dir holds exactly two sibling entries, and the
-    -- second is a file like the first (not a directory inside the first).
+    -- No nesting: two sibling entries each have a metadata sidecar; the
+    -- second payload is a file, not a directory inside the first.
     local trash_dir = vim.fs.dirname(t1)
     local names = {}
     for name in vim.fs.dir(trash_dir) do
       names[#names + 1] = name
     end
     table.sort(names)
-    H.assert_eq(names, { vim.fs.basename(t1), vim.fs.basename(t2) },
-      'trash holds exactly the two sibling entries')
+    local expected_names = {
+      vim.fs.basename(t1), vim.fs.basename(t2),
+      vim.fs.basename(M.trash_metadata_path(t1)),
+      vim.fs.basename(M.trash_metadata_path(t2)),
+    }
+    table.sort(expected_names)
+    H.assert_eq(names, expected_names,
+      'trash holds two sibling entries and their sidecars')
     H.assert_eq(vim.fn.isdirectory(t2), 0, 'no nested directory was created')
   end)
 

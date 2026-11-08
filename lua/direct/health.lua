@@ -18,6 +18,13 @@ function M.check()
 
   local home = require('direct.paths').data_home()
   vim.health.ok('data directory: ' .. home)
+
+  local trash_size, trash_err = require('direct.trash').size_bytes()
+  if trash_size then
+    vim.health.ok(string.format('trash size: %d bytes', trash_size))
+  else
+    vim.health.warn('trash size unavailable: ' .. tostring(trash_err))
+  end
 end
 
 return M
