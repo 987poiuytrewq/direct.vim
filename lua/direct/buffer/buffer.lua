@@ -2208,9 +2208,17 @@ local function sync_locked(self, options)
 end
 
 function Buffer:sync(options)
-  return history.with_lock(function()
+  local synced, sync_err = history.with_lock(function()
     return sync_locked(self, options)
   end)
+  if synced then
+    local retained, retention_err = require('direct.trash').apply_retention()
+    if not retained and retention_err then
+      ui.notify('direct: trash retention was skipped: ' .. tostring(retention_err),
+        vim.log.levels.WARN)
+    end
+  end
+  return synced, sync_err
 end
 
 -- ---------------------------------------------------------------------------

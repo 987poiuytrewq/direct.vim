@@ -13,6 +13,7 @@ local defaults = {
   respect_gitignore = true,
   indent_size = 2,
   undo_confirm = 'elsewhere',
+  trash_retention = false,
   show_folder_icons = true,
   show_file_icons = true,
   show_filetype_icons = true,
@@ -127,6 +128,34 @@ local function resolve_git_options(value)
     else
       report_invalid_git_option(tostring(key), 'unknown setting')
     end
+  end
+  return result
+end
+
+local function resolve_trash_retention(value)
+  if value == false then return false end
+  if type(value) ~= 'table' then
+    require('direct.ui').notify(
+      'direct: trash_retention must be false or a table with max_age_days and/or max_size_bytes',
+      vim.log.levels.ERROR)
+    return false
+  end
+  local result = {}
+  for key, limit in pairs(value) do
+    if (key ~= 'max_age_days' and key ~= 'max_size_bytes')
+      or type(limit) ~= 'number' or limit < 1 or limit % 1 ~= 0 then
+      require('direct.ui').notify(
+        'direct: trash_retention limits must be positive integers named max_age_days or max_size_bytes',
+        vim.log.levels.ERROR)
+    else
+      result[key] = limit
+    end
+  end
+  if next(result) == nil then
+    require('direct.ui').notify(
+      'direct: trash_retention needs a valid max_age_days or max_size_bytes limit',
+      vim.log.levels.ERROR)
+    return false
   end
   return result
 end
@@ -326,6 +355,8 @@ function M.setup(opts)
       and value ~= false and value ~= true and value ~= 'elsewhere' then
       require('direct.ui').notify(
         "direct: undo_confirm must be true, false, or 'elsewhere'", vim.log.levels.ERROR)
+    elseif key == 'trash_retention' then
+      next_options.trash_retention = resolve_trash_retention(value)
     elseif key == 'directory_separator'
       and value ~= '/' and value ~= '\\' then
       require('direct.ui').notify(

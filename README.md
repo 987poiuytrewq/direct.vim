@@ -169,6 +169,7 @@ require('direct').setup({
   respect_gitignore = true,          -- hide Git-ignored entries (toggle with `gi`)
   indent_size = 2,                   -- spaces per tree level (integer > 1)
   undo_confirm = 'elsewhere',        -- true, false, or confirm only outside this listing
+  trash_retention = false,           -- or { max_age_days = 30, max_size_bytes = 1e9 }
   directory_separator = package.config:sub(1, 1), -- '/' or '\\'
   max_recursive_expand_depth = false, -- limit for zO/zR; false = unlimited
   show_folder_icons = true,
@@ -206,6 +207,10 @@ ignored.
 `undo_confirm` controls prompts before filesystem undo/redo: `true` always
 prompts, `false` never prompts, and `'elsewhere'` (the default) prompts only if
 the affected paths are outside the current listing's directory.
+
+`trash_retention` is off by default. Set `max_age_days`, `max_size_bytes`, or
+both to prune old, unreferenced trash entries; history-referenced entries are
+kept unless explicitly forced through `:DirectTrash! empty`.
 
 With `show_filetype_icons` enabled, file icons use bufferline.nvim's built-in
 basename-based nvim-web-devicons lookup. The dependency is optional; Direct uses
@@ -276,6 +281,7 @@ through `willRenameFiles`, so they can update imports before the file moves.
 | `:DirectSync`              | Apply edits (same as `:write`)                        |
 | `:DirectUndo` / `:DirectRedo` | Undo/redo filesystem changes, or text while modified |
 | `:DirectHistoryReset`      | Back up and reset both history stacks                 |
+| `:DirectTrash`             | List, restore, or empty trashed entries               |
 | `:DirectYank`              | Yank the entries in a range                           |
 | `:DirectPaste [dir]`       | Paste here, or into `{dir}`                           |
 | `:DirectPasteAs {name}`    | Paste under a new name                                |
@@ -286,6 +292,12 @@ through `willRenameFiles`, so they can update imports before the file moves.
 | `:DirectNextFile` / `:DirectPreviousFile` | Jump between files, skipping directories |
 | `:DirectNextChange` / `:DirectPreviousChange` | Jump between changed entries       |
 | `:DirectRun {cmd}` / `:DirectGit {cmd}` | Run a command on the current entry       |
+
+`:DirectTrash` opens a read-only list. Use `:DirectTrash restore {id}` to
+restore an entry (or add a destination for old entries without metadata), and
+`:DirectTrash empty` to remove unreferenced entries. Prefix the command with
+`!` only to override history protection; an existing restore destination is
+never overwritten.
 
 Relisting a directory with unsaved edits is refused so the listing is not
 silently overwritten. Opening a file from a modified listing is also refused;

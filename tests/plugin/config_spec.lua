@@ -64,6 +64,24 @@ H.describe('config', function()
     config.clear_mappings()
   end)
 
+  H.it('validates optional trash retention limits', function()
+    local config = fresh_config()
+    config.clear_mappings()
+    H.assert_false(config.defaults.trash_retention, 'retention is off by default')
+    H.assert_eq(config.setup({ trash_retention = {
+      max_age_days = 30, max_size_bytes = 1024,
+    } }).trash_retention, { max_age_days = 30, max_size_bytes = 1024 },
+    'age and size limits are accepted together')
+    H.assert_eq(config.setup({ trash_retention = { max_size_bytes = 4096 } }).trash_retention,
+      { max_size_bytes = 4096 }, 'either limit can be used on its own')
+    H.capture_messages()
+    H.assert_false(config.setup({ trash_retention = { max_age_days = 0 } }).trash_retention,
+      'invalid limits leave retention off')
+    H.assert_notified('trash_retention limits must be positive integers',
+      vim.log.levels.ERROR)
+    config.clear_mappings()
+  end)
+
   H.it('two setup() calls converge on the same options', function()
     local config = fresh_config()
     config.clear_mappings()

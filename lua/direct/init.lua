@@ -14,6 +14,7 @@ local pending = require('direct.pending')
 local run = require('direct.run')
 local fs = require('direct.fs')
 local paths = require('direct.paths')
+local trash = require('direct.trash')
 
 local function paste_and_refresh(destination, name)
   return register.paste(destination, name, function(result, _, _, changed, pasted_entry)
@@ -217,6 +218,30 @@ function M.reset_history()
   return history.reset_history()
 end
 
+function M.trash_list()
+  if pending.refuse('list trash') then return nil end
+  return trash.show()
+end
+
+function M.trash_restore(id, destination, force)
+  if pending.refuse('restore trash entry') then return nil end
+  local restored, err = trash.restore(id, destination, force)
+  if not restored and err then
+    ui.notify('direct: cannot restore trash entry: ' .. tostring(err),
+      vim.log.levels.ERROR)
+  end
+  return restored, err
+end
+
+function M.trash_empty(force)
+  if pending.refuse('empty trash') then return nil end
+  local emptied, err = trash.empty(force)
+  if not emptied and err then
+    ui.notify('direct: cannot empty trash: ' .. tostring(err), vim.log.levels.ERROR)
+  end
+  return emptied, err
+end
+
 -- The range is normalised so an upward visual selection works; a nil range means the current line.
 function M.yank(first, last)
   if pending.refuse('yank') then return nil end
@@ -323,6 +348,9 @@ local protected_actions = {
   undo = 'undo the last filesystem action',
   redo = 'redo the last filesystem action',
   reset_history = 'reset the filesystem history',
+  trash_list = 'list trashed entries',
+  trash_restore = 'restore a trashed entry',
+  trash_empty = 'empty unreferenced trash entries',
   yank = 'copy the selected entries to the Direct register',
   paste = 'paste the Direct register',
   paste_as = 'paste the Direct register with the requested name',

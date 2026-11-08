@@ -533,6 +533,7 @@ Calling `setup()` is optional. These are the defaults:
       respect_gitignore = true,
       indent_size = 2,
       undo_confirm = 'elsewhere',
+      trash_retention = false,
       directory_separator = package.config:sub(1, 1),
       max_recursive_expand_depth = false,
       show_folder_icons = true,
@@ -591,6 +592,12 @@ undo_confirm             `true`, `false` or `'elsewhere'` (default)
     Confirm before filesystem undo/redo always (`true`), never (`false`), or
     only when the affected paths are outside the current listing directory
     (`'elsewhere'`).
+
+                                                      *direct-trash_retention*
+trash_retention          `false` or a table (default: `false`)
+    Optionally prune old, unreferenced trash entries. Set `max_age_days`,
+    `max_size_bytes`, or both to positive integers. Entries referenced by undo
+    or redo history are protected, even when a retention limit is exceeded.
 
                                                   *direct-directory_separator*
 directory_separator     `'/'` or `'\'` (default: the platform separator)
@@ -738,6 +745,21 @@ Editing ~
     in `history/`, then start with empty undo and redo stacks. Works from any
     buffer. Use this only when history is damaged or you deliberately want to
     discard it; backups are not automatically removed.
+
+                                                               *:DirectTrash*
+:DirectTrash
+    Open a read-only listing of trash entries with their IDs, deletion times,
+    sizes, and original paths.
+>
+    :DirectTrash restore {id} [path]
+    :DirectTrash empty
+    :DirectTrash! restore {id} [path]
+    :DirectTrash! empty
+<
+    Restore an entry without overwriting an existing path, or empty entries
+    that no longer appear in undo/redo history. The `!` form overrides history
+    protection, but never overwrites a restore destination. Older trash entries
+    without metadata need an explicit [path] to restore.
 
                                                                  *:DirectUndo*
 :DirectUndo
@@ -927,7 +949,8 @@ the current one. It contains:
 
     `history/`               `undo.log`, `redo.log` and the transaction
                            journal
-    `trash/`                 deleted entries, kept so undo can restore them
+    `trash/`                 deleted entries and sidecars with original path
+                            and deletion time, kept so undo can restore them
     `register/`              the latest yank
     `.direct-history.lock`   the lock file shared by Neovim instances
 

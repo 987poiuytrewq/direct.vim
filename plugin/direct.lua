@@ -130,6 +130,21 @@ vim.api.nvim_create_user_command('DirectHistoryReset', function()
   require('direct').reset_history()
 end, { nargs = 0, desc = 'direct: back up and reset filesystem history' })
 
+vim.api.nvim_create_user_command('DirectTrash', function(args)
+  local api = require('direct')
+  local operation = args.fargs[1]
+  if not operation then
+    api.trash_list()
+  elseif operation == 'restore' and args.fargs[2] then
+    api.trash_restore(args.fargs[2], args.fargs[3], args.bang)
+  elseif operation == 'empty' then
+    api.trash_empty(args.bang)
+  else
+    require('direct.ui').notify(
+      'direct: usage: :DirectTrash [restore {id} [path] | empty]', vim.log.levels.ERROR)
+  end
+end, { nargs = '*', bang = true, desc = 'direct: list and manage trashed entries' })
+
 vim.api.nvim_create_user_command('DirectYank', function(args)
   require('direct').yank(args.line1, args.line2)
 end, { nargs = 0, range = true, desc = 'direct: yank the ranged entries' })

@@ -737,6 +737,45 @@ local function action_paths(action)
   return result
 end
 
+local function trash_references(state)
+  local references = {}
+  local function add(path)
+    if type(path) == 'string' and path ~= '' then
+      references[M.paths.canonical(path)] = true
+    end
+  end
+  local function visit(action)
+    if type(action) ~= 'table' then return end
+    if action.name == 'g' then
+      for _, member in ipairs(action.actions or {}) do visit(member) end
+    elseif action.name == 'rm' or action.name == 'rmdir' then
+      add(action.dst)
+    elseif action.name == 'rs' or action.name == 'rsdir' then
+      add(action.src)
+    end
+  end
+  for _, lines in ipairs({ state.undo_lines, state.redo_lines }) do
+    for index = 2, #lines do
+      local action = M.action.deserialize(lines[index])
+      if action then visit(action) end
+    end
+  end
+  return references
+end
+
+-- Run a trash operation while holding the history lock and with a verified
+-- snapshot of every undo/redo reference to trash paths.
+function M.with_trash_references(callback)
+  if type(callback) ~= 'function' then
+    return nil, 'history.with_trash_references: callback is required'
+  end
+  return M.with_lock(function()
+    local state, err = preflight_locked()
+    if not state then return nil, err end
+    return callback(trash_references(state), state)
+  end)
+end
+
 -- Paths changed on disk by a reversal, excluding the private trash/register
 -- storage roots. These are the paths shown in the confirmation before an
 -- operation that is outside the current listing.
@@ -807,7 +846,7 @@ end
 -- history while holding the process lock for the entire critical section. The
 -- durable intent journal supports restart recovery; keeping
 -- the lock across execute prevents it from replaying that intent concurrently.
-function M.apply(action, execute)
+function M.apply(action, execute, preflight_guard)
   if type(action) ~= 'table' then
     return nil, 'history.apply: an action is required'
   end
@@ -820,6 +859,10 @@ function M.apply(action, execute)
   return M.with_lock(function()
     local state, preflight_err = preflight_locked(action_paths(action))
     if not state then return nil, preflight_err end
+    if type(preflight_guard) == 'function' then
+      local allowed, guard_err = preflight_guard(state, trash_references(state))
+      if not allowed then return nil, guard_err end
+    end
 
     local transaction, transaction_err = write_apply_intent(state, action, record)
     if transaction == false then

@@ -93,6 +93,8 @@ local EXPECTED_CMDS = {
   DirectUndo = { nargs = '0' },
   DirectRedo = { nargs = '0' },
   DirectHistoryReset = { nargs = '0' },
+  DirectTrash = { nargs = '*', bang = true },
+  DirectTrash = { nargs = '*', bang = true },
   DirectYank = { nargs = '0', range = '.' },
   DirectPaste = { nargs = '?', complete = 'dir' },
   DirectPasteAs = { nargs = '1', complete = 'file' },
@@ -221,7 +223,7 @@ H.describe('entry: direct-buffer guard', function()
       'show_git_status',
       'next_change', 'previous_change', 'next_file', 'previous_file',
       'sync', 'fold_all', 'unfold_all', 'undo', 'redo', 'reset_history', 'yank', 'paste',
-      'paste_as', 'run', 'git' }
+      'paste_as', 'run', 'git', 'trash_list', 'trash_restore', 'trash_empty' }
     local actual = {}
     for name, value in pairs(api) do
       actual[#actual + 1] = name
