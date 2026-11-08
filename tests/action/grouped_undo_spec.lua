@@ -66,6 +66,7 @@ local function swap_line(ws)
     buffer.list(ws)
     vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'b.txt', 'a.txt' })
     vim.cmd('write')
+    H.wait_for_direct()
   end
 
   H.it('undo restores a swapped pair byte-identically in one step, redo re-applies it', function()
@@ -189,6 +190,7 @@ local function swap_line(ws)
     buffer.list(ws)
     vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'd2/', 'd1/' })
     vim.cmd('write')
+    H.wait_for_direct()
 
     H.assert_eq(vim.fn.readfile(ws .. '/d1/inner.txt'), { 'INNER-2' },
       'the directories swapped')
@@ -221,6 +223,7 @@ local function swap_line(ws)
     buffer.list(ws)
     vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'x.txt', 'y.txt' })
     vim.cmd('write')
+    H.wait_for_direct()
 
     H.assert_eq(vim.fn.readfile(ws .. '/x.txt'), { 'CONTENT-A' })
     H.assert_eq(vim.fn.readfile(ws .. '/y.txt'), { 'CONTENT-B' })
@@ -253,6 +256,7 @@ local function swap_line(ws)
     buffer.list(ws)
     vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'b.txt', 'c.txt', 'a.txt' })
     vim.cmd('write')
+    H.wait_for_direct()
 
     H.assert_eq(vim.fn.readfile(ws .. '/a.txt'), { 'CONTENT-C' }, 'a<-c')
     H.assert_eq(vim.fn.readfile(ws .. '/b.txt'), { 'CONTENT-A' }, 'b<-a')

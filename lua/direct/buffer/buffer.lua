@@ -433,6 +433,7 @@ local ambiguous_message = sync_plan.ambiguous_message
 local result_entry = sync_plan.result_entry
 local build_actions = sync_plan.build_actions
 local pending = require('direct.pending')
+M._pending_for_test = pending
 local file_operations = require('direct.file_operations')
 local pending_sync = {}
 local reconcile_undone_materialization
@@ -2027,21 +2028,33 @@ local function sync_locked(self, options)
       end
     end
     if #files > 0 and #file_operations.clients('workspace/willRenameFiles', changed_paths) > 0 then
-      local began, token = pending.begin('willRenameFiles')
-      if not began then
-        ui.notify('direct: cannot rename while another operation is pending',
-          vim.log.levels.WARN)
-        return nil, 'another direct operation is pending'
+      local token, owns_token = options.pending_token, false
+      if token == nil then
+        local began, begin_token = pending.begin('willRenameFiles')
+        if not began then
+          ui.notify('direct: cannot rename while another operation is pending',
+            vim.log.levels.WARN)
+          return nil, 'another direct operation is pending'
+        end
+        token, owns_token = begin_token, true
       end
+      if options.async_actions then options.async_started = true end
       local requested_plan = sync_signature(actions, yanks)
-      local operation = { token = token, closed = false, guard_released = false }
+      local operation = {
+        token = token, closed = false, guard_released = false,
+        owns_token = owns_token, continuing = false,
+      }
       pending_sync[bufnr] = operation
       operation.cleanup = function()
         operation.closed = true
         if pending_sync[bufnr] == operation then pending_sync[bufnr] = nil end
-        if not operation.guard_released then
+        if operation.owns_token and not operation.guard_released then
           operation.guard_released = true
           pending.finish(token)
+        elseif not operation.owns_token and not operation.continuing
+          and options.async_actions then
+          operation.continuing = true
+          options.async_complete(nil, 'pending rename was canceled')
         end
       end
       local function finish(ok, suppressed_or_err)
@@ -2051,23 +2064,48 @@ local function sync_locked(self, options)
         if pending_sync[bufnr] == operation then pending_sync[bufnr] = nil end
         local ran, callback_err = xpcall(function()
           if not active then return end
-          if not vim.api.nvim_buf_is_valid(bufnr) then return end
+          if not vim.api.nvim_buf_is_valid(bufnr) then
+            if options.async_actions then
+              operation.continuing = true
+              options.async_complete(nil, 'listing buffer was closed during sync')
+            end
+            return
+          end
           if not ok then
             vim.bo[bufnr].modified = true
             ui.notify('Refusing to rename after LSP workspace edit failure '
               .. '(earlier server edits may already have applied): '
               .. tostring(suppressed_or_err), vim.log.levels.ERROR)
+            if options.async_actions then
+              operation.continuing = true
+              options.async_complete(nil, tostring(suppressed_or_err))
+            end
             return
           end
+          if options.async_actions then operation.continuing = true end
           vim.api.nvim_buf_call(bufnr, function()
-            self:sync({ bypass_pending = true, skip_will = true,
-              suppress_operations = suppressed_or_err,
-              expected_plan = requested_plan })
+            if options.async_actions then
+              local follow = {
+                bypass_pending = true, skip_will = true,
+                suppress_operations = suppressed_or_err,
+                expected_plan = requested_plan,
+                async_actions = true,
+                pending_token = token,
+                async_complete = options.async_complete,
+              }
+              local result, follow_err = sync_locked(self, follow)
+              if not follow.async_started then options.async_complete(result, follow_err) end
+            else
+              self:sync({ bypass_pending = true, skip_will = true,
+                suppress_operations = suppressed_or_err,
+                expected_plan = requested_plan })
+            end
           end)
         end, debug.traceback)
         operation.cleanup()
         if not ran then
           ui.report_error('finish the directory rename', callback_err)
+          if options.async_actions then options.async_complete(nil, callback_err) end
         end
       end
       local started, cancel = pcall(file_operations.will_rename, files, finish, nil,
@@ -2115,8 +2153,8 @@ local function sync_locked(self, options)
     end
   end
 
-  -- Apply and record each operation under the history coordinator. Interlinked
-  -- moves use a durable staging plan instead of mutating names before journaling.
+  -- Interlinked moves use a durable staging plan instead of mutating names
+  -- before journaling.
   local group_at, processed = {}, {}
   for _, indices in ipairs(action_mod.move_groups(actions)) do
     if #indices > 1 then
@@ -2128,6 +2166,158 @@ local function sync_locked(self, options)
     end
   end
   local failed, applied, failure_reason, already_logged = {}, {}, nil, {}
+  local function finalize_sync()
+    log_applied(actions, applied, already_logged)
+    file_operations.emit_actions(actions, applied, options.suppress_operations)
+
+    if not vim.api.nvim_buf_is_valid(bufnr) then return true end
+    -- Re-list so the buffer reflects the filesystem, restore the cursor, and
+    -- mark it unmodified only after the refresh succeeds.
+    local reopen = {}
+    local state_before_list = states[bufnr]
+    if state_before_list then
+      local row_ids = row_ids_by_row(bufnr)
+      for row, line in ipairs(visible) do
+        local id = row_ids[row - 1]
+        local rec = id and state_before_list.rows[id]
+        if rec and rec.kind == 'root' and not line:match('^%s') then
+          local path = M.entry_path(self.root, line)
+          if fs.exists(path) then
+            rec.name, rec.text, rec.path = line, line, path
+          end
+        end
+      end
+    end
+    if subtree_edit then
+      local state = states[bufnr]
+      reopen = vim.deepcopy(subtree_edit.expanded_targets or {})
+      for id in pairs(subtree_edit.changed_parents) do
+        local rec = state and state.rows[id]
+        if rec then remove_expanded_subtree(bufnr, state, id) end
+      end
+      if #reopen == 0 then
+        for id in pairs(subtree_edit.changed_parents) do
+          local rec = state and state.rows[id]
+          if rec then reopen[#reopen + 1] = { path = rec.path, depth = rec.depth or 0 } end
+        end
+        table.sort(reopen, function(a, b) return a.depth < b.depth end)
+      end
+    end
+    self:list({ allow_modified = true, reset_undo = true })
+    for _, target in ipairs(reopen) do
+      for row = 0, vim.api.nvim_buf_line_count(bufnr) - 1 do
+        local rec = current_row_record(bufnr, row)
+        if rec and ((rec.kind == 'child' and is_dir_line(rec.name))
+            or (rec.kind == 'root' and is_dir_line(rec.name)))
+          and fs.same_path(rec.path, target.path) then
+          self:expand(row + 1)
+          break
+        end
+      end
+    end
+    for _, path in ipairs(added_expand_paths) do
+      for row = 0, vim.api.nvim_buf_line_count(bufnr) - 1 do
+        local rec = current_row_record(bufnr, row)
+        if rec and is_dir_line(rec.name) and fs.same_path(rec.path, path) then
+          self:expand(row + 1)
+          break
+        end
+      end
+    end
+    if added_focus_path then
+      for row = 0, vim.api.nvim_buf_line_count(bufnr) - 1 do
+        local rec = current_row_record(bufnr, row)
+        if rec and fs.same_path(rec.path, added_focus_path) then
+          pcall(vim.api.nvim_win_set_cursor, 0,
+            { row + 1, (rec.depth or 0) * indent_size() })
+          break
+        end
+      end
+    end
+    if #actions > 0 then
+      ui.notify(action_mod.summarize(actions), vim.log.levels.INFO)
+    end
+    if #failed > 0 then
+      local names = {}
+      for _, act in ipairs(failed) do names[#names + 1] = action_mod.describe_action(act) end
+      ui.notify(string.format('%d action(s) failed: %s', #failed,
+        table.concat(names, ', ')), vim.log.levels.ERROR)
+      vim.bo[bufnr].modified = true
+      return nil, failure_reason
+    end
+    return true
+  end
+
+  local function record_action_result(index, info, act, result, action_err)
+    if result ~= nil then
+      if info then
+        for _, member_index in ipairs(info.indices) do
+          processed[member_index], applied[member_index], already_logged[member_index] = true, true, true
+          self.current_entry = result_entry(actions[member_index])
+        end
+      else
+        processed[index], applied[index], already_logged[index] = true, true, true
+        self.current_entry = result_entry(actions[index])
+      end
+    else
+      local message = 'Action failed - ' .. action_mod.describe_action(act)
+        .. (action_err and (': ' .. tostring(action_err)) or '')
+      ui.notify(message, vim.log.levels.ERROR)
+      if info then
+        for _, member_index in ipairs(info.indices) do
+          processed[member_index] = true
+          failed[#failed + 1] = actions[member_index]
+        end
+      else
+        processed[index] = true
+        failed[#failed + 1] = actions[index]
+      end
+      if failure_reason == nil then failure_reason = action_err or message end
+    end
+  end
+
+  if options.async_actions then
+    options.async_started = true
+    local index = 1
+    local function next_action()
+      while index <= #actions and processed[index] do index = index + 1 end
+      if index > #actions then
+        local complete = function()
+          local ok, err = finalize_sync()
+          options.async_complete(ok, err)
+        end
+        if vim.api.nvim_buf_is_valid(bufnr) then
+          vim.api.nvim_buf_call(bufnr, complete)
+        else
+          complete()
+        end
+        return
+      end
+      local current = index
+      local info = group_at[current]
+      if info and info.first ~= current then
+        processed[current] = true
+        index = index + 1
+        return vim.schedule(next_action)
+      end
+      local act = info and info.action or actions[current]
+      local started, start_err = history.apply_async(act, function(done)
+        action_mod.execute_async(act, done)
+      end, function(result, action_err)
+        record_action_result(current, info, act, result, action_err)
+        index = current + 1
+        vim.schedule(next_action)
+      end)
+      if not started then
+        record_action_result(current, info, act, nil, start_err)
+        index = current + 1
+        vim.schedule(next_action)
+      end
+    end
+    vim.schedule(next_action)
+    return true
+  end
+
   local i = 1
   while i <= #actions do
     if processed[i] then
@@ -2138,135 +2328,15 @@ local function sync_locked(self, options)
         i = i + 1
       else
         local act = info and info.action or actions[i]
-        local res, aerr = history.apply(act, function()
+        local result, action_err = history.apply(act, function()
           return action_mod.execute(act)
         end)
-        if res ~= nil then
-          if info then
-            for _, index in ipairs(info.indices) do
-              processed[index], applied[index], already_logged[index] = true, true, true
-              self.current_entry = result_entry(actions[index])
-            end
-          else
-            processed[i], applied[i], already_logged[i] = true, true, true
-            self.current_entry = result_entry(actions[i])
-          end
-        else
-          local message = 'Action failed - ' .. action_mod.describe_action(act)
-            .. (aerr and (': ' .. tostring(aerr)) or '')
-          ui.notify(message, vim.log.levels.ERROR)
-          if info then
-            for _, index in ipairs(info.indices) do
-              processed[index] = true
-              failed[#failed + 1] = actions[index]
-            end
-          else
-            processed[i] = true
-            failed[#failed + 1] = actions[i]
-          end
-          if failure_reason == nil then failure_reason = aerr or message end
-        end
+        record_action_result(i, info, act, result, action_err)
         i = i + 1
       end
     end
   end
-  log_applied(actions, applied, already_logged)
-  file_operations.emit_actions(actions, applied, options.suppress_operations)
-
-  -- Re-list so the buffer reflects the filesystem, restore the cursor, and
-  -- mark it unmodified only after the refresh succeeds.
-  local reopen = {}
-  -- Root directory/file renames retain their row identity even when an
-  -- expanded subtree is present. Refresh the root record's path before list()
-  -- rebuilds its inode index, so the expansion follows the renamed directory.
-  local state_before_list = states[bufnr]
-  if state_before_list then
-    local row_ids = row_ids_by_row(bufnr)
-    for row, line in ipairs(visible) do
-      local id = row_ids[row - 1]
-      local rec = id and state_before_list.rows[id]
-      if rec and rec.kind == 'root' and not line:match('^%s') then
-        local path = M.entry_path(self.root, line)
-        if fs.exists(path) then
-          rec.name, rec.text, rec.path = line, line, path
-        end
-      end
-    end
-  end
-  if subtree_edit then
-    local state = states[bufnr]
-    reopen = vim.deepcopy(subtree_edit.expanded_targets or {})
-    for id in pairs(subtree_edit.changed_parents) do
-      local rec = state and state.rows[id]
-      if rec then
-        remove_expanded_subtree(bufnr, state, id)
-      end
-    end
-    if #reopen == 0 then
-      for id in pairs(subtree_edit.changed_parents) do
-        local rec = state and state.rows[id]
-        if rec then reopen[#reopen + 1] = { path = rec.path, depth = rec.depth or 0 } end
-      end
-      table.sort(reopen, function(a, b) return a.depth < b.depth end)
-    end
-  end
-  self:list({ allow_modified = true, reset_undo = true })
-  -- Re-materialize only the edited scopes, now from the filesystem's committed
-  -- state. Other expanded branches retain their original identities and view.
-  for _, target in ipairs(reopen) do
-    local state = states[bufnr]
-    for row = 0, vim.api.nvim_buf_line_count(bufnr) - 1 do
-      local rec = current_row_record(bufnr, row)
-      if rec and rec.kind == 'child' and is_dir_line(rec.name)
-        and fs.same_path(rec.path, target.path) then
-        self:expand(row + 1)
-        break
-      elseif rec and rec.kind == 'root' and is_dir_line(rec.name)
-        and fs.same_path(rec.path, target.path) then
-        self:expand(row + 1)
-        break
-      end
-    end
-  end
-
-  -- Open every parent directory on newly added nested paths, including parents
-  -- that already existed, then put the cursor on the last added row.
-  for _, path in ipairs(added_expand_paths) do
-    for row = 0, vim.api.nvim_buf_line_count(bufnr) - 1 do
-      local rec = current_row_record(bufnr, row)
-      if rec and is_dir_line(rec.name) and fs.same_path(rec.path, path) then
-        self:expand(row + 1)
-        break
-      end
-    end
-  end
-  if added_focus_path then
-    for row = 0, vim.api.nvim_buf_line_count(bufnr) - 1 do
-      local rec = current_row_record(bufnr, row)
-      if rec and fs.same_path(rec.path, added_focus_path) then
-        pcall(vim.api.nvim_win_set_cursor, 0,
-          { row + 1, (rec.depth or 0) * indent_size() })
-        break
-      end
-    end
-  end
-
-  if #actions > 0 then
-    -- Emit one joined summary for the classified actions.
-    ui.notify(action_mod.summarize(actions), vim.log.levels.INFO)
-  end
-  if #failed > 0 then
-    -- Emit one additional error summary naming the failed actions.
-    local names = {}
-    for _, act in ipairs(failed) do
-      names[#names + 1] = action_mod.describe_action(act)
-    end
-    ui.notify(string.format('%d action(s) failed: %s', #failed,
-      table.concat(names, ', ')), vim.log.levels.ERROR)
-    vim.bo[bufnr].modified = true
-    return nil, failure_reason
-  end
-  return true
+  return finalize_sync()
 end
 
 function Buffer:sync(options)
@@ -2281,6 +2351,65 @@ function Buffer:sync(options)
     end
   end
   return synced, sync_err
+end
+
+function Buffer:sync_async(callback)
+  callback = callback or function() end
+  local bufnr = vim.api.nvim_get_current_buf()
+  if pending.refuse('sync') then return nil, 'another direct operation is pending' end
+  local began, token = pending.begin('sync')
+  if not began then
+    ui.notify('direct: cannot sync while another operation is pending', vim.log.levels.WARN)
+    return nil, token
+  end
+  local acquired, acquire_err = history.lock.acquire()
+  if not acquired then
+    pending.finish(token)
+    ui.notify('direct: history unavailable: ' .. tostring(acquire_err), vim.log.levels.ERROR)
+    return nil, acquire_err
+  end
+
+  local operation = { finished = false }
+  local function complete(result, err)
+    if operation.finished then return end
+    operation.finished = true
+    local released, release_err = history.lock.release()
+    if not released and result ~= nil then
+      result = nil
+      err = 'could not release history lock: ' .. tostring(release_err)
+      ui.notify('direct: history unavailable: ' .. err, vim.log.levels.ERROR)
+    end
+    if result then
+      local retained, retention_err = require('direct.trash').apply_retention()
+      if not retained and retention_err then
+        ui.notify('direct: trash retention was skipped: ' .. tostring(retention_err),
+          vim.log.levels.WARN)
+      end
+    end
+    pending.finish(token)
+    local called, callback_err = pcall(callback, result, err)
+    if not called then ui.report_error('complete sync', callback_err) end
+  end
+
+  local options = {
+    async_actions = true,
+    bypass_pending = true,
+    pending_token = token,
+    async_complete = complete,
+  }
+  local called, result, sync_err = xpcall(function()
+    return sync_locked(self, options)
+  end, debug.traceback)
+  if not called then
+    complete(nil, result)
+    ui.report_error('plan sync', result)
+    return nil, result
+  end
+  if not options.async_started then
+    complete(result, sync_err)
+    return result, sync_err
+  end
+  return true
 end
 
 -- ---------------------------------------------------------------------------

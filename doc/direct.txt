@@ -748,6 +748,10 @@ Editing ~
                                                                  *:DirectSync*
 :DirectSync
     Apply the edits in the listing to the filesystem. |:write| does the same.
+    The operation runs asynchronously: the command returns while it is pending,
+    and the listing stays modified until the filesystem and history are
+    committed. Other direct operations are refused meanwhile. Long copies to
+    another filesystem report progress.
 
                                                      *:DirectHistoryReset*
 :DirectHistoryReset
@@ -927,7 +931,7 @@ The functions in `require('direct')` mirror the commands:
     `list_cwd()`                  |:DirectListCwd|
     `open()`                      `<CR>`
     `open_parent_expanded()`      `z-`
-    `sync()`                      |:DirectSync|
+    `sync([callback])`             |:DirectSync|
     `undo()`  `redo()`              |:DirectUndo|  |:DirectRedo|
     `yank(first, last)`           |:DirectYank| on lines {first} to {last}
     `paste(dir)`                  |:DirectPaste|
@@ -947,6 +951,10 @@ The functions in `require('direct')` mirror the commands:
 Like their commands, `list()`, `list_buffer()`, `list_cwd()` and
 `paste(dir)` with a directory work from any buffer. The others report an
 error outside a listing.
+
+`sync()` without a callback runs synchronously for Lua callers.
+`sync(callback)` uses the same asynchronous path as |:DirectSync| and |:write|;
+the callback receives `(result, error)` when the operation has finished.
 
 ==============================================================================
 16. Data and safety                                          *direct.vim-data*

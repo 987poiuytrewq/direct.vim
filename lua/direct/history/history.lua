@@ -925,6 +925,126 @@ function M.apply(action, execute, preflight_guard)
   end)
 end
 
+-- apply_async keeps the same process lock and durable intent across an
+-- asynchronous filesystem executor. The callback receives result, err.
+function M.apply_async(action, execute_async, callback, preflight_guard)
+  if type(action) ~= 'table' then return nil, 'history.apply_async: an action is required' end
+  if type(execute_async) ~= 'function' then
+    return nil, 'history.apply_async: an executor is required'
+  end
+  if type(callback) ~= 'function' then
+    return nil, 'history.apply_async: a completion callback is required'
+  end
+  local record, serialize_err = M.action.serialize(action)
+  if not record then return nil, serialize_err end
+
+  local acquired, acquire_err = M.lock.acquire()
+  if not acquired then
+    notify_unavailable(acquire_err)
+    return nil, acquire_err
+  end
+  local called, state, preflight_err = xpcall(function()
+    return preflight_locked(action_paths(action))
+  end, debug.traceback)
+  if not called or not state then
+    M.lock.release()
+    return nil, called and preflight_err or state
+  end
+  if type(preflight_guard) == 'function' then
+    local guard_ok, allowed, guard_err = pcall(preflight_guard, state, trash_references(state))
+    if not guard_ok or not allowed then
+      M.lock.release()
+      return nil, guard_ok and guard_err or allowed
+    end
+  end
+
+  local transaction, transaction_err = write_apply_intent(state, action, record)
+  if transaction == false then
+    M.lock.release()
+    notify_unavailable(transaction_err)
+    return nil, transaction_err
+  end
+
+  local finished = false
+  local function finish(result, execute_err)
+    if finished then return end
+    finished = true
+    local final_result, final_err = result, execute_err
+
+    if result == nil then
+      local why = tostring(execute_err or 'action failed')
+      if transaction then
+        if transaction.steps then
+          if transaction.next_step == 1
+            and recovery.move_step_status(transaction.steps[1]) == 'not-started' then
+            clear_transaction(state.transaction_path)
+          else
+            why = why .. '; grouped move recovery journal preserved at '
+              .. state.transaction_path
+          end
+        else
+          local status = recovery.reverse_operation_status(transaction)
+          if status == 'not-started' then
+            clear_transaction(state.transaction_path)
+          elseif status == 'completed' then
+            local committed, commit_err = commit_stacks(state.undo_path,
+              state.redo_path, state.transaction_path,
+              transaction.undo, transaction.redo)
+            if not committed then why = why .. '; ' .. tostring(commit_err) end
+          else
+            why = why .. '; filesystem outcome is ambiguous; recovery journal preserved at '
+              .. state.transaction_path
+          end
+        end
+      end
+      final_err = why
+    else
+      local undo_lines, redo_lines
+      if transaction then
+        undo_lines, redo_lines = transaction.undo, transaction.redo
+      else
+        undo_lines = copy_lines(state.undo_lines)
+        undo_lines[#undo_lines + 1] = record
+        redo_lines = { M.HEADER }
+      end
+      local committed, commit_err = commit_stacks(state.undo_path, state.redo_path,
+        state.transaction_path, undo_lines, redo_lines)
+      if not committed then
+        final_result = nil
+        final_err = 'action completed but history commit is pending recovery: '
+          .. tostring(commit_err)
+      end
+    end
+
+    local released, release_err = M.lock.release()
+    if not released then
+      notify_unavailable('could not release history lock: ' .. tostring(release_err))
+      if final_result ~= nil then
+        final_result = nil
+        final_err = 'action completed but the history lock could not be released: '
+          .. tostring(release_err)
+      end
+    end
+    local callback_ok, callback_err = pcall(callback, final_result, final_err)
+    if not callback_ok then
+      M.ui.report_error('finish asynchronous history action', callback_err)
+    end
+  end
+
+  if transaction and transaction.steps then
+    recovery.complete_move_steps_async(transaction, state.transaction_path,
+      function(result, execute_err) finish(result, execute_err) end)
+    return true
+  end
+
+  local started, start_err = pcall(execute_async, function(ok, result, execute_err)
+    if ok and result ~= nil then finish(result, nil)
+    else finish(nil, execute_err or result or 'action failed') end
+  end)
+  if not started then finish(nil, start_err) end
+  return true
+end
+
 local function write_paste_journal(operation)
   local called, ok, err = pcall(function()
     return log_mod.write_raw_atomic(operation.transaction_path,

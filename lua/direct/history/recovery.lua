@@ -125,6 +125,55 @@ function M.new(deps)
     return true
   end
 
+  local function complete_move_steps_async(transaction, transaction_path, callback)
+    local function finish(ok, err)
+      local called, callback_err = pcall(callback, ok, err)
+      if not called then ui.report_error('finish grouped move recovery', callback_err) end
+    end
+    local function next_step()
+      local index = transaction.next_step
+      if index > #transaction.steps then return finish(true) end
+      local step = transaction.steps[index]
+      local status = move_step_status(step)
+      if status == 'ambiguous' then
+        return finish(nil, 'grouped move step identity is ambiguous (source identity changed '
+          .. 'or destination is occupied): ' .. step.src .. ' -> ' .. step.dst)
+      end
+      local function checkpoint()
+        transaction.next_step = index + 1
+        local persisted, persist_err = write_transaction(transaction_path, transaction)
+        if not persisted then return finish(nil, persist_err) end
+        vim.schedule(next_step)
+      end
+      if status == 'completed' then return checkpoint() end
+      local move = action.Move(step.src, step.dst)
+      action.execute_async(move, function(ok, result, execute_err)
+        if ok and result ~= nil then
+          if move_step_status(step) ~= 'completed' then
+            return finish(nil, 'grouped move step identity is ambiguous (source identity changed '
+              .. 'or destination is occupied): ' .. step.src .. ' -> ' .. step.dst)
+          end
+          return checkpoint()
+        end
+        status = move_step_status(step)
+        if status == 'completed' then return checkpoint() end
+        local failure = tostring(execute_err or result or 'action failed')
+        if index <= transaction.staging_count then
+          local rolled_back, rollback_err = rollback_staging_steps(
+            transaction, transaction_path, index - 1)
+          if not rolled_back then
+            return finish(nil, failure .. '; ' .. tostring(rollback_err))
+          end
+          if transaction.kind == 'reverse' then failure = 'could not stage renames: ' .. failure end
+        else
+          failure = 'grouped move step failed: ' .. failure
+        end
+        finish(nil, failure)
+      end)
+    end
+    next_step()
+  end
+
   local function paste_action_for_pairs(paste_action, completed)
     local sources, destinations = {}, {}
     for _, pair in ipairs(completed) do
@@ -276,6 +325,7 @@ function M.new(deps)
     reverse_operation_status = reverse_operation_status,
     move_step_status = move_step_status,
     complete_move_steps = complete_move_steps,
+    complete_move_steps_async = complete_move_steps_async,
     paste_stack_snapshot = paste_stack_snapshot,
     settle_paste_pending = settle_paste_pending,
     recover_paste_transaction = recover_paste_transaction,

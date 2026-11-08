@@ -1,6 +1,6 @@
 # Spec: direct.vim gap review follow-ups
 
-**Status:** S1 through S6 and R1 are complete; the remaining tasks are proposed and have
+**Status:** S1 through S6, R1 and R2 are complete; the remaining tasks are proposed and have
 not been checked item by item. This replaces `direct-vim-remaining-improvements.md`.
 Its main pieces (JSONL history, no-overwrite moves, exclusive `touch`, the
 safeguard on undoing a paste) appear in the current code, but that was not
@@ -33,7 +33,7 @@ the problem, or to record that it can't be reproduced.
 | S5 | P2 | Complete | Ask before `gc` discards Git changes, and review the `gc` / `gr` key clashes |
 | S6 | P4 | Complete | Put the lock file inside the `direct/` data directory |
 | R1 | P2 | Complete | Stop `git status` from freezing the editor |
-| R2 | P3 | Proposed | Run long moves during `:w` without blocking the editor |
+| R2 | P3 | Complete | Run long moves during `:w` without blocking the editor |
 | R3 | P3 | Proposed | Make `:checkhealth direct` check more |
 | F1 | P3 | Proposed | Let users remap individual keys |
 | F2 | P3 | Proposed | Open entries in a split, vertical split or new tab |
@@ -255,6 +255,14 @@ Git status and tell the user once.
 timeout and shows a warning.
 
 ### R2 — Long moves during `:w` block the editor (P3)
+
+**Status: COMPLETE.** `:write` and `:DirectSync` now run planned actions
+sequentially through `execute_async` while retaining the history lock and the
+pending-operation guard. Cross-filesystem file/tree moves use asynchronous
+copies, verify source and destination before removal, preserve no-overwrite
+placement, and show copy progress. Same-filesystem renames remain atomic. Tests
+cover a deferred cross-filesystem directory copy, lock/pending refusals, LSP
+rename integration and existing sync safety cases. `make test` passes.
 
 **Change.** Run the actions from `:w` in the background the same way paste,
 undo and redo already do (`execute_async`), keeping the lock and the

@@ -114,9 +114,11 @@ H.describe('sync: editable expanded subtrees', function()
     }, 'the refreshed destination subtree resolves its files')
 
     require('direct').undo()
+    H.wait_for_direct()
     H.assert_true(fs.exists(a .. '/from.txt'), 'filesystem undo restores the source path')
     H.assert_false(fs.exists(b .. '/from.txt'), 'filesystem undo clears the destination')
     require('direct').redo()
+    H.wait_for_direct()
     H.assert_true(fs.exists(b .. '/from.txt'), 'filesystem redo reapplies the subtree move')
   end)
 

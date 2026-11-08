@@ -35,6 +35,8 @@ end
 
 function M.write_trash_metadata(trash_path, original_path)
   local metadata_path = M.trash_metadata_path(trash_path)
+  local parent, parent_err = M.fs.mkdirp(M.fs.dirname(metadata_path))
+  if not parent then return nil, parent_err end
   local bytes = vim.json.encode(trash_metadata(original_path, false)) .. '\n'
   local existing, read_err, exists = M.log.read_raw(metadata_path)
   if read_err then return nil, read_err end
@@ -52,6 +54,8 @@ end
 
 function M.write_trash_reservation(trash_path, original_path)
   local metadata_path = M.trash_metadata_path(trash_path)
+  local parent, parent_err = M.fs.mkdirp(M.fs.dirname(metadata_path))
+  if not parent then return nil, parent_err end
   local bytes = vim.json.encode(trash_metadata(original_path, true)) .. '\n'
   local existing, read_err, exists = M.log.read_raw(metadata_path)
   if read_err then return nil, read_err end
@@ -233,6 +237,26 @@ end
 -- Single-entry actions
 -- ---------------------------------------------------------------------------
 
+local function move_progress(src, dst)
+  local announced, echo_shown = false, false
+  local function report(stage, total)
+    if stage == 'copying' and not announced then
+      announced = true
+      M.ui.notify('direct: copying ' .. M.rel(src) .. ' to ' .. M.rel(dst)
+        .. ' across filesystems', vim.log.levels.INFO)
+    elseif type(stage) == 'number'
+      and (stage == total or stage == 1 or stage % 25 == 0) then
+      echo_shown = true
+      vim.api.nvim_echo({ { string.format('direct: copying %d/%d files', stage, total),
+        'MoreMsg' } }, false, {})
+    end
+  end
+  local function clear()
+    if echo_shown then pcall(vim.api.nvim_echo, { { '' } }, false, {}) end
+  end
+  return report, clear
+end
+
 function M.Move(src, dst)
   local self = { name = 'mv', _kind = 'mv', src = src, dst = dst }
   self._execute = function()
@@ -244,6 +268,19 @@ function M.Move(src, dst)
       return nil, err
     end
     return M.fs.rename(self.src, self.dst)
+  end
+  self._execute_async = function(callback)
+    if M.fs.taken(self.dst) and not M.fs.same_entry(self.src, self.dst) then
+      callback(false, nil, 'destination exists: ' .. tostring(self.dst))
+      return
+    end
+    local ok, err = M.close_src_buffer(self.src)
+    if not ok then callback(false, nil, err); return end
+    local progress, clear_progress = move_progress(self.src, self.dst)
+    M.fs.rename_async(self.src, self.dst, function(moved, result, move_err)
+      clear_progress()
+      callback(moved, result, move_err)
+    end, progress)
   end
   self['do'] = function() return M.execute(self) end
   function self.describe()
@@ -304,6 +341,39 @@ function M.Remove(src, dst)
   self['do'] = function() return M.execute(self) end
   function self.describe()
     return 'Removed ' .. M.rel(self.src)
+  end
+  self._execute_async = function(callback)
+    if not self.dst then
+      local trash, err = M.paths.ensure_data_dir('trash')
+      if not trash then callback(false, nil, err); return end
+      self.dst = M.first_free_trash(trash, self.src)
+    end
+    local trash, err = M.paths.ensure_data_dir('trash')
+    if not trash then callback(false, nil, err); return end
+    local ok, close_err = M.close_src_buffer(self.src)
+    if not ok then callback(false, nil, close_err); return end
+    if M.fs.taken(self.dst) then
+      callback(false, nil, 'destination exists: ' .. tostring(self.dst))
+      return
+    end
+    local recorded, record_err = M.write_trash_metadata(self.dst, self.src)
+    if not recorded then
+      callback(false, nil, 'could not record trash metadata: ' .. tostring(record_err))
+      return
+    end
+    local progress, clear_progress = move_progress(self.src, self.dst)
+    M.fs.rename_async(self.src, self.dst, function(moved, result, move_err)
+      clear_progress()
+      if not moved then
+        local cleared, clear_err = M.clear_trash_metadata(self.dst)
+        if not cleared then
+          M.ui.notify('direct: could not remove unused trash metadata '
+            .. M.trash_metadata_path(self.dst) .. ': ' .. tostring(clear_err),
+            vim.log.levels.WARN)
+        end
+      end
+      callback(moved, result, move_err)
+    end, progress)
   end
   return self
 end
@@ -367,6 +437,40 @@ function M.RemoveDirectory(src, dst)
   function self.describe()
     return 'Removed ' .. M.rel(self.src)
   end
+  self._execute_async = function(callback)
+    if not self.dst then
+      local trash, err = M.paths.ensure_data_dir('trash')
+      if not trash then callback(false, nil, err); return end
+      self.dst = M.first_free_trash(trash, self.src)
+    end
+    local trash, err = M.paths.ensure_data_dir('trash')
+    if not trash then callback(false, nil, err); return end
+    local ok, close_err = M.close_src_buffer(self.src)
+    if not ok then callback(false, nil, close_err); return end
+    warn_cross_device_trash(self.src, trash)
+    if M.fs.taken(self.dst) then
+      callback(false, nil, 'destination exists: ' .. tostring(self.dst))
+      return
+    end
+    local recorded, record_err = M.write_trash_metadata(self.dst, self.src)
+    if not recorded then
+      callback(false, nil, 'could not record trash metadata: ' .. tostring(record_err))
+      return
+    end
+    local progress, clear_progress = move_progress(self.src, self.dst)
+    M.fs.rename_async(self.src, self.dst, function(moved, result, move_err)
+      clear_progress()
+      if not moved then
+        local cleared, clear_err = M.clear_trash_metadata(self.dst)
+        if not cleared then
+          M.ui.notify('direct: could not remove unused trash metadata '
+            .. M.trash_metadata_path(self.dst) .. ': ' .. tostring(clear_err),
+            vim.log.levels.WARN)
+        end
+      end
+      callback(moved, result, move_err)
+    end, progress)
+  end
   return self
 end
 
@@ -392,6 +496,23 @@ function M.Restore(src, dst)
       M.fs.touch(self.src)
     end
     return res, rerr
+  end
+  self._execute_async = function(callback)
+    local ok, err = M.close_src_buffer(self.src)
+    if not ok then callback(false, nil, err); return end
+    local progress, clear_progress = move_progress(self.src, self.dst)
+    M.fs.rename_async(self.src, self.dst, function(restored, result, restore_err)
+      clear_progress()
+      if restored then
+        local reserved, reserve_err = M.write_trash_reservation(self.src, self.dst)
+        if not reserved then
+          M.ui.notify('direct: restored entry but could not reserve its trash slot '
+            .. self.src .. ' (' .. tostring(reserve_err) .. ')', vim.log.levels.WARN)
+        end
+        M.fs.touch(self.src)
+      end
+      callback(restored, result, restore_err)
+    end, progress)
   end
   self['do'] = function() return M.execute(self) end
   function self.describe()
@@ -423,6 +544,27 @@ function M.RestoreDirectory(src, dst)
       end
     end
     return res, rerr
+  end
+  self._execute_async = function(callback)
+    local ok, err = M.close_src_buffer(self.src)
+    if not ok then callback(false, nil, err); return end
+    local progress, clear_progress = move_progress(self.src, self.dst)
+    M.fs.rename_async(self.src, self.dst, function(restored, result, restore_err)
+      clear_progress()
+      if restored then
+        local reserved, reserve_err = M.write_trash_reservation(self.src, self.dst)
+        if not reserved then
+          M.ui.notify('direct: restored directory but could not reserve its trash slot '
+            .. self.src .. ' (' .. tostring(reserve_err) .. ')', vim.log.levels.WARN)
+        end
+        local made, make_err = M.fs.mkdir_exclusive(self.src)
+        if not made then
+          M.ui.notify('direct: restored directory, but could not reserve its trash slot '
+            .. self.src .. ': ' .. tostring(make_err), vim.log.levels.WARN)
+        end
+      end
+      callback(restored, result, restore_err)
+    end, progress)
   end
   self['do'] = function() return M.execute(self) end
   function self.describe()

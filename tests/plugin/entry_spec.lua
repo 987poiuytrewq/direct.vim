@@ -166,6 +166,7 @@ H.describe('entry: command surface', function()
     H.assert_true(vim.bo[buf].modified, 'the buffer is dirty before the write')
 
     vim.cmd('write')
+    H.wait_for_direct()
 
     H.assert_true(vim.uv.fs_stat(vim.fs.joinpath(ws, 'new.txt')) ~= nil,
       'the write routed to the sync and created new.txt')

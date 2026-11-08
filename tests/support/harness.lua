@@ -23,6 +23,22 @@ function M.is_windows()
   return platform.is_windows
 end
 
+function M.wait_for_direct(timeout_ms)
+  M.assert_true(vim.wait(timeout_ms or 5000, function()
+    local registries = { require('direct.pending') }
+    local buffer = package.loaded['direct.buffer.buffer']
+    local history = package.loaded['direct.history.history']
+    if buffer and buffer._pending_for_test then
+      registries[#registries + 1] = buffer._pending_for_test
+    end
+    if history and history.pending then registries[#registries + 1] = history.pending end
+    for _, pending in ipairs(registries) do
+      if pending.is_pending() then return false end
+    end
+    return true
+  end), 'pending Direct operation completes')
+end
+
 -- ---------------------------------------------------------------------------
 -- Configuration and per-run state
 -- ---------------------------------------------------------------------------

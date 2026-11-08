@@ -76,6 +76,9 @@ local function run()
   rows[#rows + 1] = 'created.txt'
   vim.api.nvim_buf_set_lines(0, 0, -1, false, rows)
   vim.cmd('write')
+  assert(vim.wait(5000, function()
+    return not require('direct.pending').is_pending()
+  end), 'asynchronous :write did not settle')
   assert(vim.uv.fs_stat(vim.fs.joinpath(root, 'created.txt')) ~= nil,
     ':write did not create the new entry')
   assert(not vim.bo.modified, 'successful :write left the listing modified')

@@ -35,7 +35,10 @@ end
 
 function M.refuse(operation, only_label)
   if not active then return false end
-  if only_label ~= nil and label ~= only_label then return false end
+  if only_label ~= nil and label ~= only_label
+    and not (only_label == 'willRenameFiles' and label == 'sync') then
+    return false
+  end
   local ui = require('direct.ui')
   ui.notify('direct: cannot ' .. tostring(operation or 'start operation')
     .. ' while ' .. tostring(label or 'another operation') .. ' is pending',

@@ -21,10 +21,13 @@ function M.new()
   -- The command facade should share the test's captured buffer state module.
   local function route_write_to_test_buffer()
     package.loaded['direct.buffer.buffer'] = buffer
+    package.loaded['direct.pending'] = buffer._pending_for_test
     package.loaded['direct'] = nil
     require('direct')
     assert(require('direct.buffer.buffer') == buffer,
       'DirectSync facade must share the test buffer state registry')
+    assert(require('direct.pending') == buffer._pending_for_test,
+      'DirectSync facade must share the test buffer pending-operation state')
   end
 
   local function history_lines(name)

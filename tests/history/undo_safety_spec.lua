@@ -105,6 +105,7 @@ H.describe('undo and redo safety in listings', function()
     local accepted, accept_err = pcall(vim.cmd, 'DirectUndo')
     vim.fn.confirm = original_confirm
     H.assert_true(accepted, 'accepting confirmation runs the undo: ' .. tostring(accept_err))
+    H.wait_for_direct()
     H.assert_true(H.exists(changed, 'before.txt'), 'accepting restores the original path')
     H.assert_false(H.exists(changed, 'after.txt'), 'accepting reverses the rename')
   end)
@@ -124,6 +125,7 @@ H.describe('undo and redo safety in listings', function()
     local ok, err = pcall(vim.cmd, 'DirectUndo')
 
     vim.fn.confirm = original_confirm
+    H.wait_for_direct()
     H.assert_true(ok, 'same-directory undo succeeds: ' .. tostring(err))
     H.assert_eq(calls, 0, 'the default only confirms changes outside this directory')
     H.assert_true(H.exists(ws, 'before.txt'), 'same-directory undo restores the original')

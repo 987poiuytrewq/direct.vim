@@ -85,11 +85,14 @@ function M.open_parent_expanded()
   return buffer.expand()
 end
 
-function M.sync()
+function M.sync(callback)
   if not guard('DirectSync') then
     return nil
   end
-  if pending.refuse('sync') then return nil end
+  if pending.refuse('sync') then return nil, 'another direct operation is pending' end
+  if type(callback) == 'function' then
+    return buffer.restore():sync_async(callback)
+  end
   return buffer.restore():sync()
 end
 

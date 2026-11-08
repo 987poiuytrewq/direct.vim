@@ -246,7 +246,9 @@ H.describe('sync: applying actions', function()
     vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'keep.txt' })
     H.capture_messages()
     vim.cmd('write')
+    H.wait_for_direct()
 
+    H.assert_false(fs.exists(ws .. '/a.txt'), 'delete action should finish: ' .. H.messages())
     H.assert_fs_eq(ws, { 'keep.txt' }, 'a.txt was deleted through the :write sync')
     H.assert_not_nil(register.content(), 'the auto-yank recorded the register pointer')
 
