@@ -962,6 +962,13 @@ the current one. It contains:
                             and deletion time, kept so undo can restore them
     `register/`              the latest yank
     `.direct-history.lock`   the lock file shared by Neovim instances
+                             (inside `direct/`)
+
+The lock coordinates current versions on the same machine. Older versions
+used `$XDG_DATA_HOME/.direct-history.lock` (or the equivalent data-home path),
+so do not run an old and a new version at the same time: they would use
+different locks. The old lock file is left in place and is harmless when no
+older version is running.
 
 History format ~
                                                    *direct.vim-history-format*

@@ -1,6 +1,6 @@
 # Spec: direct.vim gap review follow-ups
 
-**Status:** S1 through S5 are complete; the remaining tasks are proposed and have
+**Status:** S1 through S6 are complete; the remaining tasks are proposed and have
 not been checked item by item. This replaces `direct-vim-remaining-improvements.md`.
 Its main pieces (JSONL history, no-overwrite moves, exclusive `touch`, the
 safeguard on undoing a paste) appear in the current code, but that was not
@@ -31,7 +31,7 @@ the problem, or to record that it can't be reproduced.
 | S3 | P1 | Complete | Keep a damaged or unrecognised history file instead of wiping it |
 | S4 | P2 | Complete | Add a way to see, restore from and empty the trash, and keep it from growing forever |
 | S5 | P2 | Complete | Ask before `gc` discards Git changes, and review the `gc` / `gr` key clashes |
-| S6 | P4 | Proposed | Put the lock file inside the `direct/` data directory |
+| S6 | P4 | Complete | Put the lock file inside the `direct/` data directory |
 | R1 | P2 | Proposed | Stop `git status` from freezing the editor |
 | R2 | P3 | Proposed | Run long moves during `:w` without blocking the editor |
 | R3 | P3 | Proposed | Make `:checkhealth direct` check more |
@@ -217,6 +217,12 @@ Neovim's built-in comment key, and `gr` makes the 0.11+ default LSP keys
 it restores the file.
 
 ### S6 — Lock file outside the data directory (P4)
+
+**Status: COMPLETE.** The persistent lock now lives at
+`<data>/direct/.direct-history.lock`. The old parent-level lock is left
+untouched. README and help docs warn not to run old and new plugin versions
+concurrently, because they would use distinct lock files. Tests verify the
+location and that the old path is not created.
 
 **Problem.** The lock is at `$XDG_DATA_HOME/.direct-history.lock`
 (`lua/direct/history/lock.lua`, `lock_path`), not under `direct/`.

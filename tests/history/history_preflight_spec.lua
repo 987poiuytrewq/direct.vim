@@ -20,6 +20,11 @@ H.describe('history preflight', function()
     H.assert_true(history.lock.release(), 'process lock is released')
     H.assert_true(vim.uv.fs_stat(sb.data_home) ~= nil,
       'the shared data home remains available after unlock')
+    H.assert_true(vim.uv.fs_stat(vim.fs.joinpath(sb.data_home,
+      'direct/.direct-history.lock')) ~= nil,
+      'the persistent lock file is inside the direct data directory')
+    H.assert_nil(vim.uv.fs_stat(vim.fs.joinpath(sb.data_home,
+      '.direct-history.lock')), 'the former parent-level lock path is not created')
   end)
 
   H.it('rejects invalid UTF-8 before creating data or register directories', function()
@@ -281,7 +286,7 @@ H.describe('history preflight', function()
     H.assert_true(type(real_rename) == 'function', 'rename seam was captured')
   end)
 
-  H.it('unreadable history fails closed before creating data directories', function()
+  H.it('unreadable history fails closed without creating history files', function()
     local sb = H.sandbox()
     local path = vim.fs.joinpath(sb.data_home, 'direct/history/undo.log')
     local restore = H.stub(log, 'read_raw', function()
@@ -290,8 +295,11 @@ H.describe('history preflight', function()
     local ok = history.preflight()
     restore()
     H.assert_nil(ok, 'unreadable log refuses the operation')
-    H.assert_eq(vim.uv.fs_stat(vim.fs.joinpath(sb.data_home, 'direct')), nil,
-      'unreadable history does not create its data directory')
+    H.assert_true(vim.uv.fs_stat(vim.fs.joinpath(sb.data_home,
+      'direct/.direct-history.lock')) ~= nil,
+      'the lock parent exists because locking now lives inside direct/')
+    H.assert_nil(vim.uv.fs_stat(vim.fs.joinpath(sb.data_home, 'direct/history')),
+      'unreadable history does not create its history directory')
     H.assert_true(type(path) == 'string', 'the absent history path was resolved purely')
   end)
 end)

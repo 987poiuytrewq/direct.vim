@@ -325,6 +325,12 @@ direct.vim is built so that a mistake can be undone:
 - Neovim instances on the same machine share a lock, so they don't change the
   filesystem or the history at the same time.
 
+The lock file is stored at `<data>/direct/.direct-history.lock`. Do not run an
+older direct.vim version at the same time as this version: older versions use
+`<data>/.direct-history.lock`, so the two versions would not coordinate with
+each other. The old lock file is left untouched and is harmless once no older
+version is running.
+
 Other programs don't use the lock, and network filesystems are not guaranteed
 to work. `:help direct.vim-data` explains exactly what is guaranteed.
 
