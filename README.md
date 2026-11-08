@@ -11,8 +11,9 @@ the changes. Every filesystem change can be undone and redone.
 - **Edit with Vim.** Use `cw`, `dd`, `o`, `:s`, macros or anything else, then `:w`.
 - **Browse as a tree.** Expand directories in place with the usual fold keys
   (`zo`, `zc`, `zR`, …). To move an entry, change its indentation.
-- **Undo filesystem changes.** `u` and `<C-r>` undo and redo renames, creates,
-  deletes and pastes. The history is kept on disk, so it survives restarts.
+- **Undo filesystem changes.** `u` and `<C-r>` undo and redo saved renames,
+  creates, deletes and pastes. With unsaved listing edits, they undo or redo
+  buffer text instead. The filesystem history survives restarts.
 - **Yank and paste files.** `yy` and `p` copy files and whole directory trees.
 - **Git integration.** Status symbols and colours, a changed-files-only view,
   stage/reset/restore keys, and `.gitignore` filtering.
@@ -123,8 +124,12 @@ automatically.
   filesystem is left alone, and your edits stay in the buffer so you can fix
   them.
 
-`u` / `<C-r>` undo filesystem changes. Use `:undo` / `:redo` to undo only text
-changes in the listing.
+When a listing has unsaved edits, `u` / `<C-r>` (and `:DirectUndo` /
+`:DirectRedo`) undo or redo buffer text only. Once the listing is clean, they
+operate on the filesystem history, except that a local text undo's paired redo
+stays text-only until the listing is refreshed. The default asks before
+changing files outside the current listing; configure `undo_confirm` to change
+that behavior.
 
 ## Key mappings
 
@@ -163,6 +168,7 @@ require('direct').setup({
   show_hidden = true,                -- show dotfiles (toggle with `gh`)
   respect_gitignore = true,          -- hide Git-ignored entries (toggle with `gi`)
   indent_size = 2,                   -- spaces per tree level (integer > 1)
+  undo_confirm = 'elsewhere',        -- true, false, or confirm only outside this listing
   directory_separator = package.config:sub(1, 1), -- '/' or '\\'
   max_recursive_expand_depth = false, -- limit for zO/zR; false = unlimited
   show_folder_icons = true,
@@ -196,6 +202,10 @@ require('direct').setup({
 You can call `setup()` more than once. Each call replaces the previous options,
 and unknown or invalid options are reported as errors instead of being silently
 ignored.
+
+`undo_confirm` controls prompts before filesystem undo/redo: `true` always
+prompts, `false` never prompts, and `'elsewhere'` (the default) prompts only if
+the affected paths are outside the current listing's directory.
 
 With `show_filetype_icons` enabled, file icons use bufferline.nvim's built-in
 basename-based nvim-web-devicons lookup. The dependency is optional; Direct uses
@@ -264,7 +274,7 @@ through `willRenameFiles`, so they can update imports before the file moves.
 | `:DirectListBuffer[!]`     | List the current file's directory; `!` discards its unsaved listing edits |
 | `:DirectListCwd[!]`        | List the working directory; `!` discards its unsaved listing edits |
 | `:DirectSync`              | Apply edits (same as `:write`)                        |
-| `:DirectUndo` / `:DirectRedo` | Undo or redo a filesystem change                   |
+| `:DirectUndo` / `:DirectRedo` | Undo/redo filesystem changes, or text while modified |
 | `:DirectYank`              | Yank the entries in a range                           |
 | `:DirectPaste [dir]`       | Paste here, or into `{dir}`                           |
 | `:DirectPasteAs {name}`    | Paste under a new name                                |

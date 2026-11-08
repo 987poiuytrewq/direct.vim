@@ -1,10 +1,10 @@
 # Spec: direct.vim gap review follow-ups
 
-**Status:** S1 is complete; the remaining tasks are proposed and have not been
-checked item by item. This replaces `direct-vim-remaining-improvements.md`. Its
-main pieces (JSONL history, no-overwrite moves, exclusive `touch`, the safeguard
-on undoing a paste) appear in the current code, but that was not checked item by
-item.
+**Status:** S1 and S2 are complete; the remaining tasks are proposed and have
+not been checked item by item. This replaces `direct-vim-remaining-improvements.md`.
+Its main pieces (JSONL history, no-overwrite moves, exclusive `touch`, the
+safeguard on undoing a paste) appear in the current code, but that was not
+checked item by item.
 
 **Source:** a static review of the code at `debabf2` (November 2026). The
 findings come from reading the code; none has been reproduced in a running
@@ -27,7 +27,7 @@ the problem, or to record that it can't be reproduced.
 | ID | Priority | Status | Task |
 |----|----------|--------|------|
 | S1 | P1 | Complete | Stop opening, navigating or refreshing from throwing away unsaved listing edits |
-| S2 | P1 | Proposed | Make `u` / `<C-r>` safe when the listing has unsaved edits, and make clear what they undo |
+| S2 | P1 | Complete | Make `u` / `<C-r>` safe when the listing has unsaved edits, and make clear what they undo |
 | S3 | P1 | Proposed | Keep a damaged or unrecognised history file instead of wiping it |
 | S4 | P2 | Proposed | Add a way to see, restore from and empty the trash, and keep it from growing forever |
 | S5 | P2 | Proposed | Ask before `gc` discards Git changes, and review the `gc` / `gr` key clashes |
@@ -91,6 +91,14 @@ the buffer, or the user was told and nothing changed. The discard command does
 discard.
 
 ### S2 — `u` reverts changes on disk from anywhere (P1)
+
+**Status: COMPLETE.** Dirty listings route `u` / `<C-r>` and `:DirectUndo` /
+`:DirectRedo` to text undo/redo. Clean listings confirm before changing paths
+outside their directory by default; `undo_confirm` configures the prompt policy.
+The prompt names the action and full affected paths, and the normal action
+summary remains after success. Regression tests cover declining and accepting
+an outside undo, same-directory undo, dirty text undo/redo, and config modes.
+`make test` passes.
 
 **Problem.** In a listing, `u` runs `:DirectUndo`, which reverts the last
 change on disk from one history shared by every listing and every Neovim

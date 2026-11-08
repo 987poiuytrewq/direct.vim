@@ -46,6 +46,24 @@ H.describe('config', function()
     config.clear_mappings()
   end)
 
+  H.it('validates undo confirmation modes and defaults to confirming other directories', function()
+    local config = fresh_config()
+    config.clear_mappings()
+    H.assert_eq(config.defaults.undo_confirm, 'elsewhere',
+      'cross-directory undo confirmation is the default')
+    H.assert_eq(config.setup({ undo_confirm = true }).undo_confirm, true,
+      'always-confirm mode is accepted')
+    H.assert_eq(config.setup({ undo_confirm = false }).undo_confirm, false,
+      'never-confirm mode is accepted')
+    H.assert_eq(config.setup({ undo_confirm = 'elsewhere' }).undo_confirm, 'elsewhere',
+      'outside-only confirmation mode is accepted')
+    H.capture_messages()
+    H.assert_eq(config.setup({ undo_confirm = 'sometimes' }).undo_confirm, 'elsewhere',
+      'an invalid mode retains the default')
+    H.assert_notified('undo_confirm must be true, false, or', vim.log.levels.ERROR)
+    config.clear_mappings()
+  end)
+
   H.it('two setup() calls converge on the same options', function()
     local config = fresh_config()
     config.clear_mappings()

@@ -608,6 +608,72 @@ local function action_paths(action)
   return result
 end
 
+-- Paths changed on disk by a reversal, excluding the private trash/register
+-- storage roots. These are the paths shown in the confirmation before an
+-- operation that is outside the current listing.
+local function affected_paths(action, result)
+  result = result or {}
+  if type(action) ~= 'table' then return result end
+  local function add(path)
+    if type(path) ~= 'string' or path == '' then return end
+    for _, existing in ipairs(result) do
+      if M.paths.canonical(existing) == M.paths.canonical(path) then return end
+    end
+    result[#result + 1] = path
+  end
+  local name = action.name
+  if name == 'g' then
+    for _, member in ipairs(action.actions or {}) do
+      affected_paths(member, result)
+    end
+  elseif name == 'mv' then
+    add(action.src)
+    add(action.dst)
+  elseif name == 'rm' or name == 'rmdir' then
+    add(action.src)
+  elseif name == 'rs' or name == 'rsdir' then
+    add(action.dst)
+  elseif name == 'touch' or name == 'mkdir' then
+    add(action.dst)
+  elseif name == 'p' then
+    if #(action.renames or {}) == 0 then add(action.dst) end
+    for _, pair in ipairs(action.renames or {}) do
+      add(M.action.fs.join(action.dst, pair.dst))
+    end
+  elseif name == 'up' then
+    if #(action.renames or {}) == 0 then add(action.src) end
+    for _, pair in ipairs(action.renames or {}) do
+      add(M.action.fs.join(action.src, pair.src))
+    end
+  else
+    add(action.src)
+    add(action.dst)
+  end
+  return result
+end
+
+-- preview_reverse(which) reads the current top action without applying it. The
+-- returned record can be passed back to _reverse_async as expected_record so a
+-- confirmation can never approve one action and execute a different one.
+function M.preview_reverse(which)
+  if which ~= 'undo' and which ~= 'redo' then
+    return nil, 'history.preview_reverse: expected undo or redo'
+  end
+  local state, preflight_err = M.preflight()
+  if not state then return nil, preflight_err end
+  local lines = which == 'undo' and state.undo_lines or state.redo_lines
+  if #lines <= 1 then return { empty = true } end
+  local record = lines[#lines]
+  local reversal, reverse_err = M.action.reverse(record)
+  if not reversal then return nil, reverse_err end
+  return {
+    record = record,
+    action = reversal,
+    summary = M.action.summarize({ reversal }),
+    paths = affected_paths(reversal),
+  }
+end
+
 -- apply(action, execute) runs one synchronous filesystem action and commits its
 -- history while holding the process lock for the entire critical section. The
 -- durable intent journal supports restart recovery; keeping
@@ -1000,12 +1066,12 @@ local function finish_callback(callback, result, err)
   end
 end
 
-function M.undo_async(callback)
-  return M._reverse_async('undo', callback)
+function M.undo_async(callback, options)
+  return M._reverse_async('undo', callback, options)
 end
 
-function M.redo_async(callback)
-  return M._reverse_async('redo', callback)
+function M.redo_async(callback, options)
+  return M._reverse_async('redo', callback, options)
 end
 
 function M._reverse_async(which, callback, options)
