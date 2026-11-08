@@ -11,7 +11,7 @@
 -- not grouped in memory: the critical test below performs the swap in THIS
 -- process and undoes it in a real second `nvim --headless -l` process.
 --
--- Unsupported and malformed history is reset silently without executing entries.
+-- Recognized legacy logs are backed up before reset; malformed logs are preserved.
 
 local H = require('tests.support.harness')
 local fixtures = require('tests.support.history_fixtures')
@@ -281,8 +281,9 @@ local function swap_line(ws)
     H.assert_eq(vim.fn.readfile(ws .. '/c.txt'), { 'CONTENT-B' })
   end)
 
-  H.it('a recognized superseded #direct-history-v2 log resets without replay or backup', function()
+  H.it('a recognized superseded #direct-history-v2 log resets after backup, never replayed', function()
     local _, history, fs = modules()
+    local log = require('direct.log')
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
     -- The state an older version left after a swap, with its log: TWO
@@ -297,8 +298,7 @@ local function swap_line(ws)
 
     H.capture_messages()
     H.assert_nil(history.undo(), 'a superseded log yields no undo step')
-    H.assert_false(H.messages():find('resetting legacy', 1, true) ~= nil,
-      'unsupported history is discarded silently')
+    H.assert_notified('legacy history was backed up and reset', vim.log.levels.WARN)
 
     -- Nothing was half-applied and no content was destroyed.
     H.assert_eq(vim.fn.readfile(ws .. '/a.txt'), { 'CONTENT-B' },
@@ -309,7 +309,12 @@ local function swap_line(ws)
     local undo_path = vim.fs.joinpath(sb.data_home, 'direct/history/undo.log')
     H.assert_eq(vim.fn.readfile(undo_path), { MARKER },
       'the recognized v2 log is reset to header-only current JSONL')
-    H.assert_false(fs.exists(undo_path .. '.legacy'), 'no backup is created')
+    local backup = vim.fn.glob(undo_path .. '.backup-*')
+    H.assert_true(backup ~= '', 'the legacy bytes have a timestamped backup')
+    H.assert_eq(log.read_raw(backup), V2_MARKER .. '\n'
+      .. 'mv\t' .. ws .. '/a.txt\t' .. ws .. '/b.txt\n'
+      .. 'mv\t' .. ws .. '/b.txt\t' .. ws .. '/a.txt\n',
+      'the legacy backup is byte-for-byte')
 
     H.capture_messages()
     H.assert_nil(history.undo(), 'the reset log has no records')
@@ -713,8 +718,9 @@ local function swap_line(ws)
     }), { { 1 }, { 2, 3 }, { 4 } }, 'a non-move action is its own singleton')
   end)
 
-  H.it('a malformed JSON group record is discarded silently, never executed', function()
+  H.it('a malformed JSON group record is preserved and never executed', function()
     local _, history, fs = modules()
+    local log = require('direct.log')
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
     H.mkfile(ws, 'a.txt', { 'CONTENT-A' })
@@ -726,13 +732,14 @@ local function swap_line(ws)
 
     H.capture_messages()
     H.assert_nil(history.undo(), 'discarded history has no undo entry')
-    H.assert_eq(H.messages(), 'Nothing to undo', 'discarding is silent')
+    H.assert_notified('undo.log', vim.log.levels.ERROR)
     H.assert_eq(vim.fn.readfile(ws .. '/a.txt'), { 'CONTENT-A' },
       'nothing was moved')
     H.assert_eq(vim.fn.readfile(ws .. '/b.txt'), { 'CONTENT-B' },
       'nothing was moved')
     H.assert_false(fs.exists(ws .. '/.direct-tmp-1'), 'no staging happened')
-    H.assert_eq(history_lines('undo.log'), { MARKER },
-      'the malformed record is discarded')
+    H.assert_eq(log.read_raw(vim.fs.joinpath(sb.data_home,
+      'direct/history/undo.log')), MARKER .. '\n' .. bad .. '\n',
+      'the malformed record remains byte-for-byte')
   end)
 end)

@@ -1,6 +1,6 @@
 # Spec: direct.vim gap review follow-ups
 
-**Status:** S1 and S2 are complete; the remaining tasks are proposed and have
+**Status:** S1, S2 and S3 are complete; the remaining tasks are proposed and have
 not been checked item by item. This replaces `direct-vim-remaining-improvements.md`.
 Its main pieces (JSONL history, no-overwrite moves, exclusive `touch`, the
 safeguard on undoing a paste) appear in the current code, but that was not
@@ -28,7 +28,7 @@ the problem, or to record that it can't be reproduced.
 |----|----------|--------|------|
 | S1 | P1 | Complete | Stop opening, navigating or refreshing from throwing away unsaved listing edits |
 | S2 | P1 | Complete | Make `u` / `<C-r>` safe when the listing has unsaved edits, and make clear what they undo |
-| S3 | P1 | Proposed | Keep a damaged or unrecognised history file instead of wiping it |
+| S3 | P1 | Complete | Keep a damaged or unrecognised history file instead of wiping it |
 | S4 | P2 | Proposed | Add a way to see, restore from and empty the trash, and keep it from growing forever |
 | S5 | P2 | Proposed | Ask before `gc` discards Git changes, and review the `gc` / `gr` key clashes |
 | S6 | P3 | Proposed | Add an optional preview of the planned changes before `:w` applies them |
@@ -125,6 +125,13 @@ declining changes nothing. An undo in the same directory works as it does
 now.
 
 ### S3 — Damaged history is wiped silently (P1)
+
+**Status: COMPLETE.** Missing and empty logs start fresh. Recognized legacy
+Python logs are backed up before a warned reset; damaged, future, or unknown
+logs remain byte-for-byte and block operations. `:DirectHistoryReset` backs up
+readable non-empty stacks before resetting them. Tests cover malformed JSONL,
+unknown versions, invalid UTF-8, missing final newlines, legacy backups, and the
+explicit reset command. `make test` passes.
 
 **Problem.** `history_format.classify` returns `reset` for any file it
 doesn't recognise: a bad line, a missing final newline, a different header or

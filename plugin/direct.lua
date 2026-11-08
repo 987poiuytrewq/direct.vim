@@ -126,6 +126,10 @@ vim.api.nvim_create_user_command('DirectRedo', function()
   require('direct').redo()
 end, { nargs = 0, desc = 'direct: redo the last undone action' })
 
+vim.api.nvim_create_user_command('DirectHistoryReset', function()
+  require('direct').reset_history()
+end, { nargs = 0, desc = 'direct: back up and reset filesystem history' })
+
 vim.api.nvim_create_user_command('DirectYank', function(args)
   require('direct').yank(args.line1, args.line2)
 end, { nargs = 0, range = true, desc = 'direct: yank the ranged entries' })
