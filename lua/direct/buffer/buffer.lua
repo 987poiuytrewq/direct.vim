@@ -75,16 +75,18 @@ end
 local refresh_highlights
 
 local function start_git_status(bufnr, state, timeout_ms)
+  if state.git_status_cancel then state.git_status_cancel() end
   local request = {}
   state.git_status_request = request
   state.git_status_pending = true
-  git.read_async(state.root, timeout_ms, function(snapshot, err)
+  local cancel = git.read_async(state.root, timeout_ms, function(snapshot, err)
     if not vim.api.nvim_buf_is_valid(bufnr) or states[bufnr] ~= state
       or state.git_status_request ~= request then
       return
     end
     if not fs.stat(state.root) then return end
     state.git_status_request = nil
+    state.git_status_cancel = nil
     state.git_status_pending = false
     state.git_status = snapshot or false
 
@@ -113,6 +115,18 @@ local function start_git_status(bufnr, state, timeout_ms)
     refresh_highlights(bufnr, state, row_ids)
     refresh_icons(bufnr, state, row_ids)
   end)
+  if state.git_status_request == request then state.git_status_cancel = cancel end
+end
+
+function M.cancel_git_status(bufnr)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  local state = states[bufnr]
+  if not state then return false end
+  if state.git_status_cancel then state.git_status_cancel() end
+  state.git_status_cancel = nil
+  state.git_status_request = nil
+  state.git_status_pending = false
+  return true
 end
 
 refresh_highlights = function(bufnr, state, row_ids)
@@ -820,6 +834,11 @@ function Buffer:list(options)
     return nil, reason
   end
   local old_state = states[bufnr]
+  if old_state and old_state.git_status_cancel then
+    old_state.git_status_cancel()
+    old_state.git_status_cancel = nil
+    old_state.git_status_request = nil
+  end
   local view_git_status_only = old_state
     and old_state.view_git_status_only == true or false
   local show_hidden_override

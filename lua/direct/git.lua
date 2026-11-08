@@ -174,6 +174,19 @@ function M.read_async(root, timeout_ms, callback)
     callback(snapshot, err, timed_out == true)
   end
 
+  local function cancel()
+    if finished then return false end
+    finished = true
+    if timer then
+      timer:stop()
+      if not timer:is_closing() then timer:close() end
+      timer = nil
+    end
+    local running = process
+    if running then pcall(running.kill, running, 15) end
+    return true
+  end
+
   timer = vim.uv.new_timer()
   timer:start(timeout_ms, 0, function()
     vim.schedule(function()
@@ -213,7 +226,7 @@ function M.read_async(root, timeout_ms, callback)
     end
     local repo_root = normalize((result.stdout or ''):gsub('[\r\n]+$', ''))
     process = nil
-    spawn({ 'git', '-C', repo_root, 'status', '--porcelain=v1', '-z',
+    spawn({ 'git', '--no-optional-locks', '-C', repo_root, 'status', '--porcelain=v1', '-z',
       '--untracked-files=all', '--ignored=matching' }, function(status_result)
       if status_result.code ~= 0 then
         local err = status_result.stderr and status_result.stderr:gsub('%s+$', '')
@@ -224,7 +237,7 @@ function M.read_async(root, timeout_ms, callback)
       finish(parse_status(repo_root, status_result.stdout or '', true), nil, false)
     end)
   end)
-  return true
+  return cancel
 end
 
 -- deleted_children(snapshot, directory) returns absent tracked entries directly

@@ -318,6 +318,7 @@ function M.git(command)
     return nil
   end
   if pending.refuse('run a Git command') then return nil end
+  buffer.cancel_git_status()
   return run.current_entry(command, function(_, bufnr, root)
     buffer.refresh_git_status(bufnr, root)
   end, { quiet_success = true })
@@ -367,6 +368,7 @@ function M.restore_git()
     return nil, reason
   end
 
+  buffer.cancel_git_status()
   return run.current_entry(git_status.worktree_restore_command(listing.root),
     function(_, bufnr, root) buffer.refresh_git_status(bufnr, root) end,
     { quiet_success = true })
