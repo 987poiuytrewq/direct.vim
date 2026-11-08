@@ -42,6 +42,7 @@ H.describe('command workflows: filesystem and listing stay in sync', function()
     set_listing({ 'after.txt' }, bufnr)
     local write_ok, write_err = pcall(vim.cmd, 'write')
     H.assert_true(write_ok, 'rename writes through :write: ' .. tostring(write_err))
+    H.wait_for_direct()
     H.assert_fs_eq(ws, { 'after.txt' }, 'the rename is on disk')
     H.assert_eq(vim.fn.readfile(ws .. '/after.txt'), { 'preserve these bytes' },
       'rename preserves file contents')
@@ -49,6 +50,7 @@ H.describe('command workflows: filesystem and listing stay in sync', function()
     H.assert_false(vim.bo[bufnr].modified, 'successful write clears modified state')
 
     vim.api.nvim_feedkeys('u', 'mx', false)
+    H.wait_for_direct()
     H.assert_fs_eq(ws, { 'before.txt' }, 'filesystem undo restores the original path')
     H.assert_eq(vim.fn.readfile(ws .. '/before.txt'), { 'preserve these bytes' },
       'undo preserves the original contents')
@@ -57,6 +59,7 @@ H.describe('command workflows: filesystem and listing stay in sync', function()
 
     vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<C-r>', true, false, true),
       'mx', false)
+    H.wait_for_direct()
     H.assert_fs_eq(ws, { 'after.txt' }, 'filesystem redo reapplies the rename')
     H.assert_eq(vim.fn.readfile(ws .. '/after.txt'), { 'preserve these bytes' },
       'redo preserves the file contents')
@@ -80,6 +83,7 @@ H.describe('command workflows: filesystem and listing stay in sync', function()
 
     list_dir(destination)
     vim.cmd('DirectPaste')
+    H.wait_for_direct()
     H.assert_fs_eq(destination, { 'tree/', 'tree/inside.txt' },
       'paste copies the full directory tree')
     H.assert_eq(vim.fn.readfile(destination .. '/tree/inside.txt'), { 'nested contents' },
@@ -89,11 +93,13 @@ H.describe('command workflows: filesystem and listing stay in sync', function()
     H.assert_fs_eq(source, { 'tree/', 'tree/inside.txt' }, 'paste leaves the source intact')
 
     vim.cmd('DirectUndo')
+    H.wait_for_direct()
     H.assert_fs_eq(destination, {}, 'undo removes the pasted tree')
     H.assert_buf_eq({ '' }, 0, 'undo refreshes an empty destination listing')
     H.assert_fs_eq(source, { 'tree/', 'tree/inside.txt' }, 'undo leaves the source intact')
 
     vim.cmd('DirectRedo')
+    H.wait_for_direct()
     H.assert_fs_eq(destination, { 'tree/', 'tree/inside.txt' }, 'redo restores the pasted tree')
     H.assert_buf_eq({ 'tree/' }, 0, 'redo refreshes the destination listing')
   end)
@@ -128,6 +134,7 @@ H.describe('command workflows: filesystem and listing stay in sync', function()
     local retry_ok, retry_err = pcall(vim.cmd, 'write')
 
     H.assert_true(retry_ok, 'a corrected edit can be written: ' .. tostring(retry_err))
+    H.wait_for_direct()
     H.assert_fs_eq(ws, { 'a.txt', 'renamed-b.txt' }, 'the corrected rename reaches disk')
     H.assert_eq(vim.fn.readfile(ws .. '/a.txt'), { 'A' }, 'the untouched file is preserved')
     H.assert_eq(vim.fn.readfile(ws .. '/renamed-b.txt'), { 'B' },
@@ -171,6 +178,7 @@ H.describe('command workflows: filesystem and listing stay in sync', function()
       set_listing({ 'renamed.txt' }, bufnr)
       local retry_ok, retry_err = pcall(vim.cmd, 'DirectSync')
       H.assert_true(retry_ok, 'the corrected rename succeeds: ' .. tostring(retry_err))
+      H.wait_for_direct()
 
       H.assert_fs_eq(ws, { 'occupied.log', 'renamed.txt' }, 'the corrected name is on disk')
       H.assert_eq(vim.fn.readfile(ws .. '/renamed.txt'), { 'SOURCE' },

@@ -62,6 +62,42 @@ H.describe('fs', function()
     H.assert_true(type(e) == 'string' and #e > 0, 'rm_file(nil) carries an err')
   end)
 
+  H.it('rename_async copies a cross-device directory off the editor loop and reports progress', function()
+    local sb = H.sandbox()
+    local source = H.mkdir(sb.root, 'source/nested')
+    H.mkfile(source, 'first.txt', { 'first content' })
+    H.mkfile(sb.root, 'source/second.txt', { 'second content' })
+    local src, dst = sb.root .. '/source', sb.root .. '/destination'
+    local original_rename = fs.rename_noreplace
+    local injected = false
+    fs.rename_noreplace = function(from, to, identity)
+      if from == src and to == dst and not injected then
+        injected = true
+        return nil, 'EXDEV: forced cross-device move', 'EXDEV'
+      end
+      return original_rename(from, to, identity)
+    end
+
+    local finished, result, move_err, progress_count = false, nil, nil, 0
+    fs.rename_async(src, dst, function(ok, value, err)
+      finished, result, move_err = true, ok and value or nil, err
+    end, function(stage, copied)
+      if stage == 'copying' then progress_count = progress_count + 1
+      elseif type(stage) == 'number' then progress_count = progress_count + 1 end
+    end)
+    fs.rename_noreplace = original_rename
+
+    H.assert_false(finished, 'cross-device tree copying returns before completion')
+    H.assert_true(vim.wait(5000, function() return finished end),
+      'the asynchronous directory move completes')
+    H.assert_true(result == true, 'move succeeds: ' .. tostring(move_err))
+    H.assert_true(injected, 'the cross-device branch was exercised')
+    H.assert_true(progress_count > 0, 'copy progress was reported')
+    H.assert_false(fs.exists(src), 'the verified source tree is removed')
+    H.assert_fs_eq(dst, { 'nested/', 'nested/first.txt', 'second.txt' },
+      'the complete directory tree is copied to the destination')
+  end)
+
   H.it('same_path is ino+dev for two spellings of a symlinked prefix', function()
     local sb = H.sandbox()
     H.mkdir(sb.root, 'outer/sub')

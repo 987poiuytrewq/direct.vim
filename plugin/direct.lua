@@ -75,7 +75,10 @@ vim.api.nvim_create_user_command('DirectListCwd', function(args)
 end, { nargs = 0, bang = true, desc = 'direct: list the current working directory' })
 
 vim.api.nvim_create_user_command('DirectSync', function()
-  require('direct').sync()
+  local synced, err = require('direct').sync(function() end)
+  if synced == nil and err ~= 'another direct operation is pending' then
+    error(err or 'sync refused')
+  end
 end, { nargs = 0, desc = 'direct: sync the listing with the filesystem' })
 
 vim.api.nvim_create_user_command('DirectFoldAll', function()

@@ -38,6 +38,7 @@ H.describe('trash management', function()
     H.assert_false(metadata.reserved, 'a newly deleted entry is not a reservation')
 
     vim.cmd('DirectUndo')
+    H.wait_for_direct()
     local after_undo = trash.entries()
     H.assert_eq(#after_undo, 0, 'restored entries are not shown as trashed items')
     H.assert_true(vim.uv.fs_lstat(entry.path) ~= nil,
@@ -45,6 +46,7 @@ H.describe('trash management', function()
     H.assert_true(H.exists(ws, 'gone.txt'), 'undo restores the deleted item')
 
     vim.cmd('DirectRedo')
+    H.wait_for_direct()
     local after_redo = trash.entries()
     H.assert_eq(#after_redo, 1,
       'redo uses a fresh trash slot and hides the old reservation')

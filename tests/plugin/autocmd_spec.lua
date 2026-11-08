@@ -71,6 +71,7 @@ H.describe('autocmd ownership', function()
     vim.api.nvim_set_current_buf(first_buf)
     local first_ok, first_err = pcall(vim.cmd, 'write')
     H.assert_true(first_ok, 'first buffer writes without error: ' .. tostring(first_err))
+    H.wait_for_direct()
     H.assert_fs_eq(first_dir, { 'first-created', 'first-existing' },
       'first write syncs only the first directory')
     H.assert_fs_eq(second_dir, { 'second-existing' },
@@ -81,6 +82,7 @@ H.describe('autocmd ownership', function()
     vim.api.nvim_set_current_buf(second_buf)
     local second_ok, second_err = pcall(vim.cmd, 'write')
     H.assert_true(second_ok, 'second buffer writes without error: ' .. tostring(second_err))
+    H.wait_for_direct()
     H.assert_fs_eq(second_dir, { 'second-created', 'second-existing' },
       'second write syncs only the second directory')
 
@@ -99,6 +101,7 @@ H.describe('autocmd ownership', function()
     local remaining_ok, remaining_err = pcall(vim.cmd, 'write')
     H.assert_true(remaining_ok,
       'second buffer remains writable after first wipe: ' .. tostring(remaining_err))
+    H.wait_for_direct()
     H.assert_fs_eq(second_dir, { 'second-created', 'second-created-again', 'second-existing' },
       'second buffer still syncs its own directory after first wipe')
 
@@ -121,6 +124,7 @@ H.describe('autocmd ownership', function()
     local recovered_ok, recovered_err = pcall(vim.cmd, 'write')
     H.assert_true(recovered_ok,
       'second buffer writes after a refused sync: ' .. tostring(recovered_err))
+    H.wait_for_direct()
     H.assert_fs_eq(second_dir,
       { 'second-after-failure', 'second-created', 'second-created-again', 'second-existing' },
       'second buffer remains usable after a refused sync')
