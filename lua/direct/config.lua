@@ -12,6 +12,7 @@ local defaults = {
   show_hidden = true,
   respect_gitignore = true,
   indent_size = 2,
+  undo_confirm = 'elsewhere',
   show_folder_icons = true,
   show_file_icons = true,
   show_filetype_icons = true,
@@ -321,6 +322,10 @@ function M.setup(opts)
       require('direct.ui').notify(
         'direct: indent_size must be an integer greater than 1',
         vim.log.levels.ERROR)
+    elseif key == 'undo_confirm'
+      and value ~= false and value ~= true and value ~= 'elsewhere' then
+      require('direct.ui').notify(
+        "direct: undo_confirm must be true, false, or 'elsewhere'", vim.log.levels.ERROR)
     elseif key == 'directory_separator'
       and value ~= '/' and value ~= '\\' then
       require('direct.ui').notify(

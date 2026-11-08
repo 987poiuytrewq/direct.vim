@@ -298,15 +298,20 @@ trailing dots or spaces are rejected when you save.
 ==============================================================================
 6. Undo and redo                                             *direct.vim-undo*
 
-In a listing, `u` and `<C-r>` undo and redo the last filesystem action, such
-as a save or a paste. They are the same as |:DirectUndo| and |:DirectRedo|.
+In a clean listing, `u` and `<C-r>` undo and redo the last filesystem action,
+such as a save or a paste. They are the same as |:DirectUndo| and |:DirectRedo|.
+When the listing has unsaved edits, these keys and commands instead use the
+buffer's text undo/redo and do not touch the filesystem history. After text undo
+returns the listing to its clean baseline, the paired redo remains text-only
+until the listing is refreshed.
 
 The history is stored on disk, so it survives restarting Neovim and is shared
 by every listing. See |direct.vim-data|.
 
-Use |:undo| and |:redo| to undo text changes in the listing. Text undo only
-changes buffer lines; it never renames, creates, deletes or restores anything
-on disk.
+Before undoing or redoing paths outside the current listing's directory,
+direct.vim asks what will change and where. Set |direct-undo_confirm| to change
+when this confirmation is shown. The action summary is still shown after a
+successful undo or redo.
 
 ==============================================================================
 7. Yank and paste                                            *direct.vim-yank*
@@ -527,6 +532,7 @@ Calling `setup()` is optional. These are the defaults:
       show_hidden = true,
       respect_gitignore = true,
       indent_size = 2,
+      undo_confirm = 'elsewhere',
       directory_separator = package.config:sub(1, 1),
       max_recursive_expand_depth = false,
       show_folder_icons = true,
@@ -576,9 +582,15 @@ respect_gitignore       boolean (default: `true`)
     Hide Git-ignored entries. `gi` (|:DirectToggleGitIgnore|) toggles this in
     the current listing. See |direct.vim-git-ignore|.
 
-                                                          *direct-indent_size*
+                                                           *direct-indent_size*
 indent_size             integer (default: `2`)
     Spaces per tree level in expanded directories. Must be greater than 1.
+
+                                                        *direct-undo_confirm*
+undo_confirm             `true`, `false` or `'elsewhere'` (default)
+    Confirm before filesystem undo/redo always (`true`), never (`false`), or
+    only when the affected paths are outside the current listing directory
+    (`'elsewhere'`).
 
                                                   *direct-directory_separator*
 directory_separator     `'/'` or `'\'` (default: the platform separator)
@@ -722,11 +734,13 @@ Editing ~
 
                                                                  *:DirectUndo*
 :DirectUndo
-    Undo the last filesystem action.
+    Undo the last filesystem action when the listing is clean. With unsaved
+    listing edits, undo text only.
 
                                                                  *:DirectRedo*
 :DirectRedo
-    Redo the last undone filesystem action.
+    Redo the last filesystem action when the listing is clean. With unsaved
+    listing edits, redo text only.
 
                                                                  *:DirectYank*
 :[range]DirectYank

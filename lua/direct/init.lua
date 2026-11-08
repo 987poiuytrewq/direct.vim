@@ -12,6 +12,8 @@ local ui = require('direct.ui')
 local constants = require('direct.constants')
 local pending = require('direct.pending')
 local run = require('direct.run')
+local fs = require('direct.fs')
+local paths = require('direct.paths')
 
 local function paste_and_refresh(destination, name)
   return register.paste(destination, name, function(result, _, _, changed, pasted_entry)
@@ -143,24 +145,71 @@ function M.previous_file()
   return buffer.previous_file()
 end
 
-function M.undo()
-  if not guard('DirectUndo') then
-    return nil
+local function path_is_within(root, path)
+  root = paths.canonical(fs.realpath(root))
+  path = paths.canonical(fs.realpath(path))
+  if path == root then return true end
+  local prefix = root == '/' and '/' or (root .. '/')
+  return path:sub(1, #prefix) == prefix
+end
+
+local function reverse(which)
+  local command = which == 'undo' and 'DirectUndo' or 'DirectRedo'
+  if not guard(command) then return nil end
+  if pending.refuse(which) then return nil end
+
+  local bufnr = vim.api.nvim_get_current_buf()
+  if vim.bo[bufnr].modified or vim.b[bufnr].direct_text_undo_mode == true then
+    -- In a dirty listing the familiar keys operate on the buffer's text undo
+    -- tree, never on the shared filesystem history. Stay in that mode for the
+    -- paired redo even if text undo returns the buffer to its clean baseline.
+    vim.cmd(which == 'undo' and 'undo' or 'redo')
+    vim.b[bufnr].direct_text_undo_mode = true
+    return true
   end
-  if pending.refuse('undo') then return nil end
-  return history.undo_async(function(result)
-    if result ~= nil then buffer.restore():list({ allow_modified = true }) end
-  end)
+
+  local options = require('direct.config').options.undo_confirm
+  local expected_record
+  if options ~= false then
+    local preview, preview_err = history.preview_reverse(which)
+    if not preview then return nil, preview_err end
+    if not preview.empty then
+      expected_record = preview.record
+      local root = buffer.restore().root
+      local outside = false
+      for _, path in ipairs(preview.paths or {}) do
+        if not path_is_within(root, path) then
+          outside = true
+          break
+        end
+      end
+      if options == true or (options == 'elsewhere' and outside) then
+        local paths_text = table.concat(preview.paths or {}, '\n')
+        local prompt = string.format('%s this filesystem change?\n\n%s\n\nAffected paths:\n%s',
+          which == 'undo' and 'Undo' or 'Redo', preview.summary, paths_text)
+        if vim.fn.confirm(prompt,
+            which == 'undo' and '&Undo\n&Cancel' or '&Redo\n&Cancel', 2) ~= 1 then
+          return nil
+        end
+      end
+    end
+  end
+
+  local refresh = function(result)
+    if result ~= nil then
+      buffer.restore():list({ allow_modified = true, reset_undo = true })
+    end
+  end
+  local reverse_options = expected_record and { expected_record = expected_record } or nil
+  return history[which .. '_async'](refresh, reverse_options)
+end
+
+function M.undo()
+  return reverse('undo')
 end
 
 function M.redo()
-  if not guard('DirectRedo') then
-    return nil
-  end
-  if pending.refuse('redo') then return nil end
-  return history.redo_async(function(result)
-    if result ~= nil then buffer.restore():list({ allow_modified = true }) end
-  end)
+  return reverse('redo')
 end
 
 -- The range is normalised so an upward visual selection works; a nil range means the current line.

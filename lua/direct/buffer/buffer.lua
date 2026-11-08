@@ -614,7 +614,7 @@ local function set_options(bufnr)
       if vim.bo[args.buf].modified then
         vim.cmd('DirectSync')
       else
-        M.restore():list()
+        M.restore():list({ reset_undo = true })
       end
     end,
     desc = 'direct: sync the listing on :write',
@@ -624,7 +624,7 @@ local function set_options(bufnr)
     buffer = bufnr,
     callback = function(args)
       vim.api.nvim_set_current_buf(args.buf)
-      M.restore():list()
+      M.restore():list({ reset_undo = true })
     end,
     desc = 'direct: refresh the listing on :edit',
   })
@@ -992,15 +992,22 @@ function Buffer:list(options)
   end
   local cursor = vim.api.nvim_win_get_cursor(0)
   vim.api.nvim_buf_clear_namespace(bufnr, namespace, 0, -1)
+  -- Initial listings and committed internal refreshes establish a fresh text
+  -- undo baseline. Ordinary re-lists preserve prior expansion undo sequences.
+  local reset_undo = options.reset_undo or options.discard or not old_state
+  local undo_levels = vim.bo[bufnr].undolevels
+  if reset_undo then vim.bo[bufnr].undolevels = -1 end
   if old_state then old_state.suppress_deleted_guard = true end
   local ok, seterr = pcall(vim.api.nvim_buf_set_lines, bufnr, 0, -1, false, display)
   if old_state then old_state.suppress_deleted_guard = nil end
+  if reset_undo then vim.bo[bufnr].undolevels = undo_levels end
   if not ok then
     ui.notify('direct: cannot list ' .. tostring(self.root) .. ': '
       .. tostring(seterr), vim.log.levels.ERROR)
     return nil, seterr
   end
   states[bufnr] = state
+  vim.b[bufnr].direct_text_undo_mode = false
   for row, item in ipairs(rendered) do
     set_row_mark(bufnr, row - 1, item.id)
   end
@@ -1362,7 +1369,7 @@ function M.toggle_hidden()
   state.materialization_undos = {}
   state.materialization_recoveries = {}
   state.collapse_undos = {}
-  local listed, err = M.restore():list()
+  local listed, err = M.restore():list({ reset_undo = true })
   if not listed then
     for key, value in pairs(previous) do state[key] = value end
     return nil, err
@@ -1407,7 +1414,7 @@ local function set_git_status_only(enabled)
   state.materialization_undos = {}
   state.materialization_recoveries = {}
   state.collapse_undos = {}
-  local listed, err = M.restore():list()
+  local listed, err = M.restore():list({ reset_undo = true })
   if not listed then
     for key, value in pairs(previous) do state[key] = value end
     return nil, err
@@ -1450,7 +1457,7 @@ function M.toggle_gitignore()
   state.materialization_undos = {}
   state.materialization_recoveries = {}
   state.collapse_undos = {}
-  local listed, err = M.restore():list()
+  local listed, err = M.restore():list({ reset_undo = true })
   if not listed then
     for key, value in pairs(previous) do state[key] = value end
     return nil, err
@@ -2141,7 +2148,7 @@ local function sync_locked(self, options)
       table.sort(reopen, function(a, b) return a.depth < b.depth end)
     end
   end
-  self:list({ allow_modified = true })
+  self:list({ allow_modified = true, reset_undo = true })
   -- Re-materialize only the edited scopes, now from the filesystem's committed
   -- state. Other expanded branches retain their original identities and view.
   for _, target in ipairs(reopen) do
@@ -2364,7 +2371,7 @@ end
 function Buffer:refresh_after_paste(destination, pasted_entry)
   local bufnr = vim.api.nvim_get_current_buf()
   local state = states[bufnr]
-  if not state then return self:list({ allow_modified = true }) end
+  if not state then return self:list({ allow_modified = true, reset_undo = true }) end
 
   local expanded_paths, destination_id = {}, nil
   for id in pairs(state.expanded or {}) do
@@ -2388,7 +2395,7 @@ function Buffer:refresh_after_paste(destination, pasted_entry)
     remove_expanded_subtree(bufnr, state, destination_id)
   end
 
-  local ok, err = self:list({ allow_modified = true })
+  local ok, err = self:list({ allow_modified = true, reset_undo = true })
   if not ok then return nil, err end
 
   local function visible_row(path)
