@@ -406,8 +406,8 @@ are directories that contain them. Their names use the colour of their status.
 Hide these rows with |direct-git.show_deleted|.
 
 You can expand and collapse deleted rows, run |:DirectRun| or |:DirectGit| on
-them, and stage, reset or restore them with `ga`, `gr` and `gc`. Edits, opens,
-yanks and pastes on them are ignored.
+them, and stage, unstage or restore them with `ga`, `<leader>gu` and
+`<leader>gr`. Edits, opens, yanks and pastes on them are ignored.
 
 Showing only changes ~
                                                          *direct.vim-git-view*
@@ -432,11 +432,14 @@ ones), and stop at the ends rather than wrapping.
 Staging ~
 
     ga          `git add -- {entry}`
-    gr          `git reset -- {entry}`
-    gc          `git checkout -- {entry}`
+    <leader>gu  `git reset -- {entry}`
+    <leader>gr  |:DirectGitRestore|
 
-These run through |:DirectGit|, so the status display refreshes when they
-finish.
+`ga` and `<leader>gu` run through |:DirectGit|. `<leader>gr` asks before
+discarding tracked worktree changes, naming the selected path and number of
+changed files it covers. It leaves staged-only and untracked files alone, then
+uses `git restore --worktree` where available (falling back to `git checkout`
+on older Git). The status display refreshes when the command finishes.
 
 Ignore filtering ~
                                                        *direct.vim-git-ignore*
@@ -852,6 +855,12 @@ Running commands ~
 :DirectGit {command}
     Like |:DirectRun|, then refresh the Git status in the listing.
 
+                                                          *:DirectGitRestore*
+:DirectGitRestore
+    Ask before restoring the tracked worktree changes under the entry. A
+    directory row covers its changed tracked descendants. Staged-only and
+    untracked files are left alone.
+
 ==============================================================================
 14. Mappings                                             *direct.vim-mappings*
 
@@ -889,8 +898,8 @@ In a listing (buffer-local):
     n       ]f  [f          |:DirectNextFile| and |:DirectPreviousFile|
     n       ]c  [c          |:DirectNextChange| and |:DirectPreviousChange|
     n       ga              `:DirectGit git add -- {}`
-    n       gr              `:DirectGit git reset -- {}`
-    n       gc              `:DirectGit git checkout -- {}`
+    n       <leader>gu      `:DirectGit git reset -- {}` (unstage)
+    n       <leader>gr      |:DirectGitRestore| (confirm worktree restore)
 
 In a listing, the buffer-local `-` takes priority over the global one.
 

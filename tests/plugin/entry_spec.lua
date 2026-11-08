@@ -62,8 +62,8 @@ local EXPECTED_N = {
   ['P'] = '<Cmd>DirectPaste<CR>',
   ['gh'] = '<Cmd>DirectToggleHidden<CR>',
   ['ga'] = '<Cmd>DirectGit git add -- {}<CR>',
-  ['gr'] = '<Cmd>DirectGit git reset -- {}<CR>',
-  ['gc'] = '<Cmd>DirectGit git checkout -- {}<CR>',
+  ['\\gu'] = '<Cmd>DirectGit git reset -- {}<CR>',
+  ['\\gr'] = '<Cmd>DirectGitRestore<CR>',
   ['gs'] = '<Cmd>DirectToggleGitStatus<CR>',
   [']c'] = '<Cmd>DirectNextChange<CR>',
   ['[c'] = '<Cmd>DirectPreviousChange<CR>',
@@ -100,6 +100,8 @@ local EXPECTED_CMDS = {
   DirectPasteAs = { nargs = '1', complete = 'file' },
   DirectRun = { nargs = '+' },
   DirectGit = { nargs = '+' },
+  DirectGitRestore = { nargs = '0' },
+  DirectGitRestore = { nargs = '0' },
 }
 
 H.describe('entry: command surface', function()
@@ -223,7 +225,7 @@ H.describe('entry: direct-buffer guard', function()
       'show_git_status',
       'next_change', 'previous_change', 'next_file', 'previous_file',
       'sync', 'fold_all', 'unfold_all', 'undo', 'redo', 'reset_history', 'yank', 'paste',
-      'paste_as', 'run', 'git', 'trash_list', 'trash_restore', 'trash_empty' }
+      'paste_as', 'run', 'git', 'restore_git', 'trash_list', 'trash_restore', 'trash_empty' }
     local actual = {}
     for name, value in pairs(api) do
       actual[#actual + 1] = name
@@ -241,6 +243,7 @@ H.describe('entry: direct-buffer guard', function()
     local cases = {
       { name = 'DirectUndo', call = function(api) return api.undo() end },
       { name = 'DirectRedo', call = function(api) return api.redo() end },
+      { name = 'DirectGitRestore', call = function(api) return api.restore_git() end },
       { name = 'DirectFoldAll', call = function(api) return api.fold_all() end },
       { name = 'DirectUnfoldAll', call = function(api) return api.unfold_all() end },
       { name = 'DirectYank', call = function(api) return api.yank(1, 1) end },

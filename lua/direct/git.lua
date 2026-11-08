@@ -188,6 +188,60 @@ local function discover_repo(path)
   return normalize(output:gsub('[\r\n]+$', ''))
 end
 
+-- worktree_changes(root, path, directory) -> the absolute tracked paths whose
+-- unstaged worktree changes a restore would discard. Untracked files are not
+-- included because `git restore --worktree` does not remove them.
+function M.worktree_changes(root, path, directory)
+  local repo_root, repo_err = discover_repo(root)
+  if repo_root == false then return nil, 'path is not in a Git repository' end
+  if not repo_root then return nil, repo_err end
+  local output, status_err = command({ '-C', repo_root, 'status', '--porcelain=v1', '-z',
+    '--untracked-files=all' })
+  if not output then return nil, status_err end
+
+  path = normalize(path)
+  local prefix = path == '/' and '/' or (path .. '/')
+  local function covers(candidate)
+    return candidate == path or (directory and candidate:sub(1, #prefix) == prefix)
+  end
+
+  local fields, changes, seen = nul_fields(output), {}, {}
+  local index = 1
+  while index <= #fields do
+    local record = fields[index]
+    index = index + 1
+    if #record >= 4 then
+      local xy, relative = record:sub(1, 2), record:sub(4)
+      if xy:find('R', 1, true) or xy:find('C', 1, true) then index = index + 1 end
+      -- Column two is the worktree state. `??` is untracked, not a change that
+      -- restore --worktree can discard; staged-only changes have a blank second
+      -- column and likewise remain untouched.
+      if xy ~= '??' and xy:sub(2, 2) ~= ' ' and relative ~= '' then
+        local absolute = normalize(vim.fs.joinpath(repo_root, relative))
+        if covers(absolute) and not seen[absolute] then
+          seen[absolute] = true
+          changes[#changes + 1] = absolute
+        end
+      end
+    end
+  end
+  table.sort(changes)
+  return changes
+end
+
+function M.worktree_restore_command(root)
+  local version = run({ 'git', '-C', root, '--version' })
+  local major, minor
+  if type(version) == 'string' then
+    major, minor = version:match('git version (%d+)%.(%d+)')
+  end
+  major, minor = tonumber(major), tonumber(minor)
+  if major and (major > 2 or (major == 2 and minor >= 23)) then
+    return 'git --literal-pathspecs restore --worktree -- {}'
+  end
+  return 'git --literal-pathspecs checkout -- {}'
+end
+
 local function add_tracked_path(tracked, relative)
   relative = relative:gsub('/+$', '')
   if relative == '' then return end

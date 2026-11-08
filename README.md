@@ -152,7 +152,7 @@ All mappings are buffer-local to direct listings, except the global `-`.
 | `gi`             | Toggle `.gitignore` filtering                       |
 | `gs`             | Toggle a view of changed files only                 |
 | `]c` `[c`        | Next or previous changed entry                      |
-| `ga` `gr` `gc`   | `git add`, `git reset` or `git checkout` the entry  |
+| `ga` `<leader>gu` `<leader>gr` | Stage, unstage, or confirm restore of the entry |
 
 With mouse support on (`:set mouse=a`), double-click an entry to open it, and
 click a folder icon to expand or collapse that folder. To turn off every
@@ -246,7 +246,10 @@ restore them.
 
 - `gs` shows only changed entries, with directories fully expanded.
 - `]c` / `[c` jump between changed entries.
-- `ga` / `gr` / `gc` stage, unstage or restore the entry under the cursor.
+- `ga` stages the entry; `<leader>gu` unstages it.
+- `<leader>gr` asks before discarding tracked worktree changes under the entry.
+  The prompt names the path and counts changed files. It leaves untracked and
+  staged-only changes alone.
 - `gi` toggles ignore filtering. Filtering uses Git itself, so nested
   `.gitignore` files, `.git/info/exclude` and your global excludes file all
   apply. Tracked files are never hidden.
