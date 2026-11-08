@@ -11,16 +11,16 @@ local M = {}
 -- code below resolves through.
 local fs = require('direct.fs')
 local paths = require('direct.paths')
-local action_mod = require('direct.action')
-local history = require('direct.history')
+local action_mod = require('direct.action.action')
+local history = require('direct.history.history')
 local register = require('direct.register')
 local ui = require('direct.ui')
 local highlight = require('direct.highlight')
 local git = require('direct.git')
 local constants = require('direct.constants')
 local folding = require('direct.folding')
-local listing = require('direct.buffer_listing')
-local rows = require('direct.buffer_rows')
+local listing = require('direct.buffer.listing')
+local rows = require('direct.buffer.rows')
 local states = rows.states
 local namespace = rows.namespace
 local deleted_guards = {}
@@ -364,7 +364,7 @@ local function attach_deleted_guard(bufnr)
   if attached then deleted_guards[bufnr] = true end
 end
 
-local sync_plan = require('direct.buffer_sync_plan')({
+local sync_plan = require('direct.buffer.sync_plan')({
   action_mod = action_mod,
   entry_path = M.entry_path,
   is_dir_line = is_dir_line,
@@ -505,7 +505,7 @@ local function indent_size()
   return require('direct.config').options.indent_size
 end
 
-local tree_planner = require('direct.buffer_tree')({
+local tree_planner = require('direct.buffer.tree')({
   fs = fs,
   states = states,
   namespace = namespace,
@@ -524,7 +524,7 @@ local tree_planner = require('direct.buffer_tree')({
 })
 children_integrity = tree_planner.children_integrity
 edited_subtrees = tree_planner.edited_subtrees
-reconcile_undone_materialization = require('direct.buffer_undo_state')({
+reconcile_undone_materialization = require('direct.buffer.undo_state')({
   states = states,
   namespace = namespace,
   fs = fs,

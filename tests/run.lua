@@ -148,6 +148,7 @@ local function main()
     io.write(string.format('tmp:  %s\n', base))
   end
   local total_specs, total_passed, total_skipped, total_failed = 0, 0, 0, 0
+  local failures = {}
   for _, spec in ipairs(specs) do
     H.reset_registry()
     local loaded, load_err = xpcall(function()
@@ -157,15 +158,23 @@ local function main()
     end, debug.traceback)
 
     if not loaded then
-      io.write(string.format('FAIL %s (load error)\n%s\n', spec.name, load_err))
+      io.write(string.format('FAIL %s (load error)\n', spec.name))
+      failures[#failures + 1] = { name = spec.name .. ' (load error)', trace = tostring(load_err) }
       total_failed = total_failed + 1
     else
       local ran, report = xpcall(H.run_all, debug.traceback)
       if not ran then
-        io.write(string.format('FAIL %s (harness error)\n%s\n', spec.name, report))
+        io.write(string.format('FAIL %s (harness error)\n', spec.name))
+        failures[#failures + 1] = { name = spec.name .. ' (harness error)', trace = tostring(report) }
         total_failed = total_failed + 1
       else
         io.write(string.format('-- %s\n%s', spec.name, report.text))
+        for _, failure in ipairs(report.failures) do
+          failures[#failures + 1] = {
+            name = spec.name .. ': ' .. failure.name,
+            trace = failure.trace,
+          }
+        end
         total_specs = total_specs + report.specs
         total_passed = total_passed + report.passed
         total_skipped = total_skipped + report.skipped
@@ -176,6 +185,12 @@ local function main()
 
   io.write(string.format('RUN: %d spec(s), %d passed, %d skipped, %d failed\n',
     total_specs, total_passed, total_skipped, total_failed))
+  if #failures > 0 then
+    io.write('\nFailures:\n')
+    for index, failure in ipairs(failures) do
+      io.write(string.format('\n%d) %s\n%s\n', index, failure.name, failure.trace))
+    end
+  end
   return total_failed == 0
 end
 

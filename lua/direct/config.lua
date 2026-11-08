@@ -281,7 +281,7 @@ function M.install_mappings()
   -- buffer is created).
   for _, bufnr in ipairs(open_direct_buffers()) do
     M.install_buffer_mappings(bufnr)
-    require('direct.folding').install_mappings(bufnr, require('direct.buffer'))
+    require('direct.folding').install_mappings(bufnr, require('direct.buffer.buffer'))
   end
   return true
 end

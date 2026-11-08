@@ -3,7 +3,7 @@
 local H = require('tests.support.harness')
 
 -- Open direct buffers let these tests verify mapping removal and restoration.
-local buffer = require('direct.buffer')
+local buffer = require('direct.buffer.buffer')
 
 -- A fresh module table: config is stateful (lifecycle flags), and the harness
 -- only unloads direct modules at file boundaries, so the spec reloads it where

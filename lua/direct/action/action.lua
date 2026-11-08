@@ -799,7 +799,7 @@ function M.summarize(actions)
   return summary
 end
 
-require('direct.action_moves')(M)
-require('direct.action_registry')(M)
+require('direct.action.moves')(M)
+require('direct.action.registry')(M)
 
 return M

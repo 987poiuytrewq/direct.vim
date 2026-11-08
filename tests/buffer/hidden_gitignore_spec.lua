@@ -403,7 +403,7 @@ H.describe('hidden and Git-ignore filtering', function()
     H.mkfile(root, 'visible', 'preserve')
     local listing = require('direct').list(root)
     H.assert_buf_eq({ 'visible' }, 0, 'the outside-repository listing is unfiltered')
-    local state = require('direct.buffer')._state_for_test(vim.api.nvim_get_current_buf())
+    local state = require('direct.buffer.buffer')._state_for_test(vim.api.nvim_get_current_buf())
     H.assert_true(state.directory_snapshots[1].respect_gitignore,
       'the directory records that Git filtering was enabled')
     H.assert_false(state.directory_snapshots[1].git_repo,
@@ -417,7 +417,7 @@ H.describe('hidden and Git-ignore filtering', function()
     vim.bo.modified = true
 
     local before = H.fs_snapshot(root)
-    local history = require('direct.history')
+    local history = require('direct.history.history')
     local history_calls = 0
     local original_log = history.log
     history.log = function(...) history_calls = history_calls + 1; return original_log(...) end
@@ -484,7 +484,7 @@ H.describe('hidden and Git-ignore filtering', function()
     H.mkfile(root, 'new.log', 'must survive')
     git(root, 'add', '-f', 'new.log')
     vim.api.nvim_buf_set_lines(0, -1, -1, false, { 'unrelated-new-file' })
-    local history = require('direct.history')
+    local history = require('direct.history.history')
     local history_calls = 0
     local original_log = history.log
     history.log = function(...) history_calls = history_calls + 1; return original_log(...) end
@@ -522,7 +522,7 @@ H.describe('hidden and Git-ignore filtering', function()
     init_repo(root)
     init_repo(nested)
     require('direct').list(root)
-    local state = require('direct.buffer')._state_for_test(vim.api.nvim_get_current_buf())
+    local state = require('direct.buffer.buffer')._state_for_test(vim.api.nvim_get_current_buf())
     local root_snapshot
     for _, snapshot in ipairs(state.directory_snapshots) do
       if snapshot.path == root then root_snapshot = snapshot; break end
@@ -537,7 +537,7 @@ H.describe('hidden and Git-ignore filtering', function()
       end
       return original_system(command, ...)
     end
-    local hidden, err = require('direct.buffer_listing').hidden_descendant(
+    local hidden, err = require('direct.buffer.listing').hidden_descendant(
       outer, root_snapshot, state)
     vim.system = original_system
 
@@ -606,7 +606,7 @@ H.describe('hidden and Git-ignore filtering', function()
       H.mkfile(xdg, 'git/ignore', 'other.tmp\n')
       vim.api.nvim_buf_set_lines(0, -1, -1, false, { 'added-after-change' })
       local before = H.fs_snapshot(root)
-      local history = require('direct.history')
+      local history = require('direct.history.history')
       local history_calls = 0
       local original_log = history.log
       history.log = function(...) history_calls = history_calls + 1; return original_log(...) end

@@ -94,7 +94,7 @@ H.describe('DirectRun', function()
 
     local notifications, refreshes = {}, 0
     local ui = require('direct.ui')
-    local buffer = require('direct.buffer')
+    local buffer = require('direct.buffer.buffer')
     local restore_notify = H.stub(ui, 'notify', function(message, level)
       notifications[#notifications + 1] = { message = message, level = level }
     end)
@@ -209,10 +209,10 @@ H.describe('DirectRun', function()
     H.assert_not_nil(add, 'DirectGit accepts a missing Git-deleted row')
     add:wait()
     local staged = vim.wait(3000, function()
-      local state = require('direct.buffer')._state_for_test(vim.api.nvim_get_current_buf())
+      local state = require('direct.buffer.buffer')._state_for_test(vim.api.nvim_get_current_buf())
       return state and state.git_status and state.git_status.paths[path] == 'D '
     end)
-    local state = require('direct.buffer')._state_for_test(vim.api.nvim_get_current_buf())
+    local state = require('direct.buffer.buffer')._state_for_test(vim.api.nvim_get_current_buf())
     H.assert_true(staged, 'ga-style Git add updates the row status: '
       .. vim.inspect(state and state.git_status))
 
@@ -220,7 +220,7 @@ H.describe('DirectRun', function()
     H.assert_not_nil(reset, 'reset runs for a deleted row')
     reset:wait()
     H.assert_true(vim.wait(3000, function()
-      local state = require('direct.buffer')._state_for_test(vim.api.nvim_get_current_buf())
+      local state = require('direct.buffer.buffer')._state_for_test(vim.api.nvim_get_current_buf())
       return state and state.git_status and state.git_status.paths[path] == ' D'
     end), 'gr-style Git reset updates the row status')
 
@@ -231,7 +231,7 @@ H.describe('DirectRun', function()
     H.assert_not_nil(add_directory, 'ga accepts a missing tracked directory')
     add_directory:wait()
     H.assert_true(vim.wait(3000, function()
-      local state = require('direct.buffer')._state_for_test(vim.api.nvim_get_current_buf())
+      local state = require('direct.buffer.buffer')._state_for_test(vim.api.nvim_get_current_buf())
       return state and state.git_status and state.git_status.paths[child] == 'D '
     end), 'ga stages a deleted directory through its pathspec')
 
@@ -240,7 +240,7 @@ H.describe('DirectRun', function()
     H.assert_not_nil(reset_directory, 'gr accepts a missing tracked directory')
     reset_directory:wait()
     H.assert_true(vim.wait(3000, function()
-      local state = require('direct.buffer')._state_for_test(vim.api.nvim_get_current_buf())
+      local state = require('direct.buffer.buffer')._state_for_test(vim.api.nvim_get_current_buf())
       return state and state.git_status and state.git_status.paths[child] == ' D'
     end), 'gr unstages a deleted directory through its pathspec')
 
@@ -251,8 +251,8 @@ H.describe('DirectRun', function()
     H.assert_true(vim.wait(3000, function()
       return vim.uv.fs_stat(child) ~= nil
         and find_line('gone-dir/') ~= nil
-        and not require('direct.buffer')._state_for_test(vim.api.nvim_get_current_buf()).rows[
-          require('direct.buffer')._state_for_test(vim.api.nvim_get_current_buf()).display_ids[
+        and not require('direct.buffer.buffer')._state_for_test(vim.api.nvim_get_current_buf()).rows[
+          require('direct.buffer.buffer')._state_for_test(vim.api.nvim_get_current_buf()).display_ids[
             find_line('gone-dir/')
           ]
         ].deleted_kind
@@ -264,8 +264,8 @@ H.describe('DirectRun', function()
     restore:wait()
     H.assert_true(vim.wait(3000, function()
       return vim.uv.fs_stat(path) ~= nil and find_line('gone.txt') ~= nil
-        and not require('direct.buffer')._state_for_test(vim.api.nvim_get_current_buf()).rows[
-          require('direct.buffer')._state_for_test(vim.api.nvim_get_current_buf()).display_ids[find_line('gone.txt')]
+        and not require('direct.buffer.buffer')._state_for_test(vim.api.nvim_get_current_buf()).rows[
+          require('direct.buffer.buffer')._state_for_test(vim.api.nvim_get_current_buf()).display_ids[find_line('gone.txt')]
         ].deleted_kind
     end), 'gc restores the file and re-lists it as an ordinary entry')
     H.assert_eq(vim.fn.readfile(path), { 'tracked content' },

@@ -1,6 +1,6 @@
 -- buffer_listing_spec.lua -- listing, path identity, and wildignore filtering.
 local H = require('tests.support.harness')
-local buffer = require('direct.buffer')
+local buffer = require('direct.buffer.buffer')
 local fs = require('direct.fs')
 local paths = require('direct.paths')
 

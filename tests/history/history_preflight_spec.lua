@@ -1,9 +1,9 @@
 -- Integration tests for the read-only history gate and its side-effect order.
 local H = require('tests.support.harness')
-local history = require('direct.history')
+local history = require('direct.history.history')
 local register = require('direct.register')
 local log = require('direct.log')
-local buffer = require('direct.buffer')
+local buffer = require('direct.buffer.buffer')
 local paths = require('direct.paths')
 local fs = require('direct.fs')
 local fixtures = require('tests.support.history_fixtures')

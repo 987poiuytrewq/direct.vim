@@ -2,8 +2,8 @@
 -- The marker prevents unsafe legacy replay; failed reversals remain retryable.
 
 local H = require('tests.support.harness')
-local history = require('direct.history')
-local action = require('direct.action')
+local history = require('direct.history.history')
+local action = require('direct.action.action')
 local fs = require('direct.fs')
 local log = require('direct.log')
 local paths = require('direct.paths')
@@ -407,8 +407,8 @@ H.describe('history', function()
     local undo_path = vim.fs.joinpath(history_dir(sb), 'undo.log')
 
     with_fresh_process(function()
-      local h = require('direct.history')
-      local a = require('direct.action')
+      local h = require('direct.history.history')
+      local a = require('direct.action.action')
       local move = a.Move(sb.root .. '/a.txt', sb.root .. '/b.txt')
       H.assert_true(move['do']() ~= nil, 'process A moved the file')
       H.assert_true(h.log(move) == true, 'process A logged the move')
@@ -420,7 +420,7 @@ H.describe('history', function()
 
     local undone = false
     with_fresh_process(function()
-      local h = require('direct.history')
+      local h = require('direct.history.history')
       undone = h.undo() ~= nil
     end)
     H.assert_true(undone, 'process B reversed the logged action')
@@ -434,7 +434,7 @@ H.describe('history', function()
     local script = H.mkfile(sb.root, 'try_lock.lua', {
       "local root = assert(vim.env.DIRECT_FRESH_ROOT)",
       "package.path = root .. '/lua/?.lua;' .. package.path",
-      "local lock = require('direct.history_lock')",
+      "local lock = require('direct.history.lock')",
       "local ok = lock.acquire()",
       "if ok then io.stdout:write('ACQUIRED\\n'); lock.release()",
       "else io.stdout:write('BLOCKED\\n') end",
@@ -454,7 +454,7 @@ H.describe('history', function()
     local script = H.mkfile(sb.root, 'try_lock_during_apply.lua', {
       "local root = assert(vim.env.DIRECT_FRESH_ROOT)",
       "package.path = root .. '/lua/?.lua;' .. package.path",
-      "local lock = require('direct.history_lock')",
+      "local lock = require('direct.history.lock')",
       "local ok = lock.acquire()",
       "if ok then io.stdout:write('ACQUIRED\\n'); lock.release()",
       "else io.stdout:write('BLOCKED\\n') end",
@@ -483,7 +483,7 @@ H.describe('history', function()
     local transaction_path = write_touch_apply_intent(sb, target)
 
     with_fresh_process(function()
-      local fresh_history = require('direct.history')
+      local fresh_history = require('direct.history.history')
       local state = fresh_history.preflight()
       H.assert_true(state ~= nil, 'startup recovers the prepared action')
     end)
@@ -524,7 +524,7 @@ H.describe('history', function()
       'the first source is staged before the progress write fails')
 
     with_fresh_process(function()
-      local fresh_history = require('direct.history')
+      local fresh_history = require('direct.history.history')
       H.assert_true(fresh_history.preflight() ~= nil,
         'restart resumes the persisted sequence from the filesystem state')
     end)
@@ -559,7 +559,7 @@ H.describe('history', function()
 
     H.assert_true(history.lock.release(), 'simulate process exit and OS lock release')
     with_fresh_process(function()
-      local fresh_history = require('direct.history')
+      local fresh_history = require('direct.history.history')
       H.assert_true(fresh_history.preflight() ~= nil,
         'restart verifies the pending copy and commits its history')
     end)
@@ -611,7 +611,7 @@ H.describe('history', function()
       'the pending redo copy intent is durable')
 
     with_fresh_process(function()
-      local fresh_history = require('direct.history')
+      local fresh_history = require('direct.history.history')
       H.assert_true(fresh_history.preflight() ~= nil,
         'restart recognizes the completely copied destination')
     end)
@@ -644,7 +644,7 @@ H.describe('history', function()
     local quarantine = vim.fn.glob(destination .. '/.direct-unpaste-*')
     H.assert_true(quarantine ~= '', 'the captured file remains quarantined')
     with_fresh_process(function()
-      local fresh_history = require('direct.history')
+      local fresh_history = require('direct.history.history')
       H.assert_true(fresh_history.preflight() ~= nil,
         'restart verifies and finishes the pending Unpaste deletion')
     end)
@@ -706,7 +706,7 @@ H.describe('history', function()
       H.assert_true(log.write_raw_atomic(transaction_path, transaction .. '\n') == true,
         'the prepared reversal intent is durable')
       with_fresh_process(function()
-        local fresh_history = require('direct.history')
+        local fresh_history = require('direct.history.history')
         H.assert_true(fresh_history.preflight() ~= nil, 'restart recovers the transaction')
       end)
       H.assert_true(H.exists(ws, 'a.txt'), 'undo state is applied')
@@ -736,7 +736,7 @@ H.describe('history', function()
     H.assert_true(history.lock.release(), 'simulate process exit and OS lock release')
 
     with_fresh_process(function()
-      local fresh_history = require('direct.history')
+      local fresh_history = require('direct.history.history')
       local state, err = fresh_history.preflight()
       H.assert_nil(state, 'an unrelated occupant is not mistaken for Direct output')
       H.assert_true(type(err) == 'string' and err:find('ambiguous', 1, true) ~= nil,

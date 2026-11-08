@@ -118,7 +118,7 @@ H.describe('ui', function()
 
   H.it('public API catches unexpected errors and reports a readable message', function()
     local api = require('direct')
-    local buffer = require('direct.buffer')
+    local buffer = require('direct.buffer.buffer')
     local restore = H.stub(buffer, 'list', function()
       error('injected list failure')
     end)

@@ -1,11 +1,11 @@
 -- Content-proof Unpaste protocol: validate, capture, verify, then delete only Q.
 local H = require('tests.support.harness')
-local action = require('direct.action')
+local action = require('direct.action.action')
 local fs = require('direct.fs')
 local log = require('direct.log')
 local paths = require('direct.paths')
 local register = require('direct.register')
-local history = require('direct.history')
+local history = require('direct.history.history')
 local ui = require('direct.ui')
 
 local function history_paths(sb)

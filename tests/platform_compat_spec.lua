@@ -1,7 +1,7 @@
 -- platform_compat_spec.lua -- native and configured path separator behavior.
 
 local H = require('tests.support.harness')
-local buffer = require('direct.buffer')
+local buffer = require('direct.buffer.buffer')
 local fs = require('direct.fs')
 
 local function clean_buffers()

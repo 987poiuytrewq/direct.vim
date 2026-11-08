@@ -2,9 +2,9 @@
 -- This module is deliberately side-effect free: it never reads or writes files.
 local M = {}
 
-local action = require('direct.action')
+local action = require('direct.action.action')
 local paths = require('direct.paths')
-local history_format = require('direct.history_format')
+local history_format = require('direct.history.format')
 local platform = require('direct.platform')
 
 M.FORMAT = 'direct-operation-journal'

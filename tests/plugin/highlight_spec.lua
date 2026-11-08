@@ -1,7 +1,7 @@
 -- tests/highlight_spec.lua -- listing filename highlight lifecycle.
 
 local H = require('tests.support.harness')
-local buffer = require('direct.buffer')
+local buffer = require('direct.buffer.buffer')
 local highlight = require('direct.highlight')
 local FILE_ICON = '\u{f15b}'
 

@@ -11,7 +11,7 @@ local function next_id(state)
 end
 
 local fs = require('direct.fs')
-local listing = require('direct.buffer_listing')
+local listing = require('direct.buffer.listing')
 local git = require('direct.git')
 local highlight = require('direct.highlight')
 local paths = require('direct.paths')

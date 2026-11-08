@@ -3,15 +3,15 @@
 local M = {}
 
 local log_mod = require('direct.log')
-local format = require('direct.history_format')
-local transaction_codec = require('direct.history_transaction')
+local format = require('direct.history.format')
+local transaction_codec = require('direct.history.transaction')
 local platform = require('direct.platform')
 local recovery
-M.action = require('direct.action')
+M.action = require('direct.action.action')
 M.paths = require('direct.paths')
 M.ui = require('direct.ui')
 M.pending = require('direct.pending')
-M.lock = require('direct.history_lock')
+M.lock = require('direct.history.lock')
 local file_operations = require('direct.file_operations')
 
 local TRANSACTION_FORMAT = transaction_codec.FORMAT
@@ -509,7 +509,7 @@ commit_stacks = function(undo_path, redo_path, transaction_path, undo_lines, red
   return clear_transaction(transaction_path)
 end
 
-recovery = require('direct.history_recovery').new({
+recovery = require('direct.history.recovery').new({
   action = M.action,
   header = M.HEADER,
   ui = M.ui,

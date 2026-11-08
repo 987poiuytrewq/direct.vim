@@ -35,8 +35,8 @@ H.describe('grouped move undo', function()
   -- re-sourced at the file boundary are the ones under test (and the ones a
   -- stub is installed on).
   local function modules()
-    return require('direct.buffer'), require('direct.history'),
-      require('direct.fs'), require('direct.action'), require('direct.paths'),
+    return require('direct.buffer.buffer'), require('direct.history.history'),
+      require('direct.fs'), require('direct.action.action'), require('direct.paths'),
       require('direct.ui')
   end
 
@@ -62,7 +62,7 @@ local function swap_line(ws)
   -- swap_through_sync(ws) -> lists ws, swaps the two lines and :writes, i.e.
   -- the real user path through `Buffer:sync()`.
   local function swap_through_sync(ws)
-    local buffer = require('direct.buffer')
+    local buffer = require('direct.buffer.buffer')
     buffer.list(ws)
     vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'b.txt', 'a.txt' })
     vim.cmd('write')
@@ -154,7 +154,7 @@ local function swap_line(ws)
     local script = H.mkfile(sb.root, 'fresh_undo.lua', {
       "local root = assert(vim.env.DIRECT_FRESH_ROOT, 'DIRECT_FRESH_ROOT required')",
       "package.path = root .. '/lua/?.lua;' .. root .. '/?.lua;' .. package.path",
-      "local history = require('direct.history')",
+      "local history = require('direct.history.history')",
       "local ok, res = pcall(history.undo)",
       "io.stdout:write(string.format('FRESH-UNDO ok=%s returned=%s\\n',"
         .. ' tostring(ok), tostring(res ~= nil)))',
@@ -185,7 +185,7 @@ local function swap_line(ws)
     H.mkdir(ws, 'd2')
     H.mkfile(ws, 'd2/inner.txt', { 'INNER-2' })
 
-    local buffer = require('direct.buffer')
+    local buffer = require('direct.buffer.buffer')
     buffer.list(ws)
     vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'd2/', 'd1/' })
     vim.cmd('write')
@@ -217,7 +217,7 @@ local function swap_line(ws)
     H.mkfile(ws, 'a.txt', { 'CONTENT-A' })
     H.mkfile(ws, 'b.txt', { 'CONTENT-B' })
 
-    local buffer = require('direct.buffer')
+    local buffer = require('direct.buffer.buffer')
     buffer.list(ws)
     vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'x.txt', 'y.txt' })
     vim.cmd('write')
@@ -249,7 +249,7 @@ local function swap_line(ws)
     H.mkfile(ws, 'b.txt', { 'CONTENT-B' })
     H.mkfile(ws, 'c.txt', { 'CONTENT-C' })
 
-    local buffer = require('direct.buffer')
+    local buffer = require('direct.buffer.buffer')
     buffer.list(ws)
     vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'b.txt', 'c.txt', 'a.txt' })
     vim.cmd('write')
