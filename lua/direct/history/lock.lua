@@ -11,10 +11,11 @@ local depth, token = 0, nil
 local function lock_path()
   local paths = require('direct.paths')
   local fs = require('direct.fs')
-  local home = paths.data_home()
-  local ok, err = fs.mkdirp(home)
+  local constants = require('direct.constants')
+  local direct_dir = paths.join(paths.data_home(), constants.DATA_DIRECTORY)
+  local ok, err = fs.mkdirp(direct_dir)
   if not ok then return nil, err end
-  return paths.join(home, '.direct-history.lock')
+  return paths.join(direct_dir, '.direct-history.lock')
 end
 
 function M.acquire()
