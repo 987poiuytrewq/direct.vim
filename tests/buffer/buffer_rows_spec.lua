@@ -148,7 +148,7 @@ H.describe('buffer: row identity and filtered rendering', function()
       'the retained child identity denotes the real directory entry')
   end)
 
-  H.it('DirectYank refresh does not transfer an edited root identity to matching text', function()
+  H.it('DirectYank preserves edits to a root row that matches another entry', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -174,13 +174,14 @@ H.describe('buffer: row identity and filtered rendering', function()
 
     H.assert_eq(yanked, { ws .. '/unrelated.txt' },
       ':DirectYank uses only the selected unrelated root file')
-    H.assert_buf_eq({ 'a/', 'b/', 'unrelated.txt' }, 0,
-      'stale a/ children are discarded instead of rendered under b/')
+    H.assert_buf_eq({ 'b/', '  inside.txt', 'b/', 'unrelated.txt' }, 0,
+      'yanking does not refresh and discard the modified listing')
+    H.assert_true(vim.bo.modified, 'the user edit remains pending')
     H.assert_eq(H.fs_snapshot(ws), before,
-      'the refresh performs no filesystem actions')
+      'yanking performs no filesystem actions')
   end)
 
-  H.it('DirectYank safely re-renders when an edited root creates hostile duplicate rows', function()
+  H.it('DirectYank preserves hostile duplicate rows in a modified listing', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -207,10 +208,11 @@ H.describe('buffer: row identity and filtered rendering', function()
 
     H.assert_eq(yanked, { ws .. '/unrelated.txt' },
       ':DirectYank still resolves the unrelated file in an ambiguous listing')
-    H.assert_buf_eq({ 'a/', 'b/', 'unrelated.txt' }, 0,
-      'ambiguous duplicate text triggers a safe filesystem re-render')
+    H.assert_buf_eq({ 'b/', '  inside.txt', 'b/', 'b/', 'unrelated.txt' }, 0,
+      'yanking does not refresh and discard the modified listing')
+    H.assert_true(vim.bo.modified, 'the user edits remain pending')
     H.assert_eq(H.fs_snapshot(ws), before,
-      'the hostile refresh performs no filesystem actions')
+      'yanking performs no filesystem actions')
   end)
 
   H.it('DirectYank discards expansions when distinct root names share a filesystem identity', function()

@@ -119,6 +119,12 @@ In a listing:
     z-          Go up to the parent directory and expand the directory you
                 came from.
 
+Opening a file from a listing with unsaved edits is refused, so the listing
+cannot be deleted along with those edits. Opening another directory keeps the
+original listing available. If you return to a modified listing, it is not
+refreshed; sync it first or deliberately discard its edits with the `!` form
+of a listing command (|:DirectList|).
+
 Expanding directories ~
 
 Directories can be expanded in place, so the listing becomes a tree. The
@@ -688,18 +694,22 @@ buffer they report an error and do nothing.
 
 Opening listings ~
                                                                  *:DirectList*
-:DirectList {dir}
-    List {dir}. Completes directory names. Works from any buffer.
+:DirectList[!] {dir}
+    List {dir}. Completes directory names. Works from any buffer. If the
+    listing for {dir} has unsaved edits, the command is refused unless `!` is
+    given; `:DirectList!` deliberately discards those edits before re-listing.
 
                                                            *:DirectListBuffer*
-:DirectListBuffer
+:DirectListBuffer[!]
     List the directory of the current file. In a buffer with no file name,
     or with a non-empty 'buftype', list the working directory instead.
-    Works from any buffer.
+    Works from any buffer. `!` deliberately discards unsaved edits in the
+    listing being refreshed.
 
                                                               *:DirectListCwd*
-:DirectListCwd
-    List the working directory. Works from any buffer.
+:DirectListCwd[!]
+    List the working directory. Works from any buffer. `!` deliberately
+    discards unsaved edits in the listing being refreshed.
 
 Editing ~
                                                                  *:DirectSync*

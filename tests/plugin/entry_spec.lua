@@ -76,9 +76,9 @@ local EXPECTED_V = {
 }
 
 local EXPECTED_CMDS = {
-  DirectList = { nargs = '1', complete = 'dir' },
-  DirectListBuffer = { nargs = '0' },
-  DirectListCwd = { nargs = '0' },
+  DirectList = { nargs = '1', complete = 'dir', bang = true },
+  DirectListBuffer = { nargs = '0', bang = true },
+  DirectListCwd = { nargs = '0', bang = true },
   DirectSync = { nargs = '0' },
   DirectFoldAll = { nargs = '0' },
   DirectUnfoldAll = { nargs = '0' },
@@ -109,6 +109,7 @@ H.describe('entry: command surface', function()
         H.assert_eq(got.nargs, want.nargs, name .. '.nargs')
         H.assert_eq(got.complete, want.complete, name .. '.complete')
         H.assert_eq(got.range, want.range, name .. '.range')
+        H.assert_eq(got.bang, want.bang or false, name .. '.bang')
       end
     end
   end)
@@ -125,6 +126,24 @@ H.describe('entry: command surface', function()
     H.assert_eq(vim.bo.filetype, 'direct', ':DirectList sets filetype=direct')
     H.assert_eq(vim.bo.buftype, 'acwrite', 'and buftype=acwrite')
     H.assert_buf_eq({ 'sub/', 'a.txt' })
+  end)
+
+  H.it(':DirectList! deliberately discards unsaved listing edits', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkfile(ws, 'old.txt', '')
+    require('direct').list(ws)
+    local buf = vim.api.nvim_get_current_buf()
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'unsaved edit' })
+    vim.bo[buf].modified = true
+    H.mkfile(ws, 'new.txt', '')
+
+    vim.cmd('DirectList! ' .. vim.fn.fnameescape(ws))
+
+    H.assert_eq(vim.api.nvim_get_current_buf(), buf, 'the existing directory buffer is reused')
+    H.assert_buf_eq({ 'new.txt', 'old.txt' }, buf, 'the listing reflects the directory')
+    H.assert_false(vim.bo[buf].modified, 'the explicit discard leaves a clean listing')
   end)
 
   H.it(':write in a direct buffer runs the sync and clears modified', function()

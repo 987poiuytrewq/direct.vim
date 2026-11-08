@@ -39,12 +39,12 @@ local function guard(name)
   return false
 end
 
-function M.list(path)
+function M.list(path, options)
   if pending.refuse('list', 'willRenameFiles') then return nil end
-  return buffer.list(path)
+  return buffer.list(path, options)
 end
 
-function M.list_buffer()
+function M.list_buffer(options)
   if pending.refuse('list', 'willRenameFiles') then return nil end
   local root
   if vim.bo.buftype ~= '' then
@@ -55,12 +55,12 @@ function M.list_buffer()
       root = vim.fn.getcwd()
     end
   end
-  return buffer.list(root)
+  return buffer.list(root, options)
 end
 
-function M.list_cwd()
+function M.list_cwd(options)
   if pending.refuse('list', 'willRenameFiles') then return nil end
-  return buffer.list(vim.fn.getcwd())
+  return buffer.list(vim.fn.getcwd(), options)
 end
 
 function M.open(line)
@@ -148,8 +148,8 @@ function M.undo()
     return nil
   end
   if pending.refuse('undo') then return nil end
-  return history.undo_async(function()
-    buffer.restore():list()
+  return history.undo_async(function(result)
+    if result ~= nil then buffer.restore():list({ allow_modified = true }) end
   end)
 end
 
@@ -158,8 +158,8 @@ function M.redo()
     return nil
   end
   if pending.refuse('redo') then return nil end
-  return history.redo_async(function()
-    buffer.restore():list()
+  return history.redo_async(function(result)
+    if result ~= nil then buffer.restore():list({ allow_modified = true }) end
   end)
 end
 
@@ -176,6 +176,7 @@ function M.yank(first, last)
     first, last = last, first
   end
   local b = buffer.restore()
+  local was_modified = vim.bo[vim.api.nvim_get_current_buf()].modified
   local sources, path_err = b:get_paths(first, last)
   if not sources then
     ui.notify('direct: cannot yank selection: ' .. tostring(path_err),
@@ -185,6 +186,7 @@ function M.yank(first, last)
   if #sources == 0 then return true end
   local yanked, yank_err = register.yank(sources)
   if not yanked then return nil, yank_err end
+  if was_modified then return true end
   return b:list()
 end
 

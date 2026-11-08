@@ -1,9 +1,10 @@
 # Spec: direct.vim gap review follow-ups
 
-**Status:** PROPOSED. Nothing here has been implemented yet. This replaces
-`direct-vim-remaining-improvements.md`. Its main pieces (JSONL history,
-no-overwrite moves, exclusive `touch`, the safeguard on undoing a paste)
-appear in the current code, but that was not checked item by item.
+**Status:** S1 is complete; the remaining tasks are proposed and have not been
+checked item by item. This replaces `direct-vim-remaining-improvements.md`. Its
+main pieces (JSONL history, no-overwrite moves, exclusive `touch`, the safeguard
+on undoing a paste) appear in the current code, but that was not checked item by
+item.
 
 **Source:** a static review of the code at `debabf2` (November 2026). The
 findings come from reading the code; none has been reproduced in a running
@@ -23,35 +24,40 @@ the problem, or to record that it can't be reproduced.
 
 ## Task list
 
-| ID | Priority | Task |
-|----|----------|------|
-| S1 | P1 | Stop opening, navigating or refreshing from throwing away unsaved listing edits |
-| S2 | P1 | Make `u` / `<C-r>` safe when the listing has unsaved edits, and make clear what they undo |
-| S3 | P1 | Keep a damaged or unrecognised history file instead of wiping it |
-| S4 | P2 | Add a way to see, restore from and empty the trash, and keep it from growing forever |
-| S5 | P2 | Ask before `gc` discards Git changes, and review the `gc` / `gr` key clashes |
-| S6 | P3 | Add an optional preview of the planned changes before `:w` applies them |
-| S7 | P4 | Put the lock file inside the `direct/` data directory |
-| R1 | P2 | Stop `git status` from freezing the editor |
-| R2 | P3 | Run long moves during `:w` without blocking the editor |
-| R3 | P3 | Make `:checkhealth direct` check more |
-| F1 | P3 | Let users remap individual keys |
-| F2 | P3 | Open entries in a split, vertical split or new tab |
-| F3 | P3 | Send `User` events for other plugins and configs to hook into |
-| F4 | P3 | Add a command to view the history |
-| F5 | P3 | Allow mixed changes at the top level in one save, or explain the rule better |
-| F6 | P3 | Optional extra columns (size, date modified, permissions) and sorting |
-| F7 | P3 | Give every message the same `direct:` prefix |
-| M1 | P4 | Version tags, releases and a changelog |
-| M2 | P4 | Widen CI: latest stable and nightly Neovim, and pushes to `master` |
-| M3 | P4 | Add linting, formatting and type checks |
-| M4 | P4 | Split the largest modules up |
-| M5 | P4 | Replace the temporary override of `vim.fn.confirm` |
-| M6 | P4 | Decide whether to support Neovim 0.11 |
+| ID | Priority | Status | Task |
+|----|----------|--------|------|
+| S1 | P1 | Complete | Stop opening, navigating or refreshing from throwing away unsaved listing edits |
+| S2 | P1 | Proposed | Make `u` / `<C-r>` safe when the listing has unsaved edits, and make clear what they undo |
+| S3 | P1 | Proposed | Keep a damaged or unrecognised history file instead of wiping it |
+| S4 | P2 | Proposed | Add a way to see, restore from and empty the trash, and keep it from growing forever |
+| S5 | P2 | Proposed | Ask before `gc` discards Git changes, and review the `gc` / `gr` key clashes |
+| S6 | P3 | Proposed | Add an optional preview of the planned changes before `:w` applies them |
+| S7 | P4 | Proposed | Put the lock file inside the `direct/` data directory |
+| R1 | P2 | Proposed | Stop `git status` from freezing the editor |
+| R2 | P3 | Proposed | Run long moves during `:w` without blocking the editor |
+| R3 | P3 | Proposed | Make `:checkhealth direct` check more |
+| F1 | P3 | Proposed | Let users remap individual keys |
+| F2 | P3 | Proposed | Open entries in a split, vertical split or new tab |
+| F3 | P3 | Proposed | Send `User` events for other plugins and configs to hook into |
+| F4 | P3 | Proposed | Add a command to view the history |
+| F5 | P3 | Proposed | Allow mixed changes at the top level in one save, or explain the rule better |
+| F6 | P3 | Proposed | Optional extra columns (size, date modified, permissions) and sorting |
+| F7 | P3 | Proposed | Give every message the same `direct:` prefix |
+| M1 | P4 | Proposed | Version tags, releases and a changelog |
+| M2 | P4 | Proposed | Widen CI: latest stable and nightly Neovim, and pushes to `master` |
+| M3 | P4 | Proposed | Add linting, formatting and type checks |
+| M4 | P4 | Proposed | Split the largest modules up |
+| M5 | P4 | Proposed | Replace the temporary override of `vim.fn.confirm` |
+| M6 | P4 | Proposed | Decide whether to support Neovim 0.11 |
 
 ## Safety
 
 ### S1 — Unsaved listing edits are thrown away (P1)
+
+**Status: COMPLETE.** Modified listings are preserved on navigation and
+refresh, opening a file from a modified listing is refused, and `:DirectList!`
+(plus the other listing commands' bang forms) deliberately discards edits.
+Regression tests cover these paths; `make test` passes.
 
 **Problem.** `Buffer:list()` (`lua/direct/buffer.lua`, around lines 739–985)
 always replaces the buffer's lines and sets `modified = false`.

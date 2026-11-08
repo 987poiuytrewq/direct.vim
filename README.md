@@ -249,9 +249,9 @@ through `willRenameFiles`, so they can update imports before the file moves.
 
 | Command                    | Description                                           |
 |----------------------------|-------------------------------------------------------|
-| `:DirectList {dir}`        | List a directory                                      |
-| `:DirectListBuffer`        | List the current file's directory                     |
-| `:DirectListCwd`           | List the working directory                            |
+| `:DirectList[!] {dir}`     | List a directory; `!` discards its unsaved listing edits |
+| `:DirectListBuffer[!]`     | List the current file's directory; `!` discards its unsaved listing edits |
+| `:DirectListCwd[!]`        | List the working directory; `!` discards its unsaved listing edits |
 | `:DirectSync`              | Apply edits (same as `:write`)                        |
 | `:DirectUndo` / `:DirectRedo` | Undo or redo a filesystem change                   |
 | `:DirectYank`              | Yank the entries in a range                           |
@@ -264,6 +264,12 @@ through `willRenameFiles`, so they can update imports before the file moves.
 | `:DirectNextFile` / `:DirectPreviousFile` | Jump between files, skipping directories |
 | `:DirectNextChange` / `:DirectPreviousChange` | Jump between changed entries       |
 | `:DirectRun {cmd}` / `:DirectGit {cmd}` | Run a command on the current entry       |
+
+Relisting a directory with unsaved edits is refused so the listing is not
+silently overwritten. Opening a file from a modified listing is also refused;
+opening a directory keeps the original listing available. Sync the edits, or
+use the command's `!` form to deliberately discard edits in the listing being
+refreshed.
 
 ## How safe is it?
 
