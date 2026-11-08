@@ -31,8 +31,7 @@ the problem, or to record that it can't be reproduced.
 | S3 | P1 | Complete | Keep a damaged or unrecognised history file instead of wiping it |
 | S4 | P2 | Proposed | Add a way to see, restore from and empty the trash, and keep it from growing forever |
 | S5 | P2 | Proposed | Ask before `gc` discards Git changes, and review the `gc` / `gr` key clashes |
-| S6 | P3 | Proposed | Add an optional preview of the planned changes before `:w` applies them |
-| S7 | P4 | Proposed | Put the lock file inside the `direct/` data directory |
+| S6 | P4 | Proposed | Put the lock file inside the `direct/` data directory |
 | R1 | P2 | Proposed | Stop `git status` from freezing the editor |
 | R2 | P3 | Proposed | Run long moves during `:w` without blocking the editor |
 | R3 | P3 | Proposed | Make `:checkhealth direct` check more |
@@ -40,9 +39,8 @@ the problem, or to record that it can't be reproduced.
 | F2 | P3 | Proposed | Open entries in a split, vertical split or new tab |
 | F3 | P3 | Proposed | Send `User` events for other plugins and configs to hook into |
 | F4 | P3 | Proposed | Add a command to view the history |
-| F5 | P3 | Proposed | Allow mixed changes at the top level in one save, or explain the rule better |
-| F6 | P3 | Proposed | Optional extra columns (size, date modified, permissions) and sorting |
-| F7 | P3 | Proposed | Give every message the same `direct:` prefix |
+| F5 | P3 | Proposed | Allow renames, creates and deletes together in one top-level save |
+| F6 | P3 | Proposed | Give every message the same `direct:` prefix |
 | M1 | P4 | Proposed | Version tags, releases and a changelog |
 | M2 | P4 | Proposed | Widen CI: latest stable and nightly Neovim, and pushes to `master` |
 | M3 | P4 | Proposed | Add linting, formatting and type checks |
@@ -201,21 +199,10 @@ Neovim's built-in comment key, and `gr` makes the 0.11+ default LSP keys
 **Tests.** Declining the prompt leaves the working tree as it was. Accepting
 it restores the file.
 
-### S6 — No preview before `:w` (P3)
-
-**Change.** Add an option (`confirm = false | true | 'destructive'`) that
-shows the planned operations (renames, creates, moves, deletes) in a prompt or
-floating window before anything changes. The planned actions already exist
-(`build_actions`, `action.summarize`). Declining leaves the buffer modified
-and the disk untouched.
-
-**Tests.** With the option on, declining changes nothing and keeps the edits.
-`'destructive'` asks only when something would be deleted or moved.
-
-### S7 — Lock file outside the data directory (P4)
+### S6 — Lock file outside the data directory (P4)
 
 **Problem.** The lock is at `$XDG_DATA_HOME/.direct-history.lock`
-(`lua/direct/history_lock.lua`, `lock_path`), not under `direct/`.
+(`lua/direct/history/lock.lua`, `lock_path`), not under `direct/`.
 
 **Change.** Move it to `<data>/direct/.direct-history.lock`. Running an old
 and a new version at the same time would then use different locks, so
@@ -284,18 +271,62 @@ action's summary and paths, read-only.
 
 ### F5 — Top-level saves can't mix change types (P3)
 
-**Change.** Look at allowing renames, creates and deletes together at the top
-level when the planner can match them up unambiguously, as it already does
-inside expanded folders. If that isn't safe, make the refusal message explain
-the rule and suggest a fix.
+**Problem.** At the root level, `classify` in `lua/direct/buffer/sync_plan.lua`
+sorts each save into exactly one of `ADD`, `DELETE` or `RENAME` by comparing
+the buffer lines with the directory listing as sets. A save that both adds
+and removes root rows is `AMBIGUOUS` and refused (`doc/direct.txt`,
+`direct.vim-classify`), so renaming one file and deleting another needs two
+saves. Expanded directories don't have this limit: the tree planner in
+`lua/direct/buffer/tree.lua` pairs rows by identity.
 
-### F6 — No extra columns or sorting (P3)
+When the counts match, `classify` pairs lines by position. A save that deletes
+one row and adds another can then look like a chain of renames. For example,
+deleting `a` and adding `new` at the end of `a b c` may become `a→b`, `b→c`,
+`c→new`, so the names end up attached to the wrong contents. Reproduce this
+with a test first. If it happens, fixing it is part of this task.
 
-**Change.** Optional, display-only columns for size, date modified and
-permissions, plus a sort option (name, type, size, date). They must not
-affect how the sync reads rows.
+**Change.**
 
-### F7 — Message prefixes aren't consistent (P3)
+- Pair root rows by the identity marks each row already carries
+  (`kind = 'root'` records in `lua/direct/buffer/buffer.lua`), never by position:
+  - a marked row whose text changed is a rename;
+  - a marked row that is gone is a delete;
+  - an unmarked row is a create, and nested paths are allowed as they are for
+    pure creates now.
+- Allow any mix of renames, creates and deletes in one save, combined into one
+  set of actions and one history entry, so a single `u` undoes the whole save.
+- Order the actions so no step depends on a name that's still taken. For
+  example, delete `a` and rename `b` to `a` in one save. Reuse the staged
+  moves the tree planner already uses for swaps and chains.
+- Keep refusing what really is unclear:
+  - two rows with the same destination;
+  - a row whose original entry can't be identified, such as after text undo
+    or redo past a listing (see `direct.vim-tree-edit`);
+  - a directory that changed on disk since it was listed.
+- Deleted entries are still yanked first, so `p` puts them back.
+- When a whole line is replaced by typing over it (`cc`, `S`), treat it as a
+  rename if the row's mark survives, and as a delete plus a create if it
+  doesn't. Document which edits keep the mark.
+- Root and expanded-directory changes can then use the same rules. Merge the
+  two paths if that turns out simpler.
+- Update `doc/direct.txt` (`direct.vim-classify`, `direct.vim-tree-edit`) and
+  the "Rules for edits" section of `README.md`, which currently says to make
+  one kind of change per save.
+
+**Tests.**
+
+- Rename one file, delete another and create a third in one `:w`. The disk
+  matches, the deleted entry is yanked, and one `u` restores all three.
+- Delete the first row and add a row at the end. Nothing is renamed by
+  position.
+- Delete `a` and rename `b` to `a` in one save, and swap two names in one
+  save. Both succeed, and nothing is overwritten.
+- Two rows with the same destination, or a row with no identity, is still
+  refused and leaves the buffer modified.
+- Mixed root edits together with edits inside expanded directories in one
+  save.
+
+### F6 — Message prefixes aren't consistent (P3)
 
 **Change.** Give every user-facing message the `direct:` prefix (for example
 `Nothing to undo` and `Failed to undo action - …` in `history.lua`), and
@@ -352,5 +383,6 @@ README.
    S1's modified-buffer guard.
 2. S5, R1 and S4.
 3. M1 and M2, so later changes are released and tested properly.
-4. Everything else, in any order. M4 is easiest when nothing else is changing
-   the same files.
+4. Everything else, in any order. Do F5 before M4, since both change
+   `buffer.lua` and the sync planner. M4 is easiest when nothing else is
+   changing the same files.
