@@ -651,6 +651,13 @@ git.enabled             boolean (default: `true`)
     Show Git status. Turning this off doesn't affect
     |direct-respect_gitignore|.
 
+                                                       *direct-git.timeout_ms*
+git.timeout_ms           positive integer (default: `1000`)
+    Maximum time in milliseconds for the background Git status query. Listings
+    appear immediately without waiting. When the query completes, status
+    decorations and deleted rows are applied. If it times out, the listing
+    remains usable without status and Direct reports one warning per repository.
+
                                                      *direct-git.show_symbols*
 git.show_symbols        boolean (default: `true`)
     Show the right-aligned status symbols. When `false`, names and folder icons

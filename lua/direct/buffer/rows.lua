@@ -115,9 +115,6 @@ local function refresh_icons(bufnr, state, row_ids)
     local ok, provider = pcall(require, 'nvim-web-devicons')
     if ok then devicons = provider end
   end
-  if options.git.enabled and state.git_status == nil then
-    state.git_status = git.read(state.root) or false
-  end
   local git_snapshot = state.git_status
   local line_count = vim.api.nvim_buf_line_count(bufnr)
   state.icon_line_count = line_count

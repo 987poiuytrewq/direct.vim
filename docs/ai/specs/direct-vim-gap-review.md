@@ -1,6 +1,6 @@
 # Spec: direct.vim gap review follow-ups
 
-**Status:** S1 through S6 are complete; the remaining tasks are proposed and have
+**Status:** S1 through S6 and R1 are complete; the remaining tasks are proposed and have
 not been checked item by item. This replaces `direct-vim-remaining-improvements.md`.
 Its main pieces (JSONL history, no-overwrite moves, exclusive `touch`, the
 safeguard on undoing a paste) appear in the current code, but that was not
@@ -32,7 +32,7 @@ the problem, or to record that it can't be reproduced.
 | S4 | P2 | Complete | Add a way to see, restore from and empty the trash, and keep it from growing forever |
 | S5 | P2 | Complete | Ask before `gc` discards Git changes, and review the `gc` / `gr` key clashes |
 | S6 | P4 | Complete | Put the lock file inside the `direct/` data directory |
-| R1 | P2 | Proposed | Stop `git status` from freezing the editor |
+| R1 | P2 | Complete | Stop `git status` from freezing the editor |
 | R2 | P3 | Proposed | Run long moves during `:w` without blocking the editor |
 | R3 | P3 | Proposed | Make `:checkhealth direct` check more |
 | F1 | P3 | Proposed | Let users remap individual keys |
@@ -234,6 +234,13 @@ document that, or check both locks during one release.
 ## Robustness and performance
 
 ### R1 — `git status` blocks with no timeout (P2)
+
+**Status: COMPLETE.** Git status now runs asynchronously, with a configurable
+`git.timeout_ms` deadline (default 1000 ms). Listings render immediately; when
+status arrives, decorations and Git-deleted rows update without replacing a
+modified listing. A timeout kills the process and emits one warning per
+repository. Tests use a hung Git status process to verify the listing returns
+before the deadline and the warning is not repeated. `make test` passes.
 
 **Problem.** `lua/direct/git.lua` calls `vim.system(...):wait()` with no
 timeout on every listing and refresh. A large repository or a slow

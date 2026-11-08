@@ -37,6 +37,10 @@ H.describe('buffer navigation', function()
     H.mkfile(root, 'ignored.txt', 'ignored')
 
     buffer.list(root)
+    H.assert_true(vim.wait(5000, function()
+      local state = buffer._state_for_test(vim.api.nvim_get_current_buf())
+      return state and not state.git_status_pending
+    end), 'Git status is ready before changed-row navigation')
     H.assert_buf_eq({ 'a.txt', 'b.txt', 'c.txt', 'ignored.txt' })
     vim.api.nvim_win_set_cursor(0, { 1, 0 })
 

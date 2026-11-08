@@ -190,6 +190,10 @@ H.describe('DirectRun', function()
 
     require('direct').setup({ git = { enabled = true } })
     require('direct').list(root)
+    H.assert_true(vim.wait(5000, function()
+      local state = require('direct.buffer.buffer')._state_for_test(vim.api.nvim_get_current_buf())
+      return state and not state.git_status_pending
+    end), 'Git status completes before selecting deleted rows')
     local row = find_line('gone.txt')
     H.assert_not_nil(row, 'the deleted tracked row is visible')
     vim.api.nvim_win_set_cursor(0, { row, 0 })

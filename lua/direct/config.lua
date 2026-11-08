@@ -28,6 +28,7 @@ local defaults = {
   max_recursive_expand_depth = false,
   git = {
     enabled = true,
+    timeout_ms = 1000,
     show_symbols = true,
     show_deleted = true,
     symbols = {
@@ -97,6 +98,12 @@ local function resolve_git_options(value)
         result.enabled = option
       else
         report_invalid_git_option(key, 'expected a boolean')
+      end
+    elseif key == 'timeout_ms' then
+      if type(option) == 'number' and option >= 1 and option % 1 == 0 then
+        result.timeout_ms = option
+      else
+        report_invalid_git_option(key, 'expected a positive integer')
       end
     elseif key == 'show_symbols' then
       if type(option) == 'boolean' then

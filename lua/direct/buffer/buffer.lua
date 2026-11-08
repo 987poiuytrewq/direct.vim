@@ -26,6 +26,7 @@ local namespace = rows.namespace
 local deleted_guards = {}
 local state_generations = {}
 local next_state_generation = 0
+local git_status_timeout_notified = {}
 local next_id = rows.next_id
 local set_row_mark = rows.set_row_mark
 local row_ids_by_row = rows.row_ids_by_row
@@ -67,16 +68,70 @@ local lstat = listing.lstat
 local is_real_directory = listing.is_real_directory
 local hidden_descendant = listing.hidden_descendant
 
-local function ensure_git_snapshot(state, options)
-  if options.git.enabled and state.git_status == nil then
-    state.git_status = git.read(state.root) or false
-  end
+local function ensure_git_snapshot(state)
   return state.git_status
 end
 
-local function refresh_highlights(bufnr, state, row_ids)
+local refresh_highlights
+
+local function start_git_status(bufnr, state, timeout_ms)
+  if state.git_status_cancel then state.git_status_cancel() end
+  local request = {}
+  state.git_status_request = request
+  state.git_status_pending = true
+  local cancel = git.read_async(state.root, timeout_ms, function(snapshot, err)
+    if not vim.api.nvim_buf_is_valid(bufnr) or states[bufnr] ~= state
+      or state.git_status_request ~= request then
+      return
+    end
+    if not fs.stat(state.root) then return end
+    state.git_status_request = nil
+    state.git_status_cancel = nil
+    state.git_status_pending = false
+    state.git_status = snapshot or false
+
+    if err then
+      local key = paths.canonical(state.root)
+      if not git_status_timeout_notified[key] then
+        git_status_timeout_notified[key] = true
+        ui.notify('direct: Git status unavailable for ' .. state.root .. ': '
+          .. tostring(err), vim.log.levels.WARN)
+      end
+    end
+
+    if snapshot and not vim.bo[bufnr].modified then
+      local expand_git_view = state.git_expand_all == true
+      state.git_expand_all = false
+      vim.api.nvim_buf_call(bufnr, function()
+        if states[bufnr] == state and not vim.bo[bufnr].modified then
+          M.list(state.root, { git_status_resolved = true, git_status = snapshot })
+          if expand_git_view then require('direct.folding').expand_all(M) end
+        end
+      end)
+      return
+    end
+
+    local row_ids = row_ids_by_row(bufnr)
+    refresh_highlights(bufnr, state, row_ids)
+    refresh_icons(bufnr, state, row_ids)
+  end)
+  if state.git_status_request == request then state.git_status_cancel = cancel end
+end
+
+function M.cancel_git_status(bufnr)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  local state = states[bufnr]
+  if not state then return false end
+  if state.git_status_cancel then state.git_status_cancel() end
+  state.git_status_cancel = nil
+  state.git_status_request = nil
+  state.git_status_pending = false
+  return true
+end
+
+refresh_highlights = function(bufnr, state, row_ids)
   local options = require('direct.config').options
-  local snapshot = ensure_git_snapshot(state, options)
+  local snapshot = ensure_git_snapshot(state)
   local display_rows = {}
   row_ids = row_ids or row_ids_by_row(bufnr)
   for row = 0, vim.api.nvim_buf_line_count(bufnr) - 1 do
@@ -109,21 +164,16 @@ function M.refresh_git_status(bufnr, root)
   local state = states[bufnr]
   if not state or (root and state.root ~= root) then return false end
   state.git_status = nil
-  ensure_git_snapshot(state, require('direct.config').options)
-  local restored = false
-  for _, record in pairs(state.rows) do
-    if record.deleted_kind and fs.taken(record.path) then
-      restored = true
-      break
-    end
-  end
-  if restored then
-    vim.api.nvim_buf_call(bufnr, function() M.list(state.root) end)
+  local options = require('direct.config').options
+  if not options.git.enabled then
+    state.git_status = false
+    refresh_highlights(bufnr, state)
+    refresh_icons(bufnr, state)
     return true
   end
-  local row_ids = row_ids_by_row(bufnr)
-  refresh_highlights(bufnr, state, row_ids)
-  refresh_icons(bufnr, state, row_ids)
+  refresh_highlights(bufnr, state)
+  refresh_icons(bufnr, state)
+  start_git_status(bufnr, state, options.git.timeout_ms)
   return true
 end
 
@@ -137,7 +187,7 @@ function M.navigate_git_status(direction)
 
   local options = require('direct.config').options
   if not options.git.enabled then return false end
-  local snapshot = ensure_git_snapshot(state, options)
+  local snapshot = ensure_git_snapshot(state)
   if not snapshot then return false end
 
   local cursor_row = vim.api.nvim_win_get_cursor(0)[1] - 1
@@ -784,6 +834,11 @@ function Buffer:list(options)
     return nil, reason
   end
   local old_state = states[bufnr]
+  if old_state and old_state.git_status_cancel then
+    old_state.git_status_cancel()
+    old_state.git_status_cancel = nil
+    old_state.git_status_request = nil
+  end
   local view_git_status_only = old_state
     and old_state.view_git_status_only == true or false
   local show_hidden_override
@@ -818,8 +873,9 @@ function Buffer:list(options)
   local git_options = require('direct.config').options.git
   local show_deleted = git_options.enabled and git_options.show_deleted ~= false
   local git_snapshot = false
-  if git_options.enabled then
-    git_snapshot = git.read(self.root) or false
+  if git_options.enabled then git_snapshot = nil end
+  if git_options.enabled and options.git_status_resolved then
+    git_snapshot = options.git_status or false
   end
   if view_git_status_only then
     safe = filter_git_status_lines(self.root, safe, git_snapshot)
@@ -920,7 +976,9 @@ function Buffer:list(options)
     view_respect_gitignore_override = old_state
       and old_state.view_respect_gitignore_override or false,
     view_git_status_only = view_git_status_only,
-    git_status = git_snapshot or false,
+    git_status = git_snapshot,
+    git_status_pending = git_options.enabled and not options.git_status_resolved,
+    git_expand_all = old_state and old_state.git_expand_all == true or false,
   }
   set_directory_snapshot(state, snapshot)
   local roots = {}
@@ -1024,6 +1082,9 @@ function Buffer:list(options)
     })
   end
   vim.bo[bufnr].modified = false
+  if state.git_status_pending then
+    start_git_status(bufnr, state, git_options.timeout_ms)
+  end
   return true
 end
 
@@ -1060,7 +1121,7 @@ function Buffer:expand(row)
       end
     end
     local options = require('direct.config').options
-    local git_snapshot = ensure_git_snapshot(state, options)
+    local git_snapshot = ensure_git_snapshot(state)
     local show_deleted = options.git.enabled and options.git.show_deleted ~= false
     local children, deleted_children = merge_deleted_entries(path, physical_children,
       show_deleted and git_snapshot or nil, state.view_show_hidden)
@@ -1406,6 +1467,7 @@ local function set_git_status_only(enabled)
     collapse_undos = state.collapse_undos,
   }
   state.view_git_status_only = enabled
+  state.git_expand_all = enabled
   -- Rebuild at every level from a fresh Git snapshot; the view must not leave
   -- stale child rows behind when the filter is enabled or disabled.
   state.expanded = {}
