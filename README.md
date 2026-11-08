@@ -167,7 +167,7 @@ require('direct').setup({
   max_recursive_expand_depth = false, -- limit for zO/zR; false = unlimited
   show_folder_icons = true,
   show_file_icons = true,
-  show_filetype_icons = true,        -- filetype icons, via nvim-web-devicons
+  show_filetype_icons = true,        -- bufferline-style filename icons via nvim-web-devicons
   icons = {
     file = '\u{f15b}',
     folder = '\u{f07b}',
@@ -197,6 +197,11 @@ You can call `setup()` more than once. Each call replaces the previous options,
 and unknown or invalid options are reported as errors instead of being silently
 ignored.
 
+With `show_filetype_icons` enabled, file icons use bufferline.nvim's built-in
+basename-based nvim-web-devicons lookup. The dependency is optional; Direct uses
+`icons.file` when it is unavailable. Set the option to `false` to use the
+generic glyph for every file.
+
 ### Highlights
 
 Every highlight links to a standard group by default, so it follows your
@@ -205,9 +210,15 @@ colour scheme. To change one, use `vim.api.nvim_set_hl()`:
 | Group                                       | Default link            |
 |---------------------------------------------|-------------------------|
 | `DirectDirectory`                           | `Directory`             |
-| `DirectHiddenFolderIcon`, `DirectHiddenFileIcon` | `Comment`          |
+| `DirectFileIcon`                             | `Normal`                |
+| `DirectHiddenFolderIcon`, `DirectHiddenFileIcon` | `Comment`           |
 | `DirectGitDeletedFile`, `DirectGitDeletedDirectory` | `ErrorMsg`      |
 | `DirectGit*` status groups                  | `Added`, `Changed`, `Removed`, `ErrorMsg`, `Comment` |
+
+Visible file icons use `DirectFileIcon`; hidden file icons retain
+`DirectHiddenFileIcon`. nvim-web-devicons supplies file glyphs, but its
+highlight groups do not override Direct's groups. Git status still colours the
+file names and folder icons.
 
 `:help direct.vim` lists every group.
 

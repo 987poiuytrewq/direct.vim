@@ -411,46 +411,56 @@ H.describe('listing filename highlights', function()
     assert_folder_icon(0, 0, 0, 'O')
   end)
 
-  H.it('renders filetype icons through the optional devicons provider and preserves folder icons', function()
+  H.it('matches bufferline filename icon lookup and preserves folder icons', function()
     clean_buffers()
     local config = require('direct.config')
     config.setup({ show_folder_icons = true, show_file_icons = true })
     local previous = package.loaded['nvim-web-devicons']
     local requests = {}
     package.loaded['nvim-web-devicons'] = {
-      get_icon_by_filetype = function(filetype, opts)
-        requests[#requests + 1] = { filetype = filetype, opts = opts }
-        if filetype == 'lua' then return 'L', 'TestLuaIcon' end
+      get_icon = function(filename, extension, opts)
+        requests[#requests + 1] = {
+          filename = filename,
+          extension = extension or false,
+          opts = opts,
+        }
+        if filename == 'Dockerfile' then return 'D', 'TestDockerIcon' end
+        if filename == 'script.lua' then return 'L', 'TestLuaIcon' end
+        return 'G', 'TestDefaultIcon'
       end,
     }
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
     H.mkdir(ws, 'source.lua')
+    H.mkfile(ws, 'Dockerfile', '')
     H.mkfile(ws, 'script.lua', '')
     H.mkfile(ws, 'script.py', '')
     local listing = buffer.list(ws)
     package.loaded['nvim-web-devicons'] = previous
 
-    H.assert_eq(H.buf_lines(), { 'source.lua/', 'script.lua', 'script.py' })
+    H.assert_eq(H.buf_lines(), { 'source.lua/', 'Dockerfile', 'script.lua', 'script.py' })
     H.assert_eq(icon_mark(0, 0)[4].virt_text,
       { { '\u{f07b} ', 'DirectFolderIcon' } },
       'directories keep their existing folder icons')
-    H.assert_eq(icon_mark(0, 1)[4].virt_text,
-      { { 'L ', 'TestLuaIcon' } }, 'recognized filetypes use the devicons glyph and highlight')
     H.assert_eq(icon_mark(0, 2)[4].virt_text,
-      { { FILE_ICON .. ' ', 'DirectFileIcon' } }, 'a provider without a matching icon falls back to the generic glyph')
+      { { 'L ', 'DirectFileIcon' } }, 'extension lookup uses the devicons glyph and DirectFileIcon')
+    H.assert_eq(icon_mark(0, 1)[4].virt_text,
+      { { 'D ', 'DirectFileIcon' } }, 'exact filename lookup handles special files')
+    H.assert_eq(icon_mark(0, 3)[4].virt_text,
+      { { 'G ', 'DirectFileIcon' } }, 'provider default glyphs also use DirectFileIcon')
     H.assert_eq(requests, {
-      { filetype = 'lua', opts = { default = false } },
-      { filetype = 'python', opts = { default = false } },
-    }, 'lookups use Neovim filetypes and disable provider generic fallbacks')
+      { filename = 'Dockerfile', extension = false, opts = { default = true } },
+      { filename = 'script.lua', extension = false, opts = { default = true } },
+      { filename = 'script.py', extension = false, opts = { default = true } },
+    }, 'lookup matches bufferline: basename, no explicit extension, and provider default')
 
     config.setup({ show_folder_icons = true, show_file_icons = true, show_filetype_icons = false })
     listing:list()
-    H.assert_eq(icon_mark(0, 1)[4].virt_text,
+    H.assert_eq(icon_mark(0, 2)[4].virt_text,
       { { FILE_ICON .. ' ', 'DirectFileIcon' } }, 'the option disables filetype icons')
   end)
 
-  H.it('styles hidden names and their optional icons with Comment', function()
+  H.it('styles hidden names and icons with Comment', function()
     clean_buffers()
     vim.cmd('syntax off')
     H.assert_false(vim.g.syntax_on == 1, 'test exercises the syntax-off configuration')

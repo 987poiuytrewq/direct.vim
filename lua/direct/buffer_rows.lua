@@ -89,20 +89,18 @@ local function is_dir_line(line)
   return paths.is_directory_name(line)
 end
 
--- Use the same filetype-to-icon lookup supported by bufferline.nvim. The
--- provider stays optional; callers fall back to the configured generic file
--- glyph when it is unavailable or has no icon for this filetype.
-local function filetype_icon(name, devicons)
-  if not devicons or type(devicons.get_icon_by_filetype) ~= 'function' then
+-- Match bufferline.nvim's built-in icon lookup: resolve the basename against
+-- nvim-web-devicons' filename and extension tables, including its default icon.
+-- The provider stays optional; without it callers use Direct's generic glyph.
+local function file_icon(name, devicons)
+  if not devicons or type(devicons.get_icon) ~= 'function' then
     return nil
   end
   local filename = paths.strip_directory_marker(name)
-  local ok, filetype = pcall(vim.filetype.match, { filename = filename })
-  if not ok or type(filetype) ~= 'string' or filetype == '' then return nil end
-  local icon_ok, glyph, group = pcall(devicons.get_icon_by_filetype,
-    filetype, { default = false })
+  local icon_ok, glyph = pcall(devicons.get_icon,
+    filename, nil, { default = true })
   if not icon_ok or type(glyph) ~= 'string' or glyph == '' then return nil end
-  return glyph, group
+  return glyph
 end
 
 -- Refresh display-only icons. When either kind is enabled, every row gets an
@@ -160,15 +158,11 @@ local function refresh_icons(bufnr, state, row_ids)
         base_glyph = options.icons.file
         base_group = hidden and 'DirectHiddenFileIcon' or 'DirectFileIcon'
         -- Keep the dedicated deleted-file glyph for Git tombstones. Regular
-        -- files use their filetype icon when the optional provider recognizes
-        -- their Neovim filetype.
+        -- files use bufferline's filename-based devicon lookup.
         if rec.deleted_kind ~= 'file' and options.show_filetype_icons == true then
-          local glyph, group = filetype_icon(rec.name, devicons)
+          local glyph = file_icon(rec.name, devicons)
           if glyph then
             base_glyph = glyph
-            if not hidden and type(group) == 'string' and group ~= '' then
-              base_group = group
-            end
           end
         end
       end
@@ -176,7 +170,11 @@ local function refresh_icons(bufnr, state, row_ids)
         glyph, group = base_glyph, base_group
         if options.git.enabled and git_snapshot then
           local status = git.first_status_for(git_snapshot, rec.path)
-          group = highlight.git_status_highlight(status) or group
+          -- File icons always use DirectFileIcon; Git status colors their names
+          -- but only overrides folder icon groups.
+          if is_folder then
+            group = highlight.git_status_highlight(status) or group
+          end
         end
       end
       vim.api.nvim_buf_set_extmark(bufnr, icon_namespace, row,

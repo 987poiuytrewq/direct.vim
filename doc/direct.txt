@@ -380,9 +380,10 @@ changes, both types are shown. Untracked files show the added glyph and a
 blank slot. Directories combine the status of their contents, separately for
 the index and the worktree.
 
-Names and icons are coloured to match the first (leftmost) symbol: the index
-status when there is one, otherwise the worktree status. See
-|direct.vim-highlights| for the groups.
+Names and folder icons are coloured to match the first (leftmost) symbol: the
+index status when there is one, otherwise the worktree status. Visible file
+icons use |DirectFileIcon| and hidden file icons use |DirectHiddenFileIcon|.
+See |direct.vim-highlights| for the groups.
 
 Change the glyphs with |direct-git.symbols|, or hide the status component with
 |direct-git.show_symbols| while keeping the colours.
@@ -593,17 +594,18 @@ show_file_icons         boolean (default: `true`)
 
                                                   *direct-show_filetype_icons*
 show_filetype_icons     boolean (default: `true`)
-    Give files the icon and colour for their filetype, from nvim-web-devicons
-    (the same lookup bufferline.nvim uses). Without nvim-web-devicons, or for
-    a filetype it doesn't know, files use `icons.file`. Set to `false` to use
-    `icons.file` for every file. Folders and deleted tracked files keep their
-    own icons. Has no effect when |direct-show_file_icons| is off.
+    Use bufferline.nvim's built-in nvim-web-devicons lookup for files: match the
+    basename (including exact filename overrides), then the extension, with the
+    provider's default icon as a fallback. Without nvim-web-devicons, files use
+    `icons.file`. Set to `false` to use `icons.file` for every file. Folders and
+    deleted tracked files keep their own icons. Has no effect when
+    |direct-show_file_icons| is off.
 
                                                                 *direct-icons*
 icons                   table
     The glyphs used for icons. Any key you leave out keeps its default.
-    `file` is used for every file unless |direct-show_filetype_icons| finds
-    an icon for its type.
+    `file` is used when filetype icons are disabled or nvim-web-devicons is not
+    available.
 
     Key                     Default ~
     `file`                    U+F15B  (file)
@@ -623,8 +625,9 @@ git.enabled             boolean (default: `true`)
 
                                                      *direct-git.show_symbols*
 git.show_symbols        boolean (default: `true`)
-    Show the right-aligned status symbols. When `false`, names and icons are
-    still coloured and the Git views still work.
+    Show the right-aligned status symbols. When `false`, names and folder icons
+    are still coloured and the Git views still work. File-icon groups are not
+    overridden by Git status.
 
                                                      *direct-git.show_deleted*
 git.show_deleted        boolean (default: `true`)
@@ -673,9 +676,10 @@ definitions are kept.
     DirectGitDeletedDirectory   deleted tracked dir names     |hl-ErrorMsg|
 
 File names get no highlighting based on their name or type. With
-|direct-show_filetype_icons|, file icons use nvim-web-devicons' colour for
-their type. Changed entries are coloured by their Git status
-(|direct.vim-git-status|).
+|direct-show_filetype_icons|, nvim-web-devicons supplies the file icon glyph,
+but its highlight group is ignored: visible file icons use |DirectFileIcon| and
+hidden file icons use |DirectHiddenFileIcon|. Changed names and folder icons are
+coloured by Git status (|direct.vim-git-status|).
 
 Listings use their own syntax file, which loads even when Neovim's global
 syntax loading is turned off.
