@@ -210,9 +210,15 @@ colour scheme. To change one, use `vim.api.nvim_set_hl()`:
 | Group                                       | Default link            |
 |---------------------------------------------|-------------------------|
 | `DirectDirectory`                           | `Directory`             |
-| `DirectHiddenFolderIcon`, `DirectHiddenFileIcon` | `Comment`          |
+| `DirectFileIcon`                             | `Normal`                |
+| `DirectHiddenFolderIcon`, `DirectHiddenFileIcon` | `Comment`           |
 | `DirectGitDeletedFile`, `DirectGitDeletedDirectory` | `ErrorMsg`      |
 | `DirectGit*` status groups                  | `Added`, `Changed`, `Removed`, `ErrorMsg`, `Comment` |
+
+Visible file icons use `DirectFileIcon`; hidden file icons retain
+`DirectHiddenFileIcon`. nvim-web-devicons supplies file glyphs, but its
+highlight groups do not override Direct's groups. Git status still colours the
+file names and folder icons.
 
 `:help direct.vim` lists every group.
 

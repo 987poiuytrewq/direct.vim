@@ -443,11 +443,11 @@ H.describe('listing filename highlights', function()
       { { '\u{f07b} ', 'DirectFolderIcon' } },
       'directories keep their existing folder icons')
     H.assert_eq(icon_mark(0, 2)[4].virt_text,
-      { { 'L ', 'TestLuaIcon' } }, 'extension lookup uses the devicons glyph and highlight')
+      { { 'L ', 'DirectFileIcon' } }, 'extension lookup uses the devicons glyph and DirectFileIcon')
     H.assert_eq(icon_mark(0, 1)[4].virt_text,
-      { { 'D ', 'TestDockerIcon' } }, 'exact filename lookup handles special files')
+      { { 'D ', 'DirectFileIcon' } }, 'exact filename lookup handles special files')
     H.assert_eq(icon_mark(0, 3)[4].virt_text,
-      { { 'G ', 'TestDefaultIcon' } }, 'unknown extensions use the provider default icon')
+      { { 'G ', 'DirectFileIcon' } }, 'provider default glyphs also use DirectFileIcon')
     H.assert_eq(requests, {
       { filename = 'Dockerfile', extension = false, opts = { default = true } },
       { filename = 'script.lua', extension = false, opts = { default = true } },
@@ -460,7 +460,7 @@ H.describe('listing filename highlights', function()
       { { FILE_ICON .. ' ', 'DirectFileIcon' } }, 'the option disables filetype icons')
   end)
 
-  H.it('styles hidden names and their optional icons with Comment', function()
+  H.it('styles hidden names and icons with Comment', function()
     clean_buffers()
     vim.cmd('syntax off')
     H.assert_false(vim.g.syntax_on == 1, 'test exercises the syntax-off configuration')

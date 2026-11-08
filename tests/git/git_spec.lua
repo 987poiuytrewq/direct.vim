@@ -167,8 +167,8 @@ H.describe('Git status display', function()
     local icons = mark_by_row(0, 'direct-listing-icons')
     H.assert_eq(name_highlights[row][4].hl_group, 'DirectGitModified',
       'conflict filename follows the first, modified symbol')
-    H.assert_eq(icons[row][4].virt_text, { { '\u{f15b} ', 'DirectGitModified' } },
-      'conflict icon follows the first, modified symbol')
+    H.assert_eq(icons[row][4].virt_text, { { '\u{f15b} ', 'DirectFileIcon' } },
+      'conflict icon keeps DirectFileIcon')
   end)
 
   H.it('normalizes type changes to modifications in their original porcelain columns', function()
@@ -481,8 +481,8 @@ H.describe('Git status display', function()
       'untracked.txt', 'worktree-only.txt' },
       'listing text remains ordinary paths')
     H.assert_eq(icons[rows['tracked.txt']][4].virt_text,
-      { { '\u{f15b} ', 'DirectGitModified' } },
-      'the first status symbol colors the normal file icon')
+      { { '\u{f15b} ', 'DirectFileIcon' } },
+      'file icons keep DirectFileIcon despite Git status')
     H.assert_eq(highlights[rows['tracked.txt']][4].hl_group, 'DirectGitModified',
       'the first status symbol colors the entry name')
     H.assert_eq(status_text(statuses[rows['tracked.txt']]), '\u{f01f} \u{f01f}',
@@ -496,8 +496,8 @@ H.describe('Git status display', function()
     H.assert_eq(highlights[rows['index-only.txt']][4].hl_group, 'DirectGitModified',
       'an index-only status colors the filename like its first symbol')
     H.assert_eq(icons[rows['index-only.txt']][4].virt_text,
-      { { '\u{f15b} ', 'DirectGitModified' } },
-      'an index-only status colors the icon like its first symbol')
+      { { '\u{f15b} ', 'DirectFileIcon' } },
+      'an index-only status does not replace the file icon group')
     H.assert_eq(status_text(statuses[rows['staged-add.txt']]), '\u{f067} \u{f00c}',
       'staged additions show added and staged symbols')
     H.assert_eq(status_text(statuses[rows['worktree-only.txt']]), '\u{f01f}  ',
@@ -505,8 +505,8 @@ H.describe('Git status display', function()
     H.assert_eq(highlights[rows['worktree-only.txt']][4].hl_group, 'DirectGitModified',
       'worktree-only status colors the filename')
     H.assert_eq(icons[rows['worktree-only.txt']][4].virt_text,
-      { { '\u{f15b} ', 'DirectGitModified' } },
-      'worktree-only status colors the icon')
+      { { '\u{f15b} ', 'DirectFileIcon' } },
+      'worktree-only status does not replace the file icon group')
     H.assert_eq(status_text(statuses[rows['untracked.txt']]), '\u{f067}  ',
       'untracked ?? maps to added in the first slot')
     H.assert_eq(status_chunks(statuses[rows['untracked.txt']])[1][2], 'DirectGitAdded',
@@ -538,8 +538,8 @@ H.describe('Git status display', function()
     H.assert_eq(highlights[rows['worktree-only.txt']][4].hl_group, 'DirectGitModified',
       'hiding symbols keeps first-symbol filename colors')
     H.assert_eq(icons[rows['worktree-only.txt']][4].virt_text,
-      { { '\u{f15b} ', 'DirectGitModified' } },
-      'hiding symbols keeps worktree icon colors')
+      { { '\u{f15b} ', 'DirectFileIcon' } },
+      'hiding symbols leaves the file icon group unchanged')
 
     config.setup({ git = { show_symbols = true } })
     listing:list()
@@ -579,8 +579,8 @@ H.describe('Git status display', function()
       { { '\u{f114} ', 'DirectGitDeleted' } },
       'collapsed deleted directories use the outlined folder glyph')
     H.assert_eq(icons[row_for('gone.txt') - 1][4].virt_text,
-      { { '\u{f016} ', 'DirectGitDeleted' } },
-      'deleted files use the outlined file glyph')
+      { { '\u{f016} ', 'DirectFileIcon' } },
+      'deleted files use the outlined glyph with DirectFileIcon')
     local namespace = vim.api.nvim_get_namespaces()['direct-listing-highlights']
     local marks = {}
     for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(0, namespace, 0, -1,
