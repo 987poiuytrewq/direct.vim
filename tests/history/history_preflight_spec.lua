@@ -75,7 +75,7 @@ H.describe('history preflight', function()
       'invalid yank creates no redo log')
   end)
 
-  H.it('an unknown redo stack is silently discarded before paste reads the register', function()
+  H.it('an unknown redo stack is preserved before paste reads the register', function()
     local sb = H.sandbox()
     local hist = history_dir(sb)
     H.mkdir(sb.root, '')
@@ -96,17 +96,49 @@ H.describe('history preflight', function()
     restore()
 
     H.assert_nil(result, 'paste is refused by preflight')
-    H.assert_eq(content_calls, 1, 'paste reads the register after history reset')
-    H.assert_eq(log.read_raw(redo_path), fixtures.header .. '\n',
-      'unknown redo bytes are discarded')
-    H.assert_eq(log.read_raw(vim.fs.joinpath(hist, 'undo.log')),
-      fixtures.header .. '\n', 'both stacks reset together')
+    H.assert_eq(content_calls, 0, 'preserved history blocks before register access')
+    H.assert_eq(log.read_raw(redo_path), original, 'unknown redo bytes remain byte-for-byte')
+    H.assert_nil(vim.uv.fs_stat(vim.fs.joinpath(hist, 'undo.log')),
+      'the good sibling stack is not initialized or reset')
     H.assert_fs_eq(dest, {}, 'the destination tree is untouched')
-    H.assert_false(H.messages():find('resetting legacy', 1, true) ~= nil,
-      'unsupported history is discarded silently')
+    H.assert_notified(redo_path, vim.log.levels.ERROR)
   end)
 
-  H.it('sync silently discards unsupported history before applying the requested edit', function()
+  H.it('preserves a missing-final-newline log and refuses history operations', function()
+    local sb = H.sandbox()
+    local hist = history_dir(sb)
+    vim.fn.mkdir(hist, 'p')
+    local undo_path = vim.fs.joinpath(hist, 'undo.log')
+    local original = fixtures.header .. '\n' .. fixtures.touch(sb.root .. '/file.txt')
+    H.assert_true(log.write_raw_atomic(undo_path, original) == true,
+      'write a current-format log without the terminating LF')
+
+    H.capture_messages()
+    local result = history.preflight()
+
+    H.assert_nil(result, 'the unterminated log blocks the operation')
+    H.assert_eq(log.read_raw(undo_path), original, 'the exact raw bytes are preserved')
+    H.assert_notified(undo_path, vim.log.levels.ERROR)
+  end)
+
+  H.it('preserves invalid UTF-8 history bytes and refuses history operations', function()
+    local sb = H.sandbox()
+    local hist = history_dir(sb)
+    vim.fn.mkdir(hist, 'p')
+    local undo_path = vim.fs.joinpath(hist, 'undo.log')
+    local original = fixtures.header .. '\n\255\n'
+    H.assert_true(log.write_raw_atomic(undo_path, original) == true,
+      'write raw invalid UTF-8 bytes')
+
+    H.capture_messages()
+    local result = history.preflight()
+
+    H.assert_nil(result, 'invalid UTF-8 history blocks the operation')
+    H.assert_eq(log.read_raw(undo_path), original, 'invalid bytes remain byte-for-byte')
+    H.assert_notified(undo_path, vim.log.levels.ERROR)
+  end)
+
+  H.it('sync refuses to mutate files while preserving malformed history', function()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
     H.mkfile(ws, 'keep.txt', { 'keep' })
@@ -114,7 +146,7 @@ H.describe('history preflight', function()
     local hist = history_dir(sb)
     vim.fn.mkdir(hist, 'p')
     local redo_path = vim.fs.joinpath(hist, 'redo.log')
-    local original = '#direct-history-v99\nopaque\n'
+    local original = fixtures.header .. '\n{bad JSON\n'
     H.assert_true(log.write_raw_atomic(redo_path, original) == true,
       'unknown redo fixture')
 
@@ -131,21 +163,16 @@ H.describe('history preflight', function()
     local ok, err = listing:sync()
     restore()
 
-    H.assert_true(ok == true, 'sync proceeds after unsupported history is discarded')
-    H.assert_nil(err, 'sync has no error')
-    H.assert_eq(yank_calls, 1, 'the deletion is auto-yanked')
-    H.assert_nil(vim.uv.fs_stat(ws .. '/delete.txt'), 'the requested deletion applied')
-    H.assert_true(type(register.content()) == 'string', 'the register pointer was written')
-    H.assert_eq(log.read_raw(redo_path), fixtures.header .. '\n',
-      'unsupported redo bytes were replaced')
-    H.assert_true(log.read_raw(vim.fs.joinpath(hist, 'undo.log')):find(fixtures.header, 1, true) == 1,
-      'the new action is recorded in the reset undo stack')
-    H.assert_false(vim.bo.modified, 'successful sync clears the buffer')
-    H.assert_false(H.messages():find('resetting legacy', 1, true) ~= nil,
-      'unsupported history is discarded silently')
+    H.assert_nil(ok, 'malformed history refuses sync')
+    H.assert_true(type(err) == 'string', 'the refusal returns a reason')
+    H.assert_eq(yank_calls, 0, 'auto-yank does not run')
+    H.assert_true(H.exists(ws, 'delete.txt'), 'the requested deletion did not apply')
+    H.assert_eq(log.read_raw(redo_path), original, 'malformed bytes remain byte-for-byte')
+    H.assert_true(vim.bo.modified, 'the attempted listing edit remains available')
+    H.assert_notified(redo_path, vim.log.levels.ERROR)
   end)
 
-  H.it('unsupported redo history silently resets both stacks before undo', function()
+  H.it('unsupported redo history blocks undo and preserves both stacks', function()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
     H.mkfile(ws, 'a.txt', { 'A' })
@@ -160,16 +187,61 @@ H.describe('history preflight', function()
       'unknown redo fixture')
 
     H.capture_messages()
-    H.assert_nil(history.undo(), 'the unsupported redo causes both histories to reset')
+    H.assert_nil(history.undo(), 'the unsupported redo blocks undo')
 
     H.assert_eq(vim.fn.readfile(ws .. '/a.txt'), { 'A' }, 'filesystem is untouched')
     H.assert_nil(vim.uv.fs_stat(ws .. '/b.txt'), 'the reversal did not run')
-    H.assert_eq(log.read_raw(undo_path), fixtures.header .. '\n',
-      'the valid sibling stack is discarded too')
-    H.assert_eq(log.read_raw(redo_path), fixtures.header .. '\n',
-      'unsupported redo is discarded')
-    H.assert_false(H.messages():find('resetting legacy', 1, true) ~= nil,
-      'unsupported history is discarded silently')
+    H.assert_eq(log.read_raw(undo_path), fixtures.header .. '\n' .. valid .. '\n',
+      'the valid sibling stack remains intact')
+    H.assert_eq(log.read_raw(redo_path), unknown, 'unsupported redo remains byte-for-byte')
+    H.assert_notified(redo_path, vim.log.levels.ERROR)
+  end)
+
+  H.it('backs up recognized legacy history before resetting both stacks with a warning', function()
+    local sb = H.sandbox()
+    local hist = history_dir(sb)
+    vim.fn.mkdir(hist, 'p')
+    local undo_path = vim.fs.joinpath(hist, 'undo.log')
+    local legacy = 'touch\t' .. sb.root .. '/old.txt\n'
+    H.assert_true(log.write_raw_atomic(undo_path, legacy) == true,
+      'write a recognized markerless Python history')
+
+    H.capture_messages()
+    local state = history.preflight()
+
+    H.assert_not_nil(state, 'recognized legacy history can be reset automatically')
+    H.assert_eq(log.read_raw(undo_path), fixtures.header .. '\n', 'undo starts fresh')
+    H.assert_eq(log.read_raw(vim.fs.joinpath(hist, 'redo.log')),
+      fixtures.header .. '\n', 'redo starts fresh with its paired stack')
+    local backup = vim.fn.glob(undo_path .. '.backup-*')
+    H.assert_true(backup ~= '', 'the legacy bytes have a timestamped backup')
+    H.assert_eq(log.read_raw(backup), legacy, 'backup preserves the legacy bytes')
+    H.assert_notified('legacy history was backed up and reset', vim.log.levels.WARN)
+  end)
+
+  H.it('explicit history reset backs up damaged stacks before starting fresh', function()
+    local sb = H.sandbox()
+    local hist = history_dir(sb)
+    vim.fn.mkdir(hist, 'p')
+    local undo_path = vim.fs.joinpath(hist, 'undo.log')
+    local redo_path = vim.fs.joinpath(hist, 'redo.log')
+    local bad_undo = fixtures.header .. '\nnot-json\n'
+    local unknown_redo = '#direct-history-v99\nopaque bytes\n'
+    H.assert_true(log.write_raw_atomic(undo_path, bad_undo) == true,
+      'write a malformed current stack')
+    H.assert_true(log.write_raw_atomic(redo_path, unknown_redo) == true,
+      'write an unknown stack')
+
+    vim.cmd('DirectHistoryReset')
+
+    H.assert_eq(log.read_raw(undo_path), fixtures.header .. '\n', 'undo stack is fresh')
+    H.assert_eq(log.read_raw(redo_path), fixtures.header .. '\n', 'redo stack is fresh')
+    local undo_backup = vim.fn.glob(undo_path .. '.backup-*')
+    local redo_backup = vim.fn.glob(redo_path .. '.backup-*')
+    H.assert_true(undo_backup ~= '' and redo_backup ~= '', 'both source files are backed up')
+    H.assert_eq(log.read_raw(undo_backup), bad_undo, 'malformed bytes are copied exactly')
+    H.assert_eq(log.read_raw(redo_backup), unknown_redo, 'future bytes are copied exactly')
+    H.assert_notified('history reset; backups', vim.log.levels.INFO)
   end)
 
   H.it('reset failure aborts before auto-yank and leaves legacy bytes intact', function()

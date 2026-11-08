@@ -305,8 +305,8 @@ H.describe('history', function()
     H.assert_notified('Nothing to redo')
   end)
 
-  -- Unsupported history is discarded silently, never replayed or migrated.
-  H.it('a recognized markerless Python log is reset, never executed or backed up', function()
+  -- Recognized Python history is backed up and reset; no old action is replayed.
+  H.it('a recognized markerless Python log is backed up and reset, never executed', function()
     local sb = H.sandbox()
     local hist = history_dir(sb)
     local ws = H.mkdir(sb.root, 'ws')
@@ -321,8 +321,8 @@ H.describe('history', function()
     H.capture_messages()
     local res = history.undo()
     H.assert_nil(res, 'a foreign log yields no undo action')
-    H.assert_false(H.messages():find('resetting legacy', 1, true) ~= nil,
-      'unsupported history is discarded silently')
+    H.assert_true(H.messages():find('legacy history was backed up and reset', 1, true) ~= nil,
+      'legacy reset emits a warning')
 
     -- The deleted-file oracle: these readfile calls raise E484 if the foreign
     -- line is ever executed.
@@ -334,7 +334,10 @@ H.describe('history', function()
     local undo_path = vim.fs.joinpath(history_dir(sb), 'undo.log')
     H.assert_eq(vim.fn.readfile(undo_path), { MARKER },
       'the recognized legacy log was reset to a header-only JSONL file')
-    H.assert_false(fs.exists(undo_path .. '.legacy'), 'no backup file was created')
+    local backup = vim.fn.glob(undo_path .. '.backup-*')
+    H.assert_true(backup ~= '', 'a timestamped backup was created')
+    H.assert_eq(log.read_raw(backup), legacy_line .. '\n',
+      'the original Python bytes are preserved exactly')
 
     -- With the foreign log gone, a second undo sees empty history.
     H.capture_messages()
@@ -342,7 +345,7 @@ H.describe('history', function()
     H.assert_notified('Nothing to undo')
   end)
 
-  H.it('an unknown log is discarded silently without touching unrelated backup names', function()
+  H.it('an unknown log is preserved without touching unrelated backup names', function()
     local sb = H.sandbox()
     local hist = history_dir(sb)
     local undo_path = vim.fs.joinpath(hist, 'undo.log')
@@ -352,36 +355,27 @@ H.describe('history', function()
 
     H.capture_messages()
     H.assert_nil(history.undo(), 'an unknown log yields no action')
-    H.assert_false(H.messages():find('resetting legacy', 1, true) ~= nil,
-      'unsupported history is discarded silently')
-    H.assert_eq(log.read_raw(undo_path), MARKER .. '\n',
-      'unknown bytes are replaced with empty current history')
+    H.assert_notified(undo_path, vim.log.levels.ERROR)
+    H.assert_eq(log.read_raw(undo_path), '#direct-history-v99\n',
+      'unknown bytes remain byte-for-byte')
     H.assert_eq(vim.fn.readfile(undo_path .. '.legacy'), { 'legacy-older' },
       'an unrelated pre-existing .legacy file is untouched')
     H.assert_eq(vim.fn.readfile(undo_path .. '.legacy.1'), { 'legacy-even-older' },
       'an unrelated pre-existing .legacy.1 file is untouched')
   end)
 
-  H.it('a malformed log is discarded before a new action is recorded', function()
+  H.it('a malformed legacy log is preserved and blocks a new history action', function()
     local sb = H.sandbox()
     local hist = history_dir(sb)
     local undo_path = vim.fs.joinpath(hist, 'undo.log')
     H.mkfile(hist, 'undo.log', { '#direct-history-v3', 'mv\t/a' })
     H.capture_messages()
-    H.assert_nil(history.undo(), 'discarded history yields no action')
-    H.assert_notified('Nothing to undo')
-    H.assert_eq(log.read_raw(undo_path), MARKER .. '\n',
-      'malformed bytes are discarded')
-
-    -- A new action must not append to the foreign file either.
-    local touch = action.Touch(sb.root .. '/c.txt')
-    touch['do']()
-    local ok, err = history.log(touch)
-    H.assert_true(ok == true, 'new action is logged after discarding unsupported bytes')
-    H.assert_nil(err, 'log() succeeds')
-    H.assert_eq(log.read_raw(undo_path), MARKER .. '\n'
-      .. fixtures.touch(sb.root .. '/c.txt') .. '\n',
-      'the new record replaces unsupported history')
+    H.assert_nil(history.undo(), 'damaged history yields no undo action')
+    H.assert_notified(undo_path, vim.log.levels.ERROR)
+    H.assert_eq(log.read_raw(undo_path), '#direct-history-v3\nmv\t/a\n',
+      'malformed legacy bytes remain byte-for-byte')
+    H.assert_nil(vim.uv.fs_stat(sb.root .. '/c.txt'),
+      'no later action is accidentally executed')
   end)
 
   H.it('a marker-only log is empty history', function()

@@ -16,6 +16,7 @@ local file_operations = require('direct.file_operations')
 
 local TRANSACTION_FORMAT = transaction_codec.FORMAT
 local TRANSACTION_VERSION = transaction_codec.VERSION
+local backup_sequence = 0
 
 local function identity_paths_equal(a, b)
   if type(a) ~= 'string' or type(b) ~= 'string' then return false end
@@ -85,19 +86,52 @@ end
 local function classify_path(path)
   local bytes, err, exists = log_mod.read_raw(path)
   if err then
-    return { state = 'preserve', reason = err }
+    return { state = 'preserve', reason = err, read_error = true }
   end
-  return format.classify(bytes, exists)
+  local state = format.classify(bytes, exists)
+  state.bytes, state.exists = bytes, exists
+  return state
 end
 
 local function write_stack(path, lines)
   return log_mod.write(path, lines)
 end
 
+local commit_stacks
+
+local function backup_history(path, bytes)
+  local stamp = os.date('!%Y%m%dT%H%M%SZ')
+  local pid = tostring(log_mod.uv.os_getpid())
+  for _ = 1, 100 do
+    backup_sequence = backup_sequence + 1
+    local backup_path = string.format('%s.backup-%s-%s-%d', path, stamp, pid,
+      backup_sequence)
+    local ok, err, code = log_mod.write_raw_exclusive(backup_path, bytes)
+    if ok then return backup_path end
+    if code ~= 'EEXIST' then return nil, err end
+  end
+  return nil, 'could not allocate a unique history backup path'
+end
+
+local function backup_history_files(entries)
+  local backups = {}
+  for _, entry in ipairs(entries) do
+    if type(entry.bytes) == 'string' and entry.bytes ~= '' then
+      local backup, err = backup_history(entry.path, entry.bytes)
+      if not backup then return nil, err end
+      backups[#backups + 1] = backup
+    end
+  end
+  return backups
+end
+
+local function reset_stacks(undo_path, redo_path, transaction_path)
+  return commit_stacks(undo_path, redo_path, transaction_path,
+    { M.HEADER }, { M.HEADER })
+end
+
 local copy_lines
 local parse_transaction = transaction_codec.parse
-
-local commit_stacks
 
 local function write_operation_transaction(path, transaction)
   local called, ok, err = pcall(function()
@@ -553,23 +587,62 @@ local function preflight_locked(user_paths)
     end
   end
 
-  local needs_reset = undo_state.state == 'reset' or redo_state.state == 'reset'
-  if needs_reset then
+  local entries = {
+    { path = undo_path, state = undo_state },
+    { path = redo_path, state = redo_state },
+  }
+  local has_legacy = undo_state.state == 'legacy' or redo_state.state == 'legacy'
+  if has_legacy then
     local dir, dir_err = M.paths.ensure_data_dir('history')
     if not dir then
       notify_unavailable(dir_err)
       return nil, dir_err
     end
-    -- Unsupported history is intentionally discarded without migration or a
-    -- warning. Reset both stacks together so one old/future stack cannot be
-    -- combined with records from a different history generation.
-    local ok, err = commit_stacks(undo_path, redo_path, transaction_path,
-      { M.HEADER }, { M.HEADER })
+    -- Back up both existing non-empty stacks before a paired reset so even a
+    -- valid sibling stack is recoverable if the other one is from an old format.
+    local backup_entries = {}
+    for _, entry in ipairs(entries) do
+      backup_entries[#backup_entries + 1] = {
+        path = entry.path, bytes = entry.state.bytes,
+      }
+    end
+    local backups, backup_err = backup_history_files(backup_entries)
+    if not backups then
+      notify_unavailable('could not back up legacy history: ' .. tostring(backup_err))
+      return nil, backup_err
+    end
+    local ok, err = reset_stacks(undo_path, redo_path, transaction_path)
     if not ok then
       notify_unavailable(err)
       return nil, err
     end
     undo_state.lines, redo_state.lines = { M.HEADER }, { M.HEADER }
+    local warning = #backups > 0
+      and ('; backup: ' .. table.concat(backups, ', ')) or ''
+    M.ui.notify('direct: recognized legacy history was backed up and reset' .. warning,
+      vim.log.levels.WARN)
+  else
+    local initialized = false
+    for _, entry in ipairs(entries) do
+      if entry.state.state == 'fresh' then initialized = true; break end
+    end
+    if initialized then
+      local dir, dir_err = M.paths.ensure_data_dir('history')
+      if not dir then
+        notify_unavailable(dir_err)
+        return nil, dir_err
+      end
+      for _, entry in ipairs(entries) do
+        if entry.state.state == 'fresh' then
+          local ok, err = write_stack(entry.path, { M.HEADER })
+          if not ok then
+            notify_unavailable(err)
+            return nil, err
+          end
+          entry.state.lines = { M.HEADER }
+        end
+      end
+    end
   end
 
   return {
@@ -593,6 +666,62 @@ function M.preflight(user_paths)
   return M.with_lock(function()
     return preflight_locked(user_paths)
   end)
+end
+
+-- reset_history() intentionally replaces the undo and redo stacks, but first
+-- preserves every readable non-empty log byte-for-byte in a unique backup.
+local function reset_history_locked()
+  local undo_path, redo_path, transaction_path = log_paths()
+  local recovered, recover_err = recover_transaction(undo_path, redo_path, transaction_path)
+  if not recovered then
+    notify_unavailable(recover_err)
+    return nil, recover_err
+  end
+
+  local entries = {
+    { path = undo_path, state = classify_path(undo_path) },
+    { path = redo_path, state = classify_path(redo_path) },
+  }
+  for _, entry in ipairs(entries) do
+    if entry.state.read_error then
+      return notify_preserved(entry.path, entry.state.reason)
+    end
+  end
+
+  local dir, dir_err = M.paths.ensure_data_dir('history')
+  if not dir then
+    notify_unavailable(dir_err)
+    return nil, dir_err
+  end
+  local backup_entries = {}
+  for _, entry in ipairs(entries) do
+    backup_entries[#backup_entries + 1] = {
+      path = entry.path, bytes = entry.state.bytes,
+    }
+  end
+  local backups, backup_err = backup_history_files(backup_entries)
+  if not backups then
+    notify_unavailable('could not back up history: ' .. tostring(backup_err))
+    return nil, backup_err
+  end
+
+  local reset, reset_err = reset_stacks(undo_path, redo_path, transaction_path)
+  if not reset then
+    notify_unavailable(reset_err)
+    return nil, reset_err
+  end
+  if #backups > 0 then
+    M.ui.notify('direct: history reset; backups: ' .. table.concat(backups, ', '),
+      vim.log.levels.INFO)
+  else
+    M.ui.notify('direct: history reset; no history files needed backup',
+      vim.log.levels.INFO)
+  end
+  return true, backups
+end
+
+function M.reset_history()
+  return M.with_lock(reset_history_locked)
 end
 
 local function action_paths(action)

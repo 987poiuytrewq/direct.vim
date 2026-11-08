@@ -732,6 +732,13 @@ Editing ~
 :DirectSync
     Apply the edits in the listing to the filesystem. |:write| does the same.
 
+                                                     *:DirectHistoryReset*
+:DirectHistoryReset
+    Back up each readable, non-empty history stack to a unique timestamped file
+    in `history/`, then start with empty undo and redo stacks. Works from any
+    buffer. Use this only when history is damaged or you deliberately want to
+    discard it; backups are not automatically removed.
+
                                                                  *:DirectUndo*
 :DirectUndo
     Undo the last filesystem action when the listing is clean. With unsaved
@@ -931,9 +938,12 @@ History format ~
 line. Both files are checked before the register is read or the filesystem is
 changed.
 
-A history file that can't be read stops the operation. A file in any other
-format (old, newer, damaged or unrecognised) is discarded without a warning,
-and both stacks are reset to empty. History is never migrated or backed up.
+Missing or empty files are treated as fresh history. Recognized legacy Python
+logs are backed up to timestamped files in `history/`, reset, and reported with
+a warning; they are never replayed or migrated. Other files (newer formats,
+malformed records, invalid UTF-8, or missing final newlines) are preserved
+byte-for-byte and block filesystem operations. The error names the file.
+Run |:DirectHistoryReset| to back up readable history files and start fresh.
 
 Crash safety ~
 
@@ -1000,9 +1010,9 @@ reports it so you can recover it. Network filesystems are not guaranteed.
 The Lua version uses a new data format and doesn't migrate the Python
 version's data:
 
-    - History: old history is discarded and replaced with empty stacks,
-      without migration or backup. A history file that can't be read still
-      blocks operations.
+    - History: recognized old history is backed up and replaced with empty
+      stacks, without migration. Damaged or unrecognized history is preserved
+      and blocks operations until |:DirectHistoryReset| is run.
     - Register: entries yanked with the Python version still appear. Names
       with spaces are supported. Names with control characters or invalid
       UTF-8 are skipped with an error.

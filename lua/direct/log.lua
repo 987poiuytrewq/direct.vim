@@ -126,6 +126,45 @@ function M.write_raw_atomic(path, bytes)
   return true
 end
 
+-- write_raw_exclusive(path, bytes) creates a new durable file without replacing
+-- an existing path. It is used for recovery backups, whose names must never
+-- clobber an earlier backup. A failed write removes only the file this call
+-- created; the source history remains untouched.
+function M.write_raw_exclusive(path, bytes)
+  if type(bytes) ~= 'string' then
+    return nil, 'log.write_raw_exclusive: bytes must be a string'
+  end
+  local fd, err, code = M.uv.fs_open(path, 'wx', 384)
+  if not fd then return nil, tostring(err or code or 'exclusive create failed'), code end
+
+  local offset, failure = 0, nil
+  while offset < #bytes do
+    local count, write_err = M.uv.fs_write(fd, bytes:sub(offset + 1), offset)
+    if type(count) ~= 'number' or count <= 0 then
+      failure = tostring(write_err or 'short write')
+      break
+    end
+    offset = offset + count
+  end
+  if not failure then
+    local synced, sync_err = M.uv.fs_fsync(fd)
+    if synced == nil or synced == false then
+      failure = tostring(sync_err or 'fsync failed')
+    end
+  end
+  local closed, close_err = M.uv.fs_close(fd)
+  if not failure and (closed == nil or closed == false) then
+    failure = tostring(close_err or 'close failed')
+  end
+  if failure then
+    pcall(M.uv.fs_unlink, path)
+    return nil, failure
+  end
+  local synced, sync_err = sync_parent(path)
+  if not synced then return nil, sync_err end
+  return true
+end
+
 local function encode_lines(lines)
   if #lines == 0 then return '' end
   return table.concat(lines, '\n') .. '\n'

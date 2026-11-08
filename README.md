@@ -275,6 +275,7 @@ through `willRenameFiles`, so they can update imports before the file moves.
 | `:DirectListCwd[!]`        | List the working directory; `!` discards its unsaved listing edits |
 | `:DirectSync`              | Apply edits (same as `:write`)                        |
 | `:DirectUndo` / `:DirectRedo` | Undo/redo filesystem changes, or text while modified |
+| `:DirectHistoryReset`      | Back up and reset both history stacks                 |
 | `:DirectYank`              | Yank the entries in a range                           |
 | `:DirectPaste [dir]`       | Paste here, or into `{dir}`                           |
 | `:DirectPasteAs {name}`    | Paste under a new name                                |
@@ -304,6 +305,8 @@ direct.vim is built so that a mistake can be undone:
 - Undo history is stored on disk under `$XDG_DATA_HOME/direct` (or
   `~/.local/share/direct`) and journaled, so an interrupted operation can be
   finished or reported after a crash.
+- Damaged or unknown history is preserved and blocks filesystem operations.
+  `:DirectHistoryReset` first backs up readable history files before resetting.
 - Neovim instances on the same machine share a lock, so they don't change the
   filesystem or the history at the same time.
 

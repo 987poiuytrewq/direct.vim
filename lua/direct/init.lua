@@ -212,6 +212,11 @@ function M.redo()
   return reverse('redo')
 end
 
+function M.reset_history()
+  if pending.refuse('reset history') then return nil end
+  return history.reset_history()
+end
+
 -- The range is normalised so an upward visual selection works; a nil range means the current line.
 function M.yank(first, last)
   if pending.refuse('yank') then return nil end
@@ -317,6 +322,7 @@ local protected_actions = {
   previous_file = 'navigate to the previous file',
   undo = 'undo the last filesystem action',
   redo = 'redo the last filesystem action',
+  reset_history = 'reset the filesystem history',
   yank = 'copy the selected entries to the Direct register',
   paste = 'paste the Direct register',
   paste_as = 'paste the Direct register with the requested name',
