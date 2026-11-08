@@ -165,6 +165,10 @@ vim.api.nvim_create_user_command('DirectGit', function(args)
   require('direct').git(args.args)
 end, { nargs = '+', desc = 'direct: run a Git command and refresh status' })
 
+vim.api.nvim_create_user_command('DirectGitRestore', function()
+  require('direct').restore_git()
+end, { nargs = 0, desc = 'direct: confirm and restore Git worktree changes' })
+
 -- Under `nvim --headless -l` `v:vim_did_enter` is 1, so this installs the global
 -- `-` immediately; a real startup defers to a one-shot VimEnter handler (config).
 require('direct.config').install_deferred()

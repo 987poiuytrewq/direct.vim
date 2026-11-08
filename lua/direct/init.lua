@@ -15,6 +15,7 @@ local run = require('direct.run')
 local fs = require('direct.fs')
 local paths = require('direct.paths')
 local trash = require('direct.trash')
+local git_status = require('direct.git')
 
 local function paste_and_refresh(destination, name)
   return register.paste(destination, name, function(result, _, _, changed, pasted_entry)
@@ -322,6 +323,55 @@ function M.git(command)
   end, { quiet_success = true })
 end
 
+function M.restore_git()
+  if not guard('DirectGitRestore') then return nil end
+  if pending.refuse('restore Git changes') then return nil end
+  local listing = buffer.restore()
+  local row = vim.api.nvim_win_get_cursor(0)[1]
+  local target, path_err = listing:get_entry_path(row)
+  local record = listing:get_entry_record(row)
+  if not target then
+    ui.notify('direct: cannot restore Git changes: ' .. tostring(path_err),
+      vim.log.levels.ERROR)
+    return nil, path_err
+  end
+
+  local is_directory = record and paths.is_directory_name(record.name) or false
+  local changes, status_err = git_status.worktree_changes(listing.root, target, is_directory)
+  if not changes then
+    ui.notify('direct: cannot inspect Git changes: ' .. tostring(status_err),
+      vim.log.levels.ERROR)
+    return nil, status_err
+  end
+  if #changes == 0 then
+    ui.notify('direct: no tracked worktree changes to restore at ' .. target,
+      vim.log.levels.INFO)
+    return false
+  end
+
+  local count_text = #changes == 1 and '1 changed file' or (#changes .. ' changed files')
+  local prompt = string.format('Restore the worktree state of %s?\n'
+    .. 'This will discard unstaged changes to %s.', target, count_text)
+  if vim.fn.confirm(prompt, '&Restore\n&Cancel', 2) ~= 1 then return nil end
+
+  local confirmed_changes, recheck_err =
+    git_status.worktree_changes(listing.root, target, is_directory)
+  if not confirmed_changes then
+    ui.notify('direct: cannot recheck Git changes: ' .. tostring(recheck_err),
+      vim.log.levels.ERROR)
+    return nil, recheck_err
+  end
+  if not vim.deep_equal(changes, confirmed_changes) then
+    local reason = 'Git worktree changes changed while awaiting confirmation; nothing was restored'
+    ui.notify('direct: ' .. reason, vim.log.levels.WARN)
+    return nil, reason
+  end
+
+  return run.current_entry(git_status.worktree_restore_command(listing.root),
+    function(_, bufnr, root) buffer.refresh_git_status(bufnr, root) end,
+    { quiet_success = true })
+end
+
 -- Public API functions are a final error boundary for both Lua callers and the
 -- user commands/mappings that delegate to them. Expected failures are returned
 -- normally by the implementations; only unexpected raised errors are reported
@@ -356,6 +406,7 @@ local protected_actions = {
   paste_as = 'paste the Direct register with the requested name',
   run = 'run the command for the selected entry',
   git = 'run the Git command for the selected entry',
+  restore_git = 'restore Git worktree changes for the selected entry',
 }
 
 local pack = function(...) return { n = select('#', ...), ... } end

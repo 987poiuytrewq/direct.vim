@@ -390,13 +390,18 @@ H.describe('config', function()
     config.clear_mappings()
     config.setup({ map_default_keys = true })
     local bufnr = open_direct_buffer()
+    local leader = vim.g.mapleader or '\\'
+    local unstage = leader .. 'gu'
+    local restore = leader .. 'gr'
 
     H.assert_eq(buf_map_rhs('ga', 'n'), '<Cmd>DirectGit git add -- {}<CR>',
       'ga stages the current entry through DirectGit')
-    H.assert_eq(buf_map_rhs('gr', 'n'), '<Cmd>DirectGit git reset -- {}<CR>',
-      'gr unstages the current entry through DirectGit')
-    H.assert_eq(buf_map_rhs('gc', 'n'), '<Cmd>DirectGit git checkout -- {}<CR>',
-      'gc checks out the current entry through DirectGit')
+    H.assert_eq(buf_map_rhs(unstage, 'n'), '<Cmd>DirectGit git reset -- {}<CR>',
+      'leader-gu unstages through DirectGit without prefixing LSP gr mappings')
+    H.assert_eq(buf_map_rhs(restore, 'n'), '<Cmd>DirectGitRestore<CR>',
+      'leader-gr invokes the guarded worktree restore')
+    H.assert_nil(buf_map_rhs('gr', 'n'), 'gr remains available as an LSP key prefix')
+    H.assert_nil(buf_map_rhs('gc', 'n'), 'gc remains available for comment mappings')
     H.assert_eq(buf_map_rhs(']c', 'n'), '<Cmd>DirectNextChange<CR>',
       ']c navigates to the next changed entry')
     H.assert_eq(buf_map_rhs('[c', 'n'), '<Cmd>DirectPreviousChange<CR>',
@@ -408,8 +413,8 @@ H.describe('config', function()
 
     config.setup({ map_default_keys = false })
     H.assert_nil(buf_map_rhs('ga', 'n'), 'ga is removed when default mappings are disabled')
-    H.assert_nil(buf_map_rhs('gr', 'n'), 'gr is removed when default mappings are disabled')
-    H.assert_nil(buf_map_rhs('gc', 'n'), 'gc is removed when default mappings are disabled')
+    H.assert_nil(buf_map_rhs(unstage, 'n'), 'leader-gu is removed when mappings are disabled')
+    H.assert_nil(buf_map_rhs(restore, 'n'), 'leader-gr is removed when mappings are disabled')
     H.assert_nil(buf_map_rhs(']c', 'n'), ']c is removed when default mappings are disabled')
     H.assert_nil(buf_map_rhs('[c', 'n'), '[c is removed when default mappings are disabled')
     H.assert_nil(buf_map_rhs(']f', 'n'), ']f is removed when default mappings are disabled')
@@ -422,14 +427,17 @@ H.describe('config', function()
     config.clear_mappings()
     config.setup({ map_default_keys = true })
     local bufnr = open_direct_buffer()
+    local leader = vim.g.mapleader or '\\'
+    local unstage = leader .. 'gu'
+    local restore = leader .. 'gr'
     H.assert_true(buf_map_rhs('u', 'n') ~= nil, 'premise: buffer-local u installed')
     H.assert_true(buf_map_rhs('p', 'n') ~= nil, 'premise: buffer-local p installed')
     H.assert_eq(buf_map_rhs('ga', 'n'), '<Cmd>DirectGit git add -- {}<CR>',
       'ga stages the current entry')
-    H.assert_eq(buf_map_rhs('gr', 'n'), '<Cmd>DirectGit git reset -- {}<CR>',
-      'gr resets the current entry')
-    H.assert_eq(buf_map_rhs('gc', 'n'), '<Cmd>DirectGit git checkout -- {}<CR>',
-      'gc restores the current entry')
+    H.assert_eq(buf_map_rhs(unstage, 'n'), '<Cmd>DirectGit git reset -- {}<CR>',
+      'leader-gu resets the current entry')
+    H.assert_eq(buf_map_rhs(restore, 'n'), '<Cmd>DirectGitRestore<CR>',
+      'leader-gr restores the current entry after confirmation')
     H.assert_eq(buf_map_desc('zR', 'n'), 'direct: Expand all direct directories',
       'premise: fold mapping zR installed')
 

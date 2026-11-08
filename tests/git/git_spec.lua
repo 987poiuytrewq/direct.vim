@@ -279,7 +279,7 @@ H.describe('Git status display', function()
       'successful DirectGit commands do not notify in the command area')
   end)
 
-  H.it('ga, gr, and gc update the staged/unstaged status symbols', function()
+  H.it('ga, leader-gu, and confirmed leader-gr update Git status', function()
     local buffer = require('direct.buffer.buffer')
     local config = require('direct.config')
     local sb = H.sandbox()
@@ -290,6 +290,7 @@ H.describe('Git status display', function()
     H.mkfile(root, 'tracked.txt', 'working tree change')
 
     config.setup({ map_default_keys = true })
+    local leader = vim.g.mapleader or '\\'
     buffer.list(root)
     local function status_for_line(name)
       local line_row
@@ -324,15 +325,27 @@ H.describe('Git status display', function()
     H.assert_eq(status_text(status_for_line('tracked.txt')), '\u{f01f} \u{f00c}',
       'ga moves the modification to the staged state')
 
-    press_and_wait('gr', '\u{f01f}  ')
+    press_and_wait(leader .. 'gu', '\u{f01f}  ')
     H.assert_eq(status_text(status_for_line('tracked.txt')), '\u{f01f}  ',
-      'gr moves the modification back to the blank worktree state')
+      'leader-gu moves the modification back to the blank worktree state')
 
-    press_and_wait('gc', nil)
+    local original_confirm = vim.fn.confirm
+    local prompt
+    vim.fn.confirm = function(message)
+      prompt = message
+      return 1
+    end
+    local restored, restore_err = pcall(press_and_wait, leader .. 'gr', nil)
+    vim.fn.confirm = original_confirm
+    H.assert_true(restored, 'leader-gr completes after confirmation: ' .. tostring(restore_err))
+    H.assert_true(prompt:find(root .. '/tracked.txt', 1, true) ~= nil,
+      'the confirmation names the affected path')
+    H.assert_true(prompt:find('1 changed file', 1, true) ~= nil,
+      'the confirmation counts changed files')
     H.assert_nil(status_for_line('tracked.txt'),
-      'gc discards the working-tree change and clears the Git indicator')
+      'leader-gr restores the working-tree change and clears the Git indicator')
     H.assert_eq(vim.fn.readfile(vim.fs.joinpath(root, 'tracked.txt')),
-      { 'committed content' }, 'gc restores the committed file contents')
+      { 'committed content' }, 'leader-gr restores the committed file contents')
   end)
 
   H.it('captures deleted tracked files and missing directory ancestors', function()
