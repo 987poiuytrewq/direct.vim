@@ -39,6 +39,13 @@ local function mark_by_row(bufnr, namespace_name)
   return result
 end
 
+local function wait_for_git_status(bufnr)
+  H.assert_true(vim.wait(5000, function()
+    local state = require('direct.buffer.buffer')._state_for_test(bufnr)
+    return state and not state.git_status_pending
+  end), 'background Git status completes')
+end
+
 local function marks_by_row(bufnr, namespace_name)
   local namespace = vim.api.nvim_get_namespaces()[namespace_name]
   if not namespace then return {} end
@@ -151,6 +158,7 @@ H.describe('Git status display', function()
       'both unmerged porcelain columns are preserved')
     require('direct.config').setup({ map_default_keys = false })
     require('direct.buffer.buffer').list(root)
+    wait_for_git_status(vim.api.nvim_get_current_buf())
     local row
     for index, line in ipairs(H.buf_lines()) do
       if line == 'conflict.txt' then row = index - 1 end
@@ -215,6 +223,7 @@ H.describe('Git status display', function()
 
     config.setup({ map_default_keys = false, respect_gitignore = false })
     buffer.list(root)
+    wait_for_git_status(vim.api.nvim_get_current_buf())
     local row
     for index, line in ipairs(H.buf_lines()) do
       if line == 'ignored.txt' then row = index - 1 end
@@ -239,6 +248,7 @@ H.describe('Git status display', function()
 
     config.setup({ map_default_keys = false })
     buffer.list(root)
+    wait_for_git_status(vim.api.nvim_get_current_buf())
     local function select_file()
       for row, line in ipairs(H.buf_lines()) do
         if line == 'tracked.txt' then
@@ -292,6 +302,7 @@ H.describe('Git status display', function()
     config.setup({ map_default_keys = true })
     local leader = vim.g.mapleader or '\\'
     buffer.list(root)
+    wait_for_git_status(vim.api.nvim_get_current_buf())
     local function status_for_line(name)
       local line_row
       for row, line in ipairs(H.buf_lines()) do
@@ -401,6 +412,7 @@ H.describe('Git status display', function()
 
     config.setup({ map_default_keys = false, git = { show_deleted = false } })
     local listing = buffer.list(root)
+    wait_for_git_status(vim.api.nvim_get_current_buf())
     H.assert_eq(H.buf_lines(), { '.git/', 'sub/', 'live.txt' },
       'the option hides missing tracked rows')
     local snapshot = buffer._state_for_test(vim.api.nvim_get_current_buf()).git_status
@@ -414,6 +426,7 @@ H.describe('Git status display', function()
 
     config.setup({ map_default_keys = false, git = { show_deleted = true } })
     listing:list()
+    wait_for_git_status(vim.api.nvim_get_current_buf())
     H.assert_eq(H.buf_lines(), { '.git/', 'sub/', 'gone.txt', 'live.txt' },
       're-enabling the option restores root deleted rows')
     H.assert_true(listing:expand(2), 'the real directory can be expanded again')
@@ -469,6 +482,7 @@ H.describe('Git status display', function()
       'modified symbol uses the Neo-tree default')
     local previous_signcolumn = vim.wo.signcolumn
     local listing = buffer.list(root)
+    wait_for_git_status(vim.api.nvim_get_current_buf())
     local lines = H.buf_lines()
     local rows = {}
     for row, line in ipairs(lines) do rows[line] = row - 1 end
@@ -544,6 +558,7 @@ H.describe('Git status display', function()
 
     config.setup({ git = { show_symbols = false } })
     listing:list()
+    wait_for_git_status(vim.api.nvim_get_current_buf())
     H.assert_eq(marks_by_row(0, 'direct-listing-git-status'), {},
       'show_symbols=false removes all Git status symbols')
     highlights = mark_by_row(0, 'direct-listing-highlights')
@@ -556,6 +571,7 @@ H.describe('Git status display', function()
 
     config.setup({ git = { show_symbols = true } })
     listing:list()
+    wait_for_git_status(vim.api.nvim_get_current_buf())
     H.assert_true(#marks_by_row(0, 'direct-listing-git-status') > 0,
       'show_symbols=true restores Git status symbols')
     listing:list()
@@ -581,6 +597,7 @@ H.describe('Git status display', function()
 
     config.setup({ map_default_keys = false, show_folder_icons = true, show_file_icons = true })
     local listing = buffer.list(root)
+    wait_for_git_status(vim.api.nvim_get_current_buf())
     local lines = H.buf_lines()
     H.assert_eq(lines, { '.git/', 'removed/', 'gone.txt', 'live.txt' },
       'deleted paths appear beside normal filesystem entries')
@@ -661,13 +678,19 @@ H.describe('Git status display', function()
     H.assert_eq(vim.api.nvim_buf_get_lines(0, deleted_row - 1, deleted_row, false)[1],
       'gone.txt', 'text edits to a deleted row are silently restored')
     H.assert_true(listing:sync(), 'sync treats restored deleted rows as view-only')
+    wait_for_git_status(vim.api.nvim_get_current_buf())
     H.assert_nil(vim.uv.fs_stat(root .. '/forged.txt'),
       'sync never creates the edited tombstone name')
     H.assert_nil(vim.uv.fs_stat(root .. '/gone.txt'),
       'sync never turns the Git deletion into a filesystem action')
-    vim.api.nvim_buf_set_lines(0, deleted_row - 1, deleted_row, false, {})
+    local current_gone_row
+    for row, line in ipairs(H.buf_lines()) do
+      if line == 'gone.txt' then current_gone_row = row end
+    end
+    H.assert_not_nil(current_gone_row, 'the deleted tombstone remains visible after sync')
+    vim.api.nvim_buf_set_lines(0, current_gone_row - 1, current_gone_row, false, {})
     vim.api.nvim_exec_autocmds('TextChanged', { buffer = 0 })
-    H.assert_eq(vim.api.nvim_buf_get_lines(0, deleted_row - 1, deleted_row, false)[1],
+    H.assert_eq(vim.api.nvim_buf_get_lines(0, current_gone_row - 1, current_gone_row, false)[1],
       'gone.txt', 'deleting a tombstone row is silently undone')
   end)
 

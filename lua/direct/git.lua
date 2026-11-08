@@ -105,20 +105,9 @@ local function add_with_parent_directories(paths, conflicts, root, relative, sta
   end
 end
 
--- read(root) -> { root = repository root, paths = absolute path -> porcelain XY }
--- or nil when Git is unavailable / root is not in a repository. One status
--- query covers the repository; directory status is aggregated from descendants.
-function M.read(root)
-  if type(root) ~= 'string' or root == '' then return nil end
-  local root_output = run({ 'git', '-C', root, 'rev-parse', '--show-toplevel' })
-  if not root_output then return nil end
-  local repo_root = normalize(root_output:gsub('[\r\n]+$', ''))
-  local output = run({ 'git', '-C', repo_root, 'status', '--porcelain=v1', '-z',
-    '--untracked-files=all', '--ignored=matching' })
-  if not output then return nil end
-
+local function parse_status(repo_root, output, include_ignored)
   local fields = nul_fields(output)
-  local paths, conflicts, deleted = {}, {}, {}
+  local statuses, conflicts, deleted = {}, {}, {}
   local index = 1
   while index <= #fields do
     local record = fields[index]
@@ -133,15 +122,109 @@ function M.read(root)
         if xy:find('R', 1, true) or xy:find('C', 1, true) then
           index = index + 1
         end
-        add_with_parent_directories(paths, conflicts, repo_root, relative, status,
-          is_unmerged(xy))
+        if include_ignored or status ~= '!!' then
+          add_with_parent_directories(statuses, conflicts, repo_root, relative, status,
+            is_unmerged(xy))
+        end
         if xy:find('D', 1, true) then
           add_deleted(deleted, repo_root, relative)
         end
       end
     end
   end
-  return { root = repo_root, paths = paths, conflicts = conflicts, deleted = deleted }
+  return { root = repo_root, paths = statuses, conflicts = conflicts, deleted = deleted }
+end
+
+-- read(root) -> { root = repository root, paths = absolute path -> porcelain XY }
+-- or nil when Git is unavailable / root is not in a repository. One status
+-- query covers the repository; directory status is aggregated from descendants.
+function M.read(root)
+  if type(root) ~= 'string' or root == '' then return nil end
+  local root_output = run({ 'git', '-C', root, 'rev-parse', '--show-toplevel' })
+  if not root_output then return nil end
+  local repo_root = normalize(root_output:gsub('[\r\n]+$', ''))
+  local output = run({ 'git', '-C', repo_root, 'status', '--porcelain=v1', '-z',
+    '--untracked-files=all', '--ignored=matching' })
+  if not output then return nil end
+
+  return parse_status(repo_root, output, true)
+end
+
+-- read_async(root, timeout_ms, callback) starts Git in the background. The
+-- callback receives snapshot, error, timed_out; snapshot is false outside a
+-- repository or when Git fails. The timeout covers discovery and status.
+function M.read_async(root, timeout_ms, callback)
+  if type(callback) ~= 'function' then return nil, 'callback is required' end
+  if type(root) ~= 'string' or root == '' then
+    callback(false, 'invalid Git root', false)
+    return nil
+  end
+  timeout_ms = tonumber(timeout_ms) or 1000
+  timeout_ms = math.max(1, math.floor(timeout_ms))
+
+  local finished, process, timer = false, nil, nil
+  local function finish(snapshot, err, timed_out)
+    if finished then return end
+    finished = true
+    if timer then
+      timer:stop()
+      if not timer:is_closing() then timer:close() end
+      timer = nil
+    end
+    callback(snapshot, err, timed_out == true)
+  end
+
+  timer = vim.uv.new_timer()
+  timer:start(timeout_ms, 0, function()
+    vim.schedule(function()
+      if finished then return end
+      local running = process
+      if running then pcall(running.kill, running, 15) end
+      finish(false, 'Git status timed out after ' .. timeout_ms .. ' ms', true)
+    end)
+  end)
+
+  local function spawn(args, on_result)
+    local ok, child = pcall(vim.system, args, { text = false }, function(result)
+      vim.schedule(function()
+        if finished then return end
+        on_result(result)
+      end)
+    end)
+    if not ok or not child then
+      finish(false, tostring(child or 'could not start Git'), false)
+      return false
+    end
+    process = child
+    return true
+  end
+
+  spawn({ 'git', '-C', root, 'rev-parse', '--show-toplevel' }, function(result)
+    if result.code ~= 0 then
+      local err = result.stderr and result.stderr:gsub('%s+$', '') or 'git command failed'
+      local lower = err:lower()
+      if lower:find('not a git repository', 1, true)
+        or lower:find('must be run in a work tree', 1, true) then
+        finish(false, nil, false)
+      else
+        finish(false, err, false)
+      end
+      return
+    end
+    local repo_root = normalize((result.stdout or ''):gsub('[\r\n]+$', ''))
+    process = nil
+    spawn({ 'git', '-C', repo_root, 'status', '--porcelain=v1', '-z',
+      '--untracked-files=all', '--ignored=matching' }, function(status_result)
+      if status_result.code ~= 0 then
+        local err = status_result.stderr and status_result.stderr:gsub('%s+$', '')
+          or 'git status failed'
+        finish(false, err, false)
+        return
+      end
+      finish(parse_status(repo_root, status_result.stdout or '', true), nil, false)
+    end)
+  end)
+  return true
 end
 
 -- deleted_children(snapshot, directory) returns absent tracked entries directly

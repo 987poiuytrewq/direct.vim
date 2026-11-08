@@ -82,6 +82,19 @@ H.describe('config', function()
     config.clear_mappings()
   end)
 
+  H.it('configures a positive Git status timeout', function()
+    local config = fresh_config()
+    config.clear_mappings()
+    H.assert_eq(config.defaults.git.timeout_ms, 1000, 'status timeout defaults to one second')
+    H.assert_eq(config.setup({ git = { timeout_ms = 250 } }).git.timeout_ms, 250,
+      'a positive integer timeout is accepted')
+    H.capture_messages()
+    H.assert_eq(config.setup({ git = { timeout_ms = 0 } }).git.timeout_ms, 1000,
+      'an invalid timeout leaves the default in place')
+    H.assert_notified('git.timeout_ms: expected a positive integer', vim.log.levels.ERROR)
+    config.clear_mappings()
+  end)
+
   H.it('two setup() calls converge on the same options', function()
     local config = fresh_config()
     config.clear_mappings()

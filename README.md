@@ -184,7 +184,8 @@ require('direct').setup({
     deleted_folder_open = '\u{f115}',
   },
   git = {
-    enabled = true,       -- read `git status` for each listing
+    enabled = true,       -- show Git status when its background query completes
+    timeout_ms = 1000,    -- background status-query deadline
     show_symbols = true,  -- right-aligned status symbols
     show_deleted = true,  -- show rows for deleted tracked files
     symbols = {           -- one display cell each, or '' to hide
@@ -199,6 +200,11 @@ require('direct').setup({
   },
 })
 ```
+
+Git status is read in the background so it doesn't delay the initial listing.
+When the query completes, Direct adds the status decorations and deleted rows.
+`git.timeout_ms` sets the deadline in milliseconds; a timed-out query leaves
+the listing usable without status and reports one warning per repository.
 
 You can call `setup()` more than once. Each call replaces the previous options,
 and unknown or invalid options are reported as errors instead of being silently
