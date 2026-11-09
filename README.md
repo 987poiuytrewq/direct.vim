@@ -161,8 +161,9 @@ All mappings are buffer-local to direct listings, except the global `-`.
 | `ga` `<leader>gu` `<leader>gr` | Stage, unstage, or confirm restore of the entry |
 
 With mouse support on (`:set mouse=a`), double-click an entry to open it, and
-click a folder icon to expand or collapse that folder. To turn off every
-default mapping, set `map_default_keys = false`.
+click a folder icon to expand or collapse that folder. Set `map_default_keys =
+false` to disable default key bindings; explicit entries in `mappings` remain
+active.
 
 ## Configuration
 
@@ -171,6 +172,11 @@ These are the defaults:
 ```lua
 require('direct').setup({
   map_default_keys = true,           -- install the mappings above
+  mappings = {                       -- per-action key override or false to disable
+    expand = 'o',
+    undo = '<leader>u',
+    toggle_hidden = false,
+  },
   show_hidden = true,                -- show dotfiles (toggle with `gh`)
   respect_gitignore = true,          -- hide Git-ignored entries (toggle with `gi`)
   indent_size = 2,                   -- spaces per tree level (integer > 1)
@@ -215,6 +221,21 @@ the listing usable without status and reports one warning per repository.
 You can call `setup()` more than once. Each call replaces the previous options,
 and unknown or invalid options are reported as errors instead of being silently
 ignored.
+
+`mappings` accepts action names such as `open`, `undo`, `redo`, `yank`,
+`paste`, `toggle_hidden`, `toggle_gitignore`, `git_add`, `next_change`,
+`expand`, `collapse`, `toggle`, and their recursive variants. A non-empty key
+string overrides that action's default; `false` disables its physical default.
+Every action also has a `<Plug>(direct-...)` mapping for composing your own
+bindings. For example:
+
+```lua
+vim.keymap.set('n', '<leader>e', '<Plug>(direct-expand)', { remap = true })
+```
+
+The folder actions are also public Lua functions: `require('direct').expand()`,
+`collapse()`, `toggle()`, `expand_recursive()`, `collapse_recursive()`, and
+`toggle_recursive()`.
 
 `undo_confirm` controls prompts before filesystem undo/redo: `true` always
 prompts, `false` never prompts, and `'elsewhere'` (the default) prompts only if

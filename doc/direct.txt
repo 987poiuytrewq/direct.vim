@@ -573,8 +573,25 @@ error, and its default is used instead.
                                                      *direct-map_default_keys*
 map_default_keys        boolean (default: `true`)
     Install the global `-` mapping and the buffer-local mappings in
-    listings. Set to `false` to install none of them. See
-    |direct.vim-mappings|.
+    listings. Set to `false` to disable default physical keys; explicit
+    per-action mappings are still installed. `<Plug>` mappings are always
+    available. See |direct.vim-mappings|.
+
+                                                             *direct-mappings*
+mappings                table (default: `{}`)
+    Per-action key overrides. Use an action name as the key and a non-empty
+    key string as its value, or `false` to disable that action's default key.
+    For example:
+>
+        require('direct').setup({
+          mappings = { expand = 'o', undo = '<leader>u', toggle_hidden = false },
+        })
+<
+    Action names include `open`, `undo`, `redo`, `yank`, `paste`, `toggle_hidden`,
+    `toggle_gitignore`, `git_add`, `next_change`, `expand`, `collapse`, `toggle`,
+    and the recursive folder actions. Each action has a `<Plug>(direct-...)`
+    mapping. `map_default_keys = false` suppresses defaults but not explicit
+    overrides or `<Plug>` mappings.
 
                                                           *direct-show_hidden*
 show_hidden             boolean (default: `true`)
@@ -875,7 +892,9 @@ Running commands ~
 ==============================================================================
 14. Mappings                                             *direct.vim-mappings*
 
-All mappings are installed only when |direct-map_default_keys| is on.
+Default physical mappings are installed when |direct-map_default_keys| is on.
+Per-action overrides are installed regardless of that option, and `<Plug>`
+entry points are always available.
 
 Global, in Normal mode:
 
@@ -914,10 +933,9 @@ In a listing (buffer-local):
 
 In a listing, the buffer-local `-` takes priority over the global one.
 
-To use your own keys, set |direct-map_default_keys| to `false` and map the
-commands or the |direct.vim-api| functions yourself, for example:
+Use `mappings` to override one action, or map a `<Plug>` entry point yourself:
 >lua
-    vim.keymap.set('n', '<leader>e', '<Cmd>DirectListBuffer<CR>')
+    vim.keymap.set('n', '<leader>e', '<Plug>(direct-expand)', { remap = true })
 <
 ==============================================================================
 15. Lua API                                                   *direct.vim-api*
@@ -931,6 +949,8 @@ The functions in `require('direct')` mirror the commands:
     `list_cwd()`                  |:DirectListCwd|
     `open()`                      `<CR>`
     `open_parent_expanded()`      `z-`
+    `expand()` `collapse()` `toggle()`   folder expansion actions
+    `expand_recursive()` `collapse_recursive()` `toggle_recursive()` recursive folder actions
     `sync([callback])`             |:DirectSync|
     `undo()`  `redo()`              |:DirectUndo|  |:DirectRedo|
     `yank(first, last)`           |:DirectYank| on lines {first} to {last}
@@ -943,6 +963,7 @@ The functions in `require('direct')` mirror the commands:
     `show_git_status()`           |:DirectGitStatus|
     `next_change()`               |:DirectNextChange|
     `previous_change()`           |:DirectPreviousChange|
+    `next_directory()` `previous_directory()`   visible directory navigation
     `next_file()`                 |:DirectNextFile|
     `previous_file()`             |:DirectPreviousFile|
     `run(command)`                |:DirectRun|

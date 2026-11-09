@@ -14,6 +14,7 @@ local defaults = {
   indent_size = 2,
   undo_confirm = 'elsewhere',
   trash_retention = false,
+  mappings = {},
   show_folder_icons = true,
   show_file_icons = true,
   show_filetype_icons = true,
@@ -172,6 +173,7 @@ M.options = vim.deepcopy(defaults)
 
 -- Global mapping: normal `-` opens the current buffer's directory.
 M.GLOBAL_MAP = {
+  action = 'list_buffer',
   mode = 'n',
   lhs = '-',
   rhs = ':<C-U>DirectListBuffer<CR>',
@@ -198,35 +200,71 @@ M._installed = vim.fn.maparg(M.GLOBAL_MAP.lhs, M.GLOBAL_MAP.mode) == M.GLOBAL_MA
 -- over the global one inside a direct buffer, which is why the global mapping
 -- resolving to `getcwd` there is never observable.
 M.BUFFER_MAPS = {
-  { mode = 'n', lhs = '<CR>',
+  { action = 'open', mode = 'n', lhs = '<CR>',
     rhs = '<Cmd>lua require("direct").open()<CR>' },
-  { mode = 'n', lhs = '-',
+  { action = 'list_buffer', mode = 'n', lhs = '-',
     rhs = '<Cmd>lua require("direct").list(vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":h"))<CR>' },
-  { mode = 'n', lhs = 'z-',
+  { action = 'open_parent_expanded', mode = 'n', lhs = 'z-',
     rhs = '<Cmd>lua require("direct").open_parent_expanded()<CR>' },
-  { mode = 'n', lhs = 'u', rhs = '<Cmd>DirectUndo<CR>' },
-  { mode = 'n', lhs = '<C-r>', rhs = '<Cmd>DirectRedo<CR>' },
-  { mode = 'n', lhs = 'yy', rhs = '<Cmd>DirectYank<CR>' },
-  { mode = 'n', lhs = 'Y', rhs = '<Cmd>DirectYank<CR>' },
+  { action = 'undo', mode = 'n', lhs = 'u', rhs = '<Cmd>DirectUndo<CR>' },
+  { action = 'redo', mode = 'n', lhs = '<C-r>', rhs = '<Cmd>DirectRedo<CR>' },
+  { action = 'yank', mode = 'n', lhs = 'yy', rhs = '<Cmd>DirectYank<CR>' },
+  { action = 'yank_uppercase', mode = 'n', lhs = 'Y', rhs = '<Cmd>DirectYank<CR>' },
   -- Visual `y`: a ranged command (`:<C-U>'<,'>DirectYank<CR>`) raises E20 and
   -- unsets the marks here, so the Lua entry point is called with the visual
   -- range (start from `'v'`, end from the cursor); `M.yank` normalises the
   -- order.
-  { mode = 'v', lhs = 'y',
+  { action = 'yank_visual', mode = 'v', lhs = 'y',
     rhs = '<Cmd>lua require("direct").yank(vim.fn.line("v"), vim.fn.line("."))<CR>' },
-  { mode = 'n', lhs = 'p', rhs = '<Cmd>DirectPaste<CR>' },
-  { mode = 'n', lhs = 'P', rhs = '<Cmd>DirectPaste<CR>' },
-  { mode = 'n', lhs = 'gh', rhs = '<Cmd>DirectToggleHidden<CR>' },
-  { mode = 'n', lhs = 'gi', rhs = '<Cmd>DirectToggleGitIgnore<CR>' },
-  { mode = 'n', lhs = 'ga', rhs = '<Cmd>DirectGit git add -- {}<CR>' },
-  { mode = 'n', lhs = '<leader>gu', rhs = '<Cmd>DirectGit git reset -- {}<CR>' },
-  { mode = 'n', lhs = '<leader>gr', rhs = '<Cmd>DirectGitRestore<CR>' },
-  { mode = 'n', lhs = 'gs', rhs = '<Cmd>DirectToggleGitStatus<CR>' },
-  { mode = 'n', lhs = ']c', rhs = '<Cmd>DirectNextChange<CR>' },
-  { mode = 'n', lhs = '[c', rhs = '<Cmd>DirectPreviousChange<CR>' },
-  { mode = 'n', lhs = ']f', rhs = '<Cmd>DirectNextFile<CR>' },
-  { mode = 'n', lhs = '[f', rhs = '<Cmd>DirectPreviousFile<CR>' },
+  { action = 'paste', mode = 'n', lhs = 'p', rhs = '<Cmd>DirectPaste<CR>' },
+  { action = 'paste_uppercase', mode = 'n', lhs = 'P', rhs = '<Cmd>DirectPaste<CR>' },
+  { action = 'toggle_hidden', mode = 'n', lhs = 'gh', rhs = '<Cmd>DirectToggleHidden<CR>' },
+  { action = 'toggle_gitignore', mode = 'n', lhs = 'gi', rhs = '<Cmd>DirectToggleGitIgnore<CR>' },
+  { action = 'git_add', mode = 'n', lhs = 'ga', rhs = '<Cmd>DirectGit git add -- {}<CR>' },
+  { action = 'git_unstage', mode = 'n', lhs = '<leader>gu', rhs = '<Cmd>DirectGit git reset -- {}<CR>' },
+  { action = 'git_restore', mode = 'n', lhs = '<leader>gr', rhs = '<Cmd>DirectGitRestore<CR>' },
+  { action = 'toggle_git_status', mode = 'n', lhs = 'gs', rhs = '<Cmd>DirectToggleGitStatus<CR>' },
+  { action = 'next_change', mode = 'n', lhs = ']c', rhs = '<Cmd>DirectNextChange<CR>' },
+  { action = 'previous_change', mode = 'n', lhs = '[c', rhs = '<Cmd>DirectPreviousChange<CR>' },
+  { action = 'next_file', mode = 'n', lhs = ']f', rhs = '<Cmd>DirectNextFile<CR>' },
+  { action = 'previous_file', mode = 'n', lhs = '[f', rhs = '<Cmd>DirectPreviousFile<CR>' },
 }
+
+local function mapping_catalog()
+  local result = { [M.GLOBAL_MAP.action] = true }
+  for _, entry in ipairs(M.BUFFER_MAPS) do result[entry.action] = true end
+  for _, entry in ipairs(require('direct.folding').KEY_MAPS) do
+    result[entry.action] = true
+  end
+  return result
+end
+
+function M.mapping_lhs(action, default)
+  local mapping = M.options.mappings and M.options.mappings[action]
+  if mapping == false then return nil end
+  if type(mapping) == 'string' then return mapping end
+  return M.options.map_default_keys and default or nil
+end
+
+local function resolve_mappings(value)
+  if type(value) ~= 'table' then
+    require('direct.ui').notify('direct: mappings must be a table', vim.log.levels.ERROR)
+    return {}
+  end
+  local known, result = mapping_catalog(), {}
+  for action, key in pairs(value) do
+    if not known[action] then
+      require('direct.ui').notify('direct: unknown mapping action '
+        .. tostring(action), vim.log.levels.ERROR)
+    elseif key == false or (type(key) == 'string' and key ~= '') then
+      result[action] = key
+    else
+      require('direct.ui').notify('direct: mappings.' .. tostring(action)
+        .. ' must be a non-empty key or false', vim.log.levels.ERROR)
+    end
+  end
+  return result
+end
 
 -- The loaded buffers whose filetype is `direct`: the retrofit targets for
 -- install/clear of the buffer-local maps.
@@ -241,34 +279,76 @@ local function open_direct_buffers()
   return bufs
 end
 
--- install_buffer_mappings(bufnr) -> true. Installs the buffer-local
--- mappings into `bufnr` (0 = the current buffer). Idempotent: re-setting a
--- mapping replaces it in place, so repeated ftplugin runs cannot stack.
-function M.install_buffer_mappings(bufnr)
-  for _, entry in ipairs(M.BUFFER_MAPS) do
-    vim.keymap.set(entry.mode, entry.lhs, entry.rhs, {
-      buffer = bufnr,
-      silent = true,
-      noremap = true,
-    })
+local function buffer_mapping_rhs()
+  local rhs = {}
+  for _, entry in ipairs(M.BUFFER_MAPS) do rhs[entry.rhs] = true end
+  for _, entry in ipairs(require('direct.folding').KEY_MAPS) do
+    if entry.rhs then rhs[entry.rhs] = true end
   end
+  for _, entry in ipairs(require('direct.folding').MOUSE_MAPS) do
+    if entry.rhs then rhs[entry.rhs] = true end
+  end
+  return rhs
+end
+
+local function plug_entries()
+  local entries, seen = {}, {}
+  local function add(action, mode, rhs)
+    if seen[action] then return end
+    seen[action] = true
+    entries[#entries + 1] = {
+      action = action,
+      mode = mode or 'n',
+      lhs = '<Plug>(direct-' .. action:gsub('_', '-') .. ')',
+      rhs = rhs,
+      desc = 'direct: Plug ' .. action,
+    }
+  end
+  add(M.GLOBAL_MAP.action, M.GLOBAL_MAP.mode, M.GLOBAL_MAP.rhs)
+  for _, entry in ipairs(M.BUFFER_MAPS) do add(entry.action, entry.mode, entry.rhs) end
+  local folding = require('direct.folding')
+  local buffer = require('direct.buffer.buffer')
+  for _, entry in ipairs(require('direct.folding').KEY_MAPS) do
+    add(entry.action, 'n', folding.action_callback(entry.action, buffer))
+  end
+  return entries
+end
+
+local function clear_owned_buffer_maps(target)
+  local rhs = buffer_mapping_rhs()
+  for _, mode in ipairs({ 'n', 'v' }) do
+    for _, map in ipairs(vim.api.nvim_buf_get_keymap(target, mode)) do
+      if rhs[map.rhs] then
+        local ok, err = pcall(vim.keymap.del, mode, map.lhs, { buffer = target })
+        if not ok then
+          require('direct.ui').notify(string.format(
+            'direct: cannot clear the %s mapping in buffer %d: %s',
+            map.lhs, target, tostring(err)), vim.log.levels.WARN)
+        end
+      end
+    end
+  end
+  require('direct.folding').clear_mappings(target)
+end
+
+-- install_buffer_mappings(bufnr) -> true. Physical buffer mappings follow the
+-- `mappings` table; global <Plug> entry points are installed separately.
+function M.install_buffer_mappings(bufnr)
+  local target = bufnr == 0 and vim.api.nvim_get_current_buf() or bufnr
+  clear_owned_buffer_maps(target)
+  for _, entry in ipairs(M.BUFFER_MAPS) do
+    local lhs = M.mapping_lhs(entry.action, entry.lhs)
+    if lhs then
+      vim.keymap.set(entry.mode, lhs, entry.rhs, {
+        buffer = target, silent = true, noremap = true,
+      })
+    end
+  end
+  require('direct.folding').install_mappings(target, require('direct.buffer.buffer'))
   return true
 end
 
--- clear_buffer_mappings -> true. Removes the plugin's buffer-local maps from
--- every loaded direct buffer. Each candidate is re-read through nvim_buf_call
--- (maparg reads the CURRENT buffer's scope) and deleted only when it really IS
--- this buffer's mapping (current.buffer == 1) AND is the plugin's own (rhs
--- identity, the same ownership rule the global `-` uses): a buffer-local map
--- with the same lhs but a different rhs belongs to the user and is left alone
--- and a GLOBAL fallback (buffer == 0) is not this buffer's mapping at all --
--- `keymap.del(..., { buffer = true })` raises E31 on it, so it must not even be
--- attempted.
---
--- The guard is PER MAPPING: a deletion that fails is reported and must not
--- silently abort the rest of that buffer's mappings (a single pcall around the
--- whole loop did exactly that while still returning true, leaving the buffer
--- half-cleared with no sign of it).
+-- clear_buffer_mappings -> true. Removes only mappings with Direct-owned RHSs.
 function M.clear_buffer_mappings(bufnr)
   local buffers
   if bufnr ~= nil then
@@ -281,58 +361,56 @@ function M.clear_buffer_mappings(bufnr)
     -- buffer is unloaded in the meantime) and nvim_buf_call raises on an
     -- invalid buffer id. The buffer is going away anyway, so the failure is
     -- ignored rather than propagated.
-    pcall(vim.api.nvim_buf_call, target, function()
-      for _, entry in ipairs(M.BUFFER_MAPS) do
-        local current = vim.fn.maparg(entry.lhs, entry.mode, false, true)
-        local ours = current.rhs ~= nil
-          and current.rhs == entry.rhs
-          and current.buffer == 1
-        if ours then
-          local ok, err = pcall(vim.keymap.del, entry.mode, entry.lhs, { buffer = true })
-          if not ok then
-            require('direct.ui').notify(
-              string.format('direct: cannot clear the %s mapping in buffer %d: %s',
-                entry.lhs, target, tostring(err)),
-              vim.log.levels.WARN)
-          end
-        end
-      end
-      require('direct.folding').clear_mappings()
-    end)
+    pcall(vim.api.nvim_buf_call, target, function() clear_owned_buffer_maps(target, true) end)
   end
   return true
 end
 
-function M.install_mappings()
-  if not M.options.map_default_keys then
-    return M.clear_mappings()
+local function clear_global_mapping()
+  local owned_desc = { ['direct: list current buffer directory'] = true }
+  for _, entry in ipairs(plug_entries()) do owned_desc[entry.desc] = true end
+  for _, mode in ipairs({ 'n', 'v' }) do
+    for _, map in ipairs(vim.api.nvim_get_keymap(mode)) do
+      if owned_desc[map.desc] then
+        pcall(vim.keymap.del, mode, map.lhs)
+      end
+    end
   end
-  vim.keymap.set(M.GLOBAL_MAP.mode, M.GLOBAL_MAP.lhs, M.GLOBAL_MAP.rhs, {
-    noremap = true,
-    silent = true,
-    desc = 'direct: list current buffer directory',
-  })
-  M._installed = true
+  M._installed = false
+end
+
+function M.install_mappings()
+  clear_global_mapping()
+  local global_lhs = M.mapping_lhs(M.GLOBAL_MAP.action, M.GLOBAL_MAP.lhs)
+  if global_lhs then
+    vim.keymap.set(M.GLOBAL_MAP.mode, global_lhs, M.GLOBAL_MAP.rhs, {
+      noremap = true, silent = true, desc = 'direct: list current buffer directory',
+    })
+    M._installed = true
+  end
+  for _, entry in ipairs(plug_entries()) do
+    vim.keymap.set(entry.mode, entry.lhs, entry.rhs, {
+      noremap = true, silent = true, desc = entry.desc,
+    })
+  end
   -- re-applying the option must also re-install the buffer-local maps in
   -- direct buffers that are already open (the ftplugin only runs when a direct
   -- buffer is created).
   for _, bufnr in ipairs(open_direct_buffers()) do
     M.install_buffer_mappings(bufnr)
-    require('direct.folding').install_mappings(bufnr, require('direct.buffer.buffer'))
   end
   return true
 end
 
 function M.clear_mappings()
-  -- Only remove the global `-` when this plugin installed it: a user-owned
-  -- mapping with a different rhs must survive.
-  if M._installed then
-    pcall(vim.keymap.del, M.GLOBAL_MAP.mode, M.GLOBAL_MAP.lhs)
-    M._installed = false
+  clear_global_mapping()
+  -- Explicitly clear all owned mappings. `setup()` uses install_mappings() to
+  -- reconcile defaults and per-action overrides while retaining <Plug> maps.
+  for _, bufnr in ipairs(open_direct_buffers()) do
+    pcall(vim.api.nvim_buf_call, bufnr, function()
+      clear_owned_buffer_maps(bufnr)
+    end)
   end
-  -- disabling the maps must also clear the buffer-local ones in direct
-  -- buffers that are already open.
-  M.clear_buffer_mappings()
   return true
 end
 
@@ -370,6 +448,8 @@ function M.setup(opts)
         'direct: directory_separator must be "/" or "\\\\"', vim.log.levels.ERROR)
     elseif key == 'icons' then
       next_options.icons = resolve_icon_options(value)
+    elseif key == 'mappings' then
+      next_options.mappings = resolve_mappings(value)
     elseif (key == 'show_hidden' or key == 'respect_gitignore'
         or key == 'show_filetype_icons')
       and type(value) ~= 'boolean' then
@@ -383,11 +463,7 @@ function M.setup(opts)
   end
   M.options = next_options
   M._setup_called = true
-  if M.options.map_default_keys then
-    M.install_mappings()
-  else
-    M.clear_mappings()
-  end
+  M.install_mappings()
   return M.options
 end
 
@@ -398,9 +474,7 @@ function M.on_vim_enter()
     return false
   end
   M._vim_enter_installed = true
-  if M.options.map_default_keys then
-    M.install_mappings()
-  end
+  M.install_mappings()
   return true
 end
 

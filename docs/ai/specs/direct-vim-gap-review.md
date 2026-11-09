@@ -1,6 +1,6 @@
 # Spec: direct.vim gap review follow-ups
 
-**Status:** S1 through S6 and R1 through R3 are complete; the remaining tasks are proposed and have
+**Status:** S1 through S6, R1 through R3, and F1 are complete; the remaining tasks are proposed and have
 not been checked item by item. This replaces `direct-vim-remaining-improvements.md`.
 Its main pieces (JSONL history, no-overwrite moves, exclusive `touch`, the
 safeguard on undoing a paste) appear in the current code, but that was not
@@ -35,7 +35,7 @@ the problem, or to record that it can't be reproduced.
 | R1 | P2 | Complete | Stop `git status` from freezing the editor |
 | R2 | P3 | Complete | Run long moves during `:w` without blocking the editor |
 | R3 | P3 | Complete | Make `:checkhealth direct` check more |
-| F1 | P3 | Proposed | Let users remap individual keys |
+| F1 | P3 | Complete | Let users remap individual keys |
 | F2 | P3 | Proposed | Open entries in a split, vertical split or new tab |
 | F3 | P3 | Proposed | Send `User` events for other plugins and configs to hook into |
 | F4 | P3 | Proposed | Add a command to view the history |
@@ -287,6 +287,13 @@ whether nvim-web-devicons is installed, and the current icon settings.
 ## Features and usability
 
 ### F1 — Keys can't be remapped one at a time (P3)
+
+**Status: COMPLETE.** The `mappings` option now overrides or disables individual
+actions without changing the existing `map_default_keys` default. All actions
+have public `<Plug>(direct-...)` entry points, and the folder expand/collapse
+and navigation functions are exposed from `require('direct')`. README and help
+docs cover customization; tests cover overrides, disabled keys, Plug mappings,
+the public folder API, and the default behavior. `make test` passes.
 
 **Problem.** `map_default_keys` turns every mapping on or off at once. There
 are no `<Plug>` mappings, and the folder keys (`zo`, `zc`, `za` and their

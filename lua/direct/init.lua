@@ -85,6 +85,47 @@ function M.open_parent_expanded()
   return buffer.expand()
 end
 
+function M.expand()
+  if not guard('expand') then return nil end
+  return require('direct.buffer.buffer').expand()
+end
+
+function M.collapse()
+  if not guard('collapse') then return nil end
+  return require('direct.buffer.buffer').collapse()
+end
+
+function M.toggle()
+  if not guard('toggle') then return nil end
+  return require('direct.buffer.buffer').toggle()
+end
+
+function M.expand_recursive()
+  if not guard('expand recursively') then return nil end
+  return require('direct.folding').expand_recursive(require('direct.buffer.buffer'))
+end
+
+function M.collapse_recursive()
+  if not guard('collapse recursively') then return nil end
+  -- Collapsing a materialized directory removes its complete descendant tree.
+  return require('direct.buffer.buffer').collapse()
+end
+
+function M.toggle_recursive()
+  if not guard('toggle recursively') then return nil end
+  return require('direct.folding').toggle_recursive(require('direct.buffer.buffer'))
+end
+
+function M.next_directory()
+  if not guard('navigate to the next directory') then return nil end
+  return require('direct.folding').navigate_directory(require('direct.buffer.buffer'), 1)
+end
+
+function M.previous_directory()
+  if not guard('navigate to the previous directory') then return nil end
+  return require('direct.folding').navigate_directory(require('direct.buffer.buffer'), -1)
+end
+
 function M.sync(callback)
   if not guard('DirectSync') then
     return nil
@@ -389,6 +430,14 @@ local protected_actions = {
   list_cwd = 'open the current working directory',
   open = 'open the selected entry',
   open_parent_expanded = 'open and expand the parent directory',
+  expand = 'expand the selected directory',
+  collapse = 'collapse the selected directory',
+  toggle = 'toggle the selected directory',
+  expand_recursive = 'expand the selected directory recursively',
+  collapse_recursive = 'collapse the selected directory recursively',
+  toggle_recursive = 'toggle the selected directory recursively',
+  next_directory = 'navigate to the next directory',
+  previous_directory = 'navigate to the previous directory',
   sync = 'sync the directory listing',
   fold_all = 'collapse the expanded directories',
   unfold_all = 'expand the directories',
