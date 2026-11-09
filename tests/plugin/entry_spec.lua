@@ -52,6 +52,9 @@ end
 
 local EXPECTED_N = {
   ['<CR>'] = '<Cmd>lua require("direct").open()<CR>',
+  ['<C-S>'] = '<Cmd>lua require("direct").open({ split = "horizontal" })<CR>',
+  ['<C-V>'] = '<Cmd>lua require("direct").open({ split = "vertical" })<CR>',
+  ['<C-T>'] = '<Cmd>lua require("direct").open({ split = "tab" })<CR>',
   ['-'] = '<Cmd>lua require("direct").list(vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":h"))<CR>',
   ['z-'] = '<Cmd>lua require("direct").open_parent_expanded()<CR>',
   ['u'] = '<Cmd>DirectUndo<CR>',
@@ -171,6 +174,70 @@ H.describe('entry: command surface', function()
     H.assert_true(vim.uv.fs_stat(vim.fs.joinpath(ws, 'new.txt')) ~= nil,
       'the write routed to the sync and created new.txt')
     H.assert_false(vim.bo[buf].modified, 'the write cleared modified')
+  end)
+
+  H.it('open({ split = ... }) preserves the listing while opening files and directories', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local directory = H.mkdir(ws, 'directory')
+    local file = H.mkfile(ws, 'file.txt', { 'file' })
+    H.mkfile(directory, 'inside.txt', { 'inside' })
+    local api = require('direct')
+    api.list(ws)
+    local source_buf = vim.api.nvim_get_current_buf()
+    local source_win = vim.api.nvim_get_current_win()
+    vim.api.nvim_buf_set_lines(source_buf, -1, -1, false, { 'unsaved listing edit' })
+    local preserved_lines = vim.api.nvim_buf_get_lines(source_buf, 0, -1, false)
+    H.assert_true(vim.bo[source_buf].modified, 'the source listing is dirty')
+
+    local function row_for(text)
+      for row, line in ipairs(preserved_lines) do
+        if line == text then return row end
+      end
+    end
+
+    vim.api.nvim_win_set_cursor(source_win, { row_for('directory/'), 0 })
+    H.assert_true(api.open({ split = 'horizontal' }), 'horizontal split opens the directory')
+    H.assert_true(vim.api.nvim_get_current_win() ~= source_win, 'a new horizontal window is current')
+    H.assert_eq(vim.bo.filetype, 'direct', 'the split shows a direct listing')
+    H.assert_true(require('direct.fs').same_path(vim.api.nvim_buf_get_name(0), directory),
+      'the child directory is listed in the split')
+    H.assert_true(vim.api.nvim_buf_is_valid(source_buf), 'the original listing buffer survives')
+    H.assert_eq(vim.api.nvim_buf_get_lines(source_buf, 0, -1, false), preserved_lines,
+      'the original listing text is unchanged')
+    H.assert_true(vim.bo[source_buf].modified, 'the original listing remains modified')
+    vim.cmd('close')
+    vim.api.nvim_set_current_win(source_win)
+
+    vim.api.nvim_win_set_cursor(source_win, { row_for('file.txt'), 0 })
+    H.assert_true(api.open({ split = 'vertical' }), 'vertical split opens a file')
+    H.assert_true(require('direct.fs').same_path(vim.api.nvim_buf_get_name(0), file),
+      'the requested file opens in the vertical split')
+    H.assert_true(vim.api.nvim_buf_is_valid(source_buf), 'opening the file keeps the source buffer')
+    H.assert_eq(vim.api.nvim_buf_get_lines(source_buf, 0, -1, false), preserved_lines,
+      'the dirty source listing is untouched by the file open')
+    vim.cmd('close')
+    vim.api.nvim_set_current_win(source_win)
+
+    local tab_count = #vim.api.nvim_list_tabpages()
+    vim.api.nvim_win_set_cursor(source_win, { row_for('directory/'), 0 })
+    H.assert_true(api.open({ split = 'tab' }), 'tab open opens the directory')
+    H.assert_eq(#vim.api.nvim_list_tabpages(), tab_count + 1, 'a new tab is created')
+    H.assert_eq(vim.bo.filetype, 'direct', 'the new tab lists the selected directory')
+    H.assert_true(vim.api.nvim_buf_is_valid(source_buf), 'the original buffer survives the tab open')
+    vim.cmd('tabclose')
+    H.assert_eq(vim.api.nvim_get_current_buf(), source_buf, 'closing the new tab returns to the listing')
+    H.assert_eq(vim.api.nvim_buf_get_lines(source_buf, 0, -1, false), preserved_lines,
+      'the original listing still contains its unsaved edit')
+    H.assert_true(vim.bo[source_buf].modified, 'the original modified flag is preserved')
+
+    local before_tabs = #vim.api.nvim_list_tabpages()
+    local rejected, split_err = api.open({ split = 'diagonal' })
+    H.assert_nil(rejected, 'unsupported split names are refused')
+    H.assert_true(tostring(split_err):find('horizontal', 1, true) ~= nil,
+      'the returned error lists supported layouts')
+    H.assert_eq(#vim.api.nvim_list_tabpages(), before_tabs, 'invalid options open no windows')
   end)
 
   H.it('the BufEnter intercept is registered and converts a directory buffer', function()

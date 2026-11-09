@@ -587,11 +587,12 @@ mappings                table (default: `{}`)
           mappings = { expand = 'o', undo = '<leader>u', toggle_hidden = false },
         })
 <
-    Action names include `open`, `undo`, `redo`, `yank`, `paste`, `toggle_hidden`,
-    `toggle_gitignore`, `git_add`, `next_change`, `expand`, `collapse`, `toggle`,
-    and the recursive folder actions. Each action has a `<Plug>(direct-...)`
-    mapping. `map_default_keys = false` suppresses defaults but not explicit
-    overrides or `<Plug>` mappings.
+    Action names include `open`, `open_horizontal`, `open_vertical`, `open_tab`,
+    `undo`, `redo`, `yank`, `paste`, `toggle_hidden`, `toggle_gitignore`,
+    `git_add`, `next_change`, `expand`, `collapse`, `toggle`, and the recursive
+    folder actions. Each action has a `<Plug>(direct-...)` mapping.
+    `map_default_keys = false` suppresses defaults but not explicit overrides
+    or `<Plug>` mappings.
 
                                                           *direct-show_hidden*
 show_hidden             boolean (default: `true`)
@@ -904,6 +905,9 @@ In a listing (buffer-local):
 
     Mode    Key             Action ~
     n       <CR>            open the entry under the cursor
+    n       <C-s>           open in a horizontal split
+    n       <C-v>           open in a vertical split
+    n       <C-t>           open in a new tab
     n       <2-LeftMouse>   open the entry under the cursor
     n       <LeftMouse>     on a folder icon, expand or collapse it
     n       -               go to the parent directory
@@ -947,7 +951,7 @@ The functions in `require('direct')` mirror the commands:
     `list(path)`                  |:DirectList|
     `list_buffer()`               |:DirectListBuffer|
     `list_cwd()`                  |:DirectListCwd|
-    `open()`                      `<CR>`
+    `open([line], [options])`      `<CR>` or open with layout options
     `open_parent_expanded()`      `z-`
     `expand()` `collapse()` `toggle()`   folder expansion actions
     `expand_recursive()` `collapse_recursive()` `toggle_recursive()` recursive folder actions
@@ -968,6 +972,10 @@ The functions in `require('direct')` mirror the commands:
     `previous_file()`             |:DirectPreviousFile|
     `run(command)`                |:DirectRun|
     `git(command)`                |:DirectGit|
+
+`open({ split = 'horizontal' })`, `open({ split = 'vertical' })` and
+`open({ split = 'tab' })` open the selected entry in a new window or tab. The
+existing listing remains open and its unsaved text is preserved.
 
 Like their commands, `list()`, `list_buffer()`, `list_cwd()` and
 `paste(dir)` with a directory work from any buffer. The others report an

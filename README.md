@@ -146,6 +146,7 @@ All mappings are buffer-local to direct listings, except the global `-`.
 | `-`              | List the current file's directory, or go to the parent |
 | `z-`             | Go to the parent and expand the directory you left  |
 | `<CR>`, double-click | Open the file or directory                      |
+| `<C-s>` `<C-v>` `<C-t>` | Open in a horizontal split, vertical split, or tab |
 | `zo` `zc` `za`   | Expand, collapse or toggle one directory            |
 | `zO` `zC` `zA`   | The same, recursively                               |
 | `zR` `zM`        | Expand or collapse everything                       |
@@ -224,8 +225,9 @@ ignored.
 
 `mappings` accepts action names such as `open`, `undo`, `redo`, `yank`,
 `paste`, `toggle_hidden`, `toggle_gitignore`, `git_add`, `next_change`,
-`expand`, `collapse`, `toggle`, and their recursive variants. A non-empty key
-string overrides that action's default; `false` disables its physical default.
+`open_horizontal`, `open_vertical`, `open_tab`, `expand`, `collapse`, `toggle`,
+and their recursive variants. A non-empty key string overrides that action's
+default; `false` disables its physical default.
 Every action also has a `<Plug>(direct-...)` mapping for composing your own
 bindings. For example:
 
@@ -236,6 +238,12 @@ vim.keymap.set('n', '<leader>e', '<Plug>(direct-expand)', { remap = true })
 The folder actions are also public Lua functions: `require('direct').expand()`,
 `collapse()`, `toggle()`, `expand_recursive()`, `collapse_recursive()`, and
 `toggle_recursive()`.
+
+Pass a `split` option to open the selected entry in a new layout, leaving the
+current listing in place: `require('direct').open({ split = 'horizontal' })`,
+`require('direct').open({ split = 'vertical' })`, or
+`require('direct').open({ split = 'tab' })`. The default bindings are `<C-s>`,
+`<C-v>`, and `<C-t>`.
 
 `undo_confirm` controls prompts before filesystem undo/redo: `true` always
 prompts, `false` never prompts, and `'elsewhere'` (the default) prompts only if

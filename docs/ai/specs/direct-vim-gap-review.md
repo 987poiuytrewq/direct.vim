@@ -1,6 +1,6 @@
 # Spec: direct.vim gap review follow-ups
 
-**Status:** S1 through S6, R1 through R3, and F1 are complete; the remaining tasks are proposed and have
+**Status:** S1 through S6, R1 through R3, and F1 through F2 are complete; the remaining tasks are proposed and have
 not been checked item by item. This replaces `direct-vim-remaining-improvements.md`.
 Its main pieces (JSONL history, no-overwrite moves, exclusive `touch`, the
 safeguard on undoing a paste) appear in the current code, but that was not
@@ -36,7 +36,7 @@ the problem, or to record that it can't be reproduced.
 | R2 | P3 | Complete | Run long moves during `:w` without blocking the editor |
 | R3 | P3 | Complete | Make `:checkhealth direct` check more |
 | F1 | P3 | Complete | Let users remap individual keys |
-| F2 | P3 | Proposed | Open entries in a split, vertical split or new tab |
+| F2 | P3 | Complete | Open entries in a split, vertical split or new tab |
 | F3 | P3 | Proposed | Send `User` events for other plugins and configs to hook into |
 | F4 | P3 | Proposed | Add a command to view the history |
 | F5 | P3 | Proposed | Allow renames, creates and deletes together in one top-level save |
@@ -306,6 +306,13 @@ key, or `false` to turn it off. Add `<Plug>(direct-…)` mappings. Expose
 `require('direct')`.
 
 ### F2 — No split, vertical split or tab open (P3)
+
+**Status: COMPLETE.** `require('direct').open({ split = ... })` opens files or
+directories horizontally, vertically, or in a new tab without replacing the
+source listing. Modified listings retain their text and buffer state. Default
+`<C-s>`, `<C-v>`, and `<C-t>` bindings are remappable through the F1 mapping
+options. README and help docs describe the behavior; tests cover all layouts,
+including modified listings. `make test` passes.
 
 **Change.** Add `open({ split = 'horizontal' | 'vertical' | 'tab' })` and
 default keys (for example `<C-s>`, `<C-v>`, `<C-t>`). These must follow S1:
