@@ -1,6 +1,6 @@
 # Spec: direct.vim gap review follow-ups
 
-**Status:** S1 through S6, R1 and R2 are complete; the remaining tasks are proposed and have
+**Status:** S1 through S6 and R1 through R3 are complete; the remaining tasks are proposed and have
 not been checked item by item. This replaces `direct-vim-remaining-improvements.md`.
 Its main pieces (JSONL history, no-overwrite moves, exclusive `touch`, the
 safeguard on undoing a paste) appear in the current code, but that was not
@@ -34,7 +34,7 @@ the problem, or to record that it can't be reproduced.
 | S6 | P4 | Complete | Put the lock file inside the `direct/` data directory |
 | R1 | P2 | Complete | Stop `git status` from freezing the editor |
 | R2 | P3 | Complete | Run long moves during `:w` without blocking the editor |
-| R3 | P3 | Proposed | Make `:checkhealth direct` check more |
+| R3 | P3 | Complete | Make `:checkhealth direct` check more |
 | F1 | P3 | Proposed | Let users remap individual keys |
 | F2 | P3 | Proposed | Open entries in a split, vertical split or new tab |
 | F3 | P3 | Proposed | Send `User` events for other plugins and configs to hook into |
@@ -270,6 +270,14 @@ undo and redo already do (`execute_async`), keeping the lock and the
 filesystem.
 
 ### R3 — `:checkhealth direct` checks very little (P3)
+
+**Status: COMPLETE.** `:checkhealth direct` now reports Git availability/version,
+the resolved and writable data directory, read-only classifications of undo
+and redo history, any damaged or unfinished transaction journal, trash size,
+whether nvim-web-devicons is installed, and current icon settings. It uses the
+history lock while inspecting state and does not recover, reset, or rewrite
+history. Tests cover healthy, damaged, interrupted, unwritable, and Git-missing
+cases. `make test` passes.
 
 **Change.** Check that Git is available and its version, that the data
 directory can be written to, the state of the history files (OK, kept because

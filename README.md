@@ -73,7 +73,8 @@ the latest.
   that match each file's type (optional; without it, files use one generic
   icon)
 
-Run `:checkhealth direct` to check your setup.
+Run `:checkhealth direct` to check Neovim, Git, data-directory write access,
+history recovery state, trash size and icon configuration.
 
 ## Installation
 
