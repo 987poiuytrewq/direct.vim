@@ -772,7 +772,15 @@ Editing ~
     committed. Other direct operations are refused meanwhile. Long copies to
     another filesystem report progress.
 
-                                                     *:DirectHistoryReset*
+Viewing history ~
+                                                            *:DirectHistory*
+:DirectHistory
+    Show the undo and redo stacks newest first, with summaries and affected
+    paths, in a read-only scratch buffer. Works from any buffer and preserves
+    the current buffer. This is a raw snapshot: it does not initialize missing
+    logs, recover an unfinished transaction, or rewrite damaged history.
+
+                                                      *:DirectHistoryReset*
 :DirectHistoryReset
     Back up each readable, non-empty history stack to a unique timestamped file
     in `history/`, then start with empty undo and redo stacks. Works from any

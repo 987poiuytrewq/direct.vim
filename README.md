@@ -353,6 +353,7 @@ reviewed and saved again.
 | `:DirectListCwd[!]`        | List the working directory; `!` discards its unsaved listing edits |
 | `:DirectSync`              | Apply edits (same as `:write`)                        |
 | `:DirectUndo` / `:DirectRedo` | Undo/redo filesystem changes, or text while modified |
+| `:DirectHistory`           | Show the undo and redo stacks in a read-only view     |
 | `:DirectHistoryReset`      | Back up and reset both history stacks                 |
 | `:DirectTrash`             | List, restore, or empty trashed entries               |
 | `:DirectYank`              | Yank the entries in a range                           |
@@ -371,6 +372,11 @@ restore an entry (or add a destination for old entries without metadata), and
 `:DirectTrash empty` to remove unreferenced entries. Prefix the command with
 `!` only to override history protection; an existing restore destination is
 never overwritten.
+
+`:DirectHistory` shows both filesystem history stacks newest first, with each
+action's summary and affected paths. It is a read-only snapshot: it does not
+recover an unfinished transaction, initialize missing logs, or rewrite damaged
+history. The current buffer remains loaded when the view replaces it.
 
 Relisting a directory with unsaved edits is refused so the listing is not
 silently overwritten. Opening a file from a modified listing is also refused;

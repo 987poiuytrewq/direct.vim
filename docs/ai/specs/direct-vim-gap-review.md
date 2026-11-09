@@ -1,6 +1,6 @@
 # Spec: direct.vim gap review follow-ups
 
-**Status:** S1 through S6, R1 through R3, and F1 through F3 are complete; the remaining tasks are proposed and have
+**Status:** S1 through S6, R1 through R3, and F1 through F4 are complete; the remaining tasks are proposed and have
 not been checked item by item. This replaces `direct-vim-remaining-improvements.md`.
 Its main pieces (JSONL history, no-overwrite moves, exclusive `touch`, the
 safeguard on undoing a paste) appear in the current code, but that was not
@@ -38,7 +38,7 @@ the problem, or to record that it can't be reproduced.
 | F1 | P3 | Complete | Let users remap individual keys |
 | F2 | P3 | Complete | Open entries in a split, vertical split or new tab |
 | F3 | P3 | Complete | Send `User` events for other plugins and configs to hook into |
-| F4 | P3 | Proposed | Add a command to view the history |
+| F4 | P3 | Complete | Add a command to view the history |
 | F5 | P3 | Proposed | Allow renames, creates and deletes together in one top-level save |
 | F6 | P3 | Proposed | Give every message the same `direct:` prefix |
 | M1 | P4 | Proposed | Version tags, releases and a changelog |
@@ -333,6 +333,14 @@ payloads, ordering, and copy isolation. `make test` passes.
 the root and the actions in `data`. Document them.
 
 ### F4 — No history view (P3)
+
+**Status: COMPLETE.** `:DirectHistory` shows undo and redo actions newest first
+with summaries and affected paths in an unlisted, read-only scratch buffer. It
+reads raw history without initializing missing logs, recovering transactions,
+or rewriting damaged bytes, and preserves the previous buffer. README and help
+docs describe the snapshot and its safety limits. Tests cover both stacks,
+empty and damaged logs, read-only behavior, and byte-for-byte preservation.
+`make test` passes.
 
 **Change.** Add `:DirectHistory` to show the undo and redo stacks with each
 action's summary and paths, read-only.

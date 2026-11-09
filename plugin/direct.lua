@@ -1,4 +1,4 @@
--- plugin/direct.lua -- the command/autocmd surface: fourteen commands, the netrw
+-- plugin/direct.lua -- the command/autocmd surface, the netrw
 -- neutralisation, the directory intercept and the deferred `-` mapping. Every
 -- registration is idempotent (the harness sources this at every spec boundary).
 
@@ -128,6 +128,10 @@ end, { nargs = 0, desc = 'direct: undo the last filesystem action' })
 vim.api.nvim_create_user_command('DirectRedo', function()
   require('direct').redo()
 end, { nargs = 0, desc = 'direct: redo the last undone action' })
+
+vim.api.nvim_create_user_command('DirectHistory', function()
+  require('direct.history.view').show()
+end, { nargs = 0, desc = 'direct: show read-only filesystem history' })
 
 vim.api.nvim_create_user_command('DirectHistoryReset', function()
   require('direct').reset_history()
