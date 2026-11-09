@@ -713,9 +713,7 @@ local function set_options(bufnr)
     end,
     desc = 'direct: refresh display marks when insert-mode edits change line count',
   })
-  if require('direct.config').options.map_default_keys then
-    folding.install_mappings(bufnr, M)
-  end
+  folding.install_mappings(bufnr, M)
   attach_deleted_guard(bufnr)
   capture_deleted_guard_snapshot(bufnr, states[bufnr])
 end

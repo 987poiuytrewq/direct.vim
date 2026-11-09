@@ -2,63 +2,94 @@
 
 local M = {}
 
-function M.install_mappings(bufnr, buffer)
-  local maps = {
-    { '<LeftMouse>', function() return M._handle_mouse_click(buffer) end,
-      'Toggle a direct directory from its folder icon' },
-    { '<2-LeftMouse>', function() return M._handle_double_click(buffer) end,
-      'Open the direct entry under the double-click' },
-    { 'zo', function() return buffer.expand() end,
-      'Expand one direct directory level' },
-    { 'za', function() return buffer.toggle() end,
-      'Toggle direct directory expansion' },
-    { 'zc', function() return buffer.collapse() end,
-      'Collapse direct directory rows' },
-    { 'zO', function() return M.expand_recursive(buffer) end,
-      'Recursively expand direct directories' },
-    { 'zA', function() return M.toggle_recursive(buffer) end,
-      'Recursively toggle direct directories' },
-    { 'zC', function() return buffer.collapse() end,
-      'Recursively collapse direct directories' },
-    { 'zR', function() return M.expand_all(buffer) end,
-      'Expand all direct directories' },
-    { 'zM', function() return M.collapse_all(buffer) end,
-      'Collapse all direct directories' },
-    { '[d', function() return M.navigate_directory(buffer, -1) end,
-      'Jump to the previous visible direct directory' },
-    { ']d', function() return M.navigate_directory(buffer, 1) end,
-      'Jump to the next visible direct directory' },
-  }
-  for _, map in ipairs(maps) do
-    vim.keymap.set('n', map[1], map[2], {
-      buffer = bufnr,
-      silent = true,
-      desc = 'direct: ' .. map[3],
-    })
+M.KEY_MAPS = {
+  { action = 'expand', lhs = 'zo',
+    desc = 'direct: Expand one direct directory level' },
+  { action = 'toggle', lhs = 'za',
+    desc = 'direct: Toggle direct directory expansion' },
+  { action = 'collapse', lhs = 'zc',
+    desc = 'direct: Collapse direct directory rows' },
+  { action = 'expand_recursive', lhs = 'zO',
+    desc = 'direct: Recursively expand direct directories' },
+  { action = 'toggle_recursive', lhs = 'zA',
+    desc = 'direct: Recursively toggle direct directories' },
+  { action = 'collapse_recursive', lhs = 'zC',
+    desc = 'direct: Recursively collapse direct directories' },
+  { action = 'unfold_all', lhs = 'zR',
+    desc = 'direct: Expand all direct directories' },
+  { action = 'fold_all', lhs = 'zM',
+    desc = 'direct: Collapse all direct directories' },
+  { action = 'previous_directory', lhs = '[d',
+    desc = 'direct: Jump to the previous visible direct directory' },
+  { action = 'next_directory', lhs = ']d',
+    desc = 'direct: Jump to the next visible direct directory' },
+}
+
+M.MOUSE_MAPS = {
+  { lhs = '<LeftMouse>', callback = function(buffer)
+    return function() return M._handle_mouse_click(buffer) end
+  end, desc = 'direct: Toggle a direct directory from its folder icon' },
+  { lhs = '<2-LeftMouse>', callback = function(buffer)
+    return function() return M._handle_double_click(buffer) end
+  end, desc = 'direct: Open the direct entry under the double-click' },
+}
+
+function M.install_mappings(bufnr, _buffer)
+  local config = require('direct.config')
+  local buffer = _buffer or require('direct.buffer.buffer')
+  M.clear_mappings(bufnr)
+  for _, map in ipairs(M.KEY_MAPS) do
+    local lhs = config.mapping_lhs(map.action, map.lhs)
+    if lhs then
+      vim.keymap.set('n', lhs, M.action_callback(map.action, buffer), {
+        buffer = bufnr, silent = true, noremap = true, desc = map.desc,
+      })
+    end
   end
+  if config.options.map_default_keys then
+    for _, map in ipairs(M.MOUSE_MAPS) do
+      vim.keymap.set('n', map.lhs, map.callback(buffer), {
+        buffer = bufnr, silent = true, noremap = true, desc = map.desc,
+      })
+    end
+  end
+end
+
+function M.action_callback(action, buffer)
+  local handlers = {
+    expand = function() return buffer.expand() end,
+    toggle = function() return buffer.toggle() end,
+    collapse = function() return buffer.collapse() end,
+    expand_recursive = function() return M.expand_recursive(buffer) end,
+    toggle_recursive = function() return M.toggle_recursive(buffer) end,
+    collapse_recursive = function() return buffer.collapse() end,
+    unfold_all = function() return M.expand_all(buffer) end,
+    fold_all = function() return M.collapse_all(buffer) end,
+    previous_directory = function() return M.navigate_directory(buffer, -1) end,
+    next_directory = function() return M.navigate_directory(buffer, 1) end,
+  }
+  return handlers[action]
 end
 
 -- Remove only mappings still owned by Direct. Descriptions are stable across
 -- config-module reloads, and user replacements do not carry this marker.
-function M.clear_mappings()
-  local descriptions = {
-    ['<LeftMouse>'] = 'direct: Toggle a direct directory from its folder icon',
-    ['<2-LeftMouse>'] = 'direct: Open the direct entry under the double-click',
-    zo = 'direct: Expand one direct directory level',
-    za = 'direct: Toggle direct directory expansion',
-    zc = 'direct: Collapse direct directory rows',
-    zO = 'direct: Recursively expand direct directories',
-    zA = 'direct: Recursively toggle direct directories',
-    zC = 'direct: Recursively collapse direct directories',
-    zR = 'direct: Expand all direct directories',
-    zM = 'direct: Collapse all direct directories',
-    ['[d'] = 'direct: Jump to the previous visible direct directory',
-    [']d'] = 'direct: Jump to the next visible direct directory',
-  }
-  for lhs, desc in pairs(descriptions) do
-    local current = vim.fn.maparg(lhs, 'n', false, true)
-    if current.buffer == 1 and current.desc == desc then
-      pcall(vim.keymap.del, 'n', lhs, { buffer = true })
+function M.clear_mappings(bufnr)
+  local buffers = bufnr and { bufnr } or vim.api.nvim_list_bufs()
+  local descriptions = {}
+  for _, map in ipairs(M.KEY_MAPS) do
+    descriptions[map.desc] = true
+    descriptions['direct: Plug ' .. map.action] = true
+  end
+  for _, map in ipairs(M.MOUSE_MAPS) do descriptions[map.desc] = true end
+  for _, target in ipairs(buffers) do
+    if vim.api.nvim_buf_is_valid(target) then
+      pcall(vim.api.nvim_buf_call, target, function()
+        for _, map in ipairs(vim.api.nvim_buf_get_keymap(target, 'n')) do
+          if descriptions[map.desc] then
+            pcall(vim.keymap.del, 'n', map.lhs, { buffer = target })
+          end
+        end
+      end)
     end
   end
 end

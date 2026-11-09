@@ -220,6 +220,8 @@ H.describe('entry: direct-buffer guard', function()
   H.it('the public API exposes every facade function', function()
     local api = require('direct')
     local expected = { 'setup', 'list', 'list_buffer', 'list_cwd', 'open', 'open_parent_expanded',
+      'expand', 'collapse', 'toggle', 'expand_recursive', 'collapse_recursive',
+      'toggle_recursive', 'next_directory', 'previous_directory',
       'toggle_hidden',
       'toggle_gitignore',
       'toggle_git_status',
@@ -238,6 +240,37 @@ H.describe('entry: direct-buffer guard', function()
     for _, name in ipairs(expected) do
       H.assert_eq(type(api[name]), 'function', 'direct.' .. name .. ' is a function')
     end
+  end)
+
+  H.it('the public folder API expands, collapses, toggles, and navigates', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local sub = H.mkdir(ws, 'sub/nested')
+    H.mkfile(sub, 'inside.txt', { 'inside' })
+    H.mkdir(ws, 'other')
+    local api = require('direct')
+    api.list(ws)
+    vim.api.nvim_win_set_cursor(0, { 2, 0 })
+
+    H.assert_true(api.expand(), 'expand opens one level')
+    H.assert_buf_eq({ 'other/', 'sub/', '  nested/' }, 0,
+      'expand materializes immediate children')
+    H.assert_true(api.collapse(), 'collapse removes the selected subtree')
+    H.assert_buf_eq({ 'other/', 'sub/' }, 0)
+    H.assert_true(api.toggle(), 'toggle expands a collapsed directory')
+    H.assert_true(api.expand_recursive(), 'recursive expand opens descendants')
+    H.assert_buf_eq({ 'other/', 'sub/', '  nested/', '    inside.txt' }, 0)
+    H.assert_true(api.collapse_recursive(), 'recursive collapse removes descendants')
+    H.assert_buf_eq({ 'other/', 'sub/' }, 0)
+    H.assert_true(api.toggle_recursive(), 'recursive toggle expands the full subtree')
+    H.assert_buf_eq({ 'other/', 'sub/', '  nested/', '    inside.txt' }, 0)
+
+    vim.api.nvim_win_set_cursor(0, { 1, 0 })
+    H.assert_true(api.next_directory(), 'next_directory finds the next visible directory')
+    H.assert_eq(vim.api.nvim_win_get_cursor(0)[1], 2)
+    H.assert_true(api.previous_directory(), 'previous_directory returns to the prior directory')
+    H.assert_eq(vim.api.nvim_win_get_cursor(0)[1], 1)
   end)
 
   H.it('guarded commands notify and change nothing outside a direct buffer', function()
@@ -547,9 +580,10 @@ H.describe('entry: default mappings', function()
       ['<2-LeftMouse>'] = 'direct: Open the direct entry under the double-click',
     }
     for lhs, desc in pairs(fold_descriptions) do
-      H.assert_true(normal_records[lhs] and normal_records[lhs].callback ~= nil,
-        'fold mapping ' .. lhs .. ' uses a callback')
-      H.assert_eq(normal_records[lhs] and normal_records[lhs].desc, desc,
+      local record = normal_records[lhs]
+      H.assert_true(record and record.callback ~= nil,
+        'direct mapping ' .. lhs .. ' uses a Lua callback')
+      H.assert_eq(record and record.desc, desc,
         'fold mapping description ' .. lhs)
     end
 

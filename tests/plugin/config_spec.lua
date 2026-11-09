@@ -435,6 +435,61 @@ H.describe('config', function()
     pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
   end)
 
+  H.it('supports per-action mapping overrides and public Plug mappings', function()
+    local config = fresh_config()
+    config.clear_mappings()
+    config.setup({
+      map_default_keys = false,
+      mappings = {
+        list_buffer = '<leader>d',
+        undo = '<leader>u',
+        expand = 'e',
+        toggle_hidden = false,
+      },
+    })
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local sub = H.mkdir(ws, 'sub')
+    H.mkfile(sub, 'inside.txt', { 'inside' })
+    require('direct.buffer.buffer').list(ws)
+    local bufnr = vim.api.nvim_get_current_buf()
+
+    H.assert_eq(buf_map_rhs('<leader>d', 'n'), config.BUFFER_MAPS[2].rhs,
+      'an explicit mapping is installed even when defaults are disabled')
+    H.assert_eq(buf_map_rhs('<leader>u', 'n'), '<Cmd>DirectUndo<CR>',
+      'the undo action can be remapped independently')
+    H.assert_true(vim.fn.maparg('e', 'n', false, true).callback ~= nil,
+      'folder actions can be remapped independently')
+    H.assert_nil(buf_map_rhs('u', 'n'), 'the default undo key is not installed')
+    H.assert_nil(buf_map_rhs('zo', 'n'), 'the default expand key is not installed')
+    H.assert_nil(buf_map_rhs('gh', 'n'), 'false disables the hidden-toggle key')
+
+    H.assert_eq(vim.fn.maparg('<Plug>(direct-undo)', 'n', false, true).rhs,
+      '<Cmd>DirectUndo<CR>', 'the Plug mapping is globally available')
+    H.assert_true(vim.fn.maparg('<Plug>(direct-expand)', 'n', false, true).callback ~= nil,
+      'folder actions have Plug mappings')
+    H.assert_eq(vim.fn.maparg('<Plug>(direct-toggle-hidden)', 'n', false, true).rhs,
+      '<Cmd>DirectToggleHidden<CR>', 'Plug entry points remain available when a default is disabled')
+
+    vim.api.nvim_feedkeys('e', 'mx', false)
+    H.assert_buf_eq({ 'sub/', '  inside.txt' }, bufnr,
+      'the per-action physical key invokes the selected action')
+    require('direct.buffer.buffer').collapse()
+    vim.keymap.set('n', '<F6>', '<Plug>(direct-expand)', {
+      buffer = bufnr, remap = true, silent = true,
+    })
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<F6>', true, false, true),
+      'mx', false)
+    H.assert_buf_eq({ 'sub/', '  inside.txt' }, bufnr,
+      'the Plug mapping can be composed into a user key')
+
+    config.clear_mappings()
+    H.assert_eq(vim.fn.maparg('<Plug>(direct-undo)', 'n'), '',
+      'clear_mappings removes Direct Plug mappings')
+    H.assert_nil(buf_map_rhs('<leader>u', 'n'), 'clear_mappings removes custom buffer mappings')
+    pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+  end)
+
   H.it('setup({ map_default_keys = false }) clears buffer-local maps in already-open direct buffers', function()
     local config = fresh_config()
     config.clear_mappings()
