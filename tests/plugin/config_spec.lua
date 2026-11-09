@@ -444,6 +444,7 @@ H.describe('config', function()
         list_buffer = '<leader>d',
         undo = '<leader>u',
         expand = 'e',
+        open_vertical = '<F7>',
         toggle_hidden = false,
       },
     })
@@ -454,10 +455,19 @@ H.describe('config', function()
     require('direct.buffer.buffer').list(ws)
     local bufnr = vim.api.nvim_get_current_buf()
 
-    H.assert_eq(buf_map_rhs('<leader>d', 'n'), config.BUFFER_MAPS[2].rhs,
+    local list_buffer_rhs
+    for _, mapping in ipairs(config.BUFFER_MAPS) do
+      if mapping.action == 'list_buffer' then list_buffer_rhs = mapping.rhs end
+    end
+    H.assert_eq(buf_map_rhs('<leader>d', 'n'), list_buffer_rhs,
       'an explicit mapping is installed even when defaults are disabled')
     H.assert_eq(buf_map_rhs('<leader>u', 'n'), '<Cmd>DirectUndo<CR>',
       'the undo action can be remapped independently')
+    H.assert_eq(buf_map_rhs('<F7>', 'n'),
+      '<Cmd>lua require("direct").open({ split = "vertical" })<CR>',
+      'split-open actions can be remapped independently')
+    H.assert_nil(buf_map_rhs('<C-V>', 'n'),
+      'an explicit split mapping does not also install the default key')
     H.assert_true(vim.fn.maparg('e', 'n', false, true).callback ~= nil,
       'folder actions can be remapped independently')
     H.assert_nil(buf_map_rhs('u', 'n'), 'the default undo key is not installed')
@@ -466,6 +476,9 @@ H.describe('config', function()
 
     H.assert_eq(vim.fn.maparg('<Plug>(direct-undo)', 'n', false, true).rhs,
       '<Cmd>DirectUndo<CR>', 'the Plug mapping is globally available')
+    H.assert_eq(vim.fn.maparg('<Plug>(direct-open-vertical)', 'n', false, true).rhs,
+      '<Cmd>lua require("direct").open({ split = "vertical" })<CR>',
+      'split-open actions also have a Plug mapping')
     H.assert_true(vim.fn.maparg('<Plug>(direct-expand)', 'n', false, true).callback ~= nil,
       'folder actions have Plug mappings')
     H.assert_eq(vim.fn.maparg('<Plug>(direct-toggle-hidden)', 'n', false, true).rhs,

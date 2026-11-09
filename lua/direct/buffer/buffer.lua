@@ -2420,8 +2420,15 @@ end
 -- a directory can reuse its existing listing; remove the old listing on file
 -- opens after another buffer is current.
 -- Child paths resolve from their row identities rather than their display text.
-function Buffer:open(line)
+function Buffer:open(line, options)
+  options = options or {}
+  if type(options) ~= 'table'
+    or (options.split ~= nil and options.split ~= 'horizontal'
+      and options.split ~= 'vertical' and options.split ~= 'tab') then
+    return nil, "open split must be 'horizontal', 'vertical', or 'tab'"
+  end
   local bufnr = vim.api.nvim_get_current_buf()
+  local direct_buf = bufnr
   restore_deleted_rows(bufnr)
   local safe, integrity_err = children_integrity(bufnr,
     vim.api.nvim_buf_get_lines(bufnr, 0, -1, false))
@@ -2444,19 +2451,26 @@ function Buffer:open(line)
     path = M.entry_path(self.root, line)
   end
   if not path then return nil, 'row identity is unavailable' end
-  local direct_buf = vim.api.nvim_get_current_buf()
+
+  if options.split then
+    local command = options.split == 'horizontal' and 'new'
+      or options.split == 'vertical' and 'vnew' or 'tabnew'
+    local ok, split_err = pcall(vim.cmd, command)
+    if not ok then return nil, tostring(split_err) end
+  end
+
   if is_dir_line(record and record.name or line) then
     local listed, list_err = M.list(path)
     if not listed then return nil, list_err end
   else
     if vim.bo[direct_buf].filetype == constants.FILETYPE
-      and vim.bo[direct_buf].modified then
+      and vim.bo[direct_buf].modified and not options.split then
       local reason = 'cannot open a file with unsaved edits; sync or discard them first'
       ui.notify('direct: ' .. reason, vim.log.levels.ERROR)
       return nil, reason
     end
     vim.cmd('edit ' .. vim.fn.fnameescape(path))
-    if vim.api.nvim_buf_is_valid(direct_buf)
+    if not options.split and vim.api.nvim_buf_is_valid(direct_buf)
       and vim.api.nvim_get_current_buf() ~= direct_buf then
       pcall(vim.api.nvim_buf_delete, direct_buf, { force = true })
     end

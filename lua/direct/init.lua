@@ -67,7 +67,11 @@ function M.list_cwd(options)
   return buffer.list(vim.fn.getcwd(), options)
 end
 
-function M.open(line)
+function M.open(line, options)
+  if type(line) == 'table' then
+    options, line = line, nil
+  end
+  options = options or {}
   if pending.refuse('open', 'willRenameFiles') then return nil end
   if not guard('open') then
     return nil
@@ -75,7 +79,7 @@ function M.open(line)
   if line == nil then
     line = vim.fn.getline('.')
   end
-  return buffer.restore():open(line)
+  return buffer.restore():open(line, options)
 end
 
 function M.open_parent_expanded()

@@ -202,6 +202,12 @@ M._installed = vim.fn.maparg(M.GLOBAL_MAP.lhs, M.GLOBAL_MAP.mode) == M.GLOBAL_MA
 M.BUFFER_MAPS = {
   { action = 'open', mode = 'n', lhs = '<CR>',
     rhs = '<Cmd>lua require("direct").open()<CR>' },
+  { action = 'open_horizontal', mode = 'n', lhs = '<C-s>',
+    rhs = '<Cmd>lua require("direct").open({ split = "horizontal" })<CR>' },
+  { action = 'open_vertical', mode = 'n', lhs = '<C-v>',
+    rhs = '<Cmd>lua require("direct").open({ split = "vertical" })<CR>' },
+  { action = 'open_tab', mode = 'n', lhs = '<C-t>',
+    rhs = '<Cmd>lua require("direct").open({ split = "tab" })<CR>' },
   { action = 'list_buffer', mode = 'n', lhs = '-',
     rhs = '<Cmd>lua require("direct").list(vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":h"))<CR>' },
   { action = 'open_parent_expanded', mode = 'n', lhs = 'z-',
