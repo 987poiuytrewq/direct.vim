@@ -247,12 +247,12 @@ local function move_progress(src, dst)
     elseif type(stage) == 'number'
       and (stage == total or stage == 1 or stage % 25 == 0) then
       echo_shown = true
-      vim.api.nvim_echo({ { string.format('direct: copying %d/%d files', stage, total),
-        'MoreMsg' } }, false, {})
+      M.ui.notify(string.format('direct: copying %d/%d files', stage, total),
+        vim.log.levels.INFO, { ephemeral = true })
     end
   end
   local function clear()
-    if echo_shown then pcall(vim.api.nvim_echo, { { '' } }, false, {}) end
+    if echo_shown then M.ui.notify('', vim.log.levels.INFO, { ephemeral = true }) end
   end
   return report, clear
 end

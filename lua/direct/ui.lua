@@ -10,8 +10,16 @@ local function strip_traceback(message)
   return message
 end
 
-function M.notify(msg, level)
+function M.notify(msg, level, options)
   local message = tostring(msg or '')
+  if message ~= '' and not message:match('^direct:') then
+    message = 'direct: ' .. message
+  end
+  if options and options.ephemeral then
+    local highlight = level == vim.log.levels.ERROR and 'ErrorMsg'
+      or level == vim.log.levels.WARN and 'WarningMsg' or 'MoreMsg'
+    return pcall(vim.api.nvim_echo, { { message, highlight } }, false, {})
+  end
   local ok = pcall(vim.notify, message, level)
   if not ok then
     local highlight = level == vim.log.levels.ERROR and 'ErrorMsg' or 'WarningMsg'

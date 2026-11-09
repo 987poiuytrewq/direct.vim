@@ -754,6 +754,8 @@ syntax loading is turned off.
 Unless noted otherwise, these commands work only in a listing. In any other
 buffer they report an error and do nothing.
 
+All direct.vim notifications use the `direct:` prefix.
+
 Opening listings ~
                                                                  *:DirectList*
 :DirectList[!] {dir}
