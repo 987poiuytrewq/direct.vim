@@ -1,6 +1,6 @@
 # Spec: direct.vim gap review follow-ups
 
-**Status:** S1 through S6, R1 through R3, and F1 through F6 are complete; the remaining tasks are proposed and have
+**Status:** S1 through S6, R1 through R3, F1 through F6, and M1 are complete; the remaining tasks are proposed and have
 not been checked item by item. This replaces `direct-vim-remaining-improvements.md`.
 Its main pieces (JSONL history, no-overwrite moves, exclusive `touch`, the
 safeguard on undoing a paste) appear in the current code, but that was not
@@ -41,7 +41,7 @@ the problem, or to record that it can't be reproduced.
 | F4 | P3 | Complete | Add a command to view the history |
 | F5 | P3 | Complete | Allow renames, creates and deletes together in one top-level save |
 | F6 | P3 | Complete | Give every message the same `direct:` prefix |
-| M1 | P4 | Proposed | Version tags, releases and a changelog |
+| M1 | P4 | Complete | Version tags, releases and a changelog |
 | M2 | P4 | Proposed | Widen CI: latest stable and nightly Neovim, and pushes to `master` |
 | M3 | P4 | Proposed | Add linting, formatting and type checks |
 | M4 | P4 | Proposed | Split the largest modules up |
@@ -428,6 +428,13 @@ route them all through `ui.notify`.
 ## Project maturity
 
 ### M1 — No version tags, releases or changelog (P4)
+
+**Status: COMPLETE.** Added the initial `0.1.0` changelog, a versioned lazy.nvim
+example, and a Lux manifest for the `direct-vim` LuaRocks package. The manifest
+includes Lua modules and Neovim runtime directories; maintainers can publish a
+tagged version with Lux after configuring their LuaRocks API key. The first
+version tag and GitHub release will be created after this pull request is
+merged.
 
 **Change.** Add `CHANGELOG.md`, tag versions (starting at `v1.0.0` or
 `v0.x`), and publish GitHub releases. Look at publishing to LuaRocks so
