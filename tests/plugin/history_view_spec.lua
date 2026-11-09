@@ -107,4 +107,32 @@ H.describe(':DirectHistory', function()
     H.assert_eq(require('direct.log').read_raw(undo_path), bytes,
       'the damaged log remains byte-for-byte unchanged')
   end)
+
+  H.it('shows the member paths of a mixed-save batch record', function()
+    pcall(vim.cmd, '%bwipeout!')
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local action = require('direct.action.action')
+    local batch = action.Batch({
+      action.Move(vim.fs.joinpath(ws, 'before.txt'), vim.fs.joinpath(ws, 'after.txt')),
+      action.Touch(vim.fs.joinpath(ws, 'created.txt')),
+    })
+    local record = assert(action.serialize(batch))
+    local history_dir = vim.fs.joinpath(sb.data_home, 'direct/history')
+    vim.fn.mkdir(history_dir, 'p')
+    H.assert_true(require('direct.log').write_raw_atomic(
+      vim.fs.joinpath(history_dir, 'undo.log'),
+      require('direct.history.history').HEADER .. '\n' .. record .. '\n'))
+
+    vim.cmd('DirectHistory')
+
+    local text = table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), '\n')
+    H.assert_true(text:find('Moved', 1, true) ~= nil, 'the batch summary includes its move')
+    H.assert_true(text:find(vim.fs.joinpath(ws, 'before.txt'), 1, true) ~= nil,
+      'the batch view shows the move source')
+    H.assert_true(text:find(vim.fs.joinpath(ws, 'after.txt'), 1, true) ~= nil,
+      'the batch view shows the move destination')
+    H.assert_true(text:find(vim.fs.joinpath(ws, 'created.txt'), 1, true) ~= nil,
+      'the batch view shows the create path')
+  end)
 end)

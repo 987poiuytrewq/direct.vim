@@ -16,7 +16,7 @@ H.describe('asynchronous sync', function()
     H.mkfile(root, 'old/nested/item.txt', { 'payload' })
     local source, destination = root .. '/old', root .. '/new'
     require('direct').list(root)
-    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'new/' })
+    H.set_direct_rows(0, { 'new/' })
 
     local real_rename = fs.rename_noreplace
     local rename_calls = {}

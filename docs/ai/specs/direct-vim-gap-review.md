@@ -1,6 +1,6 @@
 # Spec: direct.vim gap review follow-ups
 
-**Status:** S1 through S6, R1 through R3, and F1 through F4 are complete; the remaining tasks are proposed and have
+**Status:** S1 through S6, R1 through R3, and F1 through F5 are complete; the remaining tasks are proposed and have
 not been checked item by item. This replaces `direct-vim-remaining-improvements.md`.
 Its main pieces (JSONL history, no-overwrite moves, exclusive `touch`, the
 safeguard on undoing a paste) appear in the current code, but that was not
@@ -39,7 +39,7 @@ the problem, or to record that it can't be reproduced.
 | F2 | P3 | Complete | Open entries in a split, vertical split or new tab |
 | F3 | P3 | Complete | Send `User` events for other plugins and configs to hook into |
 | F4 | P3 | Complete | Add a command to view the history |
-| F5 | P3 | Proposed | Allow renames, creates and deletes together in one top-level save |
+| F5 | P3 | Complete | Allow renames, creates and deletes together in one top-level save |
 | F6 | P3 | Proposed | Give every message the same `direct:` prefix |
 | M1 | P4 | Proposed | Version tags, releases and a changelog |
 | M2 | P4 | Proposed | Widen CI: latest stable and nightly Neovim, and pushes to `master` |
@@ -346,6 +346,16 @@ empty and damaged logs, read-only behavior, and byte-for-byte preservation.
 action's summary and paths, read-only.
 
 ### F5 — Top-level saves can't mix change types (P3)
+
+**Status: COMPLETE.** Root saves now classify rows by their extmark identities,
+not line positions, and can combine renames, creates, and deletes into one
+history batch. Moves still use staged no-overwrite execution; deletes are
+yanked first, and one undo/redo reverses the complete mixed save. A stale root
+directory snapshot, duplicate destination, or unsafe identity still refuses
+before filesystem changes. Tests cover delete/create without positional
+pairing, delete-and-rename into a freed path, mixed child/root changes, undo,
+redo, and safety refusals. README and help docs explain mark-preserving edits
+versus whole-line replacements. `make test` passes.
 
 **Problem.** At the root level, `classify` in `lua/direct/buffer/sync_plan.lua`
 sorts each save into exactly one of `ADD`, `DELETE` or `RENAME` by comparing

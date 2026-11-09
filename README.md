@@ -122,9 +122,19 @@ automatically.
 - **Directories end with a separator, files don't.** `archive/` is a directory
   and `archive` is a file. On Windows the separator is `\`; you can change it
   with the `directory_separator` option.
-- **Make one kind of change per save at the root level.** A single `:w` can
-  rename, create or delete, but not mix them. Changes inside expanded
-  directories are more flexible.
+- **A save can mix root renames, creates and deletes.** Direct pairs edited
+  rows by their row identities, not by line position. The whole save is one
+  undoable history entry when it mixes change types; deleted entries are
+  yanked before removal.
+- **A row's identity decides whether an edit is a rename.** Editing its name
+  while the row mark survives is a rename. An unmarked row is a create, and a
+  marked row that disappears is a delete. If a whole-line edit such as `cc` or
+  `S` loses its mark, Direct treats it as delete-plus-create; the old entry is
+  yanked and the new one is empty. If text undo/redo leaves an identity unclear,
+  the save is refused and the listing must be reviewed or re-listed.
+- **The root directory must still match its list-time snapshot.** A visible
+  entry added, removed or replaced on disk since listing causes the save to be
+  refused rather than guessing what the edit means.
 - **Unclear edits change nothing.** If direct.vim can't tell what you meant, or
   the directory changed on disk since you listed it, the save is refused, the
   filesystem is left alone, and your edits stay in the buffer so you can fix

@@ -95,9 +95,10 @@ data directory in use, run:
 4. Press `u` to undo the filesystem change.
 
 Directory names end with the separator (`archive/`); file names do not. At the
-root level, save one kind of change at a time. If direct.vim can't tell what
-you meant, the save is refused and nothing on disk changes. See
-|direct.vim-edit| for the full rules.
+root level, a save can mix renames, creates and deletes. Rows are paired by
+their identities, not by position. If direct.vim can't tell what you meant,
+the save is refused and nothing on disk changes. See |direct.vim-edit| for the
+full rules.
 
 ==============================================================================
 4. Navigating                                            *direct.vim-navigate*
@@ -172,17 +173,25 @@ and lists the directory again.
 
 Rename, create and delete ~
                                                          *direct.vim-classify*
-At the root level, each save is classified as exactly one of these:
+At the root level, direct.vim compares rows by their extmark identities rather
+than pairing lines by position. A single save can mix:
 
     Rename      Change the text of an existing line.
     Create      Add new lines anywhere.
     Delete      Delete lines. Deleted entries are yanked first, so you can
                 paste them back with `p`.
 
-An edit that both adds and deletes root rows, or that leaves a duplicated
-line, is ambiguous. The error names both sides of the comparison. Nothing is
-changed, no history is written, and the buffer stays modified so you can fix
-it.
+A mixed save is one history entry, so one `u` reverses all its filesystem
+actions. Two rows with the same destination are refused. The root directory is
+also checked against its list-time snapshot; visible entries added, removed or
+replaced on disk since listing cause a refusal instead of a guessed operation.
+
+A row whose mark survives a text edit is a rename. An unmarked row is a create,
+and a marked row that disappears is a delete. Whole-line replacements such as
+`cc` or `S` may invalidate the mark: if so, direct.vim treats the old row as a
+delete and the new row as a create. The deleted entry is yanked first. If text
+undo/redo leaves an original row's identity unclear, the save is refused and
+the listing must be reviewed or re-listed. A duplicate line is always refused.
 
 Directories and files ~
                                                    *direct.vim-separator-rule*
@@ -238,9 +247,10 @@ If you move or rename a directory and also edit its descendants, you may need
 to save the two changes separately. direct.vim refuses the save when it can't
 determine a safe order for the filesystem actions.
 
-When a whole line is replaced, direct.vim treats it as a rename only when the
-surrounding entries make the pairing unambiguous. Otherwise the save is
-refused. Root-level edits always follow the rename/create/delete rules above.
+When a whole line is replaced, direct.vim uses the row mark if it survives. If
+the edit invalidates it, the old row is deleted and the replacement is created;
+the two rows are never paired by position or by a guessed filename match. Root
+and expanded-directory changes can be combined into the same save.
 
 What gets checked before a save ~
 

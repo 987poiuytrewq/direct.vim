@@ -391,16 +391,21 @@ return function(deps)
     -- boundary. A root moved into a child remains in its original virtual slot;
     -- a child moved to the root is handled by the tree Move action, not ADD.
     roots = {}
-    local root_ids = {}
+    local root_rows, root_ids = {}, {}
     for _, id in ipairs(state.root_ids or {}) do
       root_ids[id] = true
       local rec, now = state.rows[id], nodes_by_id[id]
       if not rec.deleted_kind and now then
-        roots[#roots + 1] = now.depth == 0 and now.name or rec.name
+        local line = now.depth == 0 and now.name or rec.name
+        roots[#roots + 1] = line
+        root_rows[#root_rows + 1] = { id = id, line = line }
       end
     end
     for _, node in ipairs(nodes) do
-      if node.depth == 0 and not node.id then roots[#roots + 1] = node.name end
+      if node.depth == 0 and not node.id then
+        roots[#roots + 1] = node.name
+        root_rows[#root_rows + 1] = { line = node.name }
+      end
     end
     for _, siblings in pairs(children_by_parent) do
       local seen_names = {}
@@ -756,6 +761,7 @@ return function(deps)
     table.sort(expanded_targets, function(a, b) return a.depth < b.depth end)
     return {
       root_lines = roots,
+      root_rows = root_rows,
       actions = actions,
       yanks = yanks,
       changed_parents = changed_parents,
