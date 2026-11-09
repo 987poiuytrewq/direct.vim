@@ -88,7 +88,7 @@ With [lazy.nvim](https://github.com/folke/lazy.nvim), load it at startup so it
 can take over directories opened from the command line (`nvim .`):
 
 ```lua
-{ '987poiuytrewq/direct.vim', lazy = false }
+{ '987poiuytrewq/direct.vim', version = '*', lazy = false }
 ```
 
 With [vim-plug](https://github.com/junegunn/vim-plug):
@@ -99,6 +99,13 @@ Plug '987poiuytrewq/direct.vim'
 
 `setup()` is optional, and direct.vim replaces netrw for directory buffers
 automatically.
+
+Releases are tagged with a `v` prefix; see [CHANGELOG.md](CHANGELOG.md) for
+release notes. The LuaRocks package is named `direct-vim` and can be installed
+with `:Rocks install direct-vim` after publication. The `lux.toml` manifest
+includes the Lua modules and Neovim runtime directories. Maintainers can publish
+a tagged version with Lux after configuring a LuaRocks API key; lazy.nvim users
+can select tagged releases with `version = '*'`.
 
 ## Quick start
 

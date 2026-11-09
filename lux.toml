@@ -1,0 +1,21 @@
+package = "direct-vim"
+lua = ">=5.1"
+
+[description]
+summary = "Edit filesystem entries in a Neovim buffer"
+detailed = """
+direct.vim lets users edit a directory listing as a buffer, then apply
+filesystem changes with undo and redo. Requires Neovim 0.12 or later.
+"""
+license = "MIT"
+homepage = "https://github.com/987poiuytrewq/direct.vim"
+issues_url = "https://github.com/987poiuytrewq/direct.vim/issues"
+labels = ["neovim", "plugin", "filesystem"]
+
+[source]
+url = "https://github.com/987poiuytrewq/direct.vim/archive/$(REF).zip"
+dev = "git+https://github.com/987poiuytrewq/direct.vim.git"
+
+[build]
+type = "builtin"
+copy_directories = ["doc", "ftplugin", "plugin", "syntax"]
