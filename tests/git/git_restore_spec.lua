@@ -125,8 +125,9 @@ H.describe('Git worktree restore confirmation', function()
     vim.fn.confirm = original_confirm
     H.assert_true(accepted, 'accepting starts the restore: ' .. tostring(accept_err))
     H.assert_true(vim.wait(5000, function()
-      return vim.fn.readfile(directory .. '/one.txt')[1] == 'one base'
-        and vim.fn.readfile(directory .. '/two.txt')[1] == 'two base'
+      local ok_one, one = pcall(vim.fn.readfile, directory .. '/one.txt')
+      local ok_two, two = pcall(vim.fn.readfile, directory .. '/two.txt')
+      return ok_one and ok_two and one[1] == 'one base' and two[1] == 'two base'
     end), 'accepted restore resets the tracked files')
     H.assert_eq(vim.fn.readfile(root .. '/outside.txt'), { 'outside changed' },
       'restore stays scoped to the selected directory')
