@@ -425,6 +425,7 @@ local sync_plan = require('direct.buffer.sync_plan')({
   fs = fs,
 })
 M.classify = sync_plan.classify
+local classify_identity = sync_plan.classify_identity
 M._component_reason = sync_plan.component_reason
 M._nested_path_reason = sync_plan.nested_path_reason
 local component_reason = sync_plan.component_reason
@@ -1003,6 +1004,7 @@ function Buffer:list(options)
     rec.kind, rec.name, rec.text, rec.depth = 'root', line, line, 0
     rec.deleted_kind = deleted_kind
     rec.path = M.entry_path(self.root, line)
+    rec.identity = identity
     state.rows[rec.id] = rec
     state.root_ids[#state.root_ids + 1] = rec.id
     roots[#roots + 1] = rec
@@ -1595,16 +1597,17 @@ end
 -- ---------------------------------------------------------------------------
 
 -- log_applied(actions, applied) records successful actions in history. History
--- is written per GROUP of interlinked moves: a swap or
--- an N-way rotation is ONE entry, so one `DirectUndo` reverses the whole
--- permutation instead of renaming a live name over an unsaved one. Every other
--- action is its own entry, exactly as before.
+-- is written per GROUP of interlinked moves: a swap or an N-way rotation is one
+-- entry. Independent actions keep their own entries unless a successful sync
+-- mixes create, delete, and rename categories; those records are compacted into
+-- one durable batch so a single `DirectUndo` reverses the mixed save.
 --
 -- A group with any member that did NOT apply is not recorded at all: its
 -- reversal would pass through a colliding name (the reported defect), and
 -- already never records a reversal for entries that were never written (the
 -- Paste precedent). A singleton group is logged only when its action applied.
 local function log_applied(actions, applied, already_logged)
+  local records, all_recorded = {}, true
   for _, group in ipairs(action_mod.move_groups(actions)) do
     local members, complete, already_recorded = {}, true, true
     for _, index in ipairs(group) do
@@ -1617,10 +1620,45 @@ local function log_applied(actions, applied, already_logged)
       members[#members + 1] = actions[index]
     end
     if complete and not already_recorded then
+      local record_action
       if #members == 1 then
-        history.log(members[1])
+        record_action = members[1]
       else
-        history.log(action_mod.Group(members))
+        record_action = action_mod.Group(members)
+      end
+      local logged, log_err = history.log(record_action)
+      if not logged then
+        all_recorded = false
+        ui.notify('direct: could not record a completed action: ' .. tostring(log_err),
+          vim.log.levels.ERROR)
+      end
+    end
+    if complete then
+      records[#records + 1] = #members == 1 and members[1] or action_mod.Group(members)
+    end
+  end
+
+  if all_recorded and #records > 1 then
+    local categories = {}
+    local function categorize(action)
+      if action.name == 'g' or action.name == 'batch' then
+        for _, member in ipairs(action.actions or {}) do categorize(member) end
+      elseif action.name == 'mv' then
+        categories.rename = true
+      elseif action.name == 'rm' or action.name == 'rmdir' then
+        categories.delete = true
+      elseif action.name == 'touch' or action.name == 'mkdir' then
+        categories.create = true
+      end
+    end
+    for _, record in ipairs(records) do categorize(record) end
+    local category_count = 0
+    for _ in pairs(categories) do category_count = category_count + 1 end
+    if category_count > 1 then
+      local combined, combine_err = history.combine_recent(records)
+      if not combined then
+        ui.notify('direct: sync completed, but its mixed actions remain in separate '
+          .. 'history entries: ' .. tostring(combine_err), vim.log.levels.WARN)
       end
     end
   end
@@ -1783,26 +1821,23 @@ local function sync_locked(self, options)
 
   -- refuse a path the history framing cannot represent, before any
   -- action or history write. The buffer is not re-listed and stays modified.
+  local current_root_rows = subtree_edit and subtree_edit.root_rows or {}
+  if not subtree_edit and #actual > 0 then
+    local row_ids = row_ids_by_row(bufnr)
+    for row, line in ipairs(visible) do
+      local id = row_ids[row - 1]
+      local rec = id and state.rows[id]
+      local prefix = line:match('^( *)') or ''
+      if #prefix > 0 or (rec and rec.kind == 'child') then
+        -- Root-only sync input excludes unchanged materialized descendants.
+      elseif not (rec and rec.deleted_kind) then
+        current_root_rows[#current_root_rows + 1] = { id = id, line = line }
+      end
+    end
+  end
   local nested_added = {}
-  -- Recognize a pure add without invoking the classifier: unsafe path checks
-  -- intentionally precede classification, and only new rows may use a nested
-  -- relative path. Renames and mixed edits retain the basename-only rule.
-  local actual_set, expected_set, unique = {}, {}, true
-  for _, line in ipairs(actual) do
-    if actual_set[line] then unique = false end
-    actual_set[line] = true
-  end
-  for _, line in ipairs(expected) do expected_set[line] = true end
-  local is_add = unique and #actual > #expected
-  if is_add then
-    for line in pairs(expected_set) do
-      if not actual_set[line] then is_add = false; break end
-    end
-  end
-  if is_add then
-    for line in pairs(actual_set) do
-      if not expected_set[line] then nested_added[line] = true end
-    end
+  for _, row in ipairs(current_root_rows) do
+    if not row.id then nested_added[row.line] = true end
   end
   local unsafe = first_unsafe(self.root, actual, nested_added)
     or first_unsafe(self.root, expected)
@@ -1813,10 +1848,35 @@ local function sync_locked(self, options)
     return nil, unsafe.reason
   end
 
-  local plan = M.classify(actual, expected)
-  if plan.kind == 'AMBIGUOUS' then
+  -- Keep the public legacy classifier observable for compatibility, but plan
+  -- filesystem actions exclusively from row identity, never from line order.
+  local classified = M.classify(actual, expected)
+  if classified.kind == 'AMBIGUOUS' and classified.reason == 'duplicate' then
     -- notify, change nothing, write no history, do NOT re-list, and
     -- leave the buffer modified so the unsaved intent is not discarded.
+    ui.notify(ambiguous_message(classified, actual, expected), vim.log.levels.ERROR)
+    return nil, classified.reason
+  end
+
+  local original_root_rows = {}
+  for _, id in ipairs(state.root_ids or {}) do
+    local rec = state.rows[id]
+    if rec and rec.kind == 'root' then
+      original_root_rows[#original_root_rows + 1] = {
+        id = id, name = rec.name, path = rec.path, identity = rec.identity,
+        deleted_kind = rec.deleted_kind,
+      }
+    end
+  end
+  local plan, identity_err = classify_identity(self.root, original_root_rows,
+    current_root_rows, expected, vim.b[bufnr].direct_text_undo_mode == true)
+  if not plan then
+    vim.bo[bufnr].modified = true
+    ui.notify('Refusing to sync: ' .. tostring(identity_err)
+      .. '; nothing was changed.', vim.log.levels.ERROR)
+    return nil, identity_err
+  end
+  if plan.kind == 'AMBIGUOUS' then
     ui.notify(ambiguous_message(plan, actual, expected), vim.log.levels.ERROR)
     return nil, plan.reason
   end
@@ -1829,7 +1889,7 @@ local function sync_locked(self, options)
     return nil, build_err
   end
   local added_expand_paths, added_focus_path = {}, nil
-  if plan.kind == 'ADD' then
+  if #(plan.added or {}) > 0 then
     local added_set, expand_by_path = {}, {}
     for _, line in ipairs(plan.added or {}) do added_set[line] = true end
     -- Keep the cursor target in the user's row order, not the sorted action
@@ -1865,7 +1925,7 @@ local function sync_locked(self, options)
     if #added_expand_paths == 0 then added_focus_path = nil end
   end
   if subtree_edit then
-    if plan.kind == 'DELETE' then
+    if #(plan.removed or {}) > 0 then
       local removed_roots = {}
       for _, line in ipairs(plan.removed or {}) do
         if is_dir_line(line) then
@@ -1919,6 +1979,25 @@ local function sync_locked(self, options)
       if a.name == 'mkdir' and adepth ~= bdepth then return adepth < bdepth end
       return adst < bdst
     end)
+    -- A root-level delete may free the target of a root rename in the same
+    -- mixed save. Keep mkdir dependencies intact, but place that file removal
+    -- immediately before the move that reuses its path.
+    local move_index = 1
+    while move_index <= #actions do
+      local move = actions[move_index]
+      if move.name == 'mv' then
+        for remove_index = move_index + 1, #actions do
+          local removal = actions[remove_index]
+          if removal.name == 'rm' and fs.same_entry(removal.src, move.dst) then
+            table.remove(actions, remove_index)
+            table.insert(actions, move_index, removal)
+            move_index = move_index + 1
+            break
+          end
+        end
+      end
+      move_index = move_index + 1
+    end
     local destination_index = fs.path_identity_index()
     for _, act in ipairs(actions) do
       if act.name == 'mv' or act.name == 'touch' or act.name == 'mkdir' then
@@ -1962,14 +2041,15 @@ local function sync_locked(self, options)
   -- would land on an occupied path. Move destinations that are also move
   -- sources are safe: grouped move execution stages them from its durable plan.
   -- Compare filesystem-entry identity as well as spelling for case-only moves.
-  local move_sources, sources_by_inode = {}, {}
+  local vacated_sources, sources_by_inode = {}, {}
   local function move_key(path)
     path = paths.strip_trailing_separator(path)
     return vim.fs.normalize(path)
   end
   for _, act in ipairs(actions) do
-    if act.name == 'mv' and fs.taken(act.src) then
-      move_sources[move_key(act.src)] = true
+    if (act.name == 'mv' or act.name == 'rm' or act.name == 'rmdir')
+      and fs.taken(act.src) then
+      vacated_sources[move_key(act.src)] = true
       local identity = fs.entry_identity(act.src)
       if identity and identity.inode then
         local bucket = sources_by_inode[identity.inode]
@@ -1985,18 +2065,20 @@ local function sync_locked(self, options)
     local destination = act.dst
     if destination and fs.taken(destination) then
       local key = move_key(destination)
-      local is_move_source = act.name == 'mv' and move_sources[key] == true
-      if act.name == 'mv' and not is_move_source then
+      local may_reuse_source = (act.name == 'mv' or act.name == 'touch'
+        or act.name == 'mkdir') and vacated_sources[key] == true
+      if (act.name == 'mv' or act.name == 'touch' or act.name == 'mkdir')
+        and not may_reuse_source then
         local identity = fs.entry_identity(destination)
         local bucket = identity and identity.inode and sources_by_inode[identity.inode]
         for _, source in ipairs(bucket or {}) do
           if fs.same_entry(destination, source) then
-            is_move_source = true
+            may_reuse_source = true
             break
           end
         end
       end
-      if not is_move_source then
+      if not may_reuse_source then
         vim.bo[bufnr].modified = true
         local reason = 'destination already exists: ' .. destination
         ui.notify('Refusing to sync: ' .. reason .. '; nothing was changed.',

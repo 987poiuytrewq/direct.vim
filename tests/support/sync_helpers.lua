@@ -39,7 +39,7 @@ function M.new()
 
   local function list_edit_and_sync(ws, lines)
     local listing = buffer.list(ws)
-    vim.api.nvim_buf_set_lines(0, 0, -1, false, lines)
+    H.set_direct_rows(0, lines)
     local ok, reason = listing:sync()
     return listing, ok, reason
   end

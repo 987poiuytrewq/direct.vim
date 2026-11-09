@@ -32,7 +32,7 @@ local function rename_files(action, files, paths)
     }
     paths[#paths + 1] = action.src
     paths[#paths + 1] = action.dst
-  elseif action.name == 'g' then
+  elseif action.name == 'g' or action.name == 'batch' then
     for _, member in ipairs(action.actions or {}) do
       rename_files(member, files, paths)
     end
@@ -131,6 +131,7 @@ local function reset_stacks(undo_path, redo_path, transaction_path)
 end
 
 local copy_lines
+local expand_batch_stack
 local parse_transaction = transaction_codec.parse
 
 local function write_operation_transaction(path, transaction)
@@ -726,13 +727,14 @@ end
 
 local function action_paths(action)
   local result = {}
+  local function visit(current)
+    if type(current) ~= 'table' then return end
+    if type(current.src) == 'string' then result[#result + 1] = current.src end
+    if type(current.dst) == 'string' then result[#result + 1] = current.dst end
+    for _, member in ipairs(current.actions or {}) do visit(member) end
+  end
   if type(action) == 'table' then
-    if type(action.src) == 'string' then result[#result + 1] = action.src end
-    if type(action.dst) == 'string' then result[#result + 1] = action.dst end
-    for _, member in ipairs(action.actions or {}) do
-      if type(member.src) == 'string' then result[#result + 1] = member.src end
-      if type(member.dst) == 'string' then result[#result + 1] = member.dst end
-    end
+    visit(action)
   end
   return result
 end
@@ -746,7 +748,7 @@ local function trash_references(state)
   end
   local function visit(action)
     if type(action) ~= 'table' then return end
-    if action.name == 'g' then
+    if action.name == 'g' or action.name == 'batch' then
       for _, member in ipairs(action.actions or {}) do visit(member) end
     elseif action.name == 'rm' or action.name == 'rmdir' then
       add(action.dst)
@@ -790,7 +792,7 @@ local function affected_paths(action, result)
     result[#result + 1] = path
   end
   local name = action.name
-  if name == 'g' then
+  if name == 'g' or name == 'batch' then
     for _, member in ipairs(action.actions or {}) do
       affected_paths(member, result)
     end
@@ -1235,6 +1237,50 @@ function M.log(action)
   end)
 end
 
+-- Replace the most recently logged independent actions with one durable batch
+-- record. Sync holds the process lock across execution and calls this only after
+-- every member has already committed its ordinary journaled history entry.
+function M.combine_recent(actions, stack_name)
+  if type(actions) ~= 'table' or #actions < 2 then
+    return nil, 'history.combine_recent: at least two actions are required'
+  end
+  stack_name = stack_name or 'undo'
+  if stack_name ~= 'undo' and stack_name ~= 'redo' then
+    return nil, "history.combine_recent: stack must be 'undo' or 'redo'"
+  end
+  local batch = M.action.Batch(actions)
+  local batch_record, serialize_err = M.action.serialize(batch)
+  if not batch_record then return nil, serialize_err end
+
+  return M.with_lock(function()
+    local state, preflight_err = preflight_locked()
+    if not state then return nil, preflight_err end
+    local source = stack_name == 'undo' and state.undo_lines or state.redo_lines
+    local next_source = copy_lines(source)
+    local first = #next_source - #actions + 1
+    if first <= 1 then
+      return nil, 'the recent history entries changed before they could be grouped'
+    end
+    local records = {}
+    for index, action in ipairs(actions) do
+      local record, err = M.action.serialize(action)
+      if not record then return nil, err end
+      records[index] = record
+      if next_source[first + index - 1] ~= record then
+        return nil, 'the recent history entries changed before they could be grouped'
+      end
+    end
+    for _ = 1, #records do table.remove(next_source) end
+    next_source[#next_source + 1] = batch_record
+    local next_undo = stack_name == 'undo' and next_source or copy_lines(state.undo_lines)
+    local next_redo = stack_name == 'redo' and next_source or copy_lines(state.redo_lines)
+    local committed, commit_err = commit_stacks(state.undo_path, state.redo_path,
+      state.transaction_path, next_undo, next_redo)
+    if not committed then return nil, commit_err end
+    return true
+  end)
+end
+
 function M.undo()
   return M._reverse('undo')
 end
@@ -1261,6 +1307,26 @@ local function reverse_locked(which)
     src_lines, dst_lines = state.redo_lines, state.undo_lines
   else
     return nil, 'history._reverse: expected undo or redo'
+  end
+  if #src_lines > 1 then
+    local top = M.action.deserialize(src_lines[#src_lines])
+    if top and top.name == 'batch' then
+      local expanded, expand_err = expand_batch_stack(which, src_lines[#src_lines])
+      if not expanded then return nil, expand_err end
+      local reversed = {}
+      for _ = 1, #expanded do
+        local result, reverse_err = reverse_locked(which)
+        if result == nil then return nil, reverse_err end
+        reversed[#reversed + 1] = result
+      end
+      local compacted, compact_err = M.combine_recent(reversed,
+        which == 'undo' and 'redo' or 'undo')
+      if not compacted then
+        M.ui.notify('direct: history operation completed, but its entries could not '
+          .. 'be grouped: ' .. tostring(compact_err), vim.log.levels.WARN)
+      end
+      return M.action.Batch(reversed)
+    end
   end
   if #src_lines <= 1 then
     M.ui.notify(which == 'undo' and 'Nothing to undo' or 'Nothing to redo',
@@ -1358,6 +1424,36 @@ local function finish_callback(callback, result, err)
   end
 end
 
+expand_batch_stack = function(which, expected_record)
+  return M.with_lock(function()
+    local state, preflight_err = preflight_locked()
+    if not state then return nil, preflight_err end
+    local source_lines = which == 'undo' and state.undo_lines or state.redo_lines
+    if source_lines[#source_lines] ~= expected_record then
+      return nil, 'history changed before the batch operation started'
+    end
+    local batch, decode_err = M.action.deserialize(expected_record)
+    if not batch or batch.name ~= 'batch' then
+      return nil, decode_err or 'history batch is malformed'
+    end
+    local member_records = {}
+    for _, member in ipairs(batch.actions) do
+      local record, serialize_err = M.action.serialize(member)
+      if not record then return nil, serialize_err end
+      member_records[#member_records + 1] = record
+    end
+    local next_source = copy_lines(source_lines)
+    table.remove(next_source)
+    vim.list_extend(next_source, member_records)
+    local next_undo = which == 'undo' and next_source or copy_lines(state.undo_lines)
+    local next_redo = which == 'redo' and next_source or copy_lines(state.redo_lines)
+    local committed, commit_err = commit_stacks(state.undo_path, state.redo_path,
+      state.transaction_path, next_undo, next_redo)
+    if not committed then return nil, commit_err end
+    return member_records
+  end)
+end
+
 function M.undo_async(callback, options)
   return M._reverse_async('undo', callback, options)
 end
@@ -1402,6 +1498,89 @@ function M._reverse_async(which, callback, options)
   end
 
   local record = src_lines[#src_lines]
+  if options.expected_record and record ~= options.expected_record then
+    local why = 'history changed while waiting for LSP willRenameFiles'
+    M.ui.notify('Failed to ' .. which .. ' action - ' .. why, vim.log.levels.WARN)
+    if token then M.pending.finish(token) end
+    finish_callback(callback, nil, why)
+    return nil, why
+  end
+  local decoded = M.action.deserialize(record)
+  if decoded and decoded.name == 'batch' then
+    if not options.skip_will then
+      local reversal, reverse_err = M.action.reverse(record)
+      if not reversal then
+        finish_callback(callback, nil, reverse_err)
+        return nil, reverse_err
+      end
+      local files, paths = {}, {}
+      rename_files(reversal, files, paths)
+      if #files > 0 and #file_operations.clients('workspace/willRenameFiles', paths) > 0 then
+        local began, batch_token = M.pending.begin('willRenameFiles')
+        if not began then
+          finish_callback(callback, nil, 'another direct operation is pending')
+          return nil, 'another direct operation is pending'
+        end
+        file_operations.will_rename(files, function(ok, suppressed_or_err)
+          if not ok then
+            M.ui.notify('Failed to ' .. which .. ' after LSP WorkspaceEdit failure '
+              .. '(earlier server edits may already have applied): '
+              .. tostring(suppressed_or_err), vim.log.levels.ERROR)
+            M.pending.finish(batch_token)
+            finish_callback(callback, nil, suppressed_or_err)
+            return
+          end
+          M.pending.finish(batch_token)
+          M._reverse_async(which, callback, {
+            expected_record = record,
+            skip_will = true,
+            suppressed = suppressed_or_err,
+          })
+        end, nil, function() return M.pending.is_active(batch_token) end)
+        return true
+      end
+    end
+    if token then
+      M.pending.finish(token)
+      finish_callback(callback, nil, 'cannot start a history batch while another operation is pending')
+      return nil, 'cannot start a history batch while another operation is pending'
+    end
+    local member_records, expand_err = expand_batch_stack(which, record)
+    if not member_records then
+      finish_callback(callback, nil, expand_err)
+      return nil, expand_err
+    end
+    local index, results = #member_records, {}
+    local function next_member()
+      if index < 1 then
+        local compacted, compact_err = M.combine_recent(results,
+          which == 'undo' and 'redo' or 'undo')
+        if not compacted then
+          M.ui.notify('direct: history operation completed, but its entries could not '
+            .. 'be grouped: ' .. tostring(compact_err), vim.log.levels.WARN)
+        end
+        finish_callback(callback, M.action.Batch(results), nil)
+        return
+      end
+      local expected = member_records[index]
+      index = index - 1
+      M._reverse_async(which, function(result, reverse_err)
+        if result == nil or reverse_err ~= nil then
+          local completed = #results > 0 and M.action.Batch(results) or nil
+          finish_callback(callback, completed, reverse_err)
+          return
+        end
+        results[#results + 1] = result
+        next_member()
+      end, {
+        expected_record = expected,
+        skip_will = options.skip_will,
+        suppressed = options.suppressed,
+      })
+    end
+    next_member()
+    return true
+  end
   local reversal, reverse_err = M.action.reverse(record)
   if not reversal then
     M.ui.notify('Failed to ' .. which .. ' action - ' .. tostring(reverse_err),
@@ -1409,14 +1588,6 @@ function M._reverse_async(which, callback, options)
     if token then M.pending.finish(token) end
     finish_callback(callback, nil, reverse_err)
     return nil, reverse_err
-  end
-
-  if options.expected_record and record ~= options.expected_record then
-    local why = 'history changed while waiting for LSP willRenameFiles'
-    M.ui.notify('Failed to ' .. which .. ' action - ' .. why, vim.log.levels.WARN)
-    if token then M.pending.finish(token) end
-    finish_callback(callback, nil, why)
-    return nil, why
   end
 
   local files, paths = {}, {}

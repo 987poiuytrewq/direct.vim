@@ -25,7 +25,7 @@ local function history_state()
 end
 
 local function set_listing(lines, bufnr)
-  vim.api.nvim_buf_set_lines(bufnr or 0, 0, -1, false, lines)
+  H.set_direct_rows(bufnr or 0, lines)
 end
 
 H.describe('command workflows: filesystem and listing stay in sync', function()

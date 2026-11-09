@@ -1403,6 +1403,28 @@ H.describe('sync with expanded children', function()
     H.assert_fs_eq(ws, { 'sub/', 'sub/inside.txt' }, 'no filesystem action was needed')
   end)
 
+  H.it('refuses an unidentifiable root row after text undo/redo', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkfile(ws, 'a.txt', { 'original' })
+    local listing = buffer.list(ws)
+    local bufnr = vim.api.nvim_get_current_buf()
+    local namespace = vim.api.nvim_get_namespaces()['direct-listing-rows']
+    vim.api.nvim_buf_clear_namespace(bufnr, namespace, 0, -1)
+    vim.b[bufnr].direct_text_undo_mode = true
+    vim.bo[bufnr].modified = true
+
+    local ok, reason = listing:sync()
+
+    H.assert_nil(ok, 'missing identity is not guessed from row position or spelling')
+    H.assert_true(tostring(reason):find('identity', 1, true) ~= nil, tostring(reason))
+    H.assert_eq(vim.fn.readfile(vim.fs.joinpath(ws, 'a.txt')), { 'original' },
+      'the filesystem is unchanged')
+    H.assert_eq(history_lines('undo.log'), {}, 'no history is written')
+    H.assert_true(vim.bo[bufnr].modified, 'the row remains available for review')
+  end)
+
   H.it('root containment guard rejects traversal paths before classification', function()
     for _, malicious in ipairs({ '../escaped' }) do
       clean_buffers()
@@ -1431,7 +1453,7 @@ H.describe('sync with expanded children', function()
     local ws = H.mkdir(sb.root, 'ws')
     H.mkfile(ws, 'old.txt', { 'old' })
     local listing = buffer.list(ws)
-    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'x/new.txt' })
+    vim.api.nvim_buf_set_text(0, 0, 1, 0, #('old.txt'), { '/new.txt' })
     local classified = 0
     local classify = buffer.classify
     buffer.classify = function(...) classified = classified + 1; return classify(...) end
@@ -1441,7 +1463,7 @@ H.describe('sync with expanded children', function()
     H.assert_true(tostring(reason):find('component', 1, true) ~= nil, tostring(reason))
     H.assert_eq(classified, 0, 'path guard precedes rename classification')
     H.assert_true(fs.exists(ws .. '/old.txt'), 'rename source remains intact')
-    H.assert_false(fs.exists(ws .. '/x'), 'nested rename did not create a directory')
+    H.assert_false(fs.exists(ws .. '/o'), 'nested rename did not create a directory')
     H.assert_eq(history_lines('undo.log'), {}, 'unsafe rename writes no history')
   end)
 

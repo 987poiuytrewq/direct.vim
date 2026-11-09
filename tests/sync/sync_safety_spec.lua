@@ -16,6 +16,21 @@ local route_write_to_test_buffer = sync.route_write_to_test_buffer
 local history_lines = sync.history_lines
 local list_edit_and_sync = sync.list_edit_and_sync
 
+local function edit_root_row_by_identity(bufnr, row, replacement)
+  local old = vim.api.nvim_buf_get_lines(bufnr, row - 1, row, false)[1]
+  if old ~= replacement then
+    vim.api.nvim_buf_set_text(bufnr, row - 1, 0, row - 1, #old, { replacement })
+  end
+end
+
+local function edit_root_rows_by_identity(bufnr, lines)
+  H.assert_eq(vim.api.nvim_buf_line_count(bufnr), #lines,
+    'identity-preserving edits keep the row count')
+  for row, replacement in ipairs(lines) do
+    edit_root_row_by_identity(bufnr, row, replacement)
+  end
+end
+
 H.describe('sync: safety guards', function()
   H.it('uses the list-time wildignore snapshot when the option changes before sync', function()
     clean_buffers()
@@ -352,7 +367,8 @@ H.describe('sync: safety guards', function()
     local before = vim.fn.readfile(child .. '/hidden.log', 'b')
     H.with_option('wildignore', '', function()
       vim.bo.modified = true
-      H.assert_true(listing:sync() == true, 'no root change is applied')
+      local ok, err = listing:sync()
+      H.assert_true(ok == true, 'no root change is applied')
     end)
     H.assert_eq(vim.fn.readfile(child .. '/hidden.log', 'b'), before,
       'a child hidden at expansion time is never touched by sync')
@@ -488,7 +504,7 @@ H.describe('sync: safety guards', function()
         listing = buffer.list(ws)
       end)
       if operation == 'move' then
-        vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'moved/', 'keep.txt' })
+        edit_root_rows_by_identity(vim.api.nvim_get_current_buf(), { 'moved/', 'keep.txt' })
       else
         vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'keep.txt' })
       end
@@ -553,7 +569,7 @@ H.describe('sync: safety guards', function()
     H.with_option('wildignore', '', function()
       listing = buffer.list(ws)
     end)
-    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'moved/' })
+    edit_root_rows_by_identity(vim.api.nvim_get_current_buf(), { 'moved/' })
     local ok, reason = listing:sync()
 
     H.assert_true(ok == true, 'the unrelated root FIFO must not block the move: ' .. tostring(reason))
@@ -614,7 +630,7 @@ H.describe('sync: safety guards', function()
       listing = buffer.list(ws)
     end)
     H.assert_buf_eq({ 'visible-link/' }, 0, 'directory symlink is visible as a directory row')
-    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'renamed-link/' })
+    edit_root_rows_by_identity(vim.api.nvim_get_current_buf(), { 'renamed-link/' })
 
     local ok, reason = listing:sync()
 
@@ -662,7 +678,11 @@ H.describe('sync: safety guards', function()
     H.mkfile(ws, 'a.txt', { 'A' })
     H.mkfile(ws, 'b.txt', { 'B' })
 
-    local _, ok = list_edit_and_sync(ws, { 'b.txt', 'a.txt' })
+    local listing = buffer.list(ws)
+    local bufnr = vim.api.nvim_get_current_buf()
+    edit_root_rows_by_identity(bufnr, { 'temporary.txt', 'a.txt' })
+    edit_root_rows_by_identity(bufnr, { 'b.txt', 'a.txt' })
+    local ok = listing:sync()
 
     H.assert_true(ok == true, 'sync applied')
     H.assert_fs_eq(ws, { 'a.txt', 'b.txt' }, 'exactly two files, no .direct-tmp-*')
@@ -681,7 +701,9 @@ H.describe('sync: safety guards', function()
       H.skip('the filesystem is case-sensitive')
     end
 
-    local _, ok, reason = list_edit_and_sync(ws, { 'Foo.txt' })
+    local listing = buffer.list(ws)
+    edit_root_rows_by_identity(vim.api.nvim_get_current_buf(), { 'Foo.txt' })
+    local ok, reason = listing:sync()
 
     H.assert_true(ok == true, 'case-only sync succeeds: ' .. tostring(reason))
     H.assert_eq(vim.fn.readfile(ws .. '/Foo.txt'), { 'case-only content' }, 'content is preserved')
@@ -709,7 +731,7 @@ H.describe('sync: safety guards', function()
     H.with_option('wildignore', 'Foo.txt', function()
       listing = buffer.list(ws)
     end)
-    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'Foo.txt' })
+    edit_root_rows_by_identity(vim.api.nvim_get_current_buf(), { 'Foo.txt' })
     local ok, reason = listing:sync()
 
     H.assert_nil(ok, 'a different occupied destination refuses the batch')
@@ -729,7 +751,12 @@ H.describe('sync: safety guards', function()
     H.mkfile(ws, 'b.txt', { 'B' })
     H.mkfile(ws, 'c.txt', { 'C' })
 
-    local _, ok = list_edit_and_sync(ws, { 'b.txt', 'c.txt', 'd.txt' })
+    local listing = buffer.list(ws)
+    local bufnr = vim.api.nvim_get_current_buf()
+    edit_root_row_by_identity(bufnr, 3, 'd.txt')
+    edit_root_row_by_identity(bufnr, 2, 'c.txt')
+    edit_root_row_by_identity(bufnr, 1, 'b.txt')
+    local ok = listing:sync()
 
     H.assert_true(ok == true, 'sync applied')
     H.assert_fs_eq(ws, { 'b.txt', 'c.txt', 'd.txt' }, 'no .direct-tmp-* remains')
@@ -749,7 +776,9 @@ H.describe('sync: safety guards', function()
     local link = ws .. '/b'
     H.assert_true(H.symlink(target, link) == true, 'directory symlink created')
     local listing = buffer.list(ws)
-    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'b/', 'c/' })
+    local bufnr = vim.api.nvim_get_current_buf()
+    edit_root_row_by_identity(bufnr, 2, 'c/')
+    edit_root_row_by_identity(bufnr, 1, 'b/')
 
     local ok, reason = listing:sync()
 
@@ -779,7 +808,9 @@ H.describe('sync: safety guards', function()
     H.mkfile(ws, 'b.txt', { 'B' })
 
     local buf = buffer.list(ws)
-    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'b.txt', 'a.txt' })
+    local bufnr = vim.api.nvim_get_current_buf()
+    edit_root_rows_by_identity(bufnr, { 'temporary.txt', 'a.txt' })
+    edit_root_rows_by_identity(bufnr, { 'b.txt', 'a.txt' })
 
     -- Fail the SECOND staging rename (b.txt -> .direct-tmp-2) after the first
     -- staged source has moved; the sync boundary should restore it atomically.
@@ -820,7 +851,9 @@ H.describe('sync: safety guards', function()
     H.mkfile(ws, 'a.txt', { 'A' })
     H.mkfile(ws, 'b.txt', { 'B' })
     local buf = buffer.list(ws)
-    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'b.txt', 'a.txt' })
+    local bufnr = vim.api.nvim_get_current_buf()
+    edit_root_rows_by_identity(bufnr, { 'temporary.txt', 'a.txt' })
+    edit_root_rows_by_identity(bufnr, { 'b.txt', 'a.txt' })
 
     local real_rename, real_noreplace = fs.rename, fs.rename_noreplace
     local staged, occupant_created = 0, false
@@ -865,7 +898,9 @@ H.describe('sync: safety guards', function()
     H.mkfile(ws, 'a.txt', { 'A' })
     H.mkfile(ws, 'b.txt', { 'B' })
     local buf = buffer.list(ws)
-    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'b.txt', 'a.txt' })
+    local bufnr = vim.api.nvim_get_current_buf()
+    edit_root_rows_by_identity(bufnr, { 'temporary.txt', 'a.txt' })
+    edit_root_rows_by_identity(bufnr, { 'b.txt', 'a.txt' })
 
     local temp, backup = ws .. '/.direct-tmp-1', ws .. '/saved-staged-entry'
     local real_rename = fs.rename

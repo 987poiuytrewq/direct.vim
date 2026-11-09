@@ -45,7 +45,7 @@ local function action_paths(item)
   end
   local function visit(current)
     if type(current) ~= 'table' then return end
-    if current.name == 'g' then
+    if current.name == 'g' or current.name == 'batch' then
       for _, member in ipairs(current.actions or {}) do visit(member) end
       return
     end

@@ -286,7 +286,9 @@ H.describe('sync: applying actions', function()
     local ws = H.mkdir(sb.root, 'ws')
     H.mkfile(ws, 'a.txt', { 'a' })
 
-    local _, ok = list_edit_and_sync(ws, { 'b.txt' })
+    local listing = buffer.list(ws)
+    vim.api.nvim_buf_set_text(0, 0, 0, 0, #('a.txt'), { 'b.txt' })
+    local ok = listing:sync()
 
     H.assert_true(ok == true, 'sync applied')
     H.assert_fs_eq(ws, { 'b.txt' })
@@ -301,7 +303,7 @@ H.describe('sync: applying actions', function()
     local ws = H.mkdir(sb.root, 'ws')
     local src, dst = H.mkfile(ws, 'a.txt', { 'PAYLOAD' }), ws .. '/b.txt'
     local listing = buffer.list(ws)
-    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'b.txt' })
+    vim.api.nvim_buf_set_text(0, 0, 0, 0, #('a.txt'), { 'b.txt' })
 
     local real_rename, real_remove = fs.rename_noreplace, fs.rm_file
     local restore_rename = H.stub(fs, 'rename_noreplace', function(from, to)
@@ -339,7 +341,9 @@ H.describe('sync: applying actions', function()
     H.mkdir(ws, 'old')
     H.mkfile(ws, 'old/inner.txt', { 'i' })
 
-    local _, ok = list_edit_and_sync(ws, { 'new/' })
+    local listing = buffer.list(ws)
+    vim.api.nvim_buf_set_text(0, 0, 0, 0, #('old/'), { 'new/' })
+    local ok = listing:sync()
 
     H.assert_true(ok == true, 'sync applied')
     H.assert_fs_eq(ws, { 'new/', 'new/inner.txt' })

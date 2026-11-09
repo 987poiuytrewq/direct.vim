@@ -32,7 +32,7 @@ H.describe('plugin User events', function()
     local fs = require('direct.fs')
     api.list(ws)
     local bufnr = vim.api.nvim_get_current_buf()
-    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { 'new.txt' })
+    H.set_direct_rows(bufnr, { 'new.txt' })
     H.assert_true(api.sync(), 'sync completes after the pre event')
     H.assert_true(vim.uv.fs_stat(vim.fs.joinpath(ws, 'new.txt')) ~= nil,
       'the sync applies its original plan despite event-data mutation')
@@ -137,7 +137,7 @@ H.describe('plugin User events', function()
     local fs = require('direct.fs')
     api.list(ws)
     local bufnr = vim.api.nvim_get_current_buf()
-    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { 'new.txt' })
+    H.set_direct_rows(bufnr, { 'new.txt' })
 
     local post
     local group = vim.api.nvim_create_augroup('direct_sync_pre_edit_spec', { clear = true })

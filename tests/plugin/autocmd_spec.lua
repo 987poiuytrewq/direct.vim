@@ -95,7 +95,7 @@ H.describe('autocmd ownership', function()
     H.assert_eq(count_autocmds('BufWriteCmd', second_buf), 1,
       'wiping first buffer leaves second handler intact')
 
-    vim.api.nvim_buf_set_lines(second_buf, 0, -1, false,
+    H.set_direct_rows(second_buf,
       { 'second-existing', 'second-created', 'second-created-again' })
     vim.api.nvim_set_current_buf(second_buf)
     local remaining_ok, remaining_err = pcall(vim.cmd, 'write')
@@ -106,7 +106,7 @@ H.describe('autocmd ownership', function()
       'second buffer still syncs its own directory after first wipe')
 
     vim.api.nvim_buf_set_lines(second_buf, 0, -1, false,
-      { 'second-created', 'second-ambiguous' })
+      { 'second-created', 'second-created' })
     vim.api.nvim_set_current_buf(second_buf)
     local failed_ok, failed_err = pcall(vim.cmd, 'write')
     H.assert_false(failed_ok, 'an ambiguous sync is refused')
@@ -118,7 +118,7 @@ H.describe('autocmd ownership', function()
       'a refused sync leaves the filesystem unchanged')
     H.assert_notified('Ambiguous buffer content', 'ERROR')
 
-    vim.api.nvim_buf_set_lines(second_buf, 0, -1, false,
+    H.set_direct_rows(second_buf,
       { 'second-existing', 'second-created', 'second-created-again', 'second-after-failure' })
     vim.api.nvim_set_current_buf(second_buf)
     local recovered_ok, recovered_err = pcall(vim.cmd, 'write')
