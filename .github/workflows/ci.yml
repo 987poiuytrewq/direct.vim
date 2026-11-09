@@ -1,8 +1,11 @@
 name: CI
 
-# Test proposed merge commits for pull requests, including fork PRs.
+# Test proposed merge commits for pull requests and the merged default branch.
 on:
   pull_request:
+  push:
+    branches:
+      - master
   workflow_dispatch:
 
 permissions:
@@ -10,7 +13,7 @@ permissions:
 
 jobs:
   test:
-    name: Test on ${{ matrix.os }}
+    name: Test minimum Neovim on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     defaults:
@@ -50,6 +53,73 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: coverage-${{ runner.os }}
+          path: |
+            coverage/index.html
+            coverage/summary.out
+          if-no-files-found: warn
+
+  stable:
+    name: Test latest stable Neovim
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install latest stable Neovim
+        uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1.6.1
+        with:
+          neovim: true
+          version: stable
+
+      - name: Run CI
+        run: make ci
+        env:
+          COVERAGE_PLATFORM: Linux-stable
+
+      - name: Publish coverage report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-Linux-stable
+          path: |
+            coverage/index.html
+            coverage/summary.out
+          if-no-files-found: warn
+
+  nightly:
+    name: Test Neovim nightly (non-blocking)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Neovim nightly
+        uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1.6.1
+        with:
+          neovim: true
+          version: nightly
+
+      - name: Run CI
+        run: make ci
+        env:
+          COVERAGE_PLATFORM: Linux-nightly
+
+      - name: Publish coverage report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-Linux-nightly
           path: |
             coverage/index.html
             coverage/summary.out
