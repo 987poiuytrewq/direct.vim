@@ -1084,6 +1084,11 @@ function Buffer:list(options)
   if state.git_status_pending then
     start_git_status(bufnr, state, git_options.timeout_ms)
   end
+  require('direct.events').emit('DirectListPost', {
+    root = self.root,
+    actions = {},
+    bufnr = bufnr,
+  })
   return true
 end
 
@@ -2140,6 +2145,31 @@ local function sync_locked(self, options)
     end
   end
 
+  require('direct.events').emit('DirectSyncPre', {
+    root = self.root,
+    actions = actions,
+    yanks = yanks,
+    bufnr = bufnr,
+  })
+  if not vim.api.nvim_buf_is_valid(bufnr)
+    or not vim.deep_equal(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), visible) then
+    local reason = 'listing changed during DirectSyncPre; review and save again'
+    if vim.api.nvim_buf_is_valid(bufnr) then vim.bo[bufnr].modified = true end
+    ui.notify('Refusing to sync: ' .. reason .. '; nothing was changed.',
+      vim.log.levels.WARN)
+    require('direct.events').emit('DirectSyncPost', {
+      root = self.root,
+      actions = actions,
+      applied = {},
+      failed = {},
+      yanks = yanks,
+      success = false,
+      error = reason,
+      bufnr = bufnr,
+    })
+    return nil, reason
+  end
+
   -- Yank removed paths before applying actions. If yanking is refused, leave
   -- the filesystem untouched.
   if #yanks > 0 then
@@ -2147,6 +2177,16 @@ local function sync_locked(self, options)
     if not ok then
       ui.notify('Action failed - could not yank deleted entries: '
         .. tostring(yerr), vim.log.levels.ERROR)
+      require('direct.events').emit('DirectSyncPost', {
+        root = self.root,
+        actions = actions,
+        applied = {},
+        failed = {},
+        yanks = yanks,
+        success = false,
+        error = tostring(yerr),
+        bufnr = bufnr,
+      })
       return nil, yerr
     end
   end
@@ -2164,11 +2204,30 @@ local function sync_locked(self, options)
     end
   end
   local failed, applied, failure_reason, already_logged = {}, {}, nil, {}
+  local function emit_sync_post()
+    local applied_actions = {}
+    for index, action in ipairs(actions) do
+      if applied[index] then applied_actions[#applied_actions + 1] = action end
+    end
+    require('direct.events').emit('DirectSyncPost', {
+      root = self.root,
+      actions = actions,
+      applied = applied_actions,
+      failed = failed,
+      yanks = yanks,
+      success = #failed == 0,
+      error = failure_reason,
+      bufnr = bufnr,
+    })
+  end
   local function finalize_sync()
     log_applied(actions, applied, already_logged)
     file_operations.emit_actions(actions, applied, options.suppress_operations)
 
-    if not vim.api.nvim_buf_is_valid(bufnr) then return true end
+    if not vim.api.nvim_buf_is_valid(bufnr) then
+      emit_sync_post()
+      return #failed == 0, failure_reason
+    end
     -- Re-list so the buffer reflects the filesystem, restore the cursor, and
     -- mark it unmodified only after the refresh succeeds.
     local reopen = {}
@@ -2241,8 +2300,10 @@ local function sync_locked(self, options)
       ui.notify(string.format('%d action(s) failed: %s', #failed,
         table.concat(names, ', ')), vim.log.levels.ERROR)
       vim.bo[bufnr].modified = true
+      emit_sync_post()
       return nil, failure_reason
     end
+    emit_sync_post()
     return true
   end
 

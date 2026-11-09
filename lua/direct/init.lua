@@ -16,6 +16,7 @@ local fs = require('direct.fs')
 local paths = require('direct.paths')
 local trash = require('direct.trash')
 local git_status = require('direct.git')
+local events = require('direct.events')
 
 local function paste_and_refresh(destination, name)
   return register.paste(destination, name, function(result, _, _, changed, pasted_entry)
@@ -220,12 +221,14 @@ local function reverse(which)
 
   local options = require('direct.config').options.undo_confirm
   local expected_record
+  local event_action
+  local root = buffer.restore().root
   if options ~= false then
     local preview, preview_err = history.preview_reverse(which)
     if not preview then return nil, preview_err end
     if not preview.empty then
       expected_record = preview.record
-      local root = buffer.restore().root
+      event_action = preview.action
       local outside = false
       for _, path in ipairs(preview.paths or {}) do
         if not path_is_within(root, path) then
@@ -245,9 +248,26 @@ local function reverse(which)
     end
   end
 
-  local refresh = function(result)
+  local refresh = function(result, reverse_err)
+    local refresh_err
     if result ~= nil then
-      buffer.restore():list({ allow_modified = true, reset_undo = true })
+      local ok, listed, list_err = pcall(function()
+        return buffer.restore():list({ allow_modified = true, reset_undo = true })
+      end)
+      if not ok then
+        refresh_err = tostring(listed)
+      elseif not listed then
+        refresh_err = tostring(list_err)
+      end
+    end
+    if result ~= nil or reverse_err ~= nil then
+      events.emit(which == 'undo' and 'DirectUndoPost' or 'DirectRedoPost', {
+        root = root,
+        actions = result and { result } or (event_action and { event_action } or {}),
+        success = result ~= nil and reverse_err == nil and refresh_err == nil,
+        error = reverse_err or refresh_err,
+        bufnr = bufnr,
+      })
     end
   end
   local reverse_options = expected_record and { expected_record = expected_record } or nil
