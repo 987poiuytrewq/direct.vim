@@ -1,6 +1,6 @@
 # Spec: direct.vim gap review follow-ups
 
-**Status:** S1 through S6, R1 through R3, and F1 through F5 are complete; the remaining tasks are proposed and have
+**Status:** S1 through S6, R1 through R3, and F1 through F6 are complete; the remaining tasks are proposed and have
 not been checked item by item. This replaces `direct-vim-remaining-improvements.md`.
 Its main pieces (JSONL history, no-overwrite moves, exclusive `touch`, the
 safeguard on undoing a paste) appear in the current code, but that was not
@@ -40,7 +40,7 @@ the problem, or to record that it can't be reproduced.
 | F3 | P3 | Complete | Send `User` events for other plugins and configs to hook into |
 | F4 | P3 | Complete | Add a command to view the history |
 | F5 | P3 | Complete | Allow renames, creates and deletes together in one top-level save |
-| F6 | P3 | Proposed | Give every message the same `direct:` prefix |
+| F6 | P3 | Complete | Give every message the same `direct:` prefix |
 | M1 | P4 | Proposed | Version tags, releases and a changelog |
 | M2 | P4 | Proposed | Widen CI: latest stable and nightly Neovim, and pushes to `master` |
 | M3 | P4 | Proposed | Add linting, formatting and type checks |
@@ -413,6 +413,13 @@ with a test first. If it happens, fixing it is part of this task.
   save.
 
 ### F6 — Message prefixes aren't consistent (P3)
+
+**Status: COMPLETE.** `direct.ui.notify()` now adds `direct:` to unprefixed
+messages and leaves existing prefixes alone. This covers history's empty-stack
+and failure notices, register summaries, and other notifications without
+duplicating prefixes at each call site. Workspace-edit warnings use the same
+helper; the transient copy progress echo already uses the prefix. Tests cover
+automatic and idempotent prefixing plus formatted errors. `make test` passes.
 
 **Change.** Give every user-facing message the `direct:` prefix (for example
 `Nothing to undo` and `Failed to undo action - …` in `history.lua`), and

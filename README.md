@@ -356,6 +356,9 @@ reviewed and saved again.
 
 ## Commands
 
+direct.vim notifications are prefixed with `direct:` so they can be
+distinguished from messages from Neovim and other plugins.
+
 | Command                    | Description                                           |
 |----------------------------|-------------------------------------------------------|
 | `:DirectList[!] {dir}`     | List a directory; `!` discards its unsaved listing edits |

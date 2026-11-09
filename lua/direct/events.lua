@@ -23,7 +23,7 @@ function M.emit(name, data)
     modeline = false,
   })
   if not ok then
-    vim.notify('direct: User event ' .. name .. ' failed: ' .. tostring(err),
+    require('direct.ui').notify('User event ' .. name .. ' failed: ' .. tostring(err),
       vim.log.levels.WARN)
   end
   return ok
