@@ -1,6 +1,6 @@
 # Spec: direct.vim gap review follow-ups
 
-**Status:** S1 through S6, R1 through R3, and F1 through F2 are complete; the remaining tasks are proposed and have
+**Status:** S1 through S6, R1 through R3, and F1 through F3 are complete; the remaining tasks are proposed and have
 not been checked item by item. This replaces `direct-vim-remaining-improvements.md`.
 Its main pieces (JSONL history, no-overwrite moves, exclusive `touch`, the
 safeguard on undoing a paste) appear in the current code, but that was not
@@ -37,7 +37,7 @@ the problem, or to record that it can't be reproduced.
 | R3 | P3 | Complete | Make `:checkhealth direct` check more |
 | F1 | P3 | Complete | Let users remap individual keys |
 | F2 | P3 | Complete | Open entries in a split, vertical split or new tab |
-| F3 | P3 | Proposed | Send `User` events for other plugins and configs to hook into |
+| F3 | P3 | Complete | Send `User` events for other plugins and configs to hook into |
 | F4 | P3 | Proposed | Add a command to view the history |
 | F5 | P3 | Proposed | Allow renames, creates and deletes together in one top-level save |
 | F6 | P3 | Proposed | Give every message the same `direct:` prefix |
@@ -319,6 +319,14 @@ default keys (for example `<C-s>`, `<C-v>`, `<C-t>`). These must follow S1:
 the listing isn't discarded.
 
 ### F3 — No events for other plugins to hook into (P3)
+
+**Status: COMPLETE.** Direct now emits `User` events for list completion, sync
+pre/post, undo/redo post, and paste post. Event data contains an absolute root
+and detached action records; sync data also reports applied/failed actions and
+paste/undo data reports completion. A `DirectSyncPre` callback that edits the
+listing causes a safe refusal rather than applying a stale plan. README and
+`:help direct.vim-events` document the event names and payloads; tests cover
+payloads, ordering, and copy isolation. `make test` passes.
 
 **Change.** Send `User` events (for example `DirectListPost`,
 `DirectSyncPre`, `DirectSyncPost`, `DirectUndoPost`, `DirectPastePost`) with

@@ -21,9 +21,10 @@ CONTENTS                                                 *direct.vim-contents*
     13. Commands ....................................... |direct.vim-commands|
     14. Mappings ....................................... |direct.vim-mappings|
     15. Lua API ............................................. |direct.vim-api|
-    16. Data and safety .................................... |direct.vim-data|
-    17. Upgrading from the Python version ............... |direct.vim-upgrade|
-    18. Licence ......................................... |direct.vim-licence|
+    16. User events ..................................... |direct.vim-events|
+    17. Data and safety .................................... |direct.vim-data|
+    18. Upgrading from the Python version ............... |direct.vim-upgrade|
+    19. Licence ......................................... |direct.vim-licence|
 
 ==============================================================================
 1. Introduction                                             *direct.vim-intro*
@@ -986,7 +987,37 @@ error outside a listing.
 the callback receives `(result, error)` when the operation has finished.
 
 ==============================================================================
-16. Data and safety                                          *direct.vim-data*
+16. User events                                            *direct.vim-events*
+
+direct.vim sends Neovim `User` autocmds so other plugins can observe completed
+operations. In callbacks, event data is available as `args.data`:
+>
+    vim.api.nvim_create_autocmd('User', {
+      pattern = 'DirectSyncPost',
+      callback = function(args)
+        if args.data.success then
+          print(args.data.root, #args.data.actions)
+        end
+      end,
+    })
+<
+All events include `root` (an absolute path) and `actions` (an array). Action
+records have `name`, `src`, `dst`, and, for grouped actions, nested `actions`.
+
+    Event               When and additional data ~
+    DirectListPost      After a successful list; actions is empty, `bufnr` is set.
+    DirectSyncPre       After plan validation and before filesystem effects; includes `yanks` and `bufnr`.
+    DirectSyncPost      After sync and refresh; includes `applied`, `failed`, `yanks`, `success`, `error`, and `bufnr`.
+    DirectUndoPost      After filesystem undo and listing refresh; includes `success` and `error`.
+    DirectRedoPost      After filesystem redo and listing refresh; includes `success` and `error`.
+    DirectPastePost     After paste completion; `root` is the destination and data includes `changed`, `entry`, `success`, and `error`.
+
+Event data is copied before dispatch; editing it does not change Direct's
+operation. Keep `DirectSyncPre` handlers read-only. If one edits the listing,
+the sync is refused and the listing remains modified for review.
+
+==============================================================================
+17. Data and safety                                          *direct.vim-data*
 
 Data directory ~
 
@@ -1088,7 +1119,7 @@ and the next step; if that happens, direct.vim keeps the temporary path and
 reports it so you can recover it. Network filesystems are not guaranteed.
 
 ==============================================================================
-17. Upgrading from the Python version                     *direct.vim-upgrade*
+18. Upgrading from the Python version                     *direct.vim-upgrade*
 
 The Lua version uses a new data format and doesn't migrate the Python
 version's data:
@@ -1102,7 +1133,7 @@ version's data:
     - Trash: entries deleted with the Python version can still be restored.
 
 ==============================================================================
-18. Licence                                               *direct.vim-licence*
+19. Licence                                               *direct.vim-licence*
 
 Copyright (c) 2017-2026 Duncan Williams
 

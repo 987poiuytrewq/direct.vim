@@ -315,6 +315,35 @@ Renames, creates and deletes are reported to language servers that support
 `workspace/*Files` file operations. For a rename, servers are asked first
 through `willRenameFiles`, so they can update imports before the file moves.
 
+## Events for plugins
+
+direct.vim emits Neovim `User` autocmds after a listing, before and after a
+filesystem sync, and after filesystem undo, redo, and paste. Event callbacks
+receive a `data` table with an absolute `root` and an `actions` array. For
+example:
+
+```lua
+vim.api.nvim_create_autocmd('User', {
+  pattern = 'DirectSyncPost',
+  callback = function(event)
+    if event.data.success then
+      print('Synced', event.data.root, #event.data.actions, 'actions')
+    end
+  end,
+})
+```
+
+Supported patterns are `DirectListPost`, `DirectSyncPre`, `DirectSyncPost`,
+`DirectUndoPost`, `DirectRedoPost`, and `DirectPastePost`. `DirectListPost` has
+an empty `actions` array. Sync post data also includes `applied`, `failed`,
+`yanks`, `success`, and `error`; paste post includes `changed`, `entry`,
+`success`, and `error`. Undo/redo post actions describe the reversal. Action
+records use the same `name`, `src`, `dst`, and nested `actions` fields as the
+Direct history model. Event data is copied before dispatch, so changing it in a
+callback does not modify Direct's operation. Keep `DirectSyncPre` handlers
+read-only; if one edits the listing, that sync is safely refused and must be
+reviewed and saved again.
+
 ## Commands
 
 | Command                    | Description                                           |
