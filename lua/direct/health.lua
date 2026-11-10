@@ -133,10 +133,10 @@ function M.check()
   local version = vim.version()
   local pretty = string.format('%d.%d.%d', version.major, version.minor,
     version.patch)
-  if vim.fn.has('nvim-0.12') == 1 then
-    vim.health.ok('Neovim ' .. pretty .. ' (>= 0.12 required)')
+  if vim.fn.has('nvim-0.11.7') == 1 then
+    vim.health.ok('Neovim ' .. pretty .. ' (>= 0.11.7 required)')
   else
-    vim.health.error('Neovim ' .. pretty .. ' is too old; 0.12+ is required')
+    vim.health.error('Neovim ' .. pretty .. ' is too old; 0.11.7+ is required')
   end
 
   local data_directory, writable = check_data_directory()

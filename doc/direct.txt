@@ -57,7 +57,7 @@ direct.vim is pure Lua and replaces |netrw| for directory buffers.
 ==============================================================================
 2. Requirements                                      *direct.vim-requirements*
 
-    - Neovim 0.12 or later, on Linux, macOS or Windows.
+    - Neovim 0.11.7 or later, on Linux, macOS or Windows.
     - Git, for Git status and Git-ignore filtering (optional). Ignore
       filtering is on by default; see |direct-respect_gitignore|.
     - A Nerd Font with the Font Awesome glyphs, for the default icons

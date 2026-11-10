@@ -152,9 +152,25 @@ H.describe('paths', function()
     local expected = '8badde10c760e9b702defb4b5e225de79c515b1d2a5cfb000e140f3c6fbb5629'
     H.assert_eq(paths.digest('a', 'b', 'c'), expected, 'varargs form')
     H.assert_eq(paths.digest({ 'a', 'b', 'c' }), expected, 'single list form')
-    H.assert_eq(vim.fn.sha256('a\0b\0c'), expected, 'oracle agrees with vim.fn.sha256')
+    local oracle_ok, oracle = pcall(vim.fn.sha256, 'a\0b\0c')
+    if oracle_ok then
+      H.assert_eq(oracle, expected, 'oracle agrees with vim.fn.sha256')
+    else
+      H.assert_true(tostring(oracle):find('E976', 1, true) ~= nil,
+        'older Neovim rejects NUL strings, so the byte-safe fallback is used')
+    end
     H.assert_true(paths.digest('a', 'b') ~= paths.digest('b', 'a'),
       'argument order is significant (the caller sorts)')
+  end)
+
+  H.it('the byte-safe SHA-256 fallback matches standard vectors', function()
+    local sha256 = require('direct.sha256')
+    H.assert_eq(sha256(''),
+      'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855')
+    H.assert_eq(sha256('abc'),
+      'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad')
+    H.assert_eq(sha256('a\0b\0c'),
+      '8badde10c760e9b702defb4b5e225de79c515b1d2a5cfb000e140f3c6fbb5629')
   end)
 
   H.it('basename() strips a trailing slash', function()

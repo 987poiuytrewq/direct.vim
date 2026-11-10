@@ -70,7 +70,7 @@ jobs:
         uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1.6.1
         with:
           neovim: true
-          version: v0.12.0
+          version: v0.11.7
 
       - name: Install GNU Make on Windows
         if: runner.os == 'Windows'
@@ -187,7 +187,7 @@ jobs:
         uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1.6.1
         with:
           neovim: true
-          version: v0.12.0
+          version: v0.11.7
 
       - name: Install Expect
         run: sudo apt-get update && sudo apt-get install --no-install-recommends --yes expect

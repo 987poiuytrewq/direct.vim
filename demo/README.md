@@ -69,7 +69,7 @@ to a Nerd Font you have installed (default: `JetBrainsMono Nerd Font`), and
 ./demo/demo.sh --check    # play the tour without recording, and check the result
 ```
 
-Recording needs Neovim 0.12+, Git, asciinema 3 and Expect, and the GIF needs
+Recording needs Neovim 0.11.7+, Git, asciinema 3 and Expect, and the GIF needs
 agg; `--check` needs only Neovim, Git and Expect. A check takes as long as a
 recording, about a minute. Use a terminal font with Nerd Font icons.
 

@@ -65,7 +65,7 @@ the latest.
 
 ## Requirements
 
-- Neovim **0.12** or later, on Linux, macOS or Windows
+- Neovim **0.11.7** or later, on Linux, macOS or Windows
 - Git, for status and ignore filtering (optional)
 - A [Nerd Font](https://www.nerdfonts.com/), for the default icons (optional;
   you can turn icons off or replace them)
@@ -76,11 +76,9 @@ the latest.
 Run `:checkhealth direct` to check Neovim, Git, data-directory write access,
 history recovery state, trash size and icon configuration.
 
-The 0.12 floor preserves the NUL-delimited SHA-256 path keys used by the
-content-addressed register and trash. Neovim 0.11's `vim.fn.sha256()` rejects
-strings containing NUL (`E976`). A different encoding would change persisted
-keys; preserving them on 0.11 would require a separate byte-safe SHA-256
-implementation.
+Register and trash paths use NUL-delimited SHA-256 keys. Neovim 0.11 rejects
+NUL-containing strings in `vim.fn.sha256()` (`E976`), so direct uses a byte-safe
+SHA-256 fallback on 0.11 to keep those keys identical across versions.
 
 ## Installation
 
@@ -457,7 +455,7 @@ brew install --cask font-jetbrains-mono-nerd-font
 The font is only needed for the demo GIF, which renders the file icons with
 it.
 
-The tests run in Neovim's embedded Lua and need only Neovim 0.12 or later:
+The tests run in Neovim's embedded Lua and need only Neovim 0.11.7 or later:
 
 ```sh
 make test
@@ -472,7 +470,7 @@ make coverage-summary  # writes coverage/summary.md
 ```
 
 CI runs the suite with coverage on Linux, macOS and Windows against Neovim
-0.12.0, and checks the demo tour, on every pull request.
+0.11.7, and checks the demo tour, on every pull request.
 
 ### Demo recording
 
