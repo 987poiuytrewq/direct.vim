@@ -107,11 +107,7 @@ Plug '987poiuytrewq/direct.vim'
 automatically.
 
 Releases are tagged with a `v` prefix; see [CHANGELOG.md](CHANGELOG.md) for
-release notes. The LuaRocks package is named `direct-vim` and can be installed
-with `:Rocks install direct-vim` after publication. The `lux.toml` manifest
-includes the Lua modules and Neovim runtime directories. Maintainers can publish
-a tagged version with Lux after configuring a LuaRocks API key; lazy.nvim users
-can select tagged releases with `version = '*'`.
+release notes. lazy.nvim users can select tagged releases with `version = '*'`.
 
 ## Quick start
 

@@ -429,16 +429,13 @@ route them all through `ui.notify`.
 
 ### M1 — No version tags, releases or changelog (P4)
 
-**Status: COMPLETE.** Added the initial `0.1.0` changelog, a versioned lazy.nvim
-example, and a Lux manifest for the `direct-vim` LuaRocks package. The manifest
-includes Lua modules and Neovim runtime directories; maintainers can publish a
-tagged version with Lux after configuring their LuaRocks API key. The first
-version tag `v0.1.0` and its GitHub release were created after this pull request
-was merged. LuaRocks publication remains available after configuring an API key.
+**Status: COMPLETE.** Added the initial `0.1.0` changelog and a versioned
+lazy.nvim example. The first version tag `v0.1.0` and its GitHub release were
+created after this pull request was merged. Distribution is through GitHub
+releases and Neovim plugin managers; LuaRocks packaging is intentionally omitted.
 
 **Change.** Add `CHANGELOG.md`, tag versions (starting at `v1.0.0` or
-`v0.x`), and publish GitHub releases. Look at publishing to LuaRocks so
-`rocks.nvim` and lazy.nvim can use it.
+`v0.x`), and publish GitHub releases.
 
 ### M2 — CI covers too little (P4)
 
