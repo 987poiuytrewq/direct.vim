@@ -256,7 +256,7 @@ local function resource_paths(edit)
   return seen
 end
 
--- Neovim 0.12's apply_workspace_edit intentionally has no success return value.
+-- Neovim's apply_workspace_edit intentionally has no success return value.
 -- Its rename helper can skip work and CreateFile silently ignores io.open('w')
 -- failures. Model expected resource state before applying and verify it after,
 -- rather than treating pcall(true, nil) as success. For an existing non-empty

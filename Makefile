@@ -63,5 +63,5 @@ demo-check: check-nvim
 	NVIM='$(NVIM)' ./demo/demo.sh --check
 
 check-nvim:
-	@command -v $(NVIM) >/dev/null 2>&1 || { echo 'Neovim >= 0.12 is required (set NVIM=/path/to/nvim if needed)' >&2; exit 1; }
+	@command -v $(NVIM) >/dev/null 2>&1 || { echo 'Neovim >= 0.11.7 is required (set NVIM=/path/to/nvim if needed)' >&2; exit 1; }
 	@$(NVIM) --headless -u NONE -l tests/check_nvim.lua

@@ -440,7 +440,7 @@ releases and Neovim plugin managers; LuaRocks packaging is intentionally omitted
 ### M2 — CI covers too little (P4)
 
 **Status: COMPLETE.** CI now runs on pull requests and pushes to `master`. The
-minimum supported Neovim `v0.12.0` remains tested on Linux, macOS, and Windows;
+minimum supported Neovim `v0.11.7` is tested on Linux, macOS, and Windows;
 additional Ubuntu jobs run the latest stable Neovim and nightly. Nightly uses
 step-level `continue-on-error` and reports failures as warnings, so upstream
 breakage remains visible without failing the required CI check. Coverage
@@ -494,18 +494,16 @@ example, checking the edit's change annotations before applying it). If
 there isn't one, keep the swap, but restore it in every code path and add a
 test that it always is.
 
-### M6 — Neovim 0.12 is required (P4)
+### M6 — Neovim version floor (P4)
 
-**Status: COMPLETE.** Confirmed that Neovim 0.11 rejects NUL-containing input
-to `vim.fn.sha256()` with `E976`. `direct.paths.digest()` hashes NUL-joined
-paths to keep register and trash keys unambiguous and stable, so a fallback
-encoding would change those keys; preserving them on 0.11 would require a
-separate byte-safe SHA-256 implementation. Retained the 0.12 minimum and
-documented the reason in the README; CI continues to test the minimum version.
+**Status: COMPLETE.** Lowered the minimum to Neovim 0.11.7 after adding a
+byte-safe SHA-256 fallback for the NUL-delimited register and trash keys. The
+fallback produces the same digest as `vim.fn.sha256()` on 0.12, preserving
+existing keys. The full suite passes on both 0.11.7 and 0.12; CI and the README
+now use the 0.11.7 floor.
 
-**Change.** Find out which 0.12-only APIs are used. Then either support 0.11
-with fallbacks and add it to CI, or keep 0.12 and explain why in the
-README.
+**Change.** Lower the minimum Neovim version where practical, add compatibility
+fallbacks for required APIs, and test the chosen floor in CI.
 
 ## Suggested order
 
