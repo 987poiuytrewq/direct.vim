@@ -499,6 +499,13 @@ test that it always is.
 
 ### M6 — Neovim 0.12 is required (P4)
 
+**Status: COMPLETE.** Confirmed that Neovim 0.11 rejects NUL-containing input
+to `vim.fn.sha256()` with `E976`. `direct.paths.digest()` hashes NUL-joined
+paths to keep register and trash keys unambiguous and stable, so a fallback
+encoding would change those keys; preserving them on 0.11 would require a
+separate byte-safe SHA-256 implementation. Retained the 0.12 minimum and
+documented the reason in the README; CI continues to test the minimum version.
+
 **Change.** Find out which 0.12-only APIs are used. Then either support 0.11
 with fallbacks and add it to CI, or keep 0.12 and explain why in the
 README.

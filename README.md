@@ -76,6 +76,12 @@ the latest.
 Run `:checkhealth direct` to check Neovim, Git, data-directory write access,
 history recovery state, trash size and icon configuration.
 
+The 0.12 floor preserves the NUL-delimited SHA-256 path keys used by the
+content-addressed register and trash. Neovim 0.11's `vim.fn.sha256()` rejects
+strings containing NUL (`E976`). A different encoding would change persisted
+keys; preserving them on 0.11 would require a separate byte-safe SHA-256
+implementation.
+
 ## Installation
 
 With Neovim's built-in `vim.pack`:
