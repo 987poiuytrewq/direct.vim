@@ -387,7 +387,7 @@ return function(M)
             function(ok, result, rollback_err)
               if not ok or result == nil then
                 finish(false, nil, tostring(original_err) .. '; batch rollback failed: '
-                  .. tostring(rollback_err or start_err or 'action failed'))
+                  .. tostring(rollback_err or 'action failed'))
                 return
               end
               next_inverse()
@@ -409,7 +409,7 @@ return function(M)
         index = index + 1
         local started, start_err = M.execute_async(member, function(ok, result, err)
           if not ok or result == nil then
-            rollback(err or start_err or 'action failed')
+            rollback(err or 'action failed')
             return
           end
           completed[#completed + 1] = member

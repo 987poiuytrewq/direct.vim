@@ -12,6 +12,43 @@ permissions:
   contents: read
 
 jobs:
+  lint:
+    name: Lint and type-check public Lua API
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Lua and LuaRocks
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes lua5.1 liblua5.1-0-dev luarocks
+          luarocks --lua-version=5.1 install --local luacheck
+          echo "$HOME/.luarocks/bin" >> "$GITHUB_PATH"
+
+      - name: Install StyLua
+        uses: JohnnyMorganz/stylua-action@76fd70c03e6340ceaf673366712db9b20560b402 # v5.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          version: 2.6.0
+          args: --version
+
+      - name: Install LuaLS
+        run: |
+          mkdir -p .tools/luals
+          curl --fail --location --silent --show-error \
+            https://github.com/LuaLS/lua-language-server/releases/download/3.19.2/lua-language-server-3.19.2-linux-x64.tar.gz \
+            | tar -xz -C .tools/luals
+          echo "$PWD/.tools/luals/bin" >> "$GITHUB_PATH"
+
+      - name: Run lint and type checks
+        run: make lint
+
   test:
     name: Test minimum Neovim on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}

@@ -2,6 +2,11 @@
 -- Current-buffer operations require filetype=direct; listing and the explicit
 -- `:DirectPaste {dir}` form are exempt because they do not operate on that buffer.
 
+---@class direct.OpenOptions
+---@field split? 'horizontal'|'vertical'|'tab'
+
+---@alias direct.SyncCallback fun(ok: boolean|nil, err: string|nil)
+
 local M = {}
 
 local buffer = require('direct.buffer.buffer')
@@ -21,34 +26,34 @@ local events = require('direct.events')
 local function paste_and_refresh(destination, name)
   return register.paste(destination, name, function(result, _, _, changed, pasted_entry)
     if not changed then return end
-    local ok, refresh_err = pcall(function()
-      return buffer.restore():refresh_after_paste(destination,
-        pasted_entry or (type(result) == 'string' and result or nil))
-    end)
-    if not ok then
-      ui.report_error('refresh the directory after pasting', refresh_err)
-    end
+    local ok, refresh_err = pcall(
+      function()
+        return buffer
+          .restore()
+          :refresh_after_paste(destination, pasted_entry or (type(result) == 'string' and result or nil))
+      end
+    )
+    if not ok then ui.report_error('refresh the directory after pasting', refresh_err) end
   end)
 end
 
-function M.setup(opts)
-  return config.setup(opts)
-end
+---@param opts direct.Config|nil
+function M.setup(opts) return config.setup(opts) end
 
 local function guard(name)
-  if vim.bo.filetype == constants.FILETYPE then
-    return true
-  end
-  ui.notify('direct: ' .. name .. ' can only be used in a direct buffer',
-    vim.log.levels.ERROR)
+  if vim.bo.filetype == constants.FILETYPE then return true end
+  ui.notify('direct: ' .. name .. ' can only be used in a direct buffer', vim.log.levels.ERROR)
   return false
 end
 
+---@param path string|nil
+---@param options table|nil
 function M.list(path, options)
   if pending.refuse('list', 'willRenameFiles') then return nil end
   return buffer.list(path, options)
 end
 
+---@param options table|nil
 function M.list_buffer(options)
   if pending.refuse('list', 'willRenameFiles') then return nil end
   local root
@@ -56,30 +61,27 @@ function M.list_buffer(options)
     root = vim.fn.getcwd()
   else
     root = vim.fn.expand('%:p:h')
-    if root == '' then
-      root = vim.fn.getcwd()
-    end
+    if root == '' then root = vim.fn.getcwd() end
   end
   return buffer.list(root, options)
 end
 
+---@param options table|nil
 function M.list_cwd(options)
   if pending.refuse('list', 'willRenameFiles') then return nil end
   return buffer.list(vim.fn.getcwd(), options)
 end
 
+---@param line string|direct.OpenOptions|nil
+---@param options direct.OpenOptions|nil
 function M.open(line, options)
   if type(line) == 'table' then
     options, line = line, nil
   end
   options = options or {}
   if pending.refuse('open', 'willRenameFiles') then return nil end
-  if not guard('open') then
-    return nil
-  end
-  if line == nil then
-    line = vim.fn.getline('.')
-  end
+  if not guard('open') then return nil end
+  if line == nil then line = vim.fn.getline('.') end
   return buffer.restore():open(line, options)
 end
 
@@ -131,14 +133,11 @@ function M.previous_directory()
   return require('direct.folding').navigate_directory(require('direct.buffer.buffer'), -1)
 end
 
+---@param callback direct.SyncCallback|nil
 function M.sync(callback)
-  if not guard('DirectSync') then
-    return nil
-  end
+  if not guard('DirectSync') then return nil end
   if pending.refuse('sync') then return nil, 'another direct operation is pending' end
-  if type(callback) == 'function' then
-    return buffer.restore():sync_async(callback)
-  end
+  if type(callback) == 'function' then return buffer.restore():sync_async(callback) end
   return buffer.restore():sync()
 end
 
@@ -238,12 +237,13 @@ local function reverse(which)
       end
       if options == true or (options == 'elsewhere' and outside) then
         local paths_text = table.concat(preview.paths or {}, '\n')
-        local prompt = string.format('%s this filesystem change?\n\n%s\n\nAffected paths:\n%s',
-          which == 'undo' and 'Undo' or 'Redo', preview.summary, paths_text)
-        if vim.fn.confirm(prompt,
-            which == 'undo' and '&Undo\n&Cancel' or '&Redo\n&Cancel', 2) ~= 1 then
-          return nil
-        end
+        local prompt = string.format(
+          '%s this filesystem change?\n\n%s\n\nAffected paths:\n%s',
+          which == 'undo' and 'Undo' or 'Redo',
+          preview.summary,
+          paths_text
+        )
+        if vim.fn.confirm(prompt, which == 'undo' and '&Undo\n&Cancel' or '&Redo\n&Cancel', 2) ~= 1 then return nil end
       end
     end
   end
@@ -251,9 +251,9 @@ local function reverse(which)
   local refresh = function(result, reverse_err)
     local refresh_err
     if result ~= nil then
-      local ok, listed, list_err = pcall(function()
-        return buffer.restore():list({ allow_modified = true, reset_undo = true })
-      end)
+      local ok, listed, list_err = pcall(
+        function() return buffer.restore():list({ allow_modified = true, reset_undo = true }) end
+      )
       if not ok then
         refresh_err = tostring(listed)
       elseif not listed then
@@ -274,13 +274,9 @@ local function reverse(which)
   return history[which .. '_async'](refresh, reverse_options)
 end
 
-function M.undo()
-  return reverse('undo')
-end
+function M.undo() return reverse('undo') end
 
-function M.redo()
-  return reverse('redo')
-end
+function M.redo() return reverse('redo') end
 
 function M.reset_history()
   if pending.refuse('reset history') then return nil end
@@ -292,31 +288,32 @@ function M.trash_list()
   return trash.show()
 end
 
+---@param id string
+---@param destination string|nil
+---@param force boolean|nil
 function M.trash_restore(id, destination, force)
   if pending.refuse('restore trash entry') then return nil end
   local restored, err = trash.restore(id, destination, force)
   if not restored and err then
-    ui.notify('direct: cannot restore trash entry: ' .. tostring(err),
-      vim.log.levels.ERROR)
+    ui.notify('direct: cannot restore trash entry: ' .. tostring(err), vim.log.levels.ERROR)
   end
   return restored, err
 end
 
+---@param force boolean|nil
 function M.trash_empty(force)
   if pending.refuse('empty trash') then return nil end
   local emptied, err = trash.empty(force)
-  if not emptied and err then
-    ui.notify('direct: cannot empty trash: ' .. tostring(err), vim.log.levels.ERROR)
-  end
+  if not emptied and err then ui.notify('direct: cannot empty trash: ' .. tostring(err), vim.log.levels.ERROR) end
   return emptied, err
 end
 
 -- The range is normalised so an upward visual selection works; a nil range means the current line.
+---@param first integer|nil
+---@param last integer|nil
 function M.yank(first, last)
   if pending.refuse('yank') then return nil end
-  if not guard('DirectYank') then
-    return nil
-  end
+  if not guard('DirectYank') then return nil end
   local line = vim.fn.line('.')
   first = first or line
   last = last or line
@@ -327,8 +324,7 @@ function M.yank(first, last)
   local was_modified = vim.bo[vim.api.nvim_get_current_buf()].modified
   local sources, path_err = b:get_paths(first, last)
   if not sources then
-    ui.notify('direct: cannot yank selection: ' .. tostring(path_err),
-      vim.log.levels.ERROR)
+    ui.notify('direct: cannot yank selection: ' .. tostring(path_err), vim.log.levels.ERROR)
     return nil, path_err
   end
   if #sources == 0 then return true end
@@ -340,12 +336,11 @@ end
 
 -- No argument pastes relative to the current row and refreshes the listing;
 -- `{dir}` pastes elsewhere, unguarded.
+---@param dir string|nil
 function M.paste(dir)
   if pending.refuse('paste') then return nil end
   if dir == nil or dir == '' then
-    if not guard('DirectPaste') then
-      return nil
-    end
+    if not guard('DirectPaste') then return nil end
     local b = buffer.restore()
     local destination, path_err = b:paste_destination()
     if destination == false then return true end
@@ -358,11 +353,10 @@ function M.paste(dir)
   return register.paste(dir)
 end
 
+---@param name string
 function M.paste_as(name)
   if pending.refuse('paste') then return nil end
-  if not guard('DirectPasteAs') then
-    return nil
-  end
+  if not guard('DirectPasteAs') then return nil end
   local b = buffer.restore()
   local destination, path_err = b:paste_destination()
   if destination == false then return true end
@@ -373,23 +367,23 @@ function M.paste_as(name)
   return paste_and_refresh(destination, name)
 end
 
+---@param command string
 function M.run(command)
-  if not guard('DirectRun') then
-    return nil
-  end
+  if not guard('DirectRun') then return nil end
   if pending.refuse('run a shell command') then return nil end
   return run.current_entry(command)
 end
 
+---@param command string
 function M.git(command)
-  if not guard('DirectGit') then
-    return nil
-  end
+  if not guard('DirectGit') then return nil end
   if pending.refuse('run a Git command') then return nil end
   buffer.cancel_git_status()
-  return run.current_entry(command, function(_, bufnr, root)
-    buffer.refresh_git_status(bufnr, root)
-  end, { quiet_success = true })
+  return run.current_entry(
+    command,
+    function(_, bufnr, root) buffer.refresh_git_status(bufnr, root) end,
+    { quiet_success = true }
+  )
 end
 
 function M.restore_git()
@@ -400,34 +394,32 @@ function M.restore_git()
   local target, path_err = listing:get_entry_path(row)
   local record = listing:get_entry_record(row)
   if not target then
-    ui.notify('direct: cannot restore Git changes: ' .. tostring(path_err),
-      vim.log.levels.ERROR)
+    ui.notify('direct: cannot restore Git changes: ' .. tostring(path_err), vim.log.levels.ERROR)
     return nil, path_err
   end
 
   local is_directory = record and paths.is_directory_name(record.name) or false
   local changes, status_err = git_status.worktree_changes(listing.root, target, is_directory)
   if not changes then
-    ui.notify('direct: cannot inspect Git changes: ' .. tostring(status_err),
-      vim.log.levels.ERROR)
+    ui.notify('direct: cannot inspect Git changes: ' .. tostring(status_err), vim.log.levels.ERROR)
     return nil, status_err
   end
   if #changes == 0 then
-    ui.notify('direct: no tracked worktree changes to restore at ' .. target,
-      vim.log.levels.INFO)
+    ui.notify('direct: no tracked worktree changes to restore at ' .. target, vim.log.levels.INFO)
     return false
   end
 
   local count_text = #changes == 1 and '1 changed file' or (#changes .. ' changed files')
-  local prompt = string.format('Restore the worktree state of %s?\n'
-    .. 'This will discard unstaged changes to %s.', target, count_text)
+  local prompt = string.format(
+    'Restore the worktree state of %s?\n' .. 'This will discard unstaged changes to %s.',
+    target,
+    count_text
+  )
   if vim.fn.confirm(prompt, '&Restore\n&Cancel', 2) ~= 1 then return nil end
 
-  local confirmed_changes, recheck_err =
-    git_status.worktree_changes(listing.root, target, is_directory)
+  local confirmed_changes, recheck_err = git_status.worktree_changes(listing.root, target, is_directory)
   if not confirmed_changes then
-    ui.notify('direct: cannot recheck Git changes: ' .. tostring(recheck_err),
-      vim.log.levels.ERROR)
+    ui.notify('direct: cannot recheck Git changes: ' .. tostring(recheck_err), vim.log.levels.ERROR)
     return nil, recheck_err
   end
   if not vim.deep_equal(changes, confirmed_changes) then
@@ -437,9 +429,11 @@ function M.restore_git()
   end
 
   buffer.cancel_git_status()
-  return run.current_entry(git_status.worktree_restore_command(listing.root),
+  return run.current_entry(
+    git_status.worktree_restore_command(listing.root),
     function(_, bufnr, root) buffer.refresh_git_status(bufnr, root) end,
-    { quiet_success = true })
+    { quiet_success = true }
+  )
 end
 
 -- Public API functions are a final error boundary for both Lua callers and the
@@ -493,12 +487,8 @@ for name, description in pairs(protected_actions) do
   local implementation = M[name]
   M[name] = function(...)
     local args, count = pack(...), select('#', ...)
-    local result = pack(xpcall(function()
-      return implementation(unpack_values(args, 1, count))
-    end, debug.traceback))
-    if not result[1] then
-      return ui.report_error(description, result[2])
-    end
+    local result = pack(xpcall(function() return implementation(unpack_values(args, 1, count)) end, debug.traceback))
+    if not result[1] then return ui.report_error(description, result[2]) end
     return unpack_values(result, 2, result.n)
   end
 end

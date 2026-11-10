@@ -455,6 +455,12 @@ the build.
 
 ### M3 — No linting, formatting or type checks (P4)
 
+**Status: COMPLETE.** Added Luacheck and StyLua configuration, LuaLS
+annotations for the public API and configuration options, and a `make lint`
+target wired into CI. The Luacheck gate currently caps existing warnings at
+48 while still failing on errors; new warnings require reducing the baseline
+or an explicit cap adjustment.
+
 **Change.** Add a `luacheck` (or `selene`) config and `stylua`, plus a
 `make lint` target that runs in CI. Add LuaLS type annotations for the
 public API in `lua/direct/init.lua` and `config.lua`, and check them with
