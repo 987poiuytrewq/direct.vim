@@ -61,7 +61,7 @@ return function(deps)
         if options.capture then return append_current() end
         return nil, err
       end
-      if #children == 1 then
+      if #children == 1 and is_dir_line(children[1]) then
         local child = children[1]
         return render_chain(entry_path(directory, child), child, next_components, false)
       end

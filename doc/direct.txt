@@ -618,10 +618,11 @@ respect_gitignore       boolean (default: `true`)
 
                                             *direct-collapse_single_entry_directories*
 collapse_single_entry_directories boolean (default: `false`)
-    Display a chain of directories with one visible entry as a single
-    slash-separated path, such as `foo/bar.txt` or `baz/bat/`. Entry counts
-    follow the current listing filters (including the Git-status-only view).
-    Each path component remains editable as its corresponding filesystem entry.
+    Display a chain of directories with one visible directory child as a single
+    slash-separated path, such as `foo/bar/`. Files are not absorbed into the
+    path; expanding the final directory shows its files. Entry counts follow
+    the current listing filters (including the Git-status-only view). Each path
+    component remains editable as its corresponding directory entry.
 
                                                            *direct-indent_size*
 indent_size             integer (default: `2`)
