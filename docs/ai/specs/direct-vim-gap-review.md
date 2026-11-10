@@ -445,9 +445,9 @@ was merged. LuaRocks publication remains available after configuring an API key.
 **Status: COMPLETE.** CI now runs on pull requests and pushes to `master`. The
 minimum supported Neovim `v0.12.0` remains tested on Linux, macOS, and Windows;
 additional Ubuntu jobs run the latest stable Neovim and nightly. Nightly uses
-`continue-on-error`, so upstream breakage is visible without blocking merges.
-Coverage artifacts include the Neovim track in their names. `make ci` passes
-locally.
+step-level `continue-on-error` and reports failures as warnings, so upstream
+breakage remains visible without failing the required CI check. Coverage
+artifacts include the Neovim track in their names. `make ci` passes locally.
 
 **Change.** Run CI on pushes to `master` as well as pull requests. Add jobs
 for the latest stable Neovim and nightly. Nightly may fail without failing

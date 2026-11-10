@@ -94,7 +94,6 @@ jobs:
   nightly:
     name: Test Neovim nightly (non-blocking)
     runs-on: ubuntu-latest
-    continue-on-error: true
     timeout-minutes: 20
     defaults:
       run:
@@ -105,15 +104,23 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Neovim nightly
+        id: setup_nightly
+        continue-on-error: true
         uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1.6.1
         with:
           neovim: true
           version: nightly
 
       - name: Run CI
+        id: test_nightly
+        continue-on-error: true
         run: make ci
         env:
           COVERAGE_PLATFORM: Linux-nightly
+
+      - name: Report nightly failures without blocking
+        if: ${{ steps.setup_nightly.outcome == 'failure' || steps.test_nightly.outcome == 'failure' }}
+        run: echo '::warning::Neovim nightly is currently incompatible; this result is informational.'
 
       - name: Publish coverage report
         if: always()
