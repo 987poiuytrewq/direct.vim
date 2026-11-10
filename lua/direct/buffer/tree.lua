@@ -10,6 +10,7 @@ return function(deps)
   local is_dir_line = deps.is_dir_line
   local strip_directory_marker = deps.strip_directory_marker
   local component_reason = deps.component_reason
+  local nested_path_reason = deps.nested_path_reason
   local same_lines = deps.same_lines
   local entry_path = deps.entry_path
   local ignore_set = deps.ignore_set
@@ -360,7 +361,12 @@ return function(deps)
       local id = marks_by_row[row - 1]
       local rec = id and state.rows[id] or nil
 
-      local reason = component_reason(name)
+      local reason
+      if depth == 0 and rec and rec.collapsed_components and nested_path_reason then
+        reason = nested_path_reason(name)
+      else
+        reason = component_reason(name)
+      end
       if reason then return nil, reason end
       local parent_key = parent and parent.key or nil
       local node = {

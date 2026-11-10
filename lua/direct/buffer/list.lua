@@ -33,6 +33,7 @@ return function(context)
   local refresh_icons = context.refresh_icons
   local set_options = context.set_options
   local start_git_status = context.start_git_status
+  local collapse_single_entry_paths = context.collapse_single_entry_paths
 
 local function modified_listing_reason()
   return 'cannot refresh a listing with unsaved edits; sync or discard them first'
@@ -193,6 +194,27 @@ function Buffer:list(options)
   end
   if next(deleted_paths) == nil then deleted_paths = {} end
 
+  local collapse_enabled = require('direct.config').options
+    .collapse_single_entry_directories == true
+  local collapsed_components, nested_snapshots
+  if collapse_enabled then
+    local collapse_err
+    safe, collapsed_components, nested_snapshots, collapse_err = collapse_single_entry_paths(
+      self.root, safe, {
+        capture = true,
+        show_hidden = snapshot.show_hidden,
+        respect_gitignore = snapshot.respect_gitignore,
+        status_only = view_git_status_only,
+        git_status = git_snapshot,
+        deleted_paths = deleted_paths,
+      })
+    if not safe then
+      ui.notify('direct: cannot inspect single-entry directories: '
+        .. tostring(collapse_err), vim.log.levels.ERROR)
+      return nil, collapse_err
+    end
+  end
+
   reconcile_undone_materialization(bufnr)
   old_state = states[bufnr]
   local old_expanded, old_deleted = {}, {}
@@ -262,11 +284,15 @@ function Buffer:list(options)
     view_respect_gitignore_override = old_state
       and old_state.view_respect_gitignore_override or false,
     view_git_status_only = view_git_status_only,
+    collapse_single_entry_directories = collapse_enabled,
     git_status = git_snapshot,
     git_status_pending = git_options.enabled and not options.git_status_resolved,
     git_expand_all = old_state and old_state.git_expand_all == true or false,
   }
   set_directory_snapshot(state, snapshot)
+  for _, child_snapshot in ipairs(nested_snapshots or {}) do
+    set_directory_snapshot(state, child_snapshot)
+  end
   local roots = {}
   local used_root = {}
   for line_index, line in ipairs(safe) do
@@ -291,6 +317,9 @@ function Buffer:list(options)
     rec.deleted_kind = deleted_kind
     rec.path = M.entry_path(self.root, line)
     rec.identity = identity
+    local path_components = collapsed_components and collapsed_components[line_index]
+    rec.collapsed_components = path_components and #path_components > 1
+      and path_components or nil
     state.rows[rec.id] = rec
     state.root_ids[#state.root_ids + 1] = rec.id
     roots[#roots + 1] = rec

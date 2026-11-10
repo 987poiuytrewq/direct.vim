@@ -120,6 +120,43 @@ return function(deps)
       end
     end
 
+    local function collapsed_component_moves(original, line)
+      local original_components = original.collapsed_components
+      if not original_components or #original_components < 2 then return nil end
+      local directory = is_dir_line(line)
+      local relative = paths.strip_directory_marker(line)
+      if directory_separator() == '\\' then relative = relative:gsub('\\', '/') end
+      local names = {}
+      for part in (relative .. '/'):gmatch('(.-)/') do
+        if part == '' then
+          return nil, 'collapsed paths must keep the same path components'
+        end
+        names[#names + 1] = part
+      end
+      if #names ~= #original_components
+        or directory ~= original_components[#original_components].directory then
+        return nil, 'collapsed paths must keep the same path components and entry type'
+      end
+      local moves, parent = {}, root
+      for index, component in ipairs(original_components) do
+        local target_name = names[index]
+        if target_name == '.' or target_name == '..' or target_name == '' then
+          return nil, 'invalid path component'
+        end
+        local source = fs.join(parent, component.name)
+        local destination = fs.join(parent, target_name)
+        if component.directory then
+          source = source .. platform.separator
+          destination = destination .. platform.separator
+        end
+        if target_name ~= component.name then
+          moves[#moves + 1] = { src_path = source, dst_path = destination }
+        end
+        parent = fs.join(parent, target_name)
+      end
+      return moves
+    end
+
     for _, row in ipairs(original_rows or {}) do
       if not row.deleted_kind then
         if row.id == nil or original_by_id[row.id] then
@@ -164,7 +201,13 @@ return function(deps)
         end
         seen_ids[row.id] = true
         if line ~= original.name then
-          moves[#moves + 1] = { src = original.name, dst = line }
+          local component_moves, component_err = collapsed_component_moves(original, line)
+          if component_err then return nil, component_err end
+          if component_moves then
+            for _, move in ipairs(component_moves) do moves[#moves + 1] = move end
+          else
+            moves[#moves + 1] = { src = original.name, dst = line }
+          end
         end
       else
         local path = entry_path(root, line)
@@ -393,8 +436,8 @@ return function(deps)
       end
     elseif plan.kind == 'RENAME' then
       for _, move in ipairs(plan.moves) do
-        local src = entry_path(root, move.src)
-        local dst = entry_path(root, move.dst)
+        local src = move.src_path or entry_path(root, move.src)
+        local dst = move.dst_path or entry_path(root, move.dst)
         -- Directory symlinks are displayed with the directory marker, but the
         -- marker would make rename follow the link instead of moving the link.
         local source_stat = lstat(src)

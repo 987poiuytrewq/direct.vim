@@ -545,6 +545,7 @@ Calling `setup()` is optional. These are the defaults:
       map_default_keys = true,
       show_hidden = true,
       respect_gitignore = true,
+      collapse_single_entry_directories = false,
       indent_size = 2,
       undo_confirm = 'elsewhere',
       trash_retention = false,
@@ -614,6 +615,13 @@ show_hidden             boolean (default: `true`)
 respect_gitignore       boolean (default: `true`)
     Hide Git-ignored entries. `gi` (|:DirectToggleGitIgnore|) toggles this in
     the current listing. See |direct.vim-git-ignore|.
+
+                                            *direct-collapse_single_entry_directories*
+collapse_single_entry_directories boolean (default: `false`)
+    Display a chain of directories with one visible entry as a single
+    slash-separated path, such as `foo/bar.txt` or `baz/bat/`. Entry counts
+    follow the current listing filters (including the Git-status-only view).
+    Each path component remains editable as its corresponding filesystem entry.
 
                                                            *direct-indent_size*
 indent_size             integer (default: `2`)

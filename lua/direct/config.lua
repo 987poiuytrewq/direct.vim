@@ -37,6 +37,7 @@
 ---@field directory_separator? '/'|'\\'
 ---@field show_hidden? boolean
 ---@field respect_gitignore? boolean
+---@field collapse_single_entry_directories? boolean
 ---@field indent_size? integer
 ---@field undo_confirm? boolean|'elsewhere'
 ---@field trash_retention? false|direct.TrashRetention
@@ -58,6 +59,7 @@ local defaults = {
   directory_separator = platform.separator,
   show_hidden = true,
   respect_gitignore = true,
+  collapse_single_entry_directories = false,
   indent_size = 2,
   undo_confirm = 'elsewhere',
   trash_retention = false,
@@ -543,8 +545,12 @@ function M.setup(opts)
     elseif key == 'mappings' then
       next_options.mappings = resolve_mappings(value)
     elseif
-      (key == 'show_hidden' or key == 'respect_gitignore' or key == 'show_filetype_icons')
-      and type(value) ~= 'boolean'
+      (
+        key == 'show_hidden'
+        or key == 'respect_gitignore'
+        or key == 'collapse_single_entry_directories'
+        or key == 'show_filetype_icons'
+      ) and type(value) ~= 'boolean'
     then
       require('direct.ui').notify(string.format('direct: %s must be a boolean', key), vim.log.levels.ERROR)
     elseif key == 'git' then
