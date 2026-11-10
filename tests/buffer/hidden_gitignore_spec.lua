@@ -187,20 +187,21 @@ H.describe('hidden and Git-ignore filtering', function()
     local sb = H.sandbox()
     local root = H.mkdir(sb.root, 'repo')
     local directory = H.mkdir(root, 'changed-dir')
+    local nested = H.mkdir(directory, 'nested')
     init_repo(root)
-    H.mkfile(directory, 'changed.txt', 'before')
-    H.mkfile(directory, 'clean.txt', 'clean')
+    H.mkfile(nested, 'changed.txt', 'before')
+    H.mkfile(nested, 'clean.txt', 'clean')
     git(root, 'add', '.')
     git(root, 'commit', '-qm', 'baseline')
-    H.mkfile(directory, 'changed.txt', 'after')
+    H.mkfile(nested, 'changed.txt', 'after')
 
     require('direct').list(root)
     wait_git_status()
     pcall(vim.cmd, 'DirectToggleGitStatus')
     wait_git_status()
 
-    H.assert_buf_eq({ 'changed-dir/changed.txt' }, 0,
-      'gs counts only the changed child when deciding whether to collapse')
+    H.assert_buf_eq({ 'changed-dir/nested/', '  changed.txt' }, 0,
+      'gs counts visible directories when collapsing and reveals the changed file on expansion')
     config.setup({})
   end)
 

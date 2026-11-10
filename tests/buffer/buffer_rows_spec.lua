@@ -99,13 +99,13 @@ H.describe('buffer: row identity and filtered rendering', function()
 
     config.setup({ collapse_single_entry_directories = true })
     local listing = buffer.list(ws)
-    H.assert_buf_eq({ 'baz/bat/', 'branch/', 'foo/bar/baz.txt' }, 0,
+    H.assert_buf_eq({ 'baz/bat/', 'branch/', 'foo/bar/' }, 0,
       'only chains with one visible entry collapse')
-    H.assert_eq(listing:get_paths(3, 3), { ws .. '/foo/bar/baz.txt' },
-      'a collapsed file row resolves to its leaf path')
+    H.assert_eq(listing:get_paths(3, 3), { ws .. '/foo/bar/' },
+      'a collapsed directory row resolves to its leaf directory')
     listing:expand(1)
     H.assert_buf_eq({ 'baz/bat/', '  one.txt', '  two.txt', 'branch/',
-      'foo/bar/baz.txt' }, 0,
+      'foo/bar/' }, 0,
     'a collapsed directory row can still be expanded at its deepest directory')
     config.setup({})
   end)
@@ -116,7 +116,8 @@ H.describe('buffer: row identity and filtered rendering', function()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
     local folder = H.mkdir(ws, 'folder')
-    H.mkfile(folder, 'visible.txt', { 'visible' })
+    local visible_dir = H.mkdir(folder, 'visible-dir')
+    H.mkfile(visible_dir, 'visible.txt', { 'visible' })
     H.mkfile(folder, '.hidden.txt', { 'hidden' })
 
     config.setup({ collapse_single_entry_directories = true })
@@ -125,8 +126,8 @@ H.describe('buffer: row identity and filtered rendering', function()
       'the visible dotfile keeps the directory from collapsing by default')
     config.setup({ collapse_single_entry_directories = true, show_hidden = false })
     buffer.list(ws)
-    H.assert_buf_eq({ 'folder/visible.txt' }, 0,
-      'filtering the dotfile leaves one visible entry and collapses the path')
+    H.assert_buf_eq({ 'folder/visible-dir/' }, 0,
+      'filtering the dotfile leaves one visible directory and collapses the path')
     config.setup({})
   end)
 
@@ -136,40 +137,44 @@ H.describe('buffer: row identity and filtered rendering', function()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
     local parent = H.mkdir(ws, 'foo')
-    H.mkfile(parent, 'bar.txt', { 'contents' })
+    local child = H.mkdir(parent, 'bar')
+    H.mkfile(child, 'baz.txt', { 'contents' })
     config.setup({ collapse_single_entry_directories = true })
     local listing = buffer.list(ws)
-    H.assert_buf_eq({ 'foo/bar.txt' }, 0, 'the file is shown with its parent path')
+    H.assert_buf_eq({ 'foo/bar/' }, 0, 'the directory chain is collapsed into one row')
 
     vim.api.nvim_buf_set_text(0, 0, 0, 0, #'foo', { 'renamed' })
     local ok, err = listing:sync()
 
     H.assert_true(ok == true, tostring(err))
-    H.assert_true(H.exists(ws, 'renamed/bar.txt'),
+    H.assert_true(H.exists(ws, 'renamed/bar/baz.txt'),
       'editing the first component renames its directory')
-    H.assert_eq(vim.fn.readfile(ws .. '/renamed/bar.txt'), { 'contents' },
+    H.assert_eq(vim.fn.readfile(ws .. '/renamed/bar/baz.txt'), { 'contents' },
       'the directory rename preserves the nested file')
     config.setup({})
   end)
 
-  H.it('renames the leaf component of a collapsed path without renaming its parent', function()
+  H.it('renames the final directory component without renaming its parent', function()
     clean_buffers()
     local config = require('direct.config')
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
     local parent = H.mkdir(ws, 'foo')
-    H.mkfile(parent, 'bar.txt', { 'contents' })
+    local child = H.mkdir(parent, 'bar')
+    H.mkfile(child, 'file.txt', { 'contents' })
     config.setup({ collapse_single_entry_directories = true })
     local listing = buffer.list(ws)
+    H.assert_buf_eq({ 'foo/bar/' }, 0, 'the directory chain is collapsed')
 
-    vim.api.nvim_buf_set_text(0, 0, #'foo/', 0, #'foo/bar.txt', { 'baz.txt' })
+    vim.api.nvim_buf_set_text(0, 0, #'foo/', 0, #'foo/bar/', { 'baz/' })
     local ok, err = listing:sync()
 
     H.assert_true(ok == true, tostring(err))
-    H.assert_true(H.exists(ws, 'foo/baz.txt'), 'editing the leaf renames the file')
+    H.assert_true(H.exists(ws, 'foo/baz/file.txt'),
+      'editing the final component renames that directory')
     H.assert_true(H.exists(ws, 'foo'), 'the unchanged parent directory remains')
-    H.assert_eq(vim.fn.readfile(ws .. '/foo/baz.txt'), { 'contents' },
-      'the file contents are preserved')
+    H.assert_eq(vim.fn.readfile(ws .. '/foo/baz/file.txt'), { 'contents' },
+      'the nested file contents are preserved')
     config.setup({})
   end)
 
