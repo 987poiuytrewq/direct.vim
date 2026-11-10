@@ -1,6 +1,6 @@
 # Spec: direct.vim gap review follow-ups
 
-**Status:** S1 through S6, R1 through R3, F1 through F6, and M1 are complete; the remaining tasks are proposed and have
+**Status:** S1 through S6, R1 through R3, F1 through F6, and M1 through M2 are complete; the remaining tasks are proposed and have
 not been checked item by item. This replaces `direct-vim-remaining-improvements.md`.
 Its main pieces (JSONL history, no-overwrite moves, exclusive `touch`, the
 safeguard on undoing a paste) appear in the current code, but that was not
@@ -42,7 +42,7 @@ the problem, or to record that it can't be reproduced.
 | F5 | P3 | Complete | Allow renames, creates and deletes together in one top-level save |
 | F6 | P3 | Complete | Give every message the same `direct:` prefix |
 | M1 | P4 | Complete | Version tags, releases and a changelog |
-| M2 | P4 | Proposed | Widen CI: latest stable and nightly Neovim, and pushes to `master` |
+| M2 | P4 | Complete | Widen CI: latest stable and nightly Neovim, and pushes to `master` |
 | M3 | P4 | Proposed | Add linting, formatting and type checks |
 | M4 | P4 | Proposed | Split the largest modules up |
 | M5 | P4 | Proposed | Replace the temporary override of `vim.fn.confirm` |
@@ -433,14 +433,21 @@ route them all through `ui.notify`.
 example, and a Lux manifest for the `direct-vim` LuaRocks package. The manifest
 includes Lua modules and Neovim runtime directories; maintainers can publish a
 tagged version with Lux after configuring their LuaRocks API key. The first
-version tag and GitHub release will be created after this pull request is
-merged.
+version tag `v0.1.0` and its GitHub release were created after this pull request
+was merged. LuaRocks publication remains available after configuring an API key.
 
 **Change.** Add `CHANGELOG.md`, tag versions (starting at `v1.0.0` or
 `v0.x`), and publish GitHub releases. Look at publishing to LuaRocks so
 `rocks.nvim` and lazy.nvim can use it.
 
 ### M2 — CI covers too little (P4)
+
+**Status: COMPLETE.** CI now runs on pull requests and pushes to `master`. The
+minimum supported Neovim `v0.12.0` remains tested on Linux, macOS, and Windows;
+additional Ubuntu jobs run the latest stable Neovim and nightly. Nightly uses
+step-level `continue-on-error` and reports failures as warnings, so upstream
+breakage remains visible without failing the required CI check. Coverage
+artifacts include the Neovim track in their names. `make ci` passes locally.
 
 **Change.** Run CI on pushes to `master` as well as pull requests. Add jobs
 for the latest stable Neovim and nightly. Nightly may fail without failing
