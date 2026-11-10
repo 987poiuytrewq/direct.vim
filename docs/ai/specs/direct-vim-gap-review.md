@@ -468,6 +468,12 @@ public API in `lua/direct/init.lua` and `config.lua`, and check them with
 
 ### M4 — The largest modules are hard to work on (P4)
 
+**Status: COMPLETE.** Split buffer listing, row state/marks, open, navigation,
+and sync into focused modules under `lua/direct/buffer/`. Extracted history
+paste and reverse handling, plus filesystem path/listing/identity operations.
+The changes move code only; `make ci` passes (589 specs: 587 passed, 2
+skipped), and `make lint` passes with the existing warning baseline.
+
 **Change.** Split `buffer.lua` (about 2.4k lines) into the listing, row
 state and marks, open and navigation, and sync. Split `history.lua` and
 `fs.lua` the same way where the boundaries are clear. Move code only, with no
