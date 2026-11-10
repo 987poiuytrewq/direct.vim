@@ -481,6 +481,13 @@ behaviour changes, and keep the tests passing at every commit.
 
 ### M5 — `vim.fn.confirm` is replaced temporarily (P4)
 
+**Status: COMPLETE.** Neovim's `apply_workspace_edit` has no cancellation
+return value, but its public `changeAnnotations` fields identify confirmation-
+required text edits. Direct now confirms each edit group before applying the
+WorkspaceEdit, clears `needsConfirmation` only on a deep copy after approval,
+and rejects declines before any workspace edits run. It never replaces the
+global `vim.fn.confirm`. Tests cover acceptance, decline, and apply exceptions.
+
 **Problem.** `lua/direct/file_operations.lua` (around lines 494–510) swaps
 the global `vim.fn.confirm` while a workspace edit is applied, to tell
 whether the user declined it.
