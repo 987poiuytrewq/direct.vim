@@ -330,6 +330,7 @@ local tree_planner = require('direct.buffer.tree')({
   is_dir_line = is_dir_line,
   strip_directory_marker = paths.strip_directory_marker,
   component_reason = component_reason,
+  nested_path_reason = sync_plan.nested_path_reason,
   same_lines = same_lines,
   entry_path = M.entry_path,
   ignore_set = M.ignore_set,
@@ -552,6 +553,18 @@ function M.Buffer(path)
 end
 
 -- Buffer attach/list behavior is isolated from row expansion and sync.
+local collapse_single_entry_paths = require('direct.buffer.collapse')({
+  paths = paths,
+  fs = fs,
+  entry_path = M.entry_path,
+  list_with_snapshot = list_with_snapshot,
+  filter_git_status_lines = filter_git_status_lines,
+  get_directory_snapshot = get_directory_snapshot,
+  apply_snapshot = apply_snapshot,
+  is_dir_line = is_dir_line,
+  dirs_then_name = dirs_then_name,
+})
+
 require('direct.buffer.list')({
   M = M,
   Buffer = Buffer,
@@ -584,6 +597,7 @@ require('direct.buffer.list')({
   refresh_icons = refresh_icons,
   set_options = set_options,
   start_git_status = start_git_status,
+  collapse_single_entry_paths = collapse_single_entry_paths,
 })
 
 function M.expand()
@@ -800,6 +814,7 @@ require('direct.buffer.sync')({
   result_entry = result_entry,
   current_row_record = current_row_record,
   remove_expanded_subtree = remove_expanded_subtree,
+  collapse_single_entry_paths = collapse_single_entry_paths,
 })
 
 -- Opening and row-path operations are kept separate from listing and sync.

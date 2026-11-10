@@ -29,6 +29,23 @@ local function global_dash_count()
 end
 
 H.describe('config', function()
+  H.it('validates the optional single-entry directory collapse setting', function()
+    local config = fresh_config()
+    config.clear_mappings()
+    H.assert_false(config.defaults.collapse_single_entry_directories,
+      'single-entry paths stay expanded by default')
+    H.assert_true(config.setup({
+      collapse_single_entry_directories = true,
+    }).collapse_single_entry_directories, 'the option can be enabled')
+    H.capture_messages()
+    H.assert_false(config.setup({
+      collapse_single_entry_directories = 'true',
+    }).collapse_single_entry_directories, 'invalid values keep the default')
+    H.assert_notified('collapse_single_entry_directories must be a boolean',
+      vim.log.levels.ERROR)
+    config.clear_mappings()
+  end)
+
   H.it('defaults the directory row marker to the filesystem separator and validates overrides', function()
     local config = fresh_config(true)
     config.clear_mappings()

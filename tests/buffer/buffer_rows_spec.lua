@@ -81,6 +81,98 @@ H.describe('buffer: row identity and filtered rendering', function()
     H.assert_eq(listing:get_paths(3, 3), { ws .. '/sub/nested/deep.txt' })
   end)
 
+  H.it('optionally collapses visible single-entry directory chains', function()
+    clean_buffers()
+    local config = require('direct.config')
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local chain = H.mkdir(ws, 'foo')
+    H.mkdir(chain, 'bar')
+    H.mkfile(ws, 'foo/bar/baz.txt', { 'baz' })
+    local branch = H.mkdir(ws, 'branch')
+    H.mkfile(branch, 'one.txt', { 'one' })
+    H.mkfile(branch, 'two.txt', { 'two' })
+    local baz = H.mkdir(ws, 'baz')
+    local bat = H.mkdir(baz, 'bat')
+    H.mkfile(bat, 'one.txt', { 'one' })
+    H.mkfile(bat, 'two.txt', { 'two' })
+
+    config.setup({ collapse_single_entry_directories = true })
+    local listing = buffer.list(ws)
+    H.assert_buf_eq({ 'baz/bat/', 'branch/', 'foo/bar/baz.txt' }, 0,
+      'only chains with one visible entry collapse')
+    H.assert_eq(listing:get_paths(3, 3), { ws .. '/foo/bar/baz.txt' },
+      'a collapsed file row resolves to its leaf path')
+    listing:expand(1)
+    H.assert_buf_eq({ 'baz/bat/', '  one.txt', '  two.txt', 'branch/',
+      'foo/bar/baz.txt' }, 0,
+    'a collapsed directory row can still be expanded at its deepest directory')
+    config.setup({})
+  end)
+
+  H.it('counts only entries enabled by the current listing filters', function()
+    clean_buffers()
+    local config = require('direct.config')
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local folder = H.mkdir(ws, 'folder')
+    H.mkfile(folder, 'visible.txt', { 'visible' })
+    H.mkfile(folder, '.hidden.txt', { 'hidden' })
+
+    config.setup({ collapse_single_entry_directories = true })
+    buffer.list(ws)
+    H.assert_buf_eq({ 'folder/' }, 0,
+      'the visible dotfile keeps the directory from collapsing by default')
+    config.setup({ collapse_single_entry_directories = true, show_hidden = false })
+    buffer.list(ws)
+    H.assert_buf_eq({ 'folder/visible.txt' }, 0,
+      'filtering the dotfile leaves one visible entry and collapses the path')
+    config.setup({})
+  end)
+
+  H.it('renames each component of a collapsed path as its corresponding entry', function()
+    clean_buffers()
+    local config = require('direct.config')
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local parent = H.mkdir(ws, 'foo')
+    H.mkfile(parent, 'bar.txt', { 'contents' })
+    config.setup({ collapse_single_entry_directories = true })
+    local listing = buffer.list(ws)
+    H.assert_buf_eq({ 'foo/bar.txt' }, 0, 'the file is shown with its parent path')
+
+    vim.api.nvim_buf_set_text(0, 0, 0, 0, #'foo', { 'renamed' })
+    local ok, err = listing:sync()
+
+    H.assert_true(ok == true, tostring(err))
+    H.assert_true(H.exists(ws, 'renamed/bar.txt'),
+      'editing the first component renames its directory')
+    H.assert_eq(vim.fn.readfile(ws .. '/renamed/bar.txt'), { 'contents' },
+      'the directory rename preserves the nested file')
+    config.setup({})
+  end)
+
+  H.it('renames the leaf component of a collapsed path without renaming its parent', function()
+    clean_buffers()
+    local config = require('direct.config')
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local parent = H.mkdir(ws, 'foo')
+    H.mkfile(parent, 'bar.txt', { 'contents' })
+    config.setup({ collapse_single_entry_directories = true })
+    local listing = buffer.list(ws)
+
+    vim.api.nvim_buf_set_text(0, 0, #'foo/', 0, #'foo/bar.txt', { 'baz.txt' })
+    local ok, err = listing:sync()
+
+    H.assert_true(ok == true, tostring(err))
+    H.assert_true(H.exists(ws, 'foo/baz.txt'), 'editing the leaf renames the file')
+    H.assert_true(H.exists(ws, 'foo'), 'the unchanged parent directory remains')
+    H.assert_eq(vim.fn.readfile(ws .. '/foo/baz.txt'), { 'contents' },
+      'the file contents are preserved')
+    config.setup({})
+  end)
+
   H.it('child paths resolve through row identity for open and yank (Phase 1)', function()
     clean_buffers()
     local sb = H.sandbox()

@@ -34,6 +34,7 @@ return function(context)
   local result_entry = context.result_entry
   local current_row_record = context.current_row_record
   local remove_expanded_subtree = context.remove_expanded_subtree
+  local collapse_single_entry_paths = context.collapse_single_entry_paths
 
 -- ---------------------------------------------------------------------------
 -- sync
@@ -252,6 +253,25 @@ local function sync_locked(self, options)
   if state.view_git_status_only then
     expected = filter_git_status_lines(self.root, expected, state.git_status)
   end
+  if state.collapse_single_entry_directories then
+    local projected, _, _, project_err = collapse_single_entry_paths(self.root,
+      expected, {
+        state = state,
+        show_hidden = snapshot.show_hidden,
+        respect_gitignore = snapshot.respect_gitignore,
+        status_only = state.view_git_status_only,
+        git_status = state.git_status,
+      })
+    if not projected then
+      vim.bo[bufnr].modified = true
+      local reason = 'could not validate collapsed directory view: '
+        .. tostring(project_err)
+      ui.notify('Refusing to sync: ' .. reason .. '; nothing was changed.',
+        vim.log.levels.ERROR)
+      return nil, reason
+    end
+    expected = projected
+  end
   -- Neovim represents an empty buffer with one empty string. An empty listing
   -- denotes zero root entries, not an empty filename: this applies both to a
   -- clean listing of an empty directory and to deleting its final visible row.
@@ -280,10 +300,21 @@ local function sync_locked(self, options)
   end
   local nested_added = {}
   for _, row in ipairs(current_root_rows) do
-    if not row.id then nested_added[row.line] = true end
+    if not row.id then
+      nested_added[row.line] = true
+    else
+      local rec = state.rows[row.id]
+      if rec and rec.collapsed_components then nested_added[row.line] = true end
+    end
+  end
+  local expected_nested = {}
+  if state.collapse_single_entry_directories then
+    for _, line in ipairs(expected) do
+      if line:find('/', 1, true) then expected_nested[line] = true end
+    end
   end
   local unsafe = first_unsafe(self.root, actual, nested_added)
-    or first_unsafe(self.root, expected)
+    or first_unsafe(self.root, expected, expected_nested)
   if unsafe ~= nil then
     vim.bo[bufnr].modified = true
     ui.notify('Unsafe entry in the buffer (' .. unsafe.reason
@@ -308,6 +339,7 @@ local function sync_locked(self, options)
       original_root_rows[#original_root_rows + 1] = {
         id = id, name = rec.name, path = rec.path, identity = rec.identity,
         deleted_kind = rec.deleted_kind,
+        collapsed_components = rec.collapsed_components,
       }
     end
   end
