@@ -1,8 +1,6 @@
--- lua/direct/buffer.lua -- direct-buffer lifecycle, row state, sync, and open.
--- Path identity uses fs.same_path. Sync validates edits, stages dependent
--- moves, records only successful actions, and re-lists the filesystem state.
--- Expanded rows retain their filesystem identities; sync reconciles edits per
--- directory and coordinates path-changing moves across the materialized tree.
+-- lua/direct/buffer/buffer.lua -- assemble the Direct buffer model and lifecycle.
+-- Listing, row state, navigation, open, and sync implementations live in the
+-- focused modules under direct.buffer and install methods on the shared model.
 
 local M = {}
 
