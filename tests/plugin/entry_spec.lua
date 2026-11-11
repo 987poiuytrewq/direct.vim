@@ -55,7 +55,7 @@ local EXPECTED_N = {
   ['<C-S>'] = '<Cmd>lua require("direct").open({ split = "horizontal" })<CR>',
   ['<C-V>'] = '<Cmd>lua require("direct").open({ split = "vertical" })<CR>',
   ['<C-T>'] = '<Cmd>lua require("direct").open({ split = "tab" })<CR>',
-  ['-'] = '<Cmd>lua require("direct").list(vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":h"))<CR>',
+  ['-'] = '<Cmd>lua require("direct").list(vim.fn.fnamemodify(vim.b.direct_root or vim.api.nvim_buf_get_name(0), ":h"))<CR>',
   ['z-'] = '<Cmd>lua require("direct").open_parent_expanded()<CR>',
   ['u'] = '<Cmd>DirectUndo<CR>',
   ['<C-R>'] = '<Cmd>DirectRedo<CR>',

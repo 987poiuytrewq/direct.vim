@@ -4,6 +4,8 @@
 
 ---@class direct.OpenOptions
 ---@field split? 'horizontal'|'vertical'|'tab'
+---@field reuse? boolean Reuse an existing Direct listing for the target directory.
+---@field open_in? 'current'|'new' Open in the current buffer or preserve the source buffer.
 
 ---@alias direct.SyncCallback fun(ok: boolean|nil, err: string|nil)
 
@@ -86,7 +88,7 @@ function M.open(line, options)
 end
 
 function M.open_parent_expanded()
-  local parent = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ':h')
+  local parent = vim.fn.fnamemodify(buffer.root_for_buffer(), ':h')
   local opened = M.list(parent)
   if not opened then return opened end
   return buffer.expand()

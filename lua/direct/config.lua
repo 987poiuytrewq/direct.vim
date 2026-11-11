@@ -32,6 +32,10 @@
 ---@field show_deleted? boolean
 ---@field symbols? table<direct.GitSymbolName, string>
 
+---@class direct.BufferConfig
+---@field reuse? boolean Reuse an existing Direct listing for the same directory.
+---@field open_in? 'current'|'new' Open targets in the current buffer or preserve the source buffer.
+
 ---@class direct.Config
 ---@field map_default_keys? boolean
 ---@field directory_separator? '/'|'\\'
@@ -48,6 +52,7 @@
 ---@field icons? direct.Icons
 ---@field max_recursive_expand_depth? false|integer
 ---@field git? direct.GitConfig
+---@field buffers? direct.BufferConfig
 
 local M = {}
 local constants = require('direct.constants')
@@ -76,6 +81,10 @@ local defaults = {
     deleted_folder_open = '\u{f115}',
   },
   max_recursive_expand_depth = false,
+  buffers = {
+    reuse = true,
+    open_in = 'current',
+  },
   git = {
     enabled = true,
     timeout_ms = 1000,
@@ -92,6 +101,38 @@ local defaults = {
     },
   },
 }
+
+local function resolve_buffer_options(value)
+  if type(value) ~= 'table' then
+    require('direct.ui').notify('direct: invalid buffers: expected a table', vim.log.levels.ERROR)
+    return vim.deepcopy(defaults.buffers)
+  end
+  local result = vim.deepcopy(defaults.buffers)
+  for key, option in pairs(value) do
+    if key == 'reuse' then
+      if type(option) == 'boolean' then
+        result.reuse = option
+      else
+        require('direct.ui').notify('direct: invalid buffers.reuse: expected a boolean', vim.log.levels.ERROR)
+      end
+    elseif key == 'open_in' then
+      if option == 'current' or option == 'new' then
+        result.open_in = option
+      else
+        require('direct.ui').notify(
+          "direct: invalid buffers.open_in: expected 'current' or 'new'",
+          vim.log.levels.ERROR
+        )
+      end
+    else
+      require('direct.ui').notify(
+        'direct: invalid buffers.' .. tostring(key) .. ': unknown setting',
+        vim.log.levels.ERROR
+      )
+    end
+  end
+  return result
+end
 
 local icon_variants = {
   file = true,
@@ -278,7 +319,7 @@ M.BUFFER_MAPS = {
     action = 'list_buffer',
     mode = 'n',
     lhs = '-',
-    rhs = '<Cmd>lua require("direct").list(vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":h"))<CR>',
+    rhs = '<Cmd>lua require("direct").list(vim.fn.fnamemodify(vim.b.direct_root or vim.api.nvim_buf_get_name(0), ":h"))<CR>',
   },
   {
     action = 'open_parent_expanded',
@@ -539,6 +580,8 @@ function M.setup(opts)
       require('direct.ui').notify("direct: undo_confirm must be true, false, or 'elsewhere'", vim.log.levels.ERROR)
     elseif key == 'trash_retention' then
       next_options.trash_retention = resolve_trash_retention(value)
+    elseif key == 'buffers' then
+      next_options.buffers = resolve_buffer_options(value)
     elseif key == 'directory_separator' and value ~= '/' and value ~= '\\' then
       require('direct.ui').notify('direct: directory_separator must be "/" or "\\\\"', vim.log.levels.ERROR)
     elseif key == 'icons' then
