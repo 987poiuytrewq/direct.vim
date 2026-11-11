@@ -890,7 +890,8 @@ Viewing history ~
 <
     Drop only the top step from the selected stack (`undo` by default). Use this
     when its filesystem source is gone or can no longer be applied; older steps
-    remain available.
+    remain available. If an undo or redo fails because its source is missing,
+    the error suggests this command.
 
                                                       *:DirectHistoryReset*
 :DirectHistoryReset
@@ -913,9 +914,9 @@ Viewing history ~
     that no longer appear in undo/redo history. The `!` form overrides history
     protection, but never overwrites a restore destination. If force would
     invalidate history steps that refer to the payload, Direct asks before
-    proceeding, reports the number of undo/redo steps lost, and removes only
-    those dependent records. Older trash entries without metadata need an
-    explicit [path] to restore.
+    proceeding, reports the number of undo/redo steps lost, and removes those
+    records plus earlier steps that overlap their paths. Older trash entries
+    without metadata need an explicit [path] to restore.
 
                                                                  *:DirectUndo*
 :DirectUndo

@@ -1,6 +1,6 @@
 # Spec: direct.vim improvements, second review
 
-**Status:** A1–A6, A16–A18 and A20 are complete; A7–A15 and A19 remain proposed.
+**Status:** A1–A6 and A16–A20 are complete; A7–A15 remain proposed.
 This replaces the first gap review, whose tasks (S1–S6, R1–R3, F1–F6, M1–M6)
 have all landed on `master`.
 
@@ -10,12 +10,9 @@ been reproduced in a running Neovim. Each task's first step is to write a
 failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
-**Last checked:** `origin/master` at `ed554ce` (11 November 2026). That check
-read #104 (forced trash operations and history), #105 (the rest of A5), and
-#106 (independent listings). It confirmed A5, A6 and A17 in the code and added
-A19 (dropping a history step can strand the step below it) and A20 (removing a
-listing closes other windows showing it). A18 is complete in #107; A20 is
-addressed here. A7–A15 and A19 remain.
+**Last checked:** `origin/master` at `0577a4e` (11 November 2026). That check
+read #107 (Git views use the current listing) and #108 (window-safe listing
+cleanup). A19 is addressed here; A7–A15 remain.
 
 ## Conventions
 
@@ -74,7 +71,7 @@ Checked by reading the code at `d72b7ea`:
 | A16 | P2 | Complete | Let a listing made during a Git timeout be saved once Git recovers |
 | A17 | P3 | Complete | Make listings opened with `buffers.reuse = false` readable and tidy |
 | A18 | P3 | Complete | Make `:DirectGitStatus` and `:DirectGitDiff` use the current listing |
-| A19 | P3 | Proposed | Don't strand earlier history steps when a step is dropped |
+| A19 | P3 | Complete | Don't strand earlier history steps when a step is dropped |
 | A20 | P3 | Complete | Don't close other windows when a listing is removed |
 
 ## Safety
@@ -483,6 +480,14 @@ Completion returns the options and a branch name.
 
 ### A19 — Dropping a history step can strand the step below it (P3)
 
+**Status: COMPLETE.** Forced trash cleanup now removes the transitive set of
+history records whose paths overlap the deleted record's paths, so earlier
+undo/redo entries cannot remain stranded beneath it. Confirmation counts all
+removed records. Missing-source undo/redo errors recommend
+`:DirectHistory drop undo|redo`, and that command completes its subcommand and
+stack direction. Tests cover the rename/delete dependency, recovery after a
+failed undo, and completion.
+
 **Problem.** Forced trash operations remove every history record that refers
 to the affected trash entries (`filter_trash_records` and
 `plan_trash_history` in `lua/direct/history/history.lua`), wherever those
@@ -601,9 +606,8 @@ tests into identity-based ones).
 
 ## Suggested order
 
-A1–A4 and A16 were released in `v0.2.0`; A5–A6 and A17–A18 are complete.
+A1–A4 and A16 were released in `v0.2.0`; A5–A6 and A17–A20 are complete.
 
-1. A19, which follows on from the history stack work in A6.
-2. A release (`v0.2.1` or `v0.3.0`) with A5, A6, A17, A18 and A20.
-3. Everything else, in any order. A13's formatting-only commit is easiest
+1. A release (`v0.2.1` or `v0.3.0`) with A5–A6 and A17–A20.
+2. Everything else, in any order. A13's formatting-only commit is easiest
    when nothing else is changing `lua/`.

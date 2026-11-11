@@ -20,13 +20,15 @@ Notable changes to direct.vim are documented here. Versions follow
   on edited sources and requested destinations. Clarify recovery after text undo
   loses a row identity.
 - Keep forced trash restore/empty from stranding undo history: confirm and drop
-  only history records that depend on the affected payload.
+  the affected records and earlier overlapping steps that depend on them. When
+  a missing source makes undo/redo fail, explain how to drop that stack entry.
 - Preserve other windows showing a Direct listing when opening a file or
   navigating directories removes the source buffer.
 
 ### Added
 
-- Add `:DirectHistory drop [undo|redo]` to remove one irrecoverable top step.
+- Add `:DirectHistory drop [undo|redo]` to remove one irrecoverable top step,
+  with completion for the command and stack direction.
 
 ## [0.2.0] - 2026-11-11
 

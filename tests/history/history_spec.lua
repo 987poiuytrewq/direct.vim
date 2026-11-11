@@ -65,6 +65,15 @@ H.describe('history', function()
     end
   end
 
+  H.it('completes DirectHistory drop directions', function()
+    H.assert_eq(history.complete_history('d', 'DirectHistory d', #'DirectHistory d'),
+      { 'drop' }, 'the history subcommand completes')
+    H.assert_eq(history.complete_history('', 'DirectHistory drop ', #'DirectHistory drop '),
+      { 'undo', 'redo' }, 'drop completes both stack directions')
+    H.assert_eq(history.complete_history('r', 'DirectHistory drop r', #'DirectHistory drop r'),
+      { 'redo' }, 'the current direction prefix is respected')
+  end)
+
   H.it('undo/redo round-trips per action type', function()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -280,6 +289,31 @@ H.describe('history', function()
     H.assert_eq(vim.fn.readfile(redo_path),
       { MARKER, fixtures.move(sb.root .. '/b.txt', sb.root .. '/a.txt') },
       'the inverse record was appended to redo.log')
+  end)
+
+  H.it('a missing undo source explains how to drop the irrecoverable step', function()
+    local sb = H.sandbox()
+    local source = H.mkfile(sb.root, 'source.txt', { 'source' })
+    local destination = vim.fs.joinpath(sb.root, 'destination.txt')
+    local move = action.Move(source, destination)
+    H.assert_true(move['do']() ~= nil, 'setup move succeeds')
+    H.assert_true(history.log(move), 'the move is logged')
+    H.assert_true(vim.uv.fs_unlink(destination), 'the undo source disappears externally')
+
+    H.capture_messages()
+    local restore_rename = H.stub(fs, 'rename', function()
+      return nil, 'The system cannot find the file specified'
+    end)
+    local result, err = history.undo()
+    restore_rename()
+
+    H.assert_nil(result, 'undo refuses when its source is missing')
+    H.assert_true(tostring(err):find(':DirectHistory drop undo', 1, true) ~= nil,
+      'the returned error explains how to discard this step')
+    H.assert_notified(':DirectHistory drop undo', vim.log.levels.ERROR)
+    H.assert_true(history.drop_top('undo'), 'the explicit drop command removes the stuck step')
+    local state = history.preflight()
+    H.assert_eq(#state.undo_lines, 1, 'the irrecoverable top undo is removed')
   end)
 
   H.it('log() after an undo clears the redo log', function()
