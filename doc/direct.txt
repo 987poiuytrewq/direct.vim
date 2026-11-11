@@ -911,7 +911,7 @@ Viewing history ~
     :DirectTrash restore {id} [path]
     :DirectTrash empty
     :DirectTrash! restore {id} [path]
-    :DirectTrash! empty
+:DirectTrash! empty
 <
     Restore an entry without overwriting an existing path, or empty entries
     that no longer appear in undo/redo history. The `!` form overrides history
@@ -922,7 +922,9 @@ Viewing history ~
     that created a later-trashed entry. When an older trash entry lacks metadata,
     Direct tries to recover its original path and entry type from history, and
     estimates the deletion time. If no matching delete action remains, supply
-    an explicit [path] to restore it.
+    an explicit [path] to restore it. The command completes its subcommands and
+    trash IDs. In the read-only view, `r` or <CR> restores the selected entry
+    after confirmation; `q` closes the view.
 
                                                                  *:DirectUndo*
 :DirectUndo

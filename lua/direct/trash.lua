@@ -198,34 +198,104 @@ function M.show()
     ui.notify('direct: cannot list trash: ' .. tostring(err), vim.log.levels.ERROR)
     return nil, err
   end
-  local lines = {
-    'direct.vim trash',
-    'ID\tDELETED\tSIZE\tORIGINAL PATH\tSTATE',
-  }
+  local headers = { 'ID', 'DELETED', 'SIZE', 'ORIGINAL PATH', 'STATE' }
+  local rows = {}
+  local widths = {}
+  for index, header in ipairs(headers) do
+    widths[index] = vim.fn.strdisplaywidth(header)
+  end
+  local function cell(value)
+    return tostring(value):gsub('[\t\r\n]', ' ')
+  end
+  for _, entry in ipairs(entries) do
+    local row = {
+      cell(entry.id),
+      cell(entry.deleted_at or 'unknown'),
+      cell(format_size(entry.size)),
+      cell(entry.original or ('(unknown: ' .. tostring(entry.metadata_error) .. ')')),
+      entry.reserved and 'reserved' or 'deleted',
+    }
+    rows[#rows + 1] = row
+    for index, value in ipairs(row) do
+      widths[index] = math.max(widths[index], vim.fn.strdisplaywidth(value))
+    end
+  end
+  local function render(row)
+    local columns = {}
+    for index, value in ipairs(row) do
+      local padding = widths[index] - vim.fn.strdisplaywidth(value)
+      columns[#columns + 1] = value .. string.rep(' ', padding)
+    end
+    return table.concat(columns, '  ')
+  end
+  local lines = { 'direct.vim trash', render(headers) }
   if #entries == 0 then
     lines[#lines + 1] = '(empty)'
   else
-    for _, entry in ipairs(entries) do
-      lines[#lines + 1] = table.concat({
-        entry.id,
-        entry.deleted_at or 'unknown',
-        format_size(entry.size),
-        entry.original or ('(unknown: ' .. tostring(entry.metadata_error) .. ')'),
-        entry.reserved and 'reserved' or 'deleted',
-      }, '\t')
-    end
+    for _, row in ipairs(rows) do lines[#lines + 1] = render(row) end
   end
 
   local bufnr = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+  vim.b[bufnr].direct_trash_ids = vim.tbl_map(function(entry) return entry.id end, entries)
   vim.bo[bufnr].buftype = 'nofile'
   vim.bo[bufnr].bufhidden = 'wipe'
   vim.bo[bufnr].buflisted = false
   vim.bo[bufnr].swapfile = false
   vim.bo[bufnr].modifiable = false
   vim.bo[bufnr].filetype = 'direct-trash'
+  local function restore_under_cursor()
+    local row = vim.api.nvim_win_get_cursor(0)[1]
+    local id = vim.b[bufnr].direct_trash_ids[row - 2]
+    if not id then return end
+    local entry
+    for _, candidate in ipairs(entries) do
+      if candidate.id == id then entry = candidate; break end
+    end
+    if not entry then return end
+    local destination = entry.original
+    if not destination then
+      destination = vim.fn.input('Restore to path: ')
+      if destination == '' then return end
+    end
+    local prompt = string.format('Restore trash entry %s to %s?', id, destination)
+    if vim.fn.confirm(prompt, '&Restore\n&Cancel', 2) ~= 1 then return end
+    local restored = require('direct').trash_restore(id, destination, true)
+    if restored then M.show() end
+  end
+  vim.keymap.set('n', 'r', restore_under_cursor, {
+    buffer = bufnr, silent = true, desc = 'direct: restore this trash entry',
+  })
+  vim.keymap.set('n', '<CR>', restore_under_cursor, {
+    buffer = bufnr, silent = true, desc = 'direct: restore this trash entry',
+  })
+  vim.keymap.set('n', 'q', function()
+    if vim.api.nvim_buf_is_valid(bufnr) then
+      pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+    end
+  end, { buffer = bufnr, silent = true, desc = 'direct: close the trash view' })
   vim.api.nvim_set_current_buf(bufnr)
   return bufnr
+end
+
+function M.complete(arg_lead, cmdline, cursor_pos)
+  arg_lead, cmdline = tostring(arg_lead or ''), tostring(cmdline or '')
+  local before = cmdline:sub(1, cursor_pos or #cmdline)
+  if arg_lead ~= '' and before:sub(-#arg_lead) == arg_lead then
+    before = before:sub(1, #before - #arg_lead)
+  end
+  local previous = before:match('(%S+)%s*$')
+  previous = previous and previous:gsub('^:', '') or nil
+  local candidates = {}
+  if previous == 'restore' then
+    local entries = M.entries()
+    for _, entry in ipairs(entries or {}) do candidates[#candidates + 1] = entry.id end
+  elseif previous == 'DirectTrash' or previous == nil then
+    candidates = { 'empty', 'restore' }
+  end
+  return vim.tbl_filter(function(candidate)
+    return candidate:sub(1, #arg_lead) == arg_lead
+  end, candidates)
 end
 
 local function lookup(id)
