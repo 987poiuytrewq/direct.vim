@@ -588,11 +588,12 @@ function M.Buffer(path, options)
   local bufnr
   if not reuse then
     -- Neovim forbids two buffers with the same name (E95). Keep the real root
-    -- in buffer-local metadata and give this independent listing a unique URI.
+    -- in buffer-local metadata and give this independent listing a readable,
+    -- unique URI.
     bufnr = vim.api.nvim_create_buf(true, false)
     vim.api.nvim_set_current_buf(bufnr)
     vim.api.nvim_buf_set_name(bufnr,
-      string.format('direct://listing/%s/%d', vim.fn.sha256(root), bufnr))
+      string.format('direct://%s#%d', root, bufnr))
   elseif open_in == 'new' then
     bufnr = vim.api.nvim_create_buf(true, false)
     vim.api.nvim_set_current_buf(bufnr)

@@ -637,8 +637,11 @@ error, and its default is used instead.
 buffers                 table (defaults: `{ reuse = true, open_in = 'current' }`)
     `reuse` controls whether opening a directory selects an existing Direct
     listing for the same path. Set it to `false` to create an independent
-    listing buffer; Direct tracks that listing's real directory separately from
-    its unique internal buffer name. Regular file buffers continue to follow
+    listing buffer named with its readable directory path and a unique suffix.
+    With `reuse = false` and `open_in = 'current'`, leaving a clean listing
+    deletes it; leaving a modified listing keeps it hidden. When a directory
+    already has a modified listing, opening it again asks whether to switch to
+    that buffer or open another one. Regular file buffers continue to follow
     Neovim's normal path-based buffer reuse.
 
     `open_in` controls file navigation when no per-call split is requested.
@@ -646,7 +649,8 @@ buffers                 table (defaults: `{ reuse = true, open_in = 'current' }`
     Direct buffer after a successful file open. `'new'` opens in the current
     window while keeping the source buffer, including unsaved listing edits,
     available. It does not create a split. Directory navigation reuses a
-    matching listing when `reuse = true`; otherwise it creates a new listing.
+    matching listing when `reuse = true`; with `reuse = false`, it creates a new
+    listing and removes the clean listing being left. Modified listings are kept.
     Explicit `open({ split = ... })` options continue to take precedence and
     preserve the source buffer.
 

@@ -258,13 +258,17 @@ and unknown or invalid options are reported as errors instead of being silently
 ignored.
 
 `buffers.reuse` applies to Direct directory listings. Set it to `false` to
-create a separate listing buffer each time; Direct keeps the real directory in
-buffer-local metadata and gives each listing a unique internal name. Regular
-file buffers keep Neovim's normal path-based reuse. `buffers.open_in = 'new'`
-keeps the source listing (including unsaved edits) when opening a file, without
-creating a split. It defaults to `'current'`, which opens in the current window
-and removes the source Direct buffer after a successful file open. These can be
-overridden per call:
+create a separate listing buffer each time; its name shows the directory path
+with a unique suffix. With `buffers.open_in = 'current'`, clean listings are
+removed as you navigate away, while modified listings remain hidden. If you
+open a directory that already has a modified listing, Direct offers to switch
+to it or create another listing. Regular file buffers keep Neovim's normal
+path-based reuse. `buffers.open_in = 'new'` keeps the source listing (including
+unsaved edits) when opening a file, without creating a split. It defaults to
+`'current'`, which opens in the current window and removes the clean source
+buffer after a successful file open. For directory navigation, clean source
+listings are also removed when `reuse = false`. These can be overridden per
+call:
 
 ```lua
 require('direct').open({ reuse = false, open_in = 'new' })
