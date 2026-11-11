@@ -204,6 +204,63 @@ H.describe('Git branch diff filter', function()
     end)
   end)
 
+  H.it('defaults Git views to the current listing and resolves relative --dir there', function()
+    local sb = H.sandbox()
+    local root = make_repo(sb)
+    local nested = vim.fs.joinpath(root, 'nested')
+    local outside = H.mkfile(sb.root, 'outside-current-listing.txt', { 'outside' })
+    require('direct').list(root)
+    local bufnr = vim.api.nvim_get_current_buf()
+
+    H.with_cwd(sb.root, function()
+      vim.cmd('edit ' .. vim.fn.fnameescape(outside))
+      vim.api.nvim_set_current_buf(bufnr)
+      vim.cmd('DirectGitStatus')
+      H.assert_eq(vim.api.nvim_get_current_buf(), bufnr,
+        'DirectGitStatus filters the current listing without opening cwd')
+      H.assert_true(require('direct.buffer.buffer')._state_for_test(bufnr).view_git_status_only,
+        'status-only mode applies to the current listing')
+
+      vim.cmd('DirectGitDiff --ref main')
+      H.assert_eq(vim.api.nvim_get_current_buf(), bufnr,
+        'DirectGitDiff filters the current listing without opening cwd')
+      local state = require('direct.buffer.buffer')._state_for_test(bufnr)
+      H.assert_true(state.view_git_diff_only, 'diff mode applies to the current listing')
+      H.assert_eq(state.git_diff_snapshot.ref, 'main', 'the requested ref is used')
+
+      vim.cmd('DirectGitDiff --ref main --dir nested')
+      local nested_buf = vim.api.nvim_get_current_buf()
+      H.assert_true(nested_buf ~= bufnr, 'an explicit relative --dir opens its target listing')
+      H.assert_true(require('direct.fs').same_path(
+        require('direct.buffer.buffer').root_for_buffer(nested_buf), nested),
+        '--dir resolves relative to the current listing, not cwd')
+    end)
+  end)
+
+  H.it('completes Git view options, repository refs, and listing-relative directories', function()
+    local sb = H.sandbox()
+    local root = make_repo(sb)
+    require('direct').list(root)
+    local commands = require('direct.git_commands')
+
+    local status_options = commands.complete_status('--', 'DirectGitStatus --',
+      #'DirectGitStatus --')
+    H.assert_true(vim.tbl_contains(status_options, '--dir'), 'status completes --dir')
+    local diff_options = commands.complete_diff('--', 'DirectGitDiff --', #'DirectGitDiff --')
+    H.assert_true(vim.tbl_contains(diff_options, '--ref'), 'diff completes --ref')
+    H.assert_true(vim.tbl_contains(diff_options, '--dir'), 'diff completes --dir')
+    H.assert_true(vim.tbl_contains(diff_options, '--include-uncommitted'),
+      'diff completes --include-uncommitted')
+
+    local refs = commands.complete_diff('ma', 'DirectGitDiff --ref ma',
+      #'DirectGitDiff --ref ma')
+    H.assert_true(vim.tbl_contains(refs, 'main'), 'refs include the current repository branch')
+    local directories = commands.complete_status('ne', 'DirectGitStatus --dir ne',
+      #'DirectGitStatus --dir ne')
+    H.assert_true(vim.tbl_contains(directories, 'nested/'),
+      '--dir completion uses the current listing as its base')
+  end)
+
   H.it('unions uncommitted paths into DirectGitDiff when requested from another buffer', function()
     local sb = H.sandbox()
     local root = make_repo(sb)

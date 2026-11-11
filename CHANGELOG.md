@@ -5,6 +5,11 @@ Notable changes to direct.vim are documented here. Versions follow
 
 ## [Unreleased]
 
+### Changed
+
+- Make `:DirectGitStatus` and `:DirectGitDiff` use the current listing when run
+  from one without `--dir`; add completion for their options, refs and dirs.
+
 ### Fixed
 
 - Allow saves to proceed after unrelated external entries are added, removed or

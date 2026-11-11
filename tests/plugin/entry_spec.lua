@@ -88,8 +88,8 @@ local EXPECTED_CMDS = {
   DirectUnfoldAll = { nargs = '0' },
   DirectToggleHidden = { nargs = '0' },
   DirectToggleGitStatus = { nargs = '0' },
-  DirectGitStatus = { nargs = '*' },
-  DirectGitDiff = { nargs = '*' },
+  DirectGitStatus = { nargs = '*', complete = 'function' },
+  DirectGitDiff = { nargs = '*', complete = 'function' },
   DirectNextChange = { nargs = '0' },
   DirectPreviousChange = { nargs = '0' },
   DirectNextFile = { nargs = '0' },
@@ -118,7 +118,11 @@ H.describe('entry: command surface', function()
       H.assert_true(got ~= nil, name .. ' is registered')
       if got then
         H.assert_eq(got.nargs, want.nargs, name .. '.nargs')
-        H.assert_eq(got.complete, want.complete, name .. '.complete')
+        if want.complete == 'function' then
+          H.assert_eq(type(got.complete), 'function', name .. '.complete')
+        else
+          H.assert_eq(got.complete, want.complete, name .. '.complete')
+        end
         H.assert_eq(got.range, want.range, name .. '.range')
         H.assert_eq(got.bang, want.bang or false, name .. '.bang')
       end

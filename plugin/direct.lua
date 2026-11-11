@@ -103,11 +103,23 @@ end, { nargs = 0, desc = 'direct: toggle Git-ignore filtering in this listing' }
 
 vim.api.nvim_create_user_command('DirectGitStatus', function(args)
   require('direct.git_commands').status(args.fargs)
-end, { nargs = '*', desc = 'direct: open a listing filtered to Git status' })
+end, {
+  nargs = '*',
+  complete = function(arg_lead, cmdline, cursor_pos)
+    return require('direct.git_commands').complete_status(arg_lead, cmdline, cursor_pos)
+  end,
+  desc = 'direct: show Git status for a directory listing',
+})
 
 vim.api.nvim_create_user_command('DirectGitDiff', function(args)
   require('direct.git_commands').diff(args.fargs)
-end, { nargs = '*', desc = 'direct: toggle a branch-relative Git diff filter' })
+end, {
+  nargs = '*',
+  complete = function(arg_lead, cmdline, cursor_pos)
+    return require('direct.git_commands').complete_diff(arg_lead, cmdline, cursor_pos)
+  end,
+  desc = 'direct: toggle a branch-relative Git diff filter',
+})
 
 vim.api.nvim_create_user_command('DirectNextChange', function()
   require('direct').next_change()
