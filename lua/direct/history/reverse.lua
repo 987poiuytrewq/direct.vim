@@ -21,7 +21,7 @@ return function(context)
   local function missing_source_hint(which, err)
     local message = tostring(err or ''):lower()
     if message:find('enoent', 1, true) or message:find('no such file', 1, true)
-      or message:find('not found', 1, true) then
+      or message:find('not found', 1, true) or message:find('cannot find', 1, true) then
       return '; use :DirectHistory drop ' .. which
         .. ' to remove this irrecoverable step and continue with earlier history'
     end

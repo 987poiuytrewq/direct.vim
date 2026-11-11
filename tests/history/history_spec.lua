@@ -301,7 +301,11 @@ H.describe('history', function()
     H.assert_true(vim.uv.fs_unlink(destination), 'the undo source disappears externally')
 
     H.capture_messages()
+    local restore_rename = H.stub(fs, 'rename', function()
+      return nil, 'The system cannot find the file specified'
+    end)
     local result, err = history.undo()
+    restore_rename()
 
     H.assert_nil(result, 'undo refuses when its source is missing')
     H.assert_true(tostring(err):find(':DirectHistory drop undo', 1, true) ~= nil,
