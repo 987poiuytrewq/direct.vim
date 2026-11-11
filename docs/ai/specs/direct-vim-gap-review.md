@@ -1,6 +1,6 @@
 # Spec: direct.vim improvements, second review
 
-**Status:** A1–A4 and A16 are complete, and A5 is partly done; A6–A15 and
+**Status:** A1–A4, A6, and A16 are complete; A5 is partly done; A7–A15 and
 A17–A18 remain proposed.
 This replaces the first gap review, whose tasks (S1–S6, R1–R3, F1–F6, M1–M6)
 have all landed on `master`.
@@ -14,7 +14,8 @@ reproduced and drop the task.
 **Last checked:** `origin/master` at `d201a5c` (11 November 2026). That check
 read #103 (saves after unrelated disk changes). It confirmed the top-level
 part of A5 in the code, but expanded folders still refuse, so A5 is partly
-done. It found no new tasks. A6–A15 and A17–A18 are unchanged.
+done. It found no new tasks. A6 is complete in this follow-up; A7–A15 and
+A17–A18 are unchanged.
 
 ## Conventions
 
@@ -60,7 +61,7 @@ Checked by reading the code at `d72b7ea`:
 | A3 | P2 | Complete | Don't fail the whole listing when one subfolder can't be read |
 | A4 | P2 | Complete | Release what the README documents |
 | A5 | P2 | Partly done | Let a save continue after unrelated changes on disk, without losing edits |
-| A6 | P2 | Proposed | Keep forced trash operations from leaving undo history stuck |
+| A6 | P2 | Complete | Keep forced trash operations from leaving undo history stuck |
 | A7 | P3 | Proposed | Stop trash retention from walking the whole trash on every save |
 | A8 | P3 | Proposed | Fill in metadata for trash entries that don't have it |
 | A9 | P3 | Proposed | Make `:DirectTrash` easier to use |
@@ -167,6 +168,14 @@ the rename. An outside change to `a` itself, or a new entry with the rename's
 target name, is still refused.
 
 ### A6 — Forced trash operations can leave undo history stuck (P2)
+
+**Status: COMPLETE.** Forced restore and empty now identify history records
+that reference affected trash paths, confirm the undo/redo step counts before
+proceeding, and atomically rewrite only the affected stacks under the history
+lock. Remaining history stays usable. `:DirectHistory drop [undo|redo]`
+explicitly removes only the chosen stack's top record. Tests cover forced
+restore and empty, confirmation cancellation, retaining lower stack entries,
+and both drop directions; `make test` passes.
 
 **Problem.** `:DirectTrash! empty` and `:DirectTrash! restore`
 (`lua/direct/trash.lua`, `empty_locked` and `M.restore` with `force`) remove
@@ -534,10 +543,9 @@ tests into identity-based ones).
 
 ## Suggested order
 
-A1–A4 and A16 are done, and released in `v0.2.0`. A5 is done for top-level
-rows.
+A1–A4 and A16 were released in `v0.2.0`; top-level A5 and A6 are complete.
 
-1. The rest of A5 (expanded folders), then A6.
+1. Finish A5 for expanded folders and text-undo recovery.
 2. A17 and A18, since they're small and follow on from recent changes.
 3. Everything else, in any order. A13's formatting-only commit is easiest
    when nothing else is changing `lua/`.

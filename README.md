@@ -295,7 +295,9 @@ the affected paths are outside the current listing's directory.
 
 `trash_retention` is off by default. Set `max_age_days`, `max_size_bytes`, or
 both to prune old, unreferenced trash entries; history-referenced entries are
-kept unless explicitly forced through `:DirectTrash! empty`.
+kept unless explicitly forced through `:DirectTrash! empty`. Forced restore or
+empty asks first when it would discard undo/redo steps that depend on the trash
+payload, and reports the number of affected steps.
 
 With `show_filetype_icons` enabled, file icons use bufferline.nvim's built-in
 basename-based nvim-web-devicons lookup. The dependency is optional; Direct uses
@@ -418,6 +420,7 @@ distinguished from messages from Neovim and other plugins.
 | `:DirectSync`              | Apply edits (same as `:write`)                        |
 | `:DirectUndo` / `:DirectRedo` | Undo/redo filesystem changes, or text while modified |
 | `:DirectHistory`           | Show the undo and redo stacks in a read-only view     |
+| `:DirectHistory drop [undo|redo]` | Drop only the top step of one history stack     |
 | `:DirectHistoryReset`      | Back up and reset both history stacks                 |
 | `:DirectTrash`             | List, restore, or empty trashed entries               |
 | `:DirectYank`              | Yank the entries in a range                           |
@@ -438,6 +441,12 @@ restore an entry (or add a destination for old entries without metadata), and
 `:DirectTrash empty` to remove unreferenced entries. Prefix the command with
 `!` only to override history protection; an existing restore destination is
 never overwritten.
+
+If a forced restore or empty would invalidate undo/redo steps that refer to the
+trash payload, Direct asks before proceeding and removes only those dependent
+history records. Use `:DirectHistory drop undo` or `:DirectHistory drop redo`
+to discard just one irrecoverable top step while preserving the rest of that
+stack. The command defaults to `undo` when the direction is omitted.
 
 `:DirectHistory` shows both filesystem history stacks newest first, with each
 action's summary and affected paths. It is a read-only snapshot: it does not
