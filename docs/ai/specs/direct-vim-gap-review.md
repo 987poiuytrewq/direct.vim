@@ -10,10 +10,10 @@ been reproduced in a running Neovim. Each task's first step is to write a
 failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
-**Last checked:** `origin/master` at `f7e77a4` (11 November 2026). The review
-added A16–A18; A16 is now complete in #101. A4's release notes and checklist
-are prepared here, with the `v0.2.0` tag and GitHub release created after this
-PR is merged. A5–A15 and A17–A18 remain to be implemented.
+**Last checked:** `origin/master` at `3d7e746` (11 November 2026). That check
+read #101 (saves after Git-ignore timeouts) and #102 (the `v0.2.0` release),
+confirmed A16 in the code, and confirmed the `v0.2.0` tag and GitHub release
+are published. It found no new tasks. A5–A15 and A17–A18 are unchanged.
 
 ## Conventions
 
@@ -262,6 +262,12 @@ line marks timed-out listings even after the one-time notification is suppressed
 Regression tests cover recovery, ignored-row refusal, repeated timeouts, the
 `gi` escape hatch and visible marking; `make test` passes.
 
+*Checked at `3d7e746`:* the code matches. Saves re-run the Git-ignore query,
+check each planned action's source and destination against it, and only then
+clear the timeout state. One thing to confirm by hand: the marker is a virtual
+line above the first row, and the tests check `b:direct_gitignore_timed_out`
+rather than whether that line is actually on screen when a listing first opens.
+
 **Problem.** When a Git-ignore query times out, `capture_filter` and
 `filtered_paths` (`lua/direct/buffer/listing.lua`) set `git_timeout = true`
 and store the error on the listing's directory snapshot. At save time,
@@ -438,8 +444,9 @@ Completion returns the options and a branch name.
 **Status: COMPLETE.** Prepared `v0.2.0` release notes covering 0.11.7 support,
 collapsed chains, configurable buffers, Git diff, the WorkspaceEdit confirmation
 fix, LuaRocks removal, and A1–A3/A16 improvements. Added a release checklist to
-the README. The `v0.2.0` tag and GitHub release are created after this PR is
-merged. No changelog-only CI gate was added; the manual checklist keeps that
+the README. *Checked at `3d7e746`:* the annotated `v0.2.0` tag points at
+`3d7e746`, and the GitHub release was published on 11 November 2026. No
+changelog-only CI gate was added; the manual checklist keeps that
 policy lightweight until it proves necessary.
 
 **Problem.** The README tells lazy.nvim users to set `version = '*'`, which
@@ -500,11 +507,9 @@ tests into identity-based ones).
 
 ## Suggested order
 
-A1–A3 are done.
+A1–A4 and A16 are done, and released in `v0.2.0`.
 
-1. A16, since it follows on directly from the Git-ignore work.
-2. A4: finish the changelog and tag `v0.2.0`, so users on `version = '*'`
-   get A1–A3.
-3. A5 and A6.
-4. Everything else, in any order. A13's formatting-only commit is easiest
+1. A5 and A6.
+2. A17 and A18, since they're small and follow on from recent changes.
+3. Everything else, in any order. A13's formatting-only commit is easiest
    when nothing else is changing `lua/`.
