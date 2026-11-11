@@ -440,8 +440,11 @@ Showing only changes ~
 `gs` (|:DirectToggleGitStatus|) switches to a view that shows only entries
 with a Git status, with every directory expanded. Press it again to return to
 the normal listing. |:DirectGitStatus| switches to the view without toggling
-it off. From any buffer, `:DirectGitStatus [--dir {dir}]` opens or reuses a
-Direct listing for {dir}; without `--dir`, {dir} is the working directory.
+it off. From any buffer, `:DirectGitStatus [--dir {dir}]` can open or reuse a
+Direct listing. In a Direct listing, it applies to the current listing by
+default; elsewhere it defaults to the working directory. An explicit relative
+`--dir` is resolved against the current listing when run there, and against the
+working directory otherwise. Options and directories can be completed.
 
 Directories that contain changes stay visible, and their children are filtered
 the same way. The view combines with the other filters (|direct.vim-filters|),
@@ -454,9 +457,11 @@ Comparing with a branch ~
 `gd` or `:DirectGitDiff` toggles the current listing to show only committed
 paths changed between the merge base of a target ref and `HEAD`. With no
 `--ref`, the target is `origin/HEAD`, falling back to local `main` and then
-local `master`. The command also works from any buffer and opens or reuses a
-Direct listing for `--dir {dir}`. Without `--dir`, it uses the working
-directory:
+local `master`. In a Direct listing the command toggles that listing by default;
+elsewhere it opens or reuses a listing for the working directory. An explicit
+`--dir` opens or reuses that target. Relative paths are based on the current
+listing when run there, and on the working directory otherwise. Options, refs
+and directories can be completed:
 >
     :DirectGitDiff
     :DirectGitDiff --ref release/2.x
@@ -967,18 +972,23 @@ Git ~
 
                                                              *:DirectGitStatus*
 :DirectGitStatus [--dir {dir}]
-    Show only entries with Git status in a Direct listing for {dir}. The
-    default is the working directory. Works from any buffer and opens or reuses
-    the matching listing.
+    Show only entries with Git status. In a Direct listing, operates on that
+    listing by default; elsewhere opens or reuses a listing for the working
+    directory. An explicit `--dir` overrides the target. Relative directory
+    arguments are based on the current listing when run there, and on the
+    working directory otherwise. Options and directories can be completed.
 
                                                                *:DirectGitDiff*
 :DirectGitDiff [--ref {ref}] [--dir {dir}] [--include-uncommitted]
     Toggle the branch-relative committed-change filter. Defaults to `origin/HEAD`,
-    then local `main`, then local `master`. Without `--dir`, uses the working
-    directory. The optional `--include-uncommitted` adds staged, unstaged and non-ignored
-    untracked paths. Works from any buffer and opens or reuses the matching
-    Direct listing. Refused while the target listing has unsaved edits. The
-    buffer-local `gd` mapping toggles the current listing's filter.
+    then local `main`, then local `master`. In a Direct listing, operates on that
+    listing by default; elsewhere opens or reuses a listing for the working
+    directory. An explicit `--dir` overrides the target. Relative directory
+    arguments are based on the current listing when run there, and on the
+    working directory otherwise. The optional `--include-uncommitted` adds
+    staged, unstaged and non-ignored untracked paths. Options, refs and
+    directories can be completed. Refused while the target listing has unsaved
+    edits. The buffer-local `gd` mapping toggles the current listing's filter.
 
                                                            *:DirectNextChange*
 :DirectNextChange

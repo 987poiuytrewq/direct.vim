@@ -1,6 +1,6 @@
 # Spec: direct.vim improvements, second review
 
-**Status:** A1–A6, A16 and A17 are complete; A7–A15 and A18–A20 are proposed.
+**Status:** A1–A6 and A16–A18 are complete; A7–A15 and A19–A20 remain proposed.
 This replaces the first gap review, whose tasks (S1–S6, R1–R3, F1–F6, M1–M6)
 have all landed on `master`.
 
@@ -14,8 +14,8 @@ reproduced and drop the task.
 read #104 (forced trash operations and history), #105 (the rest of A5) and
 #106 (independent listings). It confirmed A5, A6 and A17 in the code and added
 two tasks: A19 (dropping a history step can strand the step below it) and A20
-(removing a listing closes other windows showing it). A7–A15 and A18 are
-unchanged.
+(removing a listing closes other windows showing it). A18 is complete in this
+follow-up; A7–A15 and A19–A20 remain.
 
 ## Conventions
 
@@ -73,7 +73,7 @@ Checked by reading the code at `d72b7ea`:
 | A15 | P4 | Proposed | Retire the positional root classifier |
 | A16 | P2 | Complete | Let a listing made during a Git timeout be saved once Git recovers |
 | A17 | P3 | Complete | Make listings opened with `buffers.reuse = false` readable and tidy |
-| A18 | P3 | Proposed | Make `:DirectGitStatus` and `:DirectGitDiff` use the current listing |
+| A18 | P3 | Complete | Make `:DirectGitStatus` and `:DirectGitDiff` use the current listing |
 | A19 | P3 | Proposed | Don't strand earlier history steps when a step is dropped |
 | A20 | P3 | Proposed | Don't close other windows when a listing is removed |
 
@@ -454,6 +454,13 @@ and back up five times leaves no extra clean listings behind. A hidden listing
 with unsaved edits is mentioned when the same directory is opened again.
 
 ### A18 — `:DirectGitStatus` and `:DirectGitDiff` ignore the current listing (P3)
+
+**Status: COMPLETE.** Without `--dir`, both commands now apply to the current
+Direct listing when invoked there, and retain the working-directory default
+elsewhere. Explicit relative `--dir` values are resolved from the current
+listing or working directory according to invocation context. Add completion
+for command options, `--dir`, branch/tag refs and directories. Tests cover
+current-buffer targeting, relative `--dir` and completion; `make test` passes.
 
 **Problem.** Without `--dir`, both commands open a listing of the working
 directory (`open_listing` in `lua/direct/git_commands.lua`), even when run from

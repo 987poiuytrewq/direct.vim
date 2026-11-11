@@ -341,14 +341,18 @@ their contents, and deleted tracked files appear as protected rows so you can
 restore them.
 
 - `gs` shows only changed entries, with directories fully expanded.
-- `:DirectGitStatus [--dir {dir}]` shows changed entries in `{dir}`. Without
-  `--dir`, it defaults to the working directory. It opens or reuses a listing
-  for that path.
+- `:DirectGitStatus [--dir {dir}]` shows changed entries in the target listing.
+  In a Direct listing, it applies there by default; elsewhere it opens or reuses
+  a listing for the working directory. Relative `--dir` paths are based on the
+  current listing when run there, and on the working directory otherwise.
 - `gd` toggles committed changes from a branch's merge base to `HEAD` in the
-  current listing. From any buffer, `:DirectGitDiff` accepts `--ref {ref}`,
-  `--dir {dir}`, and `--include-uncommitted`, and opens or reuses the target
-  listing (`{dir}` defaults to the working directory). Without `--ref`, Direct
-  uses `origin/HEAD`, then local `main`, then local `master`. Staged, unstaged,
+  current listing. In a Direct listing, `:DirectGitDiff` applies there by
+  default. Elsewhere it opens or reuses a listing for the working directory.
+  Both commands accept a relative `--dir` from the current listing or working
+  directory, depending on where invoked. `:DirectGitDiff` accepts `--ref {ref}`
+  and `--include-uncommitted`. Options, refs and directories have completion.
+  Without `--ref`, Direct uses `origin/HEAD`, then local `main`, then local
+  `master`. Staged, unstaged,
   and non-ignored untracked paths are included only with
   `--include-uncommitted`; they are unioned with committed changes. Directories
   are expanded to show changed descendants, and deleted paths remain visible.
@@ -439,8 +443,8 @@ distinguished from messages from Neovim and other plugins.
 | `:DirectToggleHidden`      | Show or hide dotfiles                                 |
 | `:DirectToggleGitIgnore`   | Toggle `.gitignore` filtering                         |
 | `:DirectToggleGitStatus` / `:DirectGitStatus` | Toggle, or enter, the changed-only view |
-| `:DirectGitStatus [--dir {dir}]` | Show the status-filtered listing for a directory |
-| `:DirectGitDiff [--ref {ref}] [--dir {dir}] [--include-uncommitted]` | Toggle branch-relative changed paths |
+| `:DirectGitStatus [--dir {dir}]` | Filter the current listing, or target a directory |
+| `:DirectGitDiff [--ref {ref}] [--dir {dir}] [--include-uncommitted]` | Filter the current listing, or target a directory |
 | `:DirectNextFile` / `:DirectPreviousFile` | Jump between files, skipping directories |
 | `:DirectNextChange` / `:DirectPreviousChange` | Jump between changed entries       |
 | `:DirectRun {cmd}` / `:DirectGit {cmd}` | Run a command on the current entry       |
