@@ -369,7 +369,9 @@ restore them.
 - `ga` stages the entry; `<leader>gu` unstages it.
 - `<leader>gr` asks before discarding tracked worktree changes under the entry.
   The prompt names the path and counts changed files. It leaves untracked and
-  staged-only changes alone.
+  staged-only changes alone. Before restoring, it copies existing changed
+  entries to `:DirectTrash` and reports their IDs and original paths for manual
+  recovery. This backup is not an undo-history step.
 - `gi` toggles ignore filtering. Filtering uses Git itself, so nested
   `.gitignore` files, `.git/info/exclude` and your global excludes file all
   apply. Tracked files are never hidden. Ignore queries use `git.timeout_ms`;

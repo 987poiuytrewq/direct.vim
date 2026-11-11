@@ -17,6 +17,8 @@ Notable changes to direct.vim are documented here. Versions follow
 
 ### Fixed
 
+- Preserve changed worktree contents in trash before `:DirectGitRestore`; report
+  backup IDs and original paths for manual recovery.
 - Allow saves to proceed after unrelated external entries are added, removed or
   replaced at the root and in expanded directories, while preserving conflicts
   on edited sources and requested destinations. Clarify recovery after text undo
