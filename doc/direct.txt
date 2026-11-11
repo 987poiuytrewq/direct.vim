@@ -182,9 +182,12 @@ than pairing lines by position. A single save can mix:
                 paste them back with `p`.
 
 A mixed save is one history entry, so one `u` reverses all its filesystem
-actions. Two rows with the same destination are refused. The root directory is
-also checked against its list-time snapshot; visible entries added, removed or
-replaced on disk since listing cause a refusal instead of a guessed operation.
+actions. Two rows with the same destination are refused. Direct permits
+unrelated entries to be added, removed or replaced on disk after listing; a
+successful save re-lists and shows the current directory contents. A changed or
+missing source that the user edited, deleted or moved is refused, as is an
+external entry occupying a requested destination. Refusals name the path and
+suggest restoring it, re-listing, or choosing another destination.
 
 A row whose mark survives a text edit is a rename. An unmarked row is a create,
 and a marked row that disappears is a delete. Whole-line replacements such as

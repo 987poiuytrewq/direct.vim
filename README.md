@@ -140,13 +140,15 @@ release notes. lazy.nvim users can select tagged releases with `version = '*'`.
   `S` loses its mark, Direct treats it as delete-plus-create; the old entry is
   yanked and the new one is empty. If text undo/redo leaves an identity unclear,
   the save is refused and the listing must be reviewed or re-listed.
-- **The root directory must still match its list-time snapshot.** A visible
-  entry added, removed or replaced on disk since listing causes the save to be
-  refused rather than guessing what the edit means.
+- **Unrelated disk changes are reconciled on save.** New or removed entries
+  that do not affect an edited row or destination are kept and shown after the
+  successful save. A changed or missing edit source is refused, as is an
+  external entry that occupies a requested destination.
 - **Unclear edits change nothing.** If direct.vim can't tell what you meant, or
-  the directory changed on disk since you listed it, the save is refused, the
-  filesystem is left alone, and your edits stay in the buffer so you can fix
-  them.
+  an edited source changed on disk or a destination is occupied, the save is
+  refused, the filesystem is left alone, and your edits stay in the buffer.
+  The refusal names the conflicting path and suggests re-listing or choosing a
+  different destination.
 
 When a listing has unsaved edits, `u` / `<C-r>` (and `:DirectUndo` /
 `:DirectRedo`) undo or redo buffer text only. Once the listing is clean, they

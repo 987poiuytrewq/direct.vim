@@ -5,6 +5,11 @@ Notable changes to direct.vim are documented here. Versions follow
 
 ## [Unreleased]
 
+### Fixed
+
+- Allow saves to proceed after unrelated external additions/removals while
+  preserving conflicts on edited sources and requested destinations.
+
 ## [0.2.0] - 2026-11-11
 
 ### Fixed

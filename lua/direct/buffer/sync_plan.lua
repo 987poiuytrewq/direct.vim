@@ -78,7 +78,7 @@ return function(deps)
   local function classify_identity(root, original_rows, current_rows, expected,
       text_undo_mode)
     local expected_by_path, original_by_path, original_by_id = {}, {}, {}
-    local expected_entries, expected_by_basename = {}, {}
+    local expected_by_basename = {}
     local original_by_basename = {}
     local function basename(path)
       return paths.basename(path)
@@ -98,7 +98,6 @@ return function(deps)
         identity = fs.path_identity(path, fs.stat(path)),
       }
       expected_by_path[key] = entry
-      expected_entries[#expected_entries + 1] = entry
       local name = basename(path)
       expected_by_basename[name] = expected_by_basename[name] or {}
       expected_by_basename[name][#expected_by_basename[name] + 1] = entry
@@ -157,6 +156,11 @@ return function(deps)
       return moves
     end
 
+    local current_by_id = {}
+    for _, row in ipairs(current_rows or {}) do
+      if row.id ~= nil then current_by_id[row.id] = row end
+    end
+
     for _, row in ipairs(original_rows or {}) do
       if not row.deleted_kind then
         if row.id == nil or original_by_id[row.id] then
@@ -166,11 +170,6 @@ return function(deps)
         if original_at(row.path) then
           return nil, 'root row paths are ambiguous'
         end
-        local current = expected_at(row.path)
-        if not current or current.line ~= row.name or not row.identity
-          or not current.identity or not fs.path_identities_match(row.identity, current.identity) then
-          return nil, 'directory changed on disk since it was listed: ' .. tostring(row.path)
-        end
         original_by_id[row.id] = row
         original_by_path[key] = row
         local name = basename(row.path)
@@ -178,10 +177,32 @@ return function(deps)
         original_by_basename[name][#original_by_basename[name] + 1] = row
       end
     end
-    for _, current in ipairs(expected_entries) do
-      if not original_at(current.path) then
-        return nil, 'directory changed on disk since it was listed: '
-          .. current.path
+    for _, original in ipairs(original_rows or {}) do
+      if not original.deleted_kind then
+        local current_row = current_by_id[original.id]
+        local edited = not current_row or current_row.line ~= original.name
+        if not current_row then
+          for _, candidate in ipairs(current_rows or {}) do
+            if candidate.id == nil and candidate.line == original.name then
+              local on_disk = expected_at(original.path)
+              if on_disk and on_disk.line == original.name and original.identity
+                and on_disk.identity
+                and fs.path_identities_match(original.identity, on_disk.identity) then
+                edited = false
+                break
+              end
+            end
+          end
+        end
+        if edited then
+          local on_disk = expected_at(original.path)
+          if not on_disk or on_disk.line ~= original.name or not original.identity
+            or not on_disk.identity
+            or not fs.path_identities_match(original.identity, on_disk.identity) then
+            return nil, 'directory changed on disk since it was listed: '
+              .. tostring(original.path) .. '; restore the entry or re-list this directory'
+          end
+        end
       end
     end
 
@@ -403,6 +424,7 @@ return function(deps)
         local target_key = normalized(path)
         if fs.taken(path) and not (plan.vacated and plan.vacated[target_key]) then
           return nil, nil, 'destination already exists: ' .. path
+            .. '; choose another name or re-list the directory'
         end
         if is_directory then
           create_dirs[target_key] = path
