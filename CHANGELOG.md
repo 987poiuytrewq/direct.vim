@@ -22,6 +22,8 @@ Notable changes to direct.vim are documented here. Versions follow
 - Keep forced trash restore/empty from stranding undo history: confirm and drop
   the affected records and earlier overlapping steps that depend on them. When
   a missing source makes undo/redo fail, explain how to drop that stack entry.
+  Link paste/unpaste records to each created destination, including pasted
+  directories, so deleting a pasted entry cannot leave its creator undoable.
 - Preserve other windows showing a Direct listing when opening a file or
   navigating directories removes the source buffer.
 

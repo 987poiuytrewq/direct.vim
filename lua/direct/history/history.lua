@@ -808,6 +808,23 @@ local function action_path_entries(action)
       local entry = history_path_entry(current[field], directory)
       if entry then result[#result + 1] = entry end
     end
+    if current.name == 'p' or current.name == 'up' then
+      for _, pair in ipairs(current.renames or {}) do
+        local source, target
+        if current.name == 'p' then
+          source = M.action.fs.join(current.src, pair.src)
+          target = M.action.fs.join(current.dst, pair.dst)
+        else
+          source = M.action.fs.join(current.dst, pair.dst)
+          target = M.action.fs.join(current.src, pair.src)
+        end
+        local stat = source and M.action.fs.stat(source)
+        -- If the register source was removed, conservatively treat the target
+        -- as a directory so descendant history cannot be left stranded.
+        local entry = history_path_entry(target, not stat or stat.type == 'directory')
+        if entry then result[#result + 1] = entry end
+      end
+    end
     for _, member in ipairs(current.actions or {}) do visit(member) end
   end
   visit(action)

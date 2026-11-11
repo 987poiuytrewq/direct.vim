@@ -2,7 +2,9 @@
 local H = require('tests.support.harness')
 local action = require('direct.action.action')
 local fs = require('direct.fs')
+local history = require('direct.history.history')
 local log = require('direct.log')
+local register = require('direct.register')
 local trash = require('direct.trash')
 
 local function clean_buffers()
@@ -276,6 +278,70 @@ H.describe('trash management', function()
       'the prompt includes mkdir, child creation, and directory deletion')
     local state = require('direct.history.history').preflight()
     H.assert_eq(#state.undo_lines, 1, 'all path-dependent directory history is removed')
+  end)
+
+  H.it('force-empty also drops a paste record when a pasted file is deleted', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local source = H.mkfile(sb.root, 'pasted.txt', { 'payload' })
+    H.assert_true(register.yank({ source }), 'yank the paste source')
+    local register_path = register.content()
+    local paste = action.Paste(register_path, ws, { 'pasted.txt' }, { 'pasted.txt' })
+    H.assert_not_nil(paste['do'](), 'paste the file into the workspace')
+    H.assert_true(history.log(paste), 'record the paste action')
+
+    list_dir(ws)
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, {})
+    H.assert_true(require('direct').sync(), 'delete the pasted file into trash')
+    H.assert_eq(#trash.entries(), 1, 'the deleted paste has one trash payload')
+
+    local prompts = {}
+    local restore_confirm = H.stub(vim.fn, 'confirm', function(prompt)
+      prompts[#prompts + 1] = prompt
+      return 1
+    end)
+    H.assert_true(trash.empty(true), 'force-empty the pasted file')
+    restore_confirm()
+
+    H.assert_true(prompts[1]:find('2 undo steps and 0 redo steps', 1, true) ~= nil,
+      'confirmation includes both the delete and the paste')
+    local state = history.preflight()
+    H.assert_eq(#state.undo_lines, 1, 'the deleted paste and its creator are removed')
+    H.capture_messages()
+    H.assert_nil(history.undo(), 'no broken paste undo remains')
+    H.assert_notified('Nothing to undo')
+  end)
+
+  H.it('force-empty sees files deleted from a pasted directory as paste dependencies', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local source_dir = H.mkdir(sb.root, 'pasted-dir')
+    H.mkfile(source_dir, 'inside.txt', { 'payload' })
+    H.assert_true(register.yank({ source_dir }), 'yank the directory source')
+    local register_path = register.content()
+    local paste = action.Paste(register_path, ws, { 'pasted-dir' }, { 'pasted-dir' })
+    H.assert_not_nil(paste['do'](), 'paste the directory into the workspace')
+    H.assert_true(history.log(paste), 'record the pasted directory')
+
+    list_dir(vim.fs.joinpath(ws, 'pasted-dir'))
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, {})
+    H.assert_true(require('direct').sync(), 'delete a child from the pasted directory')
+    H.assert_eq(#trash.entries(), 1, 'the deleted descendant has one trash payload')
+
+    local prompts = {}
+    local restore_confirm = H.stub(vim.fn, 'confirm', function(prompt)
+      prompts[#prompts + 1] = prompt
+      return 1
+    end)
+    H.assert_true(trash.empty(true), 'force-empty the deleted descendant')
+    restore_confirm()
+
+    H.assert_true(prompts[1]:find('2 undo steps and 0 redo steps', 1, true) ~= nil,
+      'the directory paste is linked to its deleted descendant')
+    local state = history.preflight()
+    H.assert_eq(#state.undo_lines, 1, 'the deleted child and its directory paste are removed')
   end)
 
   H.it('force-empty removes redo references to reserved trash slots', function()
