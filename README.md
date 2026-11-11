@@ -458,7 +458,8 @@ never overwritten.
 If a forced restore or empty would invalidate undo/redo steps that refer to the
 trash payload, Direct asks before proceeding and removes those records plus
 earlier history steps that overlap the affected paths, so surviving entries do
-not depend on a missing operation. Use `:DirectHistory drop undo` or
+not depend on a missing operation. This includes paste/unpaste steps for entries
+that were later moved to trash. Use `:DirectHistory drop undo` or
 `:DirectHistory drop redo` to discard just one irrecoverable top step while
 preserving the rest of that stack. The command defaults to `undo` when the
 direction is omitted. If undo/redo fails because its source is missing, the

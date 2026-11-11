@@ -1,6 +1,6 @@
 # Spec: direct.vim improvements, second review
 
-**Status:** A1–A6 and A16–A20 are complete; A7–A15 and A21 are proposed.
+**Status:** A1–A6 and A16–A21 are complete; A7–A15 remain proposed.
 This replaces the first gap review, whose tasks (S1–S6, R1–R3, F1–F6, M1–M6)
 have all landed on `master`.
 
@@ -10,11 +10,10 @@ been reproduced in a running Neovim. Each task's first step is to write a
 failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
-**Last checked:** `origin/master` at `51cb174` (11 November 2026). That check
-read #107 (Git views use the current listing), #108 (window-safe listing
-clean-up) and #109 (dependent history when dropping steps), and confirmed A18,
-A19 and A20 in the code. It added A21: paste steps aren't linked to the
-entries they created, so the A19 fix misses them. A7–A15 are unchanged.
+**Last checked:** `origin/master` at `19614a2` (11 November 2026). That hourly
+review added A21; it is addressed in this PR. A7–A15 remain unchanged. The
+deferred `v0.2.1` release PR includes A21 and will tag its resulting master
+commit.
 
 ## Conventions
 
@@ -75,7 +74,7 @@ Checked by reading the code at `d72b7ea`:
 | A18 | P3 | Complete | Make `:DirectGitStatus` and `:DirectGitDiff` use the current listing |
 | A19 | P3 | Complete | Don't strand earlier history steps when a step is dropped |
 | A20 | P3 | Complete | Don't close other windows when a listing is removed |
-| A21 | P3 | Proposed | Link paste steps to the entries they created when dropping history |
+| A21 | P3 | Complete | Link paste steps to the entries they created when dropping history |
 
 ## Safety
 
@@ -559,6 +558,13 @@ one split: the other split keeps its listing.
 
 ### A21 — Paste steps aren't linked to the entries they created (P3)
 
+**Status: COMPLETE.** The A19 dependency scan now expands `p` and `up` records
+to individual destination entries in `renames`, using the register copy to
+identify directories. Forced trash cleanup therefore drops a paste creator when
+one of its files—or a descendant of one of its pasted directories—is deleted.
+Tests verify both cases, confirmation counts both actions, and no broken paste
+undo remains.
+
 **Problem.** The A19 dependency walk reads each record's `src` and `dst`, and
 the `actions` of batches (`action_path_entries` in
 `lua/direct/history/history.lua`). A paste record (`M.Paste` in
@@ -654,7 +660,6 @@ tests into identity-based ones).
 
 A1–A4 and A16 were released in `v0.2.0`; A5–A6 and A17–A20 are complete.
 
-1. A21, since it finishes A19.
-2. A release (`v0.2.1` or `v0.3.0`) with A5–A6 and A17–A21.
-3. Everything else, in any order. A13's formatting-only commit is easiest
+1. Release `v0.2.1` with A5–A6 and A17–A21.
+2. Everything else, in any order. A13's formatting-only commit is easiest
    when nothing else is changing `lua/`.

@@ -915,8 +915,9 @@ Viewing history ~
     protection, but never overwrites a restore destination. If force would
     invalidate history steps that refer to the payload, Direct asks before
     proceeding, reports the number of undo/redo steps lost, and removes those
-    records plus earlier steps that overlap their paths. Older trash entries
-    without metadata need an explicit [path] to restore.
+    records plus earlier steps that overlap their paths, including paste steps
+    that created a later-trashed entry. Older trash entries without metadata
+    need an explicit [path] to restore.
 
                                                                  *:DirectUndo*
 :DirectUndo
