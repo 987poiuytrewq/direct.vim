@@ -1,7 +1,8 @@
 # Spec: direct.vim improvements, second review
 
-**Status:** A1–A3 are complete; A4–A15 remain proposed. This replaces the first
-gap review, whose tasks (S1–S6, R1–R3, F1–F6, M1–M6) have all landed on `master`.
+**Status:** A1–A3 are complete and A4 is partly done; the rest are proposed,
+including three new tasks (A16–A18). This replaces the first gap review, whose
+tasks (S1–S6, R1–R3, F1–F6, M1–M6) have all landed on `master`.
 
 **Source:** a second static review of `origin/master` at `d72b7ea`
 (November 2026). As before, the findings come from reading the code; none has
@@ -9,10 +10,12 @@ been reproduced in a running Neovim. Each task's first step is to write a
 failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
-**Update:** A2 was revised after `e517c21` (Git-ignore queries in parallel,
-merged in #97, `origin/master` at `67a3063`). A1 and the combined A2/A3
-follow-up are addressed by the first two focused PRs; A4–A15 have not been
-rechecked against commits after `d72b7ea`.
+**Last checked:** `origin/master` at `9266805` (11 November 2026). That check
+read every commit since `d72b7ea`: the directory-targeted Git views
+(`21129b3`), configurable buffer reuse (`197dc7b`), the paste fix (#99) and
+the bounded, cached Git-ignore snapshots (#100). It confirmed A1–A3 in the
+code, found A4 partly done, and added A16–A18. A5–A15 are unchanged by those
+commits.
 
 ## Conventions
 
@@ -51,23 +54,26 @@ Checked by reading the code at `d72b7ea`:
 
 ## Task list
 
-| ID | Priority | Task |
-|----|----------|------|
-| A1 | P1 | Stop `p` / `P` from discarding unsaved listing edits |
-| A2 | P2 | Stop Git-ignore filtering from blocking, and from walking the whole tree |
-| A3 | P2 | Don't fail the whole listing when one subfolder can't be read |
-| A4 | P2 | Release what the README documents |
-| A5 | P2 | Let a save continue after unrelated changes on disk, without losing edits |
-| A6 | P2 | Keep forced trash operations from leaving undo history stuck |
-| A7 | P3 | Stop trash retention from walking the whole trash on every save |
-| A8 | P3 | Fill in metadata for trash entries that don't have it |
-| A9 | P3 | Make `:DirectTrash` easier to use |
-| A10 | P3 | Make Git worktree restore undoable |
-| A11 | P3 | Let `DirectSyncPre` cancel a save, and add the missing events |
-| A12 | P3 | Review default keys that shadow common user mappings |
-| A13 | P4 | Widen lint, formatting and type-check coverage |
-| A14 | P4 | Fix stale docs and remove stray files |
-| A15 | P4 | Retire the positional root classifier |
+| ID | Priority | Status | Task |
+|----|----------|--------|------|
+| A1 | P1 | Complete | Stop `p` / `P` from discarding unsaved listing edits |
+| A2 | P2 | Complete | Stop Git-ignore filtering from blocking, and from walking the whole tree |
+| A3 | P2 | Complete | Don't fail the whole listing when one subfolder can't be read |
+| A4 | P2 | Partly done | Release what the README documents |
+| A5 | P2 | Proposed | Let a save continue after unrelated changes on disk, without losing edits |
+| A6 | P2 | Proposed | Keep forced trash operations from leaving undo history stuck |
+| A7 | P3 | Proposed | Stop trash retention from walking the whole trash on every save |
+| A8 | P3 | Proposed | Fill in metadata for trash entries that don't have it |
+| A9 | P3 | Proposed | Make `:DirectTrash` easier to use |
+| A10 | P3 | Proposed | Make Git worktree restore undoable |
+| A11 | P3 | Proposed | Let `DirectSyncPre` cancel a save, and add the missing events |
+| A12 | P3 | Proposed | Review default keys that shadow common user mappings |
+| A13 | P4 | Proposed | Widen lint, formatting and type-check coverage |
+| A14 | P4 | Proposed | Fix stale docs and remove stray files |
+| A15 | P4 | Proposed | Retire the positional root classifier |
+| A16 | P2 | Proposed | Let a listing made during a Git timeout be saved once Git recovers |
+| A17 | P3 | Proposed | Make listings opened with `buffers.reuse = false` readable and tidy |
+| A18 | P3 | Proposed | Make `:DirectGitStatus` and `:DirectGitDiff` use the current listing |
 
 ## Safety
 
@@ -173,6 +179,11 @@ The deep ignored-tree benchmark now covers a nested `node_modules`-style tree.
 Tests cover hung Git, cache reuse/invalidation, pruning, gitlinks and nested
 repositories; `make test` passes.
 
+*Checked at `9266805`:* the code matches. The queries are still waited on in
+the foreground, but each wait is now capped by `git.timeout_ms` (1000 ms by
+default), so a stuck Git freezes the editor for at most a few of those steps.
+After a timeout, saving that listing is refused; see A16.
+
 **Review at task start.** Since `e517c21` (#97), `ignore_snapshot` starts
 `rev-parse --show-prefix` and both `git ls-files` inventories at the same time
 after the repository check, instead of one after another.
@@ -241,6 +252,42 @@ sure the replacement handles this case too.
 
 **Tests.** A repository with a `chmod 000` subfolder still lists, with a
 warning. On Windows, skip the test or use an equivalent ACL.
+
+### A16 — A listing made during a Git timeout can never be saved (P2)
+
+**Problem.** When a Git-ignore query times out, `capture_filter` and
+`filtered_paths` (`lua/direct/buffer/listing.lua`) set `git_timeout = true`
+and store the error on the listing's directory snapshot. At save time,
+`sync_locked` (`lua/direct/buffer/sync.lua`, around line 160) sees that flag
+and refuses, reusing the stored error. It doesn't query Git again, so the
+save is refused even after Git is fast again.
+
+The ways out are blocked too. `gi` refuses with unsaved edits
+(`lua/direct/buffer/buffer.lua`, around line 778), and re-listing refuses
+with unsaved edits. So edits made in a listing that was created during a
+single slow Git call can only be thrown away with `:DirectList!`.
+
+The timeout warning is also shown once per repository per session
+(`warn_ignore_timeout` in `lua/direct/git.lua`). A later timeout lists
+ignored entries silently, so the user can't tell the listing is unfiltered.
+
+**Change.**
+
+- At save time, retry the Git-ignore query for a timed-out snapshot. If it now
+  succeeds, check the edits against its result: refuse only if a row the user
+  edited, deleted or moved is ignored and would have been hidden, or if the
+  retry also times out.
+- Let `gi` turn filtering off in a modified listing when the listing is
+  already unfiltered because of a timeout, since that doesn't change what's
+  shown.
+- Mark a timed-out listing visibly (for example in the status line text or a
+  first virtual line) for as long as it's unfiltered, instead of relying on a
+  one-time warning.
+
+**Tests.** With a fake `git` that hangs once and then works: list, edit,
+save. The save succeeds. If it hangs every time, the save is refused with a
+message saying how to continue, and `gi` works. A second timed-out listing in
+the same session is still marked as unfiltered.
 
 ### A7 — Trash retention walks the whole trash after every save (P3)
 
@@ -331,9 +378,62 @@ Users can now remap them, but they may not realise what's being hidden.
 the clash in the README's key table with a one-line `mappings` example
 showing how to move them. Note any change in the changelog.
 
+### A17 — Listings opened with `buffers.reuse = false` are hard to tell apart (P3)
+
+**Problem.** With `buffers = { reuse = false }`, `M.Buffer`
+(`lua/direct/buffer/buffer.lua`) names each new listing
+`direct://listing/<sha256 of the path>/<bufnr>`. Buffer lists, tab lines and
+status lines then show a 64-character hash instead of the directory. Every
+`<CR>` into a folder and every `-` back up also creates another listed buffer
+(`bufhidden = 'hide'`), and none of them are cleaned up. Going down and back
+up leaves two listings of the same directory, and unsaved edits stay in the
+older, hidden one.
+
+**Change.**
+
+- Name these buffers so the directory is readable, for example
+  `direct://<path>#<n>`, keeping them unique.
+- When `open_in = 'current'`, remove the listing being left if it has no
+  unsaved edits, as opening a file already does.
+- Before creating a second listing for a directory, say if an existing one
+  has unsaved edits, and offer to switch to it.
+- Document the trade-offs of `reuse = false` in `doc/direct.txt`.
+
+**Tests.** With `reuse = false`, `:ls` shows the directory path. Going down
+and back up five times leaves no extra clean listings behind. A hidden listing
+with unsaved edits is mentioned when the same directory is opened again.
+
+### A18 — `:DirectGitStatus` and `:DirectGitDiff` ignore the current listing (P3)
+
+**Problem.** Without `--dir`, both commands open a listing of the working
+directory (`open_listing` in `lua/direct/git_commands.lua`), even when run from
+a listing of another directory. `gd` calls `require('direct').git_diff()` and
+toggles the current listing, so the key and the command behave differently
+in the same buffer. Neither command has completion for its options or for
+`--dir`, and `--dir` paths are resolved against the working directory.
+
+**Change.**
+
+- Inside a listing, default `--dir` to that listing's directory. Keep the
+  working directory as the default elsewhere.
+- Add completion for `--ref` (branches and tags), `--dir` (directories) and
+  `--include-uncommitted`.
+- Update `doc/direct.txt` (`direct.vim-git-view` and the command entries).
+
+**Tests.** `:DirectGitDiff` in a listing of `src/` filters that listing,
+the same as `gd`. Outside a listing it uses the working directory.
+Completion returns the options and a branch name.
+
 ## Project maturity
 
 ### A4 — The tagged release lags the README (P2)
+
+**Status: PARTLY DONE** (checked at `9266805`). `CHANGELOG.md`'s Unreleased
+section now covers the paste fix, the Git-ignore work and the Git views. Still
+missing: Neovim 0.11.7 support, collapsed directory chains, the
+`vim.fn.confirm` fix, removal of LuaRocks packaging and the `buffers` option.
+There is still no tag after `v0.1.0`, so `version = '*'` users get none of
+this.
 
 **Problem.** The README tells lazy.nvim users to set `version = '*'`, which
 installs `v0.1.0`. That tag is at `3f1236f`, before Neovim 0.11 support, the
@@ -393,8 +493,11 @@ tests into identity-based ones).
 
 ## Suggested order
 
-1. A1 on its own, first.
-2. A2 and A3 together, since they touch the same scan, then A5 and A6.
-3. A4 as soon as A1 is merged, so users on `version = '*'` get the fixes.
+A1–A3 are done.
+
+1. A16, since it follows on directly from the Git-ignore work.
+2. A4: finish the changelog and tag `v0.2.0`, so users on `version = '*'`
+   get A1–A3.
+3. A5 and A6.
 4. Everything else, in any order. A13's formatting-only commit is easiest
    when nothing else is changing `lua/`.
