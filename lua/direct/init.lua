@@ -48,6 +48,14 @@ local function guard(name)
   return false
 end
 
+local function refuse_modified_listing_paste()
+  local bufnr = vim.api.nvim_get_current_buf()
+  if not vim.bo[bufnr].modified then return false end
+  local reason = 'cannot paste from a listing with unsaved edits; sync or discard them first'
+  ui.notify('direct: ' .. reason, vim.log.levels.ERROR)
+  return true, reason
+end
+
 ---@param path string|nil
 ---@param options table|nil
 function M.list(path, options)
@@ -352,6 +360,8 @@ function M.paste(dir)
   if pending.refuse('paste') then return nil end
   if dir == nil or dir == '' then
     if not guard('DirectPaste') then return nil end
+    local refused, reason = refuse_modified_listing_paste()
+    if refused then return nil, reason end
     local b = buffer.restore()
     local destination, path_err = b:paste_destination()
     if destination == false then return true end
@@ -368,6 +378,8 @@ end
 function M.paste_as(name)
   if pending.refuse('paste') then return nil end
   if not guard('DirectPasteAs') then return nil end
+  local refused, reason = refuse_modified_listing_paste()
+  if refused then return nil, reason end
   local b = buffer.restore()
   local destination, path_err = b:paste_destination()
   if destination == false then return true end
@@ -441,8 +453,7 @@ function M.restore_git()
 
   local restore_command, command_err = git_status.worktree_restore_command(listing.root)
   if not restore_command then
-    ui.notify('direct: cannot prepare Git restore: ' .. tostring(command_err),
-      vim.log.levels.ERROR)
+    ui.notify('direct: cannot prepare Git restore: ' .. tostring(command_err), vim.log.levels.ERROR)
     return nil, command_err
   end
 

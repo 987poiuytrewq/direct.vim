@@ -338,9 +338,13 @@ is shared between Neovim instances. It is separate from Vim's registers.
 
 Pasting ~
 
-`p` and `P` paste into the directory under the cursor. On a file, they paste
-into the file's directory. |:DirectPaste| with a directory argument pastes
-there from any buffer, and |:DirectPasteAs| pastes under a new name.
+`p` and `P` are filesystem paste commands, not Vim's text put. They paste into
+the directory under the cursor. On a file, they paste into the file's
+directory. `p`, `P`, |:DirectPaste| without a directory, and |:DirectPasteAs|
+are refused while the listing has unsaved edits; sync or discard the edits
+first.
+|:DirectPaste| with a directory argument pastes there from any buffer without
+refreshing or changing the current listing.
 
 If an entry with the same name already exists, you are prompted for another
 name ("File already exists. Paste as:"). The prompt uses |vim.ui.input()|.
