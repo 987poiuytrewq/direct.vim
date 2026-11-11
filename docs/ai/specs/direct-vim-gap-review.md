@@ -1,6 +1,6 @@
 # Spec: direct.vim improvements, second review
 
-**Status:** A1–A10 and A16–A21 are complete; A11–A15 and A22–A23 remain proposed.
+**Status:** A1–A10, A16–A22 are complete; A11–A15, A23 and A24 are proposed.
 This replaces the first gap review, whose tasks (S1–S6, R1–R3, F1–F6, M1–M6)
 have all landed on `master`.
 
@@ -10,9 +10,10 @@ been reproduced in a running Neovim. Each task's first step is to write a
 failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
-**Last checked:** `origin/master` at `857641f` (11 November 2026). That review
-added A22 and A23. A7–A9 are complete in #113–#115; A10 is complete in #116.
-A22 is addressed in this PR; A23 and A11–A15 remain proposed.
+**Last checked:** `origin/master` at `5cc0377` (11 November 2026). That check
+read #116 (Git restore backups) and #117 (changelog correction and CI check),
+and confirmed A10 and A22 in the code. It added A24: a Git-restore backup can't
+be put back with `:DirectTrash restore`. A11–A15 and A23 are unchanged.
 
 ## Conventions
 
@@ -76,6 +77,7 @@ Checked by reading the code at `d72b7ea`:
 | A21 | P3 | Complete | Link paste steps to the entries they created when dropping history |
 | A22 | P4 | Complete | Move unreleased trash changes out of the 0.2.1 changelog section |
 | A23 | P3 | Proposed | Make trash completion cheap, and date recovered entries sensibly |
+| A24 | P3 | Proposed | Let a Git-restore backup be put back in one step |
 
 ## Safety
 
@@ -421,6 +423,11 @@ operation is not added to `u`/`:DirectUndo`. Tests cover a confirmed directory
 restore, backup contents for every changed tracked file, and the location
 notification.
 
+*Checked at `5cc0377`:* the code matches (`worktree_backups` in
+`lua/direct/init.lua`). Changed files, symlinks and folders are copied into the
+trash with metadata before Git runs, and a failure stops the restore and lists
+any copies already made. Putting a backup back is still awkward; see A24.
+
 **Problem.** `<leader>gr` / `:DirectGitRestore` asks first now, but the
 discarded worktree changes are gone for good. They aren't in direct.vim's
 history or the trash.
@@ -647,6 +654,13 @@ pull requests from editing published release sections; the `release` label is
 the explicit exception for release PRs. Verified that the current released
 section matches `git show v0.2.1:CHANGELOG.md`.
 
+*Checked at `5cc0377`:* the `[0.2.1]` section on `master` now matches
+`git show v0.2.1:CHANGELOG.md` exactly. The new CI step
+(`scripts/check_changelog_released.py`) compares every released section between
+the base branch and the pull request, and is skipped for PRs labelled
+`release`. It only runs on pull requests, so commits pushed straight to
+`master` aren't checked.
+
 **Problem.** `v0.2.1` is tagged at `06063c3`. #113–#116 landed after that, but
 each added its entry to the `[0.2.1]` section of `CHANGELOG.md` (trash
 retention, legacy trash metadata, trash-view usability and Git restore backup), not to
@@ -688,6 +702,31 @@ released section. After the move, `git show v0.2.1:CHANGELOG.md` and the
 **Tests.** Completion on a trash with a large folder entry doesn't measure
 sizes (count the calls) and writes nothing. A recovered entry whose file is
 two days old gets a deletion time about two days ago, marked as estimated.
+
+### A24 — A Git-restore backup can't be put back in one step (P3)
+
+**Problem.** #116 copies changed files into the trash before
+`:DirectGitRestore`, and the message says to restore them manually. But
+`trash.restore` (`lua/direct/trash.lua`) refuses when the destination exists,
+and after Git restores a file, its original path always exists again. So
+`:DirectTrash restore <id>`, and `r` / `<CR>` in the trash view, refuse for
+exactly these backups. The only ways back are restoring to another path with
+`:DirectTrash restore <id> <path>` and copying the file over by hand, or
+using the trash folder directly. The restore also still isn't in the undo
+history, so `u` can't reverse it.
+
+**Change.**
+
+- Record a Git restore as a history action whose undo moves the current file
+  into the trash and restores the backup to its place, without overwriting,
+  so `u` brings the worktree changes back. This was A10's original goal.
+- At least, mark these trash entries as Git-restore backups in their metadata,
+  and in the trash view offer to put one back by first moving the current file
+  into the trash (with a confirmation), so nothing is overwritten.
+
+**Tests.** Change a tracked file, `:DirectGitRestore` it, then `u` (or put
+the backup back from the trash view). The file has its changed content again,
+and the restored version is in the trash.
 
 ## Project maturity
 
@@ -767,5 +806,6 @@ A1–A4 and A16 were released in `v0.2.0`; A5–A6 and A17–A21 were released i
 A7–A10 are complete but not released.
 
 1. A23, which follows on from A8 and A9.
-2. A11–A15, in any order. A13's formatting-only commit is easiest
+2. A24, which finishes A10.
+3. A11–A15, in any order. A13's formatting-only commit is easiest
    when nothing else is changing `lua/`.
