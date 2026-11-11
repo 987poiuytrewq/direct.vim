@@ -22,6 +22,8 @@ DIRECTORIES = int(os.environ.get('BENCH_DIRECTORIES', '1000'))
 FILES_PER_KIND = int(os.environ.get('BENCH_FILES_PER_KIND', '10'))
 SAMPLES = int(os.environ.get('BENCH_SAMPLES', '5'))
 LAYOUT = os.environ.get('BENCH_LAYOUT', 'dirs')
+DEEP_LEVELS = int(os.environ.get('BENCH_DEEP_LEVELS', '5'))
+DEEP_BRANCHING = int(os.environ.get('BENCH_DEEP_BRANCHING', '5'))
 
 
 def git(root, *args, input_bytes=None):
@@ -134,10 +136,12 @@ def nvim_snapshot_median(root):
     lua_root = str(root).replace('\\', '\\\\').replace("'", "\\'")
     command = (
         "lua local git=require('direct.git'); local root='" + lua_root + "'; "
-        "local times={}; for i=1,7 do local start=vim.uv.hrtime(); "
-        "local snapshot,err=git.ignore_snapshot(root); assert(snapshot,err); "
+        "local start=vim.uv.hrtime(); local snapshot,err=git.ignore_snapshot(root); "
+        "assert(snapshot,err); local cold=(vim.uv.hrtime()-start)/1e6; "
+        "local times={}; for i=1,7 do start=vim.uv.hrtime(); "
+        "snapshot,err=git.ignore_snapshot(root); assert(snapshot,err); "
         "times[i]=(vim.uv.hrtime()-start)/1e6 end; table.sort(times); "
-        "print(string.format('SNAPSHOT_MEDIAN_MS=%.3f',times[4]))"
+        "print(string.format('SNAPSHOT_COLD_MS=%.3f SNAPSHOT_CACHED_MEDIAN_MS=%.3f',cold,times[4]))"
     )
     completed = subprocess.run(
         ['nvim', '--headless', '-u', 'NONE', '--cmd', f'set rtp^={REPO}',
@@ -148,8 +152,10 @@ def nvim_snapshot_median(root):
         check=True,
     )
     for line in completed.stdout.splitlines():
-        if line.startswith('SNAPSHOT_MEDIAN_MS='):
-            return float(line.split('=', 1)[1])
+        if line.startswith('SNAPSHOT_COLD_MS='):
+            values = line.split()
+            return (float(values[0].split('=', 1)[1]),
+                    float(values[1].split('=', 1)[1]))
     raise RuntimeError(completed.stdout)
 
 
@@ -199,6 +205,28 @@ def make_fixture(root):
         git(root, 'add', '.gitignore')
         return children, len(tracked)
 
+    if LAYOUT == 'deep':
+        tracked_name = 'tracked.txt'
+        (root / tracked_name).write_text('tracked\n')
+        tracked = [tracked_name]
+        node_modules = root / 'node_modules'
+        node_modules.mkdir()
+        pending = [(node_modules, 0)]
+        while pending:
+            directory, depth = pending.pop()
+            if depth >= DEEP_LEVELS:
+                (directory / 'fixture.js').write_text('// ignored fixture\n')
+                continue
+            for index in range(DEEP_BRANCHING):
+                child = directory / f'branch-{index:02d}'
+                child.mkdir()
+                pending.append((child, depth + 1))
+        subprocess.run(['git', '-C', str(root), 'add', '-f', '--', *tracked],
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+        (root / '.gitignore').write_text('node_modules/\n')
+        git(root, 'add', '.gitignore')
+        return [tracked_name, 'node_modules'], len(tracked)
+
     if LAYOUT != 'dirs':
         raise ValueError(f'unknown BENCH_LAYOUT: {LAYOUT}')
     for index in range(DIRECTORIES):
@@ -227,10 +255,10 @@ def main():
     fixture = Path(tempfile.mkdtemp(prefix='direct-ignore-bench-', dir=TMP))
     try:
         candidates, tracked_count = make_fixture(fixture)
-        directory_candidates = set(candidates) if LAYOUT == 'dirs' else set()
+        directory_candidates = set(candidates) if LAYOUT in ('dirs', 'deep') else set()
         expected = inventory_hidden(fixture)
         actual = candidate_hidden(fixture, candidates, directory_candidates,
-                                  no_index=LAYOUT == 'dirs')
+                                  no_index=LAYOUT in ('dirs', 'deep'))
         if actual != expected:
             missing = sorted(expected - actual)[:5]
             extra = sorted(actual - expected)[:5]
@@ -240,16 +268,22 @@ def main():
         parallel, parallel_samples = timed(
             lambda: full_snapshot_guarded_parallel(fixture))
         candidate, candidate_samples = timed(lambda: candidate_hidden(
-            fixture, candidates, directory_candidates, no_index=LAYOUT == 'dirs'))
+            fixture, candidates, directory_candidates, no_index=LAYOUT in ('dirs', 'deep')))
         nvim = nvim_snapshot_median(fixture)
         listed = nvim_list_median(fixture, respect_gitignore=True)
         unfiltered = nvim_list_median(fixture, respect_gitignore=False)
 
+        file_count = (DEEP_BRANCHING ** DEEP_LEVELS + 2 if LAYOUT == 'deep'
+                      else DIRECTORIES * FILES_PER_KIND * 2)
         print(f'fixture: layout={LAYOUT}, direct candidates={len(candidates)}, '
-              f'{DIRECTORIES * FILES_PER_KIND * 2} files, '
+              f'{file_count} files, '
               f'{tracked_count} tracked files, '
               f'{len(expected)} hidden direct entries')
-        print(f'current Neovim ignore_snapshot median (7 calls): {nvim:.2f} ms')
+        if LAYOUT == 'deep':
+            print(f'deep ignored tree: {DEEP_LEVELS} levels, branching={DEEP_BRANCHING}, '
+                  f'{sum(DEEP_BRANCHING ** level for level in range(1, DEEP_LEVELS + 1))} directories')
+        print(f'Neovim ignore_snapshot cold: {nvim[0]:.2f} ms; '
+              f'cached median (7 calls): {nvim[1]:.2f} ms')
         print(f'full Neovim Buffer:list median, Git status/icons disabled: '
               f'{listed[0]:.2f} ms ({listed[1]} rows, ignore on); '
               f'{unfiltered[0]:.2f} ms ({unfiltered[1]} rows, ignore off)')

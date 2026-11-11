@@ -19,6 +19,15 @@ local function contains(lines, value)
   return vim.tbl_contains(lines, value)
 end
 
+local function count_message(text, needle)
+  local count, start = 0, 1
+  while true do
+    local found = text:find(needle, start, true)
+    if not found then return count end
+    count, start = count + 1, found + #needle
+  end
+end
+
 local function row_of(lines, value)
   for row, line in ipairs(lines) do
     if line == value then return row end
@@ -367,6 +376,120 @@ H.describe('hidden and Git-ignore filtering', function()
     H.assert_eq(git_calls, 0, 'disabled Git-ignore filtering makes no Git calls')
   end)
 
+  H.it('falls back to an unfiltered listing when Git-ignore queries time out', function()
+    require('direct.config').setup({ map_default_keys = false, respect_gitignore = true,
+      git = { timeout_ms = 40 } })
+    local sb = H.sandbox()
+    local root = H.mkdir(sb.root, 'timed-out-ignore-repo')
+    H.mkfile(root, '.gitignore', '*.tmp\n')
+    H.mkfile(root, 'ignored.tmp', 'preserve')
+    H.mkfile(root, 'visible.txt', 'visible')
+    init_repo(root)
+
+    local original_system = vim.system
+    local timed_out_queries, timeout_values = 0, {}
+    vim.system = function(argv, options, on_exit)
+      if vim.tbl_contains(argv, 'ls-files') then
+        timed_out_queries = timed_out_queries + 1
+        return {
+          wait = function(_, timeout_ms)
+            timeout_values[#timeout_values + 1] = timeout_ms
+            return { code = 124, signal = 9, stdout = '', stderr = '' }
+          end,
+          kill = function() return true end,
+        }
+      end
+      return original_system(argv, options, on_exit)
+    end
+
+    H.capture_messages()
+    local started = vim.uv.hrtime()
+    local listing = require('direct').list(root)
+    local elapsed_ms = (vim.uv.hrtime() - started) / 1000000
+    H.assert_not_nil(listing, 'a Git-ignore timeout does not fail the listing')
+    H.assert_true(elapsed_ms < 500, 'the Git-ignore timeout is bounded')
+    H.assert_true(contains(H.buf_lines(), 'ignored.tmp'),
+      'entries stay visible when filtering timed out')
+    H.assert_true(contains(H.buf_lines(), 'visible.txt'), 'ordinary entries remain visible')
+    H.assert_eq(timeout_values, { 40, 40, 40 },
+      'all ignore inventory processes receive the configured timeout')
+    H.assert_true(timed_out_queries > 0, 'the fake Git inventory reached its timeout')
+    H.assert_notified('Git-ignore filtering timed out', vim.log.levels.WARN)
+
+    local warnings = count_message(H.messages(), 'Git-ignore filtering timed out')
+    require('direct').list(root, { discard = true })
+    H.assert_eq(count_message(H.messages(), 'Git-ignore filtering timed out'), warnings,
+      'repeated timeouts in one repository do not repeat the warning')
+    vim.system = original_system
+
+    vim.api.nvim_buf_set_lines(0, -1, -1, false, { 'new.txt' })
+    local ok, err = listing:sync()
+    H.assert_nil(ok, 'saving a listing captured without Git-ignore data is refused')
+    H.assert_true(tostring(err):find('timed out', 1, true) ~= nil,
+      'sync explains that the ignore snapshot timed out')
+    H.assert_false(H.exists(root, 'new.txt'), 'a timed-out filter cannot authorize filesystem changes')
+    H.assert_true(vim.bo.modified, "the user's listing edit remains available")
+  end)
+
+  H.it('does not scan ignored directory trees while looking for nested repositories', function()
+    require('direct.config').setup({ map_default_keys = false, respect_gitignore = true })
+    local sb = H.sandbox()
+    local root = H.mkdir(sb.root, 'pruned-ignore-repo')
+    H.mkfile(root, '.gitignore', 'ignored-heavy/\n')
+    local ignored = H.mkdir(root, 'ignored-heavy/level/deeper')
+    H.mkfile(ignored, 'file.txt', 'ignored')
+    local untracked = H.mkdir(root, 'untracked-heavy/level/deeper')
+    H.mkfile(untracked, 'file.txt', 'untracked')
+    H.mkfile(root, 'visible.txt', 'visible')
+    init_repo(root)
+
+    local original_scandir = vim.uv.fs_scandir
+    local entered_ignored = 0
+    vim.uv.fs_scandir = function(path, ...)
+      if path:sub(1, #root + 1) == root .. '/' and
+        (path:find('/ignored-heavy', 1, true) or path:find('/untracked-heavy', 1, true)) then
+        entered_ignored = entered_ignored + 1
+      end
+      return original_scandir(path, ...)
+    end
+    local listing = require('direct').list(root)
+    vim.uv.fs_scandir = original_scandir
+
+    H.assert_not_nil(listing, 'listing succeeds with an ignored directory tree')
+    H.assert_false(contains(H.buf_lines(), 'ignored-heavy/'), 'ignored tree remains filtered')
+    H.assert_true(contains(H.buf_lines(), 'untracked-heavy/'), 'ordinary untracked tree stays visible')
+    H.assert_eq(entered_ignored, 0, 'nested-repository discovery prunes ignored and untracked trees')
+  end)
+
+  H.it('skips unreadable nested-repository scan directories and warns once', function()
+    require('direct.config').setup({ map_default_keys = false, respect_gitignore = true })
+    local sb = H.sandbox()
+    local root = H.mkdir(sb.root, 'unreadable-scan-repo')
+    local unreadable = H.mkdir(root, 'unreadable')
+    H.mkfile(unreadable, 'tracked.txt', 'keep')
+    H.mkfile(root, 'visible.txt', 'visible')
+    init_repo(root)
+    git(root, 'add', '--all')
+
+    local original_scandir = vim.uv.fs_scandir
+    local unreadable_calls = 0
+    vim.uv.fs_scandir = function(path, ...)
+      if path == unreadable then
+        unreadable_calls = unreadable_calls + 1
+        return nil, 'EACCES: permission denied'
+      end
+      return original_scandir(path, ...)
+    end
+    H.capture_messages()
+    local listing = require('direct').list(root)
+    vim.uv.fs_scandir = original_scandir
+
+    H.assert_not_nil(listing, 'one unreadable child does not fail the listing')
+    H.assert_true(contains(H.buf_lines(), 'visible.txt'), 'readable entries still list')
+    H.assert_eq(unreadable_calls, 1, 'the unreadable directory is skipped once')
+    H.assert_notified(unreadable, vim.log.levels.WARN)
+  end)
+
   H.it('uses a nested repository own rules instead of its parent repository rules', function()
     require('direct.config').setup({ map_default_keys = false, respect_gitignore = true })
     local sb = H.sandbox()
@@ -556,10 +679,14 @@ H.describe('hidden and Git-ignore filtering', function()
     local outer = H.mkdir(root, 'outer')
     local middle = H.mkdir(outer, 'middle')
     local nested = H.mkdir(middle, 'nested-repo')
+    H.mkfile(outer, 'tracked.txt', 'outer')
+    H.mkfile(middle, 'tracked.txt', 'middle')
     H.mkfile(nested, '.gitignore', '*.tmp\n')
     H.mkfile(nested, 'hidden.tmp', 'preserve')
     H.mkfile(root, '.gitignore', '*.log\n')
     init_repo(root)
+    git(root, 'add', 'outer/tracked.txt', 'outer/middle/tracked.txt')
+    git(root, 'commit', '-q', '-m', 'track the path to the nested repository')
     init_repo(nested)
     require('direct').list(root)
     local state = require('direct.buffer.buffer')._state_for_test(vim.api.nvim_get_current_buf())

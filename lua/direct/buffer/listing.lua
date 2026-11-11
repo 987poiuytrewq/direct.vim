@@ -95,11 +95,20 @@ local function capture_filter(root, show_hidden_override, respect_gitignore_over
   }
   if snapshot.respect_gitignore then
     local git_snapshot, git_err = git.ignore_snapshot(root)
-    if git_err then return nil, git_err end
+    if git_err then
+      if not git.is_timeout(git_err) then return nil, git_err end
+      snapshot.git_timeout = true
+      snapshot.git_timeout_error = git_err
+      git.warn_ignore_timeout(root, git_err)
+    end
     snapshot.git = git_snapshot
     -- Preserve the distinction between an enabled filter outside a repository
     -- and a snapshot that was never checked. Sync must validate either context.
     snapshot.git_repo = git_snapshot ~= nil
+    if git_snapshot and #(git_snapshot.unreadable or {}) > 0 then
+      require('direct.ui').notify('direct: skipping unreadable directories during Git-ignore scan: '
+        .. table.concat(git_snapshot.unreadable, ', '), vim.log.levels.WARN)
+    end
   end
   return snapshot
 end
@@ -117,8 +126,14 @@ local function filtered_paths(root, paths, snapshot, git_inventory_cache)
   end
   if snapshot.respect_gitignore and snapshot.git then
     local ignored, err = git.ignored_paths(snapshot.git, paths, git_inventory_cache)
-    if not ignored then return nil, err end
-    vim.list_extend(matches, ignored)
+    if not ignored then
+      if not git.is_timeout(err) then return nil, err end
+      snapshot.git_timeout = true
+      snapshot.git_timeout_error = err
+      git.warn_ignore_timeout(snapshot.path, err)
+    else
+      vim.list_extend(matches, ignored)
+    end
   end
   return matches
 end

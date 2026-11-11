@@ -221,7 +221,7 @@ require('direct').setup({
   },
   git = {
     enabled = true,       -- show Git status when its background query completes
-    timeout_ms = 1000,    -- background status-query deadline
+    timeout_ms = 1000,    -- Git status and ignore-query deadline
     show_symbols = true,  -- right-aligned status symbols
     show_deleted = true,  -- show rows for deleted tracked files
     symbols = {           -- one display cell each, or '' to hide
@@ -239,8 +239,11 @@ require('direct').setup({
 
 Git status is read in the background so it doesn't delay the initial listing.
 When the query completes, Direct adds the status decorations and deleted rows.
-`git.timeout_ms` sets the deadline in milliseconds; a timed-out query leaves
-the listing usable without status and reports one warning per repository.
+`git.timeout_ms` sets the deadline in milliseconds. A timed-out status query
+leaves the listing usable without status; a timed-out Git-ignore query leaves
+ignored entries visible for that listing. Both report one warning per repository.
+Saving a listing whose ignore snapshot timed out is refused until it is listed
+again, so an incomplete filter cannot authorize filesystem changes.
 
 You can call `setup()` more than once. Each call replaces the previous options,
 and unknown or invalid options are reported as errors instead of being silently
@@ -344,7 +347,10 @@ restore them.
   staged-only changes alone.
 - `gi` toggles ignore filtering. Filtering uses Git itself, so nested
   `.gitignore` files, `.git/info/exclude` and your global excludes file all
-  apply. Tracked files are never hidden.
+  apply. Tracked files are never hidden. Ignore queries use `git.timeout_ms`;
+  a timeout leaves entries visible for that listing and warns once, while saves
+  are refused until a complete snapshot is available. Unreadable subfolders are
+  skipped with a warning during nested-repository discovery.
 
 ### Run commands on entries
 

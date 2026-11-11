@@ -491,16 +491,21 @@ The filter asks Git itself, so it follows root and nested `.gitignore` files,
 negations, anchoring, escaped patterns, `.git/info/exclude` and your global
 excludes file. Tracked files are never hidden, and neither are directories
 that contain tracked files. Outside a repository the filter has no effect.
+Nested-repository discovery skips ignored and untracked folders; unreadable
+folders are skipped with a warning naming them.
 
-Git must be installed when the filter is on. If an ignore query fails inside a
-repository, the listing fails rather than guessing.
+Git must be installed when the filter is on. Ignore queries use
+|direct-git.timeout_ms|. If one times out, the listing succeeds with Git-ignore
+filtering omitted and a warning; ignored entries remain visible. Other query
+errors still fail the listing rather than guessing.
 
 If the ignore rules or the set of tracked files change after a directory is
 listed, saving is refused before anything changes. List the directory again to
-pick up the new rules. To detect changes, direct.vim currently walks the whole
-repository looking for ignore files, so very large repositories take longer to
-list and save. A change in a nested repository's ignore file can require a
-re-list even when it doesn't affect the current listing.
+pick up the new rules. A timed-out list also cannot be saved until a complete
+snapshot is captured. Unchanged snapshots are cached by repository and scope;
+index, ignore-source, and relevant directory metadata changes invalidate them.
+A change in a nested repository's ignore file can require a re-list even when it
+doesn't affect the current listing.
 
 ==============================================================================
 9. Running commands                                           *direct.vim-run*
@@ -745,10 +750,10 @@ git.enabled             boolean (default: `true`)
 
                                                        *direct-git.timeout_ms*
 git.timeout_ms           positive integer (default: `1000`)
-    Maximum time in milliseconds for the background Git status query. Listings
-    appear immediately without waiting. When the query completes, status
-    decorations and deleted rows are applied. If it times out, the listing
-    remains usable without status and Direct reports one warning per repository.
+    Maximum time in milliseconds for Git status and Git-ignore queries. Status
+    runs in the background; a timeout leaves the listing usable without status.
+    A timed-out ignore query leaves ignored entries visible for that listing,
+    warns once per repository, and prevents saving until the listing is refreshed.
 
                                                      *direct-git.show_symbols*
 git.show_symbols        boolean (default: `true`)

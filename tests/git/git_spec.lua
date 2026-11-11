@@ -109,8 +109,8 @@ H.describe('Git status display', function()
           output = root .. '\n'
         elseif arg == '--show-prefix' then
           output = ''
-        elseif arg == '--cached' then
-          output = 'tracked.txt\0'
+        elseif arg == '--stage' then
+          output = '100644 0123456789012345678901234567890123456789 0\ttracked.txt\0'
         end
       end
       return {
@@ -126,10 +126,70 @@ H.describe('Git status display', function()
     H.assert_true(ok, tostring(snapshot))
     H.assert_not_nil(snapshot, 'ignore snapshot is returned')
     H.assert_nil(snapshot_err, 'ignore snapshot has no error')
-    H.assert_eq(#started, 4, 'root, prefix, tracked, and ignored queries are launched')
-    H.assert_eq(starts_at_wait, { 1, 4, 4, 4 },
-      'repo guard finishes first, then prefix and both inventories start before any is awaited')
+    H.assert_eq(#started, 6,
+      'root, prefix, three inventories, and effective excludes configuration are queried')
+    H.assert_eq(starts_at_wait, { 1, 5, 5, 5, 5, 6 },
+      'repo guard finishes first, then ignore queries start before any inventory is awaited')
     H.assert_true(snapshot.tracked['tracked.txt'], 'tracked index data is retained')
+  end)
+
+  H.it('reuses an unchanged ignore snapshot and invalidates it when ignore rules change', function()
+    local sb = H.sandbox()
+    local root = H.mkdir(sb.root, 'cached-ignore-snapshot')
+    H.mkfile(root, '.gitignore', '*.tmp\n')
+    H.mkfile(root, 'visible.txt', 'visible')
+    init_repo(root)
+
+    local original_system = vim.system
+    local inventory_calls = 0
+    vim.system = function(argv, ...)
+      if vim.tbl_contains(argv, 'ls-files') then inventory_calls = inventory_calls + 1 end
+      return original_system(argv, ...)
+    end
+    local first = require('direct').list(root)
+    local calls_after_first = inventory_calls
+    local second = require('direct').list(root, { discard = true })
+    H.assert_not_nil(first, 'initial snapshot is captured')
+    H.assert_not_nil(second, 'cached snapshot is returned')
+    H.assert_eq(inventory_calls, calls_after_first,
+      'an unchanged second query does not rerun Git inventories')
+
+    H.mkfile(root, '.gitignore', '*.txt\n')
+    local refreshed = require('direct').list(root, { discard = true })
+    H.assert_not_nil(refreshed, 'changed ignore rules produce a new snapshot')
+    H.assert_true(inventory_calls > calls_after_first,
+      'changed ignore-file metadata invalidates the cache')
+    H.assert_false(vim.tbl_contains(H.buf_lines(), 'visible.txt'),
+      'the refreshed listing reflects the new ignore rules')
+
+    local calls_after_ignore_change = inventory_calls
+    H.mkfile(root, 'indexed.txt', 'tracked')
+    git(root, 'add', '-f', 'indexed.txt')
+    local reindexed = require('direct').list(root, { discard = true })
+    vim.system = original_system
+    H.assert_not_nil(reindexed, 'the snapshot survives an index update')
+    H.assert_true(inventory_calls > calls_after_ignore_change,
+      'index metadata changes invalidate the cache')
+    H.assert_true(vim.tbl_contains(H.buf_lines(), 'indexed.txt'),
+      'the refreshed listing retains the tracked ignored path')
+  end)
+
+  H.it('records initialized submodules from Git index gitlinks', function()
+    local sb = H.sandbox()
+    local root = H.mkdir(sb.root, 'gitlink-parent')
+    local submodule = H.mkdir(root, 'vendor/submodule')
+    H.mkfile(submodule, 'tracked.txt', 'inside')
+    init_repo(submodule)
+    git(submodule, 'add', '--all')
+    git(submodule, 'commit', '-q', '-m', 'nested base')
+    init_repo(root)
+    git(root, 'update-index', '--add', '--cacheinfo',
+      '160000,' .. git(submodule, 'rev-parse', 'HEAD') .. ',vendor/submodule')
+
+    local snapshot, err = git_status.ignore_snapshot(root)
+    H.assert_not_nil(snapshot, 'parent ignore snapshot succeeds: ' .. tostring(err))
+    H.assert_not_nil(snapshot.nested[submodule],
+      'an initialized gitlink is recorded as a nested repository')
   end)
 
   H.it('stops repository-scoped Git operations after the guard outside Git', function()

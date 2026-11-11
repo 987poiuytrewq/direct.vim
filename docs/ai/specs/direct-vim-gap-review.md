@@ -1,7 +1,7 @@
 # Spec: direct.vim improvements, second review
 
-**Status:** A1 is complete; A2–A15 remain proposed. This replaces the first gap
-review, whose tasks (S1–S6, R1–R3, F1–F6, M1–M6) have all landed on `master`.
+**Status:** A1–A3 are complete; A4–A15 remain proposed. This replaces the first
+gap review, whose tasks (S1–S6, R1–R3, F1–F6, M1–M6) have all landed on `master`.
 
 **Source:** a second static review of `origin/master` at `d72b7ea`
 (November 2026). As before, the findings come from reading the code; none has
@@ -10,7 +10,8 @@ failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
 **Update:** A2 was revised after `e517c21` (Git-ignore queries in parallel,
-merged in #97, `origin/master` at `67a3063`). The other tasks have not been
+merged in #97, `origin/master` at `67a3063`). A1 and the combined A2/A3
+follow-up are addressed by the first two focused PRs; A4–A15 have not been
 rechecked against commits after `d72b7ea`.
 
 ## Conventions
@@ -162,13 +163,23 @@ entry leaves the rest of the stack in place.
 
 ### A2 — Git-ignore filtering still blocks and walks the whole tree (P2)
 
-**What's improved.** Since `e517c21` (#97), `ignore_snapshot` starts
+**Status: COMPLETE.** Git-ignore Git processes now use `git.timeout_ms`; a timed
+out list falls back to showing ignored entries with one warning, while sync
+refuses if its safety snapshot cannot be validated. Nested-repository discovery
+uses index gitlinks, traverses tracked folders, and prunes ignored and untracked
+folders. Unchanged, fully fingerprinted repository/scope snapshots are reused;
+index, ignore-source, directory, and Git environment changes invalidate them.
+The deep ignored-tree benchmark now covers a nested `node_modules`-style tree.
+Tests cover hung Git, cache reuse/invalidation, pruning, gitlinks and nested
+repositories; `make test` passes.
+
+**Review at task start.** Since `e517c21` (#97), `ignore_snapshot` starts
 `rev-parse --show-prefix` and both `git ls-files` inventories at the same time
 after the repository check, instead of one after another.
 `docs/performance/ignore-snapshot-approaches.md` measures the snapshot about
 28% faster on its 20,000-file fixtures (for example 72 → 52 ms).
 
-**What's left.** `respect_gitignore` is on by default. Every listing calls
+**Gaps addressed by this task.** `respect_gitignore` is on by default. Every listing calls
 `git.ignore_snapshot` (`lua/direct/buffer/listing.lua`), and every save
 re-checks it (`current_repo_state` in `lua/direct/git.lua`). Both still:
 
@@ -212,6 +223,11 @@ entered. Nested repositories and submodules are still found, and a second
 listing of an unchanged repository doesn't re-run the inventories.
 
 ### A3 — One unreadable subfolder fails the whole listing (P2)
+
+**Status: COMPLETE.** Unreadable directories encountered during nested-repository
+discovery are skipped, collected into one warning for the listing, and included
+in the cache fingerprint so permission changes invalidate cached state. A
+regression test injects an `EACCES` scan failure and confirms other entries list.
 
 **Problem.** `nested_repo_roots` (`lua/direct/git.lua`) returns an error when
 `fs_scandir` fails on any directory below the listed root. `ignore_snapshot`

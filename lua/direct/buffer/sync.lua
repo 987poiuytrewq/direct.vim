@@ -156,8 +156,13 @@ local function sync_locked(self, options)
   local checked_git = {}
   for _, directory_snapshot in ipairs(state.directory_snapshots or {}) do
     if directory_snapshot.respect_gitignore then
-      local matches, git_err = git.ignore_snapshot_matches(
-        directory_snapshot.git, directory_snapshot.path, checked_git)
+      local matches, git_err
+      if directory_snapshot.git_timeout then
+        git_err = directory_snapshot.git_timeout_error
+      else
+        matches, git_err = git.ignore_snapshot_matches(
+          directory_snapshot.git, directory_snapshot.path, checked_git)
+      end
       if matches ~= true then
         vim.bo[bufnr].modified = true
         local reason = matches == false and git_err
