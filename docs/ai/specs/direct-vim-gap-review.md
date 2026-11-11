@@ -1,6 +1,6 @@
 # Spec: direct.vim improvements, second review
 
-**Status:** A1–A4 and A16 are complete; A5–A15 and A17–A18 remain proposed.
+**Status:** A1–A5 and A16 are complete; A6–A15 and A17–A18 remain proposed.
 This replaces the first gap review, whose tasks (S1–S6, R1–R3, F1–F6, M1–M6)
 have all landed on `master`.
 
@@ -13,7 +13,8 @@ reproduced and drop the task.
 **Last checked:** `origin/master` at `3d7e746` (11 November 2026). That check
 read #101 (saves after Git-ignore timeouts) and #102 (the `v0.2.0` release),
 confirmed A16 in the code, and confirmed the `v0.2.0` tag and GitHub release
-are published. It found no new tasks. A5–A15 and A17–A18 are unchanged.
+are published. It found no new tasks. A5–A15 and A17–A18 are unchanged; A5 is
+now complete in this PR.
 
 ## Conventions
 
@@ -58,7 +59,7 @@ Checked by reading the code at `d72b7ea`:
 | A2 | P2 | Complete | Stop Git-ignore filtering from blocking, and from walking the whole tree |
 | A3 | P2 | Complete | Don't fail the whole listing when one subfolder can't be read |
 | A4 | P2 | Complete | Release what the README documents |
-| A5 | P2 | Proposed | Let a save continue after unrelated changes on disk, without losing edits |
+| A5 | P2 | Complete | Let a save continue after unrelated changes on disk, without losing edits |
 | A6 | P2 | Proposed | Keep forced trash operations from leaving undo history stuck |
 | A7 | P3 | Proposed | Stop trash retention from walking the whole trash on every save |
 | A8 | P3 | Proposed | Fill in metadata for trash entries that don't have it |
@@ -114,6 +115,13 @@ thrown away.
 edit, and reports the refusal. A paste in a clean listing works as now.
 
 ### A5 — A save is refused after any change on disk (P2)
+
+**Status: COMPLETE.** Saves now reconcile unrelated disk additions, removals
+and replacements, then re-list the current contents. Edits still refuse if an
+edited source is missing or has changed identity, or if a requested destination
+became occupied. Refusal messages name the path and give the next step. Tests
+cover unrelated external creation/deletion, a replaced source and a colliding
+destination; `make test` passes.
 
 **Problem.** `classify_identity` (`lua/direct/buffer/sync_plan.lua`) refuses
 the whole save with "directory changed on disk since it was listed" if any

@@ -117,26 +117,74 @@ H.describe('sync: mixed root edits', function()
     H.assert_eq(vim.fn.readfile(vim.fs.joinpath(ws, 'old.txt')), { 'original contents' })
   end)
 
-  H.it('refuses a visible root-directory change made after listing', function()
+  H.it('saves a rename after an unrelated root entry appears on disk', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkfile(ws, 'old.txt', { 'original' })
+    H.mkfile(ws, 'untouched.txt', { 'unchanged' })
+    local listing = buffer.list(ws)
+    H.mkfile(ws, 'external.txt', { 'external' })
+    vim.fn.delete(vim.fs.joinpath(ws, 'untouched.txt'))
+    vim.api.nvim_buf_set_text(0, 0, 0, 0, #('old.txt'), { 'renamed.txt' })
+
+    local ok, err = listing:sync()
+
+    H.assert_true(ok, 'unrelated external entries do not block a safe rename: ' .. tostring(err))
+    H.assert_nil(vim.uv.fs_stat(vim.fs.joinpath(ws, 'old.txt')), 'the source is renamed')
+    H.assert_eq(vim.fn.readfile(vim.fs.joinpath(ws, 'renamed.txt')), { 'original' },
+      'the original file contents follow the requested rename')
+    H.assert_eq(vim.fn.readfile(vim.fs.joinpath(ws, 'external.txt')), { 'external' },
+      'the unrelated external creation remains untouched')
+    H.assert_nil(vim.uv.fs_stat(vim.fs.joinpath(ws, 'untouched.txt')),
+      'the unrelated external deletion is reconciled by the final re-list')
+    H.assert_false(vim.bo.modified, 'the listing refreshes after the save')
+  end)
+
+  H.it('refuses a rename when its source is replaced on disk', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
     H.mkfile(ws, 'old.txt', { 'original' })
     local listing = buffer.list(ws)
-    H.mkfile(ws, 'external.txt', { 'external' })
     vim.api.nvim_buf_set_text(0, 0, 0, 0, #('old.txt'), { 'renamed.txt' })
+    vim.fn.delete(vim.fs.joinpath(ws, 'old.txt'))
+    H.mkfile(ws, 'old.txt', { 'external replacement' })
 
     local ok, reason = listing:sync()
 
-    H.assert_nil(ok, 'a stale root snapshot refuses the entire save')
-    H.assert_true(tostring(reason):find('changed on disk since it was listed', 1, true) ~= nil,
+    H.assert_nil(ok, 'a changed edited source remains a conflict')
+    H.assert_true(tostring(reason):find('old.txt', 1, true) ~= nil, tostring(reason))
+    H.assert_true(tostring(reason):find('re-list this directory', 1, true) ~= nil,
+      'the refusal explains how to recover')
+    H.assert_eq(vim.fn.readfile(vim.fs.joinpath(ws, 'old.txt')), { 'external replacement' },
+      'the external replacement remains untouched')
+    H.assert_nil(vim.uv.fs_stat(vim.fs.joinpath(ws, 'renamed.txt')),
+      'the requested rename does not run')
+    H.assert_true(vim.bo.modified, 'the requested edit remains available')
+  end)
+
+  H.it('refuses a rename when an external entry takes its destination name', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkfile(ws, 'old.txt', { 'original' })
+    local listing = buffer.list(ws)
+    vim.api.nvim_buf_set_text(0, 0, 0, 0, #('old.txt'), { 'renamed.txt' })
+    H.mkfile(ws, 'renamed.txt', { 'external destination' })
+
+    local ok, reason = listing:sync()
+
+    H.assert_nil(ok, 'a newly occupied rename destination is refused')
+    H.assert_true(tostring(reason):find('destination already exists', 1, true) ~= nil,
       tostring(reason))
+    H.assert_true(tostring(reason):find('choose another name', 1, true) ~= nil,
+      'the refusal offers a safe next step: ' .. tostring(reason))
     H.assert_eq(vim.fn.readfile(vim.fs.joinpath(ws, 'old.txt')), { 'original' },
-      'the intended rename is not applied')
-    H.assert_eq(vim.fn.readfile(vim.fs.joinpath(ws, 'external.txt')), { 'external' },
-      'the external entry is untouched')
-    H.assert_nil(vim.uv.fs_stat(vim.fs.joinpath(ws, 'renamed.txt')))
-    H.assert_true(vim.bo.modified, 'the intended edit remains for review')
+      'the rename source remains untouched')
+    H.assert_eq(vim.fn.readfile(vim.fs.joinpath(ws, 'renamed.txt')), { 'external destination' },
+      'the external target remains untouched')
+    H.assert_true(vim.bo.modified, 'the requested edit remains available')
   end)
 
   H.it('combines mixed root edits with a rename inside an expanded directory', function()
