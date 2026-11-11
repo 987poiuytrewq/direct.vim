@@ -1,6 +1,6 @@
 # Spec: direct.vim improvements, second review
 
-**Status:** A1–A8 and A16–A21 are complete; A9–A15 remain proposed.
+**Status:** A1–A9 and A16–A21 are complete; A10–A15 remain proposed.
 This replaces the first gap review, whose tasks (S1–S6, R1–R3, F1–F6, M1–M6)
 have all landed on `master`.
 
@@ -10,9 +10,10 @@ been reproduced in a running Neovim. Each task's first step is to write a
 failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
-**Last checked:** `origin/master` at `1089849` (11 November 2026). That check
-verified the `v0.2.1` release and found no new task IDs. A7 is complete in
-#113; A8 is addressed in this PR. A9–A15 remain proposed.
+**Last checked:** `origin/master` at `2ccbe80` (11 November 2026). That check
+read #114 (legacy trash metadata recovery) and found no new task IDs. A7 is
+complete in #113; A8 is complete in #114. A9 is addressed in this PR; A10–A15
+remain proposed.
 
 ## Conventions
 
@@ -61,7 +62,7 @@ Checked by reading the code at `d72b7ea`:
 | A6 | P2 | Complete | Keep forced trash operations from leaving undo history stuck |
 | A7 | P3 | Complete | Stop trash retention from walking the whole trash on every save |
 | A8 | P3 | Complete | Fill in metadata for trash entries that don't have it |
-| A9 | P3 | Proposed | Make `:DirectTrash` easier to use |
+| A9 | P3 | Complete | Make `:DirectTrash` easier to use |
 | A10 | P3 | Proposed | Make Git worktree restore undoable |
 | A11 | P3 | Proposed | Let `DirectSyncPre` cancel a save, and add the missing events |
 | A12 | P3 | Proposed | Review default keys that shadow common user mappings |
@@ -375,6 +376,12 @@ its original path, and restores without one being typed.
 
 ### A9 — `:DirectTrash` is hard to use (P3)
 
+**Status: COMPLETE.** The trash table now aligns columns by display width.
+`:DirectTrash` completes `restore`/`empty` and current trash IDs. In the
+read-only view, `r` and `<CR>` confirm and restore the selected entry, then
+refresh the view; `q` closes it. Tests cover command completion, alignment,
+confirmed restore and view refresh/close.
+
 **Problem.** The view (`trash.show`) is tab-separated text that isn't lined
 up. Restoring means typing a 64-character hex ID. `:DirectTrash` has no
 completion for its subcommands or IDs (`plugin/direct.lua`), and the view has
@@ -682,5 +689,5 @@ tests into identity-based ones).
 A1–A4 and A16 were released in `v0.2.0`; A5–A6 and A17–A21 were released in
 `v0.2.1`.
 
-1. A9–A15, in any order. A13's formatting-only commit is easiest
+1. A10–A15, in any order. A13's formatting-only commit is easiest
    when nothing else is changing `lua/`.

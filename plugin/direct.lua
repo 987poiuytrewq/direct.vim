@@ -183,7 +183,14 @@ vim.api.nvim_create_user_command('DirectTrash', function(args)
     require('direct.ui').notify(
       'direct: usage: :DirectTrash [restore {id} [path] | empty]', vim.log.levels.ERROR)
   end
-end, { nargs = '*', bang = true, desc = 'direct: list and manage trashed entries' })
+end, {
+  nargs = '*',
+  bang = true,
+  complete = function(arg_lead, cmdline, cursor_pos)
+    return require('direct.trash').complete(arg_lead, cmdline, cursor_pos)
+  end,
+  desc = 'direct: list and manage trashed entries',
+})
 
 vim.api.nvim_create_user_command('DirectYank', function(args)
   require('direct').yank(args.line1, args.line2)

@@ -84,6 +84,71 @@ H.describe('trash management', function()
       'the restore subcommand restores the empty entry')
   end)
 
+  H.it('aligns the trash view and completes its operations and entry IDs', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local source = H.mkfile(ws, 'complete-me.txt', { 'payload' })
+    local remove = action.Remove(source)
+    H.assert_true(remove['do'](), 'create a trash entry')
+    local entry = trash.entries()[1]
+    local view = trash.show()
+    local lines = H.buf_lines(view)
+    local complete = trash.complete
+    local function column_start(line, text)
+      local byte = line:find(text, 1, true)
+      return byte and vim.fn.strdisplaywidth(line:sub(1, byte - 1)) or nil
+    end
+
+    H.assert_false(lines[2]:find('\t', 1, true) ~= nil,
+      'the trash columns use spaces rather than raw tabs')
+    H.assert_eq(column_start(lines[2], 'DELETED'), column_start(lines[3], entry.deleted_at),
+      'the deletion-time column lines up')
+    H.assert_eq(column_start(lines[2], 'ORIGINAL PATH'), column_start(lines[3], source),
+      'the path column lines up')
+    H.assert_eq(complete('r', 'DirectTrash r', #'DirectTrash r'),
+      { 'restore' }, 'subcommand completion includes restore')
+    H.assert_eq(complete('', 'DirectTrash ', #'DirectTrash '),
+      { 'empty', 'restore' }, 'subcommand completion includes empty')
+    H.assert_eq(complete('', 'DirectTrash restore ', #'DirectTrash restore '),
+      { entry.id }, 'restore completion includes the current trash ID')
+  end)
+
+  H.it('restores the row under the cursor from the trash view after confirmation', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local source = H.mkfile(ws, 'view-restore.txt', { 'restore payload' })
+    local remove = action.Remove(source)
+    H.assert_true(remove['do'](), 'create a trash entry')
+    local entry = trash.entries()[1]
+    local view = trash.show()
+    local prompts = {}
+    local restore_confirm = H.stub(vim.fn, 'confirm', function(prompt, choices, default)
+      prompts[#prompts + 1] = prompt
+      return 1
+    end)
+
+    vim.api.nvim_win_set_cursor(0, { 3, 0 })
+    vim.api.nvim_feedkeys('r', 'x', false)
+    vim.wait(1000, function() return H.exists(ws, 'view-restore.txt') end)
+    restore_confirm()
+
+    H.assert_eq(vim.fn.readfile(source), { 'restore payload' },
+      'the selected trash row is restored')
+    H.assert_eq(#prompts, 1, 'view restore confirms before changing the filesystem')
+    H.assert_true(prompts[1]:find(entry.id, 1, true) ~= nil,
+      'the prompt names the selected trash entry')
+    local refreshed = vim.api.nvim_get_current_buf()
+    H.assert_true(refreshed ~= view, 'the view is refreshed after a successful restore')
+    H.assert_true(table.concat(H.buf_lines(refreshed), '\n'):find('(empty)', 1, true) ~= nil,
+      'the restored entry disappears from the refreshed view')
+
+    vim.api.nvim_feedkeys('q', 'x', false)
+    vim.wait(1000, function() return not vim.api.nvim_buf_is_valid(refreshed) end)
+    H.assert_false(vim.api.nvim_buf_is_valid(refreshed), 'q closes the trash view')
+  end)
+
   H.it('recovers missing trash metadata from history and restores without a path', function()
     clean_buffers()
     require('direct.config').setup({ trash_retention = false })

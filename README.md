@@ -457,10 +457,12 @@ distinguished from messages from Neovim and other plugins.
 | `:DirectRun {cmd}` / `:DirectGit {cmd}` | Run a command on the current entry       |
 
 `:DirectTrash` opens a read-only list. Use `:DirectTrash restore {id}` to
-restore an entry (or add a destination for old entries without metadata), and
-`:DirectTrash empty` to remove unreferenced entries. Prefix the command with
-`!` only to override history protection; an existing restore destination is
-never overwritten.
+restore an entry (or add a destination for old entries with no matching
+history), and `:DirectTrash empty` to remove unreferenced entries. Command
+completion offers `restore`, `empty`, and trash IDs. In the view, `r` or `<CR>`
+restores the selected entry after confirmation; `q` closes it. Prefix a command
+with `!` only to override history protection; an existing restore destination
+is never overwritten.
 
 If a forced restore or empty would invalidate undo/redo steps that refer to the
 trash payload, Direct asks before proceeding and removes those records plus
