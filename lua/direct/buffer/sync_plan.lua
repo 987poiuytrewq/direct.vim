@@ -200,7 +200,8 @@ return function(deps)
             or not on_disk.identity
             or not fs.path_identities_match(original.identity, on_disk.identity) then
             return nil, 'directory changed on disk since it was listed: '
-              .. tostring(original.path) .. '; restore the entry or re-list this directory'
+              .. tostring(original.path)
+              .. '; restore the entry or use :DirectList! to discard the edit and redo it'
           end
         end
       end
@@ -235,7 +236,9 @@ return function(deps)
         local original, on_disk = original_at(path), expected_at(path)
         if original and on_disk and on_disk.line == line then
           if text_undo_mode then
-            return nil, 'root row identity is unavailable after text undo or redo; re-list this directory'
+            return nil, 'root row identity is unavailable after text undo or redo; '
+              .. 'Direct cannot safely identify this edit; restore the marked listing state '
+              .. 'or use :DirectList! to discard it and redo the change'
           end
           -- A same-text replacement can invalidate a root extmark. When the
           -- exact original path is still present, this is a no-op, not a
@@ -262,7 +265,9 @@ return function(deps)
     if text_undo_mode and #added > 0 then
       for _, original in ipairs(original_rows or {}) do
         if not original.deleted_kind and not seen_ids[original.id] then
-          return nil, 'root row identity is unavailable after text undo or redo; re-list this directory'
+          return nil, 'root row identity is unavailable after text undo or redo; '
+            .. 'Direct cannot safely identify this edit; restore the marked listing state '
+            .. 'or use :DirectList! to discard it and redo the change'
         end
       end
     end
@@ -424,7 +429,7 @@ return function(deps)
         local target_key = normalized(path)
         if fs.taken(path) and not (plan.vacated and plan.vacated[target_key]) then
           return nil, nil, 'destination already exists: ' .. path
-            .. '; choose another name or re-list the directory'
+            .. '; choose another name or use :DirectList! to discard and redo the edit'
         end
         if is_directory then
           create_dirs[target_key] = path

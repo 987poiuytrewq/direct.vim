@@ -642,7 +642,7 @@ local function sync_locked(self, options)
       if not may_reuse_source then
         vim.bo[bufnr].modified = true
         local reason = 'destination already exists: ' .. destination
-          .. '; choose another name or re-list the directory'
+          .. '; choose another name or use :DirectList! to discard and redo the edit'
         ui.notify('Refusing to sync: ' .. reason .. '; nothing was changed.',
           vim.log.levels.ERROR)
         return nil, reason

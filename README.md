@@ -139,16 +139,21 @@ release notes. lazy.nvim users can select tagged releases with `version = '*'`.
   marked row that disappears is a delete. If a whole-line edit such as `cc` or
   `S` loses its mark, Direct treats it as delete-plus-create; the old entry is
   yanked and the new one is empty. If text undo/redo leaves an identity unclear,
-  the save is refused and the listing must be reviewed or re-listed.
-- **Unrelated disk changes are reconciled on save.** New or removed entries
-  that do not affect an edited row or destination are kept and shown after the
-  successful save. A changed or missing edit source is refused, as is an
-  external entry that occupies a requested destination.
+  the save is refused because Direct cannot safely identify the edit. Restore
+  the marked listing state, or use `:DirectList!` to discard the edits and redo
+  the change; re-listing alone will not preserve ambiguous edits.
+- **Unrelated disk changes are reconciled on save, including in expanded
+  folders.** Entries added, removed or replaced outside edited rows and
+  destinations are kept and shown after the successful save. A changed or
+  missing edit source is refused, as is an external entry that occupies a
+  requested destination.
 - **Unclear edits change nothing.** If direct.vim can't tell what you meant, or
   an edited source changed on disk or a destination is occupied, the save is
   refused, the filesystem is left alone, and your edits stay in the buffer.
-  The refusal names the conflicting path and suggests re-listing or choosing a
-  different destination.
+  The refusal names the conflicting path and suggests restoring it or choosing
+  another destination. If text undo/redo lost a row identity, use `:DirectList!`
+  to deliberately discard those edits, then redo them; a normal re-list cannot
+  preserve ambiguous edits.
 
 When a listing has unsaved edits, `u` / `<C-r>` (and `:DirectUndo` /
 `:DirectRedo`) undo or redo buffer text only. Once the listing is clean, they

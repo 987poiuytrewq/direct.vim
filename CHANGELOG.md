@@ -7,8 +7,10 @@ Notable changes to direct.vim are documented here. Versions follow
 
 ### Fixed
 
-- Allow saves to proceed after unrelated external additions/removals while
-  preserving conflicts on edited sources and requested destinations.
+- Allow saves to proceed after unrelated external entries are added, removed or
+  replaced at the root and in expanded directories, while preserving conflicts
+  on edited sources and requested destinations. Clarify recovery after text undo
+  loses a row identity.
 - Keep forced trash restore/empty from stranding undo history: confirm and drop
   only history records that depend on the affected payload.
 

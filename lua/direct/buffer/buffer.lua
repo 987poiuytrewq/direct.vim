@@ -341,12 +341,7 @@ local tree_planner = require('direct.buffer.tree')({
   strip_directory_marker = paths.strip_directory_marker,
   component_reason = component_reason,
   nested_path_reason = sync_plan.nested_path_reason,
-  same_lines = same_lines,
   entry_path = M.entry_path,
-  ignore_set = M.ignore_set,
-  read_with_snapshot = listing.read_with_snapshot,
-  filter_git_status_lines = filter_git_status_lines,
-  filter_git_diff_lines = filter_git_diff_lines,
   action_mod = action_mod,
   indent_size = indent_size,
 })

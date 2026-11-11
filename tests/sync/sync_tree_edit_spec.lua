@@ -48,6 +48,65 @@ H.describe('sync: editable expanded subtrees', function()
     H.assert_false(vim.bo.modified, 'successful subtree sync clears modified state')
   end)
 
+  H.it('saves an expanded child rename after unrelated sibling changes on disk', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local sub = H.mkdir(ws, 'sub')
+    H.mkfile(sub, 'rename.txt', { 'keep' })
+    H.mkfile(sub, 'remove.txt', { 'external delete' })
+    local listing = buffer.list(ws)
+    listing:expand(1)
+    local rename_row
+    for row, line in ipairs(H.buf_lines()) do
+      if line == '  rename.txt' then rename_row = row; break end
+    end
+    H.assert_not_nil(rename_row, 'rename source is visible in the expanded listing')
+    vim.api.nvim_buf_set_text(0, rename_row - 1, 2, rename_row - 1,
+      2 + #'rename.txt', { 'renamed.txt' })
+    H.mkfile(sub, 'external.txt', { 'external create' })
+    vim.fn.delete(vim.fs.joinpath(sub, 'remove.txt'))
+
+    local ok, err = listing:sync()
+
+    H.assert_true(ok, 'unrelated expanded-folder changes do not block sync: ' .. tostring(err))
+    H.assert_eq(vim.fn.readfile(vim.fs.joinpath(sub, 'renamed.txt')), { 'keep' },
+      'the requested rename is saved')
+    H.assert_eq(vim.fn.readfile(vim.fs.joinpath(sub, 'external.txt')), { 'external create' },
+      'the external addition is preserved')
+    H.assert_nil(vim.uv.fs_stat(vim.fs.joinpath(sub, 'remove.txt')),
+      'the unrelated external deletion is reconciled')
+    H.assert_false(vim.bo.modified, 'the listing refreshes after sync')
+  end)
+
+  H.it('refuses an expanded rename when its source changes on disk', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local sub = H.mkdir(ws, 'sub')
+    H.mkfile(sub, 'rename.txt', { 'original' })
+    local replacement = H.mkdir(sb.root, 'external-replacement')
+    H.mkfile(replacement, 'replacement.txt', { 'replacement' })
+    local listing = buffer.list(ws)
+    listing:expand(1)
+    vim.api.nvim_buf_set_text(0, 1, 2, 1, 2 + #'rename.txt', { 'renamed.txt' })
+    vim.fn.delete(vim.fs.joinpath(sub, 'rename.txt'))
+    H.assert_true(vim.uv.fs_rename(replacement, vim.fs.joinpath(sub, 'rename.txt')),
+      'move a separately allocated directory into the old path')
+
+    local ok, err = listing:sync()
+
+    H.assert_nil(ok, 'a replaced expanded source remains a conflict')
+    H.assert_true(tostring(err):find('rename.txt', 1, true) ~= nil, tostring(err))
+    H.assert_true(tostring(err):find(':DirectList!', 1, true) ~= nil,
+      'the refusal explains that the edit must be discarded before a fresh listing')
+    H.assert_true(H.exists(vim.fs.joinpath(sub, 'rename.txt', 'replacement.txt')),
+      'the external replacement is untouched')
+    H.assert_false(H.exists(vim.fs.joinpath(sub, 'renamed.txt')),
+      'the requested rename is not applied')
+    H.assert_true(vim.bo.modified, 'the requested edit remains in the listing')
+  end)
+
   H.it('renders and syncs tree edits with a custom indentation width', function()
     clean_buffers()
     local config = require('direct.config')
@@ -274,7 +333,7 @@ H.describe('sync: editable expanded subtrees', function()
     H.assert_eq(history_lines('undo.log'), {}, 'a presentation-only reorder writes no history')
   end)
 
-  H.it('refuses an edited subtree whose disk snapshot changed after expansion', function()
+  H.it('saves an expanded rename after an unrelated sibling appears on disk', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -284,22 +343,22 @@ H.describe('sync: editable expanded subtrees', function()
     listing:expand(1)
     H.mkfile(sub, 'external.txt', { 'external' })
     vim.api.nvim_buf_set_text(0, 1, 2, 1, 2 + #'old.txt', { 'renamed.txt' })
-    local before = H.fs_snapshot(ws)
     local yanked, classified = 0, 0
     local classify, yank = buffer.classify, register.yank
     buffer.classify = function(...) classified = classified + 1; return classify(...) end
     register.yank = function(...) yanked = yanked + 1; return yank(...) end
 
+    H.capture_messages()
     local ok, reason = listing:sync()
 
     buffer.classify, register.yank = classify, yank
-    H.assert_nil(ok, 'stale subtree snapshot is refused')
-    H.assert_true(tostring(reason):find('changed on disk', 1, true) ~= nil,
-      tostring(reason))
-    H.assert_eq(classified, 0, 'stale subtree stops before root classification')
-    H.assert_eq(yanked, 0, 'stale subtree stops before auto-yank')
-    H.assert_eq(H.fs_snapshot(ws), before, 'only the external change remains on disk')
-    H.assert_true(vim.bo.modified, 'the refused edit remains in the buffer')
+    H.assert_true(ok, 'unrelated external additions do not block an expanded rename: '
+      .. tostring(reason) .. '\n' .. H.messages())
+    H.assert_eq(classified, 1, 'root identity classification still runs')
+    H.assert_eq(yanked, 0, 'a rename does not auto-yank the unchanged source')
+    H.assert_eq(H.fs_snapshot(ws), { 'sub/', 'sub/external.txt', 'sub/renamed.txt' },
+      'both the external addition and requested rename remain on disk')
+    H.assert_false(vim.bo.modified, 'successful sync refreshes the listing')
   end)
 
   H.it('creates a nested subtree beneath a directory added in the same edit', function()

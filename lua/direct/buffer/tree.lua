@@ -11,12 +11,7 @@ return function(deps)
   local strip_directory_marker = deps.strip_directory_marker
   local component_reason = deps.component_reason
   local nested_path_reason = deps.nested_path_reason
-  local same_lines = deps.same_lines
   local entry_path = deps.entry_path
-  local ignore_set = deps.ignore_set
-  local read_with_snapshot = deps.read_with_snapshot
-  local filter_git_status_lines = deps.filter_git_status_lines
-  local filter_git_diff_lines = deps.filter_git_diff_lines
   local action_mod = deps.action_mod
   local indent_size = deps.indent_size
 
@@ -558,47 +553,44 @@ return function(deps)
       if parent and not parent.deleted_kind and nodes_by_id[parent_id]
         and expansion_is_live(parent_id) then
         local current = children_by_parent[parent_id] or {}
-        local current_by_id = {}
-        local old_children = {}
+        local old_child_ids, old_children = {}, {}
         for _, child in ipairs(expansion.children or {}) do
           if not undone_ids[child.id] then
             old_children[#old_children + 1] = child
+            old_child_ids[child.id] = true
           end
         end
-        for _, child in ipairs(current) do
-          if child.id then current_by_id[child.id] = child end
+        local changed = false
+        for _, child in ipairs(old_children) do
+          local now = nodes_by_id[child.id]
+          if not now or now.name ~= child.name or now.parent_key ~= parent_id then
+            changed = true
+            break
+          end
         end
-
-        local changed = #current ~= #old_children
         if not changed then
-          for index, child in ipairs(old_children) do
-            local now = current_by_id[child.id]
-            if not now or now.name ~= child.name or current[index] ~= now then
+          for _, child in ipairs(current) do
+            if not old_child_ids[child.id] then
               changed = true
               break
             end
           end
         end
         if changed then
-          local disk, read_err
-          if expansion.filter_snapshot and read_with_snapshot then
-            disk, read_err = read_with_snapshot(parent.path, expansion.filter_snapshot)
-          else
-            local ignored = ignore_set(parent.path, expansion.wildignore or '')
-            disk, read_err = fs.read_dir_lines(parent.path, ignored)
-          end
-          if disk and state.view_git_status_only and filter_git_status_lines then
-            disk = filter_git_status_lines(parent.path, disk, state.git_status)
-          end
-          if disk and state.view_git_diff_only and filter_git_diff_lines then
-            disk = filter_git_diff_lines(parent.path, disk, state.git_diff_snapshot)
-          end
-          if not disk or not same_lines(disk, expansion.listing_lines or {}) then
-            return nil, 'expanded directory changed on disk since it was read'
-              .. (read_err and (': ' .. tostring(read_err)) or '')
+          for _, child in ipairs(old_children) do
+            local now = nodes_by_id[child.id]
+            local edited = not now or now.name ~= child.name or now.parent_key ~= parent_id
+            if edited and not child.deleted_kind then
+              local disk_identity = fs.path_identity(child.path, fs.stat(child.path))
+              if not child.identity or not disk_identity
+                or not fs.path_identities_match(child.identity, disk_identity) then
+                return nil, 'expanded directory entry changed on disk since it was read: '
+                  .. tostring(child.path)
+                  .. '; restore it or use :DirectList! to discard the edit and redo it'
+              end
+            end
           end
           changed_parents[parent_id] = true
-
         end
       end
     end
