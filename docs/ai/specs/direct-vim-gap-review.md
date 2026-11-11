@@ -10,10 +10,10 @@ been reproduced in a running Neovim. Each task's first step is to write a
 failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
-**Last checked:** `origin/master` at `6a0d286` (11 November 2026). That check
-read #111 (paste history dependencies) and confirmed A21 in the code. It found
-no new tasks. A7–A15 are unchanged. `v0.2.1` isn't tagged yet; the latest tag
-is still `v0.2.0`.
+**Last checked:** `origin/master` at `06063c3` (11 November 2026). That check
+read #110 (the `v0.2.1` release notes), verified the annotated `v0.2.1` tag
+and published GitHub release at this commit, and found no new task IDs. A7–A15
+remain proposed.
 
 ## Conventions
 
@@ -618,6 +618,8 @@ under Unreleased.
 - Fill in the Unreleased section (0.11.7 support, collapsed chains, the
   confirm fix, removal of LuaRocks packaging), then tag `v0.2.0` and publish
   a GitHub release.
+- The follow-up `v0.2.1` release includes A5–A6 and A17–A21; its annotated tag
+  and GitHub release point at `06063c3`.
 - Add a short release checklist (to `CONTRIBUTING.md` or the README's
   development section): update the changelog, tag, release.
 - Consider a CI check that fails when code under `lua/` changes but
@@ -664,13 +666,8 @@ tests into identity-based ones).
 
 ## Suggested order
 
-<<<<<<< HEAD
-A1–A4 and A16 were released in `v0.2.0`; A5–A6 and A17–A21 are complete but
-not released.
-=======
-A1–A4 and A16 were released in `v0.2.0`; A5–A6 and A17–A21 are complete.
->>>>>>> 3c8534b (docs: prepare v0.2.1 release)
+A1–A4 and A16 were released in `v0.2.0`; A5–A6 and A17–A21 were released in
+`v0.2.1`.
 
-1. Release `v0.2.1` with A5–A6 and A17–A21.
-2. Everything else, in any order. A13's formatting-only commit is easiest
+1. Everything else, in any order. A13's formatting-only commit is easiest
    when nothing else is changing `lua/`.
