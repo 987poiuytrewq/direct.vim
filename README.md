@@ -310,6 +310,11 @@ payload, and reports the number of affected steps. Automatic retention runs at
 most once per Neovim session and data directory; opening `:DirectTrash` forces
 a fresh retention pass before showing the entries.
 
+When an older trash entry has no metadata sidecar, `:DirectTrash` looks for its
+delete action in history and reconstructs the original path and entry type,
+with an estimated deletion time. If no matching history remains, the entry
+stays marked unknown and needs an explicit restore path.
+
 With `show_filetype_icons` enabled, file icons use bufferline.nvim's built-in
 basename-based nvim-web-devicons lookup. The dependency is optional; Direct uses
 `icons.file` when it is unavailable. Set the option to `false` to use the

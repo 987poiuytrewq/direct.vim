@@ -52,6 +52,27 @@ function M.write_trash_metadata(trash_path, original_path)
   return M.log.write_raw_exclusive(metadata_path, bytes)
 end
 
+function M.recover_trash_metadata(trash_path, original_path, kind)
+  if not M.fs.taken(trash_path) then return nil, 'trash entry is no longer present' end
+  local original = M.paths.canonical(M.paths.root(original_path))
+  local valid, valid_err = M.paths.validate_canonical_path(original)
+  if not valid then return nil, 'invalid recovered trash path: ' .. tostring(valid_err) end
+  if kind ~= 'file' and kind ~= 'directory' and kind ~= 'link' and kind ~= 'unknown' then
+    kind = 'unknown'
+  end
+  local value = {
+    format = 'direct-trash',
+    version = 1,
+    original = original,
+    deleted_at = os.date('!%Y-%m-%dT%H:%M:%SZ'),
+    deleted_at_epoch = os.time(),
+    kind = kind,
+    reserved = false,
+  }
+  return M.log.write_raw_exclusive(M.trash_metadata_path(trash_path),
+    vim.json.encode(value) .. '\n')
+end
+
 function M.write_trash_reservation(trash_path, original_path)
   local metadata_path = M.trash_metadata_path(trash_path)
   local parent, parent_err = M.fs.mkdirp(M.fs.dirname(metadata_path))

@@ -79,7 +79,7 @@ function M.entries(options)
   if not iter_ok then return nil, tostring(iter) end
   if not iter then return nil, tostring(iter_err or 'cannot read trash directory') end
 
-  local entries = {}
+  local entries, missing_metadata = {}, false
   for name in iter do
     if not name:match('%.direct%-trash%.json$') then
       local path = fs.join(directory, name)
@@ -102,6 +102,70 @@ function M.entries(options)
             size = size,
             storage_size = size + (sidecar and sidecar.size or 0),
           }
+          if metadata_err == 'metadata is unavailable' then missing_metadata = true end
+        end
+      end
+    end
+  end
+
+  if missing_metadata then
+    local function recover(state)
+      local by_trash_path = {}
+      local function visit(current)
+        if type(current) ~= 'table' then return end
+        -- Only delete records describe payloads that are currently in the
+        -- trash. Restore records can refer to an empty reserved slot instead.
+        if current.name == 'rm' or current.name == 'rmdir' then
+          if type(current.dst) == 'string' and type(current.src) == 'string' then
+            by_trash_path[paths.canonical(current.dst)] = current.src
+          end
+        end
+        for _, member in ipairs(current.actions or {}) do visit(member) end
+      end
+      for _, lines in ipairs({ state.undo_lines, state.redo_lines }) do
+        for index = 2, #lines do
+          local parsed = action.deserialize(lines[index])
+          if parsed then visit(parsed) end
+        end
+      end
+
+      for _, entry in ipairs(entries) do
+        if entry.metadata_error == 'metadata is unavailable' then
+          local original = by_trash_path[paths.canonical(entry.path)]
+          if original then
+            local _, record_err = action.recover_trash_metadata(
+              entry.path, original, entry.kind)
+            local metadata, metadata_err = decode_metadata(entry.path)
+            if metadata then
+              entry.original = metadata.original
+              entry.deleted_at = metadata.deleted_at
+              entry.deleted_at_epoch = metadata.deleted_at_epoch
+              entry.kind = metadata.kind
+              entry.reserved = metadata.reserved
+              entry.metadata_error = nil
+              local sidecar = lstat(action.trash_metadata_path(entry.path))
+              entry.storage_size = entry.size + (sidecar and sidecar.size or 0)
+            else
+              entry.metadata_error = record_err or metadata_err
+            end
+          end
+        end
+      end
+      return true
+    end
+
+    local recovered, recovery_err
+    if options.history_state then
+      recovered, recovery_err = recover(options.history_state)
+    else
+      recovered, recovery_err = history.with_trash_references(function(_, state)
+        return recover(state)
+      end)
+    end
+    if not recovered then
+      for _, entry in ipairs(entries) do
+        if entry.metadata_error == 'metadata is unavailable' then
+          entry.metadata_error = tostring(recovery_err or 'history is unavailable')
         end
       end
     end
@@ -256,8 +320,8 @@ local function remove_entry(path)
   return true
 end
 
-local function empty_locked(force, references)
-  local entries, err = M.entries({ include_reserved = true })
+local function empty_locked(force, references, state)
+  local entries, err = M.entries({ include_reserved = true, history_state = state })
   if not entries then return nil, err end
   local removed, protected, failed = 0, 0, {}
   for _, entry in ipairs(entries) do
@@ -293,8 +357,8 @@ function M.apply_retention(options)
   -- reads history references. Limit saves to one pass per data directory in
   -- this Neovim session. DirectTrash passes force to provide an explicit scan.
   retention_checked[cache_key] = true
-  return history.with_trash_references(function(references)
-    local entries, err = M.entries({ include_reserved = true })
+  return history.with_trash_references(function(references, state)
+    local entries, err = M.entries({ include_reserved = true, history_state = state })
     if not entries then return nil, err end
     local total, candidates = 0, {}
     for _, entry in ipairs(entries) do
@@ -356,7 +420,7 @@ function M.empty(force)
   return history.with_trash_references(function(references, state)
     local dropped = { undo_dropped = 0, redo_dropped = 0 }
     if force == true then
-      local entries, entries_err = M.entries({ include_reserved = true })
+      local entries, entries_err = M.entries({ include_reserved = true, history_state = state })
       if not entries then return nil, entries_err end
       local paths_to_remove = {}
       for _, entry in ipairs(entries) do
@@ -381,7 +445,7 @@ function M.empty(force)
       end
     end
 
-    local emptied, result = empty_locked(force == true, references)
+    local emptied, result = empty_locked(force == true, references, state)
     local dropped_count = dropped.undo_dropped + dropped.redo_dropped
     if emptied and dropped_count > 0 then
       ui.notify(string.format('direct: discarded %d undo %s and %d redo %s '

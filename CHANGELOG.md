@@ -35,6 +35,9 @@ Notable changes to direct.vim are documented here. Versions follow
 
 - Add `:DirectHistory drop [undo|redo]` to remove one irrecoverable top step,
   with completion for the command and stack direction.
+- Recover original paths and entry types from history, with an estimated
+  deletion time, when listing older trash entries without metadata. These
+  entries can then be restored normally and considered for age-based retention.
 
 ## [0.2.0] - 2026-11-11
 

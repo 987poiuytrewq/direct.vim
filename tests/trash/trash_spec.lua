@@ -84,6 +84,62 @@ H.describe('trash management', function()
       'the restore subcommand restores the empty entry')
   end)
 
+  H.it('recovers missing trash metadata from history and restores without a path', function()
+    clean_buffers()
+    require('direct.config').setup({ trash_retention = false })
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local source = H.mkfile(ws, 'legacy.txt', { 'legacy payload' })
+    local remove = action.Remove(source)
+    H.assert_true(remove['do'](), 'move the file into the trash')
+    H.assert_true(history.log(remove), 'record the trash destination in history')
+    local entry = trash.entries()[1]
+    H.assert_true(vim.uv.fs_unlink(action.trash_metadata_path(entry.path)),
+      'simulate a legacy entry without its sidecar metadata')
+
+    local view = trash.show()
+
+    H.assert_not_nil(view, 'the legacy trash entry remains listable')
+    H.assert_true(table.concat(H.buf_lines(view), '\n'):find(source, 1, true) ~= nil,
+      'listing recovers the original path from the delete action')
+    local recovered = trash.entries()[1]
+    H.assert_eq(recovered.original, source, 'recovery writes canonical metadata')
+    H.assert_eq(recovered.kind, 'file', 'recovery records the trashed entry kind')
+    H.assert_true(recovered.deleted_at_epoch ~= nil,
+      'recovery estimates a deletion time for retention')
+
+    local restore_confirm = H.stub(vim.fn, 'confirm', function() return 1 end)
+    local restored, restore_err = trash.restore(entry.id, nil, true)
+    restore_confirm()
+    H.assert_true(restored, 'the recovered metadata restores without a typed path: '
+      .. tostring(restore_err))
+    H.assert_eq(vim.fn.readfile(source), { 'legacy payload' }, 'restored contents are intact')
+    require('direct.config').setup({})
+  end)
+
+  H.it('recovers the directory kind for a legacy trash entry', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local source_dir = H.mkdir(ws, 'legacy-dir')
+    H.mkfile(source_dir, 'inside.txt', { 'payload' })
+    local remove = action.RemoveDirectory(source_dir)
+    H.assert_true(remove['do'](), 'move the directory into the trash')
+    H.assert_true(history.log(remove), 'record the directory trash destination')
+    local entry = trash.entries()[1]
+    H.assert_true(vim.uv.fs_unlink(action.trash_metadata_path(entry.path)),
+      'simulate an older directory entry without metadata')
+
+    local recovered = trash.entries()[1]
+
+    H.assert_eq(recovered.original, paths.canonical(source_dir),
+      'history restores the directory original path')
+    H.assert_eq(recovered.kind, 'directory', 'the trash payload supplies its entry kind')
+    H.assert_not_nil(recovered.deleted_at_epoch, 'the deletion time is estimated')
+    H.assert_not_nil(vim.uv.fs_stat(action.trash_metadata_path(entry.path)),
+      'recovery writes a metadata sidecar')
+  end)
+
   H.it('refuses a history-referenced restore unless forced and never overwrites', function()
     clean_buffers()
     local sb = H.sandbox()
