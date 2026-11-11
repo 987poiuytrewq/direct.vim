@@ -149,7 +149,8 @@ H.describe('sync: mixed root edits', function()
     local listing = buffer.list(ws)
     vim.api.nvim_buf_set_text(0, 0, 0, 0, #('old.txt'), { 'renamed.txt' })
     vim.fn.delete(vim.fs.joinpath(ws, 'old.txt'))
-    H.mkfile(ws, 'old.txt', { 'external replacement' })
+    H.mkdir(ws, 'old.txt')
+    H.mkfile(vim.fs.joinpath(ws, 'old.txt'), 'external replacement.txt', { 'replacement' })
 
     local ok, reason = listing:sync()
 
@@ -157,8 +158,10 @@ H.describe('sync: mixed root edits', function()
     H.assert_true(tostring(reason):find('old.txt', 1, true) ~= nil, tostring(reason))
     H.assert_true(tostring(reason):find('re-list this directory', 1, true) ~= nil,
       'the refusal explains how to recover')
-    H.assert_eq(vim.fn.readfile(vim.fs.joinpath(ws, 'old.txt')), { 'external replacement' },
+    H.assert_eq(vim.uv.fs_stat(vim.fs.joinpath(ws, 'old.txt')).type, 'directory',
       'the external replacement remains untouched')
+    H.assert_eq(vim.fn.readfile(vim.fs.joinpath(ws, 'old.txt', 'external replacement.txt')),
+      { 'replacement' }, 'the replacement directory contents remain untouched')
     H.assert_nil(vim.uv.fs_stat(vim.fs.joinpath(ws, 'renamed.txt')),
       'the requested rename does not run')
     H.assert_true(vim.bo.modified, 'the requested edit remains available')
