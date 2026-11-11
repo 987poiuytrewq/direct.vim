@@ -1,6 +1,6 @@
 # Spec: direct.vim improvements, second review
 
-**Status:** A1–A7 and A16–A21 are complete; A8–A15 remain proposed.
+**Status:** A1–A8 and A16–A21 are complete; A9–A15 remain proposed.
 This replaces the first gap review, whose tasks (S1–S6, R1–R3, F1–F6, M1–M6)
 have all landed on `master`.
 
@@ -11,8 +11,8 @@ failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
 **Last checked:** `origin/master` at `1089849` (11 November 2026). That check
-verified the `v0.2.1` release and found no new task IDs. A7 is addressed in
-this PR; A8–A15 remain proposed.
+verified the `v0.2.1` release and found no new task IDs. A7 is complete in
+#113; A8 is addressed in this PR. A9–A15 remain proposed.
 
 ## Conventions
 
@@ -60,7 +60,7 @@ Checked by reading the code at `d72b7ea`:
 | A5 | P2 | Complete | Let a save continue after unrelated changes on disk, without losing edits |
 | A6 | P2 | Complete | Keep forced trash operations from leaving undo history stuck |
 | A7 | P3 | Complete | Stop trash retention from walking the whole trash on every save |
-| A8 | P3 | Proposed | Fill in metadata for trash entries that don't have it |
+| A8 | P3 | Complete | Fill in metadata for trash entries that don't have it |
 | A9 | P3 | Proposed | Make `:DirectTrash` easier to use |
 | A10 | P3 | Proposed | Make Git worktree restore undoable |
 | A11 | P3 | Proposed | Let `DirectSyncPre` cancel a save, and add the missing events |
@@ -352,6 +352,13 @@ unreferenced entries when it runs.
 ## Features and usability
 
 ### A8 — Older trash entries have no metadata (P3)
+
+**Status: COMPLETE.** When metadata is absent, trash listing now matches the
+entry's path against undo/redo delete or restore actions and writes a metadata
+sidecar with the recovered original path, on-disk kind, and an estimated
+deletion time. Unknown entries with no matching history remain recoverable via
+an explicit path. Tests cover the listing, metadata reconstruction, and restore
+without a supplied destination.
 
 **Problem.** Entries trashed before metadata files existed, including those
 from the Python version, show as "unknown" in `:DirectTrash`. They can't be
@@ -675,5 +682,5 @@ tests into identity-based ones).
 A1–A4 and A16 were released in `v0.2.0`; A5–A6 and A17–A21 were released in
 `v0.2.1`.
 
-1. A8–A15, in any order. A13's formatting-only commit is easiest
+1. A9–A15, in any order. A13's formatting-only commit is easiest
    when nothing else is changing `lua/`.
