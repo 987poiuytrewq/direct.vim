@@ -1,516 +1,355 @@
-# Spec: direct.vim gap review follow-ups
+# Spec: direct.vim improvements, second review
 
-**Status:** S1 through S6, R1 through R3, F1 through F6, and M1 through M2 are complete; the remaining tasks are proposed and have
-not been checked item by item. This replaces `direct-vim-remaining-improvements.md`.
-Its main pieces (JSONL history, no-overwrite moves, exclusive `touch`, the
-safeguard on undoing a paste) appear in the current code, but that was not
-checked item by item.
+**Status:** PROPOSED. Nothing here has been implemented yet. This replaces the
+first gap review, whose tasks (S1–S6, R1–R3, F1–F6, M1–M6) have all landed
+on `master`.
 
-**Source:** a static review of the code at `debabf2` (November 2026). The
-findings come from reading the code; none has been reproduced in a running
-Neovim yet. Each task's first step is to write a failing test that reproduces
-the problem, or to record that it can't be reproduced.
+**Source:** a second static review of `origin/master` at `d72b7ea`
+(November 2026). As before, the findings come from reading the code; none has
+been reproduced in a running Neovim. Each task's first step is to write a
+failing test that reproduces the problem, or to record that it can't be
+reproduced and drop the task.
 
 ## Conventions
 
-- One task per branch and pull request, tests first, run with `make test`.
+- One task per branch and pull request, tests first, run with `make test` and
+  `make lint`.
 - Keep the existing guarantees: changes never overwrite an existing entry,
-  history is journaled, and the repo's own test harness is used.
-- Update `README.md` and `doc/direct.txt` whenever behaviour or options
-  change.
-- Priorities: **P1** can lose the user's work or data, **P2** is a safety or
-  robustness gap, **P3** is a usability or feature gap, **P4** is project
-  maturity.
+  history is journaled, unsaved listing edits are never discarded without an
+  explicit `!`, and the repo's own test harness is used.
+- Update `README.md`, `doc/direct.txt` and `CHANGELOG.md` whenever behaviour,
+  options or mappings change.
+- Priorities: **P1** can lose the user's work or data, **P2** is a safety,
+  robustness or release gap, **P3** is a usability or feature gap, **P4** is
+  project maturity.
+
+## What the first review's work changed
+
+Checked by reading the code at `d72b7ea`:
+
+- Unsaved listing edits are protected on open, navigation and refresh, with
+  `!` forms to discard them on purpose.
+- `u` / `<C-r>` fall back to text undo in a modified listing, and ask before
+  reverting changes outside the current directory (`undo_confirm`).
+- Damaged or unknown history files are kept and block operations;
+  `:DirectHistoryReset` backs them up first.
+- `:DirectTrash` lists, restores and empties the trash, with optional
+  retention (`trash_retention`), and trash entries now have metadata files.
+- Git worktree restore asks first and moved to `<leader>gr`; unstage moved to
+  `<leader>gu`.
+- `git status` runs in the background with a timeout.
+- Top-level saves pair rows by identity, so renames, creates and deletes can
+  be mixed in one save.
+- Remappable mappings and `<Plug>` actions, split and tab opens, `User`
+  events, `:DirectHistory`, consistent `direct:` messages, `:DirectGitDiff`,
+  collapsed single-child directory chains, Neovim 0.11.7 support, a
+  changelog with a `v0.1.0` tag, and CI with lint, stable and nightly jobs.
 
 ## Task list
 
-| ID | Priority | Status | Task |
-|----|----------|--------|------|
-| S1 | P1 | Complete | Stop opening, navigating or refreshing from throwing away unsaved listing edits |
-| S2 | P1 | Complete | Make `u` / `<C-r>` safe when the listing has unsaved edits, and make clear what they undo |
-| S3 | P1 | Complete | Keep a damaged or unrecognised history file instead of wiping it |
-| S4 | P2 | Complete | Add a way to see, restore from and empty the trash, and keep it from growing forever |
-| S5 | P2 | Complete | Ask before `gc` discards Git changes, and review the `gc` / `gr` key clashes |
-| S6 | P4 | Complete | Put the lock file inside the `direct/` data directory |
-| R1 | P2 | Complete | Stop `git status` from freezing the editor |
-| R2 | P3 | Complete | Run long moves during `:w` without blocking the editor |
-| R3 | P3 | Complete | Make `:checkhealth direct` check more |
-| F1 | P3 | Complete | Let users remap individual keys |
-| F2 | P3 | Complete | Open entries in a split, vertical split or new tab |
-| F3 | P3 | Complete | Send `User` events for other plugins and configs to hook into |
-| F4 | P3 | Complete | Add a command to view the history |
-| F5 | P3 | Complete | Allow renames, creates and deletes together in one top-level save |
-| F6 | P3 | Complete | Give every message the same `direct:` prefix |
-| M1 | P4 | Complete | Version tags, releases and a changelog |
-| M2 | P4 | Complete | Widen CI: latest stable and nightly Neovim, and pushes to `master` |
-| M3 | P4 | Proposed | Add linting, formatting and type checks |
-| M4 | P4 | Proposed | Split the largest modules up |
-| M5 | P4 | Proposed | Replace the temporary override of `vim.fn.confirm` |
-| M6 | P4 | Proposed | Decide whether to support Neovim 0.11 |
+| ID | Priority | Task |
+|----|----------|------|
+| A1 | P1 | Stop `p` / `P` from discarding unsaved listing edits |
+| A2 | P2 | Make Git-ignore filtering fast and non-blocking |
+| A3 | P2 | Don't fail the whole listing when one subfolder can't be read |
+| A4 | P2 | Release what the README documents |
+| A5 | P2 | Let a save continue after unrelated changes on disk, without losing edits |
+| A6 | P2 | Keep forced trash operations from leaving undo history stuck |
+| A7 | P3 | Stop trash retention from walking the whole trash on every save |
+| A8 | P3 | Fill in metadata for trash entries that don't have it |
+| A9 | P3 | Make `:DirectTrash` easier to use |
+| A10 | P3 | Make Git worktree restore undoable |
+| A11 | P3 | Let `DirectSyncPre` cancel a save, and add the missing events |
+| A12 | P3 | Review default keys that shadow common user mappings |
+| A13 | P4 | Widen lint, formatting and type-check coverage |
+| A14 | P4 | Fix stale docs and remove stray files |
+| A15 | P4 | Retire the positional root classifier |
 
 ## Safety
 
-### S1 — Unsaved listing edits are thrown away (P1)
+### A1 — `p` / `P` discard unsaved listing edits (P1)
 
-**Status: COMPLETE.** Modified listings are preserved on navigation and
-refresh, opening a file from a modified listing is refused, and `:DirectList!`
-(plus the other listing commands' bang forms) deliberately discards edits.
-Regression tests cover these paths; `make test` passes.
+**Problem.** `M.paste` in `lua/direct/init.lua` doesn't check whether the
+listing is modified. It copies the direct register onto disk at once, then
+`paste_and_refresh` calls `Buffer:refresh_after_paste`
+(`lua/direct/buffer/open.lua`, around lines 190–217). That re-lists with
+`{ allow_modified = true, reset_undo = true }`, which replaces the buffer and
+clears its undo. The toggles, open and navigation all refuse in this
+situation, but paste doesn't.
 
-**Problem.** `Buffer:list()` (`lua/direct/buffer.lua`, around lines 739–985)
-always replaces the buffer's lines and sets `modified = false`.
-`Buffer:open()` (around lines 2184–2219) opens a file and then force-deletes
-the listing with `nvim_buf_delete(..., { force = true })`. Unsaved renames,
-creates and deletes are lost without a warning when the user:
-
-- presses `<CR>` on a file;
-- presses `<CR>` on a folder and later comes back, which reuses the buffer and
-  lists it again;
-- presses `-` or `z-`, or runs `:DirectList`, on a directory that already has
-  a modified listing open.
-
-The toggles already refuse in this case (`toggle_hidden`, `toggle_gitignore`
-and the Git-status filter, around lines 1297–1390).
+The common Vim habit `ddp` (move a line down) runs into this. `dd` deletes a
+row as an unsaved edit, and `p` then pastes whatever was last yanked into the
+direct register onto disk. That could have been yanked hours ago, or in
+another Neovim instance. The `dd` edit and every other unsaved edit are then
+thrown away.
 
 **Change.**
 
-- Opening a file: don't force-delete a modified listing. Either keep it as a
-  hidden buffer or refuse with the same "sync or discard them first" message
-  the toggles use. Pick one, document it, and test it.
-- Listing a buffer that is reused and modified: refuse instead of listing it
-  again, unless the call is an internal refresh straight after a successful
-  sync, undo, redo or paste.
-- Offer a deliberate way to discard edits (for example `:DirectList!` or
-  `:edit!`) so a refused user isn't stuck.
+- Refuse `p`, `P` and `:DirectPasteAs` in a modified listing with the usual
+  "sync or discard them first" message. `:DirectPaste {dir}` from another
+  buffer is unaffected.
+- Alternatively, refresh after the paste while keeping the unsaved edits
+  (re-plan them against the new listing). Only do this if it can be done
+  safely; refusing is the simpler fix.
+- Mention in `doc/direct.txt` (`direct.vim-yank`) that `p` in a listing is a
+  filesystem paste, not Vim's put.
 
-**Tests.** Edit a listing, then `<CR>` on a file, `<CR>` on a folder then `-`,
-and `-` back onto the modified directory. In each case the edits are still in
-the buffer, or the user was told and nothing changed. The discard command does
-discard.
+**Tests.** `dd` then `p` in a listing changes nothing on disk, keeps the
+edit, and reports the refusal. A paste in a clean listing works as now.
 
-### S2 — `u` reverts changes on disk from anywhere (P1)
+### A5 — A save is refused after any change on disk (P2)
 
-**Status: COMPLETE.** Dirty listings route `u` / `<C-r>` and `:DirectUndo` /
-`:DirectRedo` to text undo/redo. Clean listings confirm before changing paths
-outside their directory by default; `undo_confirm` configures the prompt policy.
-The prompt names the action and full affected paths, and the normal action
-summary remains after success. Regression tests cover declining and accepting
-an outside undo, same-directory undo, dirty text undo/redo, and config modes.
-`make test` passes.
-
-**Problem.** In a listing, `u` runs `:DirectUndo`, which reverts the last
-change on disk from one history shared by every listing and every Neovim
-instance (`lua/direct/init.lua`, `M.undo` / `M.redo`). It asks no
-confirmation and doesn't check `modified`, then lists the buffer again,
-which throws away unsaved edits (see S1). Someone who presses `u` out of
-habit after a stray `dd` can revert an unrelated rename in another directory.
+**Problem.** `classify_identity` (`lua/direct/buffer/sync_plan.lua`) refuses
+the whole save with "directory changed on disk since it was listed" if any
+root entry was added, removed or replaced since the listing was made, even
+an entry the user didn't edit. Build tools, log files, `.DS_Store` and Git
+operations do this all the time. Since the S1 fix, the only way out is
+`:DirectList!`, which throws away every unsaved edit. "Re-list this
+directory" after text undo has the same problem.
 
 **Change.**
 
-- When the listing is modified, `u` / `<C-r>` don't touch the disk. Either
-  fall back to text `:undo` / `:redo` (recommended, because it matches what
-  users expect) or refuse with a clear message. `:DirectUndo` /
-  `:DirectRedo` behave the same way.
-- Before reverting a change outside the current listing's directory, say what
-  will be reverted and where, and ask to confirm. Add an option to always
-  confirm, never confirm, or confirm only for changes elsewhere (default:
-  elsewhere).
-- Keep the summary shown after an undo, and make sure it names the paths.
+- Add a way to re-read the disk while keeping the edits. For example, a
+  `:DirectRefresh` that keeps identity-matched edited rows, adds rows for new
+  entries, and drops rows for entries removed on disk. It refuses if an
+  edited row's entry itself changed or vanished.
+- Or let the save go ahead when the outside changes don't touch any edited
+  row or any destination name. Still refuse when they do.
+- Either way, say in the refusal message which entries changed and what the
+  user can do.
 
-**Tests.** `dd` then `u` in a listing puts the line back and doesn't change
-the disk. An undo whose change is in another directory asks first, and
-declining changes nothing. An undo in the same directory works as it does
-now.
+**Tests.** With an unsaved rename of `a`, an outside process creates `z`.
+The save either succeeds, renaming `a` and leaving `z`, or the refresh keeps
+the rename. An outside change to `a` itself, or a new entry with the rename's
+target name, is still refused.
 
-### S3 — Damaged history is wiped silently (P1)
+### A6 — Forced trash operations can leave undo history stuck (P2)
 
-**Status: COMPLETE.** Missing and empty logs start fresh. Recognized legacy
-Python logs are backed up before a warned reset; damaged, future, or unknown
-logs remain byte-for-byte and block operations. `:DirectHistoryReset` backs up
-readable non-empty stacks before resetting them. Tests cover malformed JSONL,
-unknown versions, invalid UTF-8, missing final newlines, legacy backups, and the
-explicit reset command. `make test` passes.
-
-**Problem.** `history_format.classify` returns `reset` for any file it
-doesn't recognise: a bad line, a missing final newline, a different header or
-a newer version. `preflight_locked` (`lua/direct/history.lua`, around lines
-556–571) then resets both stacks "without migration or a warning". Trash
-entries are named by a hash of their original path, and only the history
-records what they were, so losing the history leaves deleted files on disk
-with no way to find them.
+**Problem.** `:DirectTrash! empty` and `:DirectTrash! restore`
+(`lua/direct/trash.lua`, `empty_locked` and `M.restore` with `force`) remove
+or move trash entries that the undo history still refers to. The history
+entries are left as they are. An undo of that delete then can't find its
+source. Undo and redo entries are kept until their filesystem change
+succeeds, so the failed entry probably stays at the top of the stack and
+blocks every undo beneath it. The only way out then is `:DirectHistoryReset`,
+which drops the whole history. Confirm this with a test first.
 
 **Change.**
 
-- A missing or empty file is still a fresh start.
-- A recognised old format (the Python version's logs) may still be reset, but
-  with a warning, and only after the old file is copied to a timestamped
-  backup in `history/`.
-- Anything else (a newer version, a bad line, invalid UTF-8) is kept exactly
-  as it is, and the operation is refused with a message that names the file.
-  This is what the earlier spec intended.
-- Add `:DirectHistoryReset` (or similar) that moves the bad files to a backup
-  and starts fresh, so the user can get going again.
-- Update `doc/direct.txt` under `direct.vim-history-format`.
+- When forcing, remove or mark the history entries that depend on the
+  removed trash entries, in the same locked transaction. Say how many undo
+  steps are lost before asking for confirmation.
+- Give users a way to drop just the top undo or redo entry when it can no
+  longer be applied (for example, `:DirectHistory drop`), instead of
+  resetting everything.
 
-**Tests.** A bad line, a newer version and a missing newline are each kept
-byte for byte and block the operation. An old-format file is backed up and
-then reset, with a warning. The reset command creates a backup.
-
-### S4 — No way to manage the trash (P2)
-
-**Status: COMPLETE.** Trash entries now have sidecars with original paths and
-deletion times. `:DirectTrash` lists entries; its `restore` and `empty`
-subcommands never overwrite destinations, and history-referenced entries are
-protected unless `!` is used. Optional age/size retention is off by default,
-and `:checkhealth direct` reports trash size. Cross-filesystem directory
-deletions warn that they will copy the tree to trash. Regression tests cover
-metadata, undo/redo reservations, restore, protection, force, retention, and
-health output. `make test` passes.
-
-**Problem.** Deleted entries go to `<data>/trash/<sha256>`
-(`lua/direct/action.lua`, `first_free_trash`) and are never removed. There's
-no way to list them, restore one, or empty the trash. Deleting a large tree on
-another drive copies it into the data directory.
-
-**Change.**
-
-- Store a small file next to each trash entry giving its original path and the
-  time it was deleted, so the trash can be read without the history.
-- Add `:DirectTrash` to show trashed entries (original path, deleted time,
-  size), with a way to restore one (without overwriting anything) and to empty
-  the trash. Entries the history still refers to are protected unless the user
-  forces it.
-- Add an optional retention setting (age and/or total size), off by default.
-  Show the trash's size in `:checkhealth`.
-- Look at warning or asking before deleting a large tree that would have to be
-  copied to another filesystem.
-
-**Tests.** Delete, then list the trash, restore, and empty it. An entry the
-history still refers to isn't removed without forcing. Restoring onto an
-existing path is refused.
-
-### S5 — `gc` discards Git changes with no confirmation (P2)
-
-**Status: COMPLETE.** The Git restore shortcut now confirms, names the selected
-path and number of affected tracked files, and leaves staged-only or untracked
-files alone. The conflicting `gc` and `gr` mappings were replaced by
-`<leader>gr` (restore) and `<leader>gu` (unstage); the mapping change is recorded
-in `CHANGELOG.md`. `git restore --worktree` is used when supported, with a
-checkout fallback. Tests cover decline, acceptance, scope, and staged-only
-changes; `make test` passes.
-
-**Problem.** `gc` runs `git checkout -- {}` (`lua/direct/config.lua`,
-`BUFFER_MAPS`). It can't be undone with `u`, and on a directory row it
-discards every change beneath it. Inside listings, `gc` also overrides
-Neovim's built-in comment key, and `gr` makes the 0.11+ default LSP keys
-(`grn`, `grr`, `gra`, `gri`) wait for `timeoutlen`.
-
-**Change.**
-
-- Ask before discarding, naming the path and how many changed files it
-  covers. Use `git restore` where it's available.
-- Decide whether `gc` and `gr` should move to other keys (for example `gR` to
-  restore, `gu` to unstage). If they move, document the change in the
-  changelog (M1).
-
-**Tests.** Declining the prompt leaves the working tree as it was. Accepting
-it restores the file.
-
-### S6 — Lock file outside the data directory (P4)
-
-**Status: COMPLETE.** The persistent lock now lives at
-`<data>/direct/.direct-history.lock`. The old parent-level lock is left
-untouched. README and help docs warn not to run old and new plugin versions
-concurrently, because they would use distinct lock files. Tests verify the
-location and that the old path is not created.
-
-**Problem.** The lock is at `$XDG_DATA_HOME/.direct-history.lock`
-(`lua/direct/history/lock.lua`, `lock_path`), not under `direct/`.
-
-**Change.** Move it to `<data>/direct/.direct-history.lock`. Running an old
-and a new version at the same time would then use different locks, so
-document that, or check both locks during one release.
+**Tests.** Delete a file, force-empty the trash, then `u`. The user is told
+the step is gone, and the next undo below it still works. Dropping the top
+entry leaves the rest of the stack in place.
 
 ## Robustness and performance
 
-### R1 — `git status` blocks with no timeout (P2)
+### A2 — Git-ignore filtering blocks and walks the whole tree (P2)
 
-**Status: COMPLETE.** Git status now runs asynchronously, with a configurable
-`git.timeout_ms` deadline (default 1000 ms). Listings render immediately; when
-status arrives, decorations and Git-deleted rows update without replacing a
-modified listing. A timeout kills the process and emits one warning per
-repository. Tests use a hung Git status process to verify the listing returns
-before the deadline and the warning is not repeated. `make test` passes.
+**Problem.** `respect_gitignore` is on by default. Every listing calls
+`git.ignore_snapshot` (`lua/direct/buffer/listing.lua`, around line 97), and
+every save re-checks it (`current_repo_state` in `lua/direct/git.lua`). Each
+time this does the following, all synchronously and with no timeout:
 
-**Problem.** `lua/direct/git.lua` calls `vim.system(...):wait()` with no
-timeout on every listing and refresh. A large repository or a slow
-filesystem freezes the editor.
+- runs `git rev-parse` and two `git ls-files` commands through
+  `vim.system(...):wait()`, plus `rev-parse --show-prefix` for each nested
+  repository;
+- calls `nested_repo_roots`, which scans every directory under the listed
+  root to look for nested `.git` folders, including `node_modules`, build
+  output and ignored folders.
 
-**Change.** Pass a timeout to `wait()` (configurable, for example
-`git.timeout_ms`). Better, read the Git status in the background and add the
-status symbols when it arrives. If it times out, show the listing without
-Git status and tell the user once.
-
-**Tests.** With a fake `git` that hangs, the listing appears within the
-timeout and shows a warning.
-
-### R2 — Long moves during `:w` block the editor (P3)
-
-**Status: COMPLETE.** `:write` and `:DirectSync` now run planned actions
-sequentially through `execute_async` while retaining the history lock and the
-pending-operation guard. Cross-filesystem file/tree moves use asynchronous
-copies, verify source and destination before removal, preserve no-overwrite
-placement, and show copy progress. Same-filesystem renames remain atomic. Tests
-cover a deferred cross-filesystem directory copy, lock/pending refusals, LSP
-rename integration and existing sync safety cases. `make test` passes.
-
-**Change.** Run the actions from `:w` in the background the same way paste,
-undo and redo already do (`execute_async`), keeping the lock and the
-"operation pending" refusals. Show progress for long copies to another
-filesystem.
-
-### R3 — `:checkhealth direct` checks very little (P3)
-
-**Status: COMPLETE.** `:checkhealth direct` now reports Git availability/version,
-the resolved and writable data directory, read-only classifications of undo
-and redo history, any damaged or unfinished transaction journal, trash size,
-whether nvim-web-devicons is installed, and current icon settings. It uses the
-history lock while inspecting state and does not recover, reset, or rewrite
-history. Tests cover healthy, damaged, interrupted, unwritable, and Git-missing
-cases. `make test` passes.
-
-**Change.** Check that Git is available and its version, that the data
-directory can be written to, the state of the history files (OK, kept because
-damaged, or recovery needed), any unfinished transaction, the trash's size,
-whether nvim-web-devicons is installed, and the current icon settings.
-
-## Features and usability
-
-### F1 — Keys can't be remapped one at a time (P3)
-
-**Status: COMPLETE.** The `mappings` option now overrides or disables individual
-actions without changing the existing `map_default_keys` default. All actions
-have public `<Plug>(direct-...)` entry points, and the folder expand/collapse
-and navigation functions are exposed from `require('direct')`. README and help
-docs cover customization; tests cover overrides, disabled keys, Plug mappings,
-the public folder API, and the default behavior. `make test` passes.
-
-**Problem.** `map_default_keys` turns every mapping on or off at once. There
-are no `<Plug>` mappings, and the folder keys (`zo`, `zc`, `za` and their
-recursive forms) have no public Lua function, so users who turn the defaults
-off can't rebuild them.
-
-**Change.** Add a `mappings` table option where each action can be given a
-key, or `false` to turn it off. Add `<Plug>(direct-…)` mappings. Expose
-`expand`, `collapse` and `toggle` (with recursive variants) in
-`require('direct')`.
-
-### F2 — No split, vertical split or tab open (P3)
-
-**Status: COMPLETE.** `require('direct').open({ split = ... })` opens files or
-directories horizontally, vertically, or in a new tab without replacing the
-source listing. Modified listings retain their text and buffer state. Default
-`<C-s>`, `<C-v>`, and `<C-t>` bindings are remappable through the F1 mapping
-options. README and help docs describe the behavior; tests cover all layouts,
-including modified listings. `make test` passes.
-
-**Change.** Add `open({ split = 'horizontal' | 'vertical' | 'tab' })` and
-default keys (for example `<C-s>`, `<C-v>`, `<C-t>`). These must follow S1:
-the listing isn't discarded.
-
-### F3 — No events for other plugins to hook into (P3)
-
-**Status: COMPLETE.** Direct now emits `User` events for list completion, sync
-pre/post, undo/redo post, and paste post. Event data contains an absolute root
-and detached action records; sync data also reports applied/failed actions and
-paste/undo data reports completion. A `DirectSyncPre` callback that edits the
-listing causes a safe refusal rather than applying a stale plan. README and
-`:help direct.vim-events` document the event names and payloads; tests cover
-payloads, ordering, and copy isolation. `make test` passes.
-
-**Change.** Send `User` events (for example `DirectListPost`,
-`DirectSyncPre`, `DirectSyncPost`, `DirectUndoPost`, `DirectPastePost`) with
-the root and the actions in `data`. Document them.
-
-### F4 — No history view (P3)
-
-**Status: COMPLETE.** `:DirectHistory` shows undo and redo actions newest first
-with summaries and affected paths in an unlisted, read-only scratch buffer. It
-reads raw history without initializing missing logs, recovering transactions,
-or rewriting damaged bytes, and preserves the previous buffer. README and help
-docs describe the snapshot and its safety limits. Tests cover both stacks,
-empty and damaged logs, read-only behavior, and byte-for-byte preservation.
-`make test` passes.
-
-**Change.** Add `:DirectHistory` to show the undo and redo stacks with each
-action's summary and paths, read-only.
-
-### F5 — Top-level saves can't mix change types (P3)
-
-**Status: COMPLETE.** Root saves now classify rows by their extmark identities,
-not line positions, and can combine renames, creates, and deletes into one
-history batch. Moves still use staged no-overwrite execution; deletes are
-yanked first, and one undo/redo reverses the complete mixed save. A stale root
-directory snapshot, duplicate destination, or unsafe identity still refuses
-before filesystem changes. Tests cover delete/create without positional
-pairing, delete-and-rename into a freed path, mixed child/root changes, undo,
-redo, and safety refusals. README and help docs explain mark-preserving edits
-versus whole-line replacements. `make test` passes.
-
-**Problem.** At the root level, `classify` in `lua/direct/buffer/sync_plan.lua`
-sorts each save into exactly one of `ADD`, `DELETE` or `RENAME` by comparing
-the buffer lines with the directory listing as sets. A save that both adds
-and removes root rows is `AMBIGUOUS` and refused (`doc/direct.txt`,
-`direct.vim-classify`), so renaming one file and deleting another needs two
-saves. Expanded directories don't have this limit: the tree planner in
-`lua/direct/buffer/tree.lua` pairs rows by identity.
-
-When the counts match, `classify` pairs lines by position. A save that deletes
-one row and adds another can then look like a chain of renames. For example,
-deleting `a` and adding `new` at the end of `a b c` may become `a→b`, `b→c`,
-`c→new`, so the names end up attached to the wrong contents. Reproduce this
-with a test first. If it happens, fixing it is part of this task.
+Listing or saving at the root of a large repository can therefore freeze the
+editor for seconds. The background `git status` from the first review
+doesn't help, because this is a separate code path. The numbers in
+`docs/performance/gitignore-benchmark.md` predate the current implementation.
 
 **Change.**
 
-- Pair root rows by the identity marks each row already carries
-  (`kind = 'root'` records in `lua/direct/buffer/buffer.lua`), never by position:
-  - a marked row whose text changed is a rename;
-  - a marked row that is gone is a delete;
-  - an unmarked row is a create, and nested paths are allowed as they are for
-    pure creates now.
-- Allow any mix of renames, creates and deletes in one save, combined into one
-  set of actions and one history entry, so a single `u` undoes the whole save.
-- Order the actions so no step depends on a name that's still taken. For
-  example, delete `a` and rename `b` to `a` in one save. Reuse the staged
-  moves the tree planner already uses for swaps and chains.
-- Keep refusing what really is unclear:
-  - two rows with the same destination;
-  - a row whose original entry can't be identified, such as after text undo
-    or redo past a listing (see `direct.vim-tree-edit`);
-  - a directory that changed on disk since it was listed.
-- Deleted entries are still yanked first, so `p` puts them back.
-- When a whole line is replaced by typing over it (`cc`, `S`), treat it as a
-  rename if the row's mark survives, and as a delete plus a create if it
-  doesn't. Document which edits keep the mark.
-- Root and expanded-directory changes can then use the same rules. Merge the
-  two paths if that turns out simpler.
-- Update `doc/direct.txt` (`direct.vim-classify`, `direct.vim-tree-edit`) and
-  the "Rules for edits" section of `README.md`, which currently says to make
-  one kind of change per save.
+- Find nested repositories without scanning the tree: use gitlinks from
+  `git ls-files --stage` (mode `160000`) for submodules, and skip ignored and
+  untracked folders when scanning for other nested repositories.
+- Cache the snapshot per repository and reuse it until the index or the
+  ignore files change, instead of rebuilding it for every listing and save.
+- Add a timeout to these Git calls, like the one `git.timeout_ms` gives
+  `git status`. If filtering can't finish, list without it once and say so.
+  Don't refuse to list.
+- Re-measure and update `docs/performance/gitignore-benchmark.md`.
 
-**Tests.**
+**Tests.** A fake `git` that hangs doesn't hold up the listing past the
+timeout. A test that counts directory scans shows ignored folders aren't
+entered. Nested repositories and submodules are still found.
 
-- Rename one file, delete another and create a third in one `:w`. The disk
-  matches, the deleted entry is yanked, and one `u` restores all three.
-- Delete the first row and add a row at the end. Nothing is renamed by
-  position.
-- Delete `a` and rename `b` to `a` in one save, and swap two names in one
-  save. Both succeed, and nothing is overwritten.
-- Two rows with the same destination, or a row with no identity, is still
-  refused and leaves the buffer modified.
-- Mixed root edits together with edits inside expanded directories in one
-  save.
+### A3 — One unreadable subfolder fails the whole listing (P2)
 
-### F6 — Message prefixes aren't consistent (P3)
+**Problem.** `nested_repo_roots` (`lua/direct/git.lua`) returns an error when
+`fs_scandir` fails on any directory below the listed root. `ignore_snapshot`
+passes the error up, and the listing fails. So a single unreadable folder deep
+inside a repository (a root-owned Docker volume, for example) makes the
+repository root impossible to list while Git-ignore filtering is on.
 
-**Status: COMPLETE.** `direct.ui.notify()` now adds `direct:` to unprefixed
-messages and leaves existing prefixes alone. This covers history's empty-stack
-and failure notices, register summaries, and other notifications without
-duplicating prefixes at each call site. Workspace-edit warnings use the same
-helper; the transient copy progress echo already uses the prefix. Tests cover
-automatic and idempotent prefixing plus formatted errors. `make test` passes.
+**Change.** Skip unreadable directories in the nested-repository scan, and
+warn once per listing that naming them. A2 may remove this scan; if so, make
+sure the replacement handles this case too.
 
-**Change.** Give every user-facing message the `direct:` prefix (for example
-`Nothing to undo` and `Failed to undo action - …` in `history.lua`), and
-route them all through `ui.notify`.
+**Tests.** A repository with a `chmod 000` subfolder still lists, with a
+warning. On Windows, skip the test or use an equivalent ACL.
+
+### A7 — Trash retention walks the whole trash after every save (P3)
+
+**Problem.** When `trash_retention` is set, `Buffer:sync` and
+`Buffer:sync_async` (`lua/direct/buffer/sync.lua`, around lines 969 and 1005)
+call `trash.apply_retention()` after every successful save. That calls
+`M.entries`, which measures each entry with a recursive `path_size`, and
+reads every history entry for references. With a large trash, every `:w`
+pays for a full synchronous walk.
+
+**Change.** Record each entry's size in its metadata when it's deleted, and
+use that. Run retention at most once per session or once a day, or in the
+background. Keep the full walk for `:DirectTrash` and `:checkhealth`.
+
+**Tests.** With retention on and a large fake trash, a save doesn't scan the
+trash's contents (count the calls). Retention still removes the oldest
+unreferenced entries when it runs.
+
+## Features and usability
+
+### A8 — Older trash entries have no metadata (P3)
+
+**Problem.** Entries trashed before metadata files existed, including those
+from the Python version, show as "unknown" in `:DirectTrash`. They can't be
+restored without typing the original path. Age-based retention never removes
+them, and the size warning can never clear.
+
+**Change.** When the trash is listed and an entry has no metadata, look it up
+in the history's delete actions. Where an action names it, write the metadata
+(original path, kind, an estimated deletion time). Add a note to
+`doc/direct.txt` about what's left after that.
+
+**Tests.** An entry without metadata but referenced by a history delete shows
+its original path, and restores without one being typed.
+
+### A9 — `:DirectTrash` is hard to use (P3)
+
+**Problem.** The view (`trash.show`) is tab-separated text that isn't lined
+up. Restoring means typing a 64-character hex ID. `:DirectTrash` has no
+completion for its subcommands or IDs (`plugin/direct.lua`), and the view has
+no mappings.
+
+**Change.** Line up the columns. Add command completion for `restore` and
+`empty` and for IDs. Add view mappings, such as `<CR>` or `r` to restore the
+entry under the cursor (asking first), and `q` to close.
+
+**Tests.** Completion returns the subcommands and the current IDs. Restoring
+from the view restores the right entry and refreshes the view.
+
+### A10 — Git worktree restore can't be undone (P3)
+
+**Problem.** `<leader>gr` / `:DirectGitRestore` asks first now, but the
+discarded worktree changes are gone for good. They aren't in direct.vim's
+history or the trash.
+
+**Change.** Before restoring, copy each affected file's current content into
+the trash, and record a history action so `u` puts the changes back. If that
+seems too large, at least name the backup location in the message.
+
+**Tests.** Restore a modified file, then `u`. The file has its modified
+content again, and the history shows one step.
+
+### A11 — `DirectSyncPre` can't cancel, and some operations send no events (P3)
+
+**Problem.** `DirectSyncPre` fires while the history lock is held, after the
+plan is checked (`lua/direct/buffer/sync.lua`, around line 711). Handlers
+can't stop the save; the docs only ask them to stay read-only. `:DirectTrash`
+restore and empty, `:DirectHistoryReset` and Git restore send no events.
+
+**Change.** Let a handler cancel the save, for example by setting
+`data.cancel = true` on a table that is checked afterwards. Refuse the save
+with a message naming the event. Add `DirectTrashPost`,
+`DirectHistoryResetPost` and `DirectGitRestorePost`. Document whether handlers
+run while the lock is held.
+
+**Tests.** A handler that cancels leaves the disk and buffer unchanged and
+the listing still modified. Each new event fires once with the documented
+data.
+
+### A12 — Some default keys shadow common user mappings (P3)
+
+**Problem.** The buffer-local defaults `<leader>gr`, `<leader>gu` and `gd`
+(`BUFFER_MAPS` in `lua/direct/config.lua`) override mappings many users
+already have in every buffer, such as LSP references or a gitsigns reset.
+Users can now remap them, but they may not realise what's being hidden.
+
+**Change.** Pick keys under a prefix that's less often taken, or document
+the clash in the README's key table with a one-line `mappings` example
+showing how to move them. Note any change in the changelog.
 
 ## Project maturity
 
-### M1 — No version tags, releases or changelog (P4)
+### A4 — The tagged release lags the README (P2)
 
-**Status: COMPLETE.** Added the initial `0.1.0` changelog and a versioned
-lazy.nvim example. The first version tag `v0.1.0` and its GitHub release were
-created after this pull request was merged. Distribution is through GitHub
-releases and Neovim plugin managers; LuaRocks packaging is intentionally omitted.
+**Problem.** The README tells lazy.nvim users to set `version = '*'`, which
+installs `v0.1.0`. That tag is at `3f1236f`, before Neovim 0.11 support, the
+Git diff view, collapsed directory chains, the module split and the
+`vim.fn.confirm` fix. The README already documents those, and says 0.11.7 is
+supported, but `v0.1.0` needs 0.12. `CHANGELOG.md` lists only the Git diff
+under Unreleased.
 
-**Change.** Add `CHANGELOG.md`, tag versions (starting at `v1.0.0` or
-`v0.x`), and publish GitHub releases.
+**Change.**
 
-### M2 — CI covers too little (P4)
+- Fill in the Unreleased section (0.11.7 support, collapsed chains, the
+  confirm fix, removal of LuaRocks packaging), then tag `v0.2.0` and publish
+  a GitHub release.
+- Add a short release checklist (to `CONTRIBUTING.md` or the README's
+  development section): update the changelog, tag, release.
+- Consider a CI check that fails when code under `lua/` changes but
+  `CHANGELOG.md` doesn't, with a label to skip it.
 
-**Status: COMPLETE.** CI now runs on pull requests and pushes to `master`. The
-minimum supported Neovim `v0.11.7` is tested on Linux, macOS, and Windows;
-additional Ubuntu jobs run the latest stable Neovim and nightly. Nightly uses
-step-level `continue-on-error` and reports failures as warnings, so upstream
-breakage remains visible without failing the required CI check. Coverage
-artifacts include the Neovim track in their names. `make ci` passes locally.
+### A13 — Lint and type checks cover only part of the code (P4)
 
-**Change.** Run CI on pushes to `master` as well as pull requests. Add jobs
-for the latest stable Neovim and nightly. Nightly may fail without failing
-the build.
+**Problem.** `make lint` lets luacheck pass with up to 48 warnings
+(`LUACHECK_MAX_WARNINGS`). StyLua and LuaLS only check `init.lua` and
+`config.lua`, and `.luarc.json` turns off `undefined-field` everywhere.
 
-### M3 — No linting, formatting or type checks (P4)
+**Change.** Reduce the luacheck allowance step by step to zero. Run StyLua
+over all of `lua/` (one formatting-only commit). Extend LuaLS checks module by
+module, and turn `undefined-field` back on where the annotations allow.
 
-**Status: COMPLETE.** Added Luacheck and StyLua configuration, LuaLS
-annotations for the public API and configuration options, and a `make lint`
-target wired into CI. The Luacheck gate currently caps existing warnings at
-48 while still failing on errors; new warnings require reducing the baseline
-or an explicit cap adjustment.
+### A14 — Stale docs and stray files (P4)
 
-**Change.** Add a `luacheck` (or `selene`) config and `stylua`, plus a
-`make lint` target that runs in CI. Add LuaLS type annotations for the
-public API in `lua/direct/init.lua` and `config.lua`, and check them with
-`lua-language-server --check`.
+**Problem.**
 
-### M4 — The largest modules are hard to work on (P4)
+- `README.md` ("Development") says CI runs against 0.11.7 on every pull
+  request. It now also runs lint, latest stable and nightly, and on pushes to
+  `master`.
+- `luacov-reporters-0.1.0-1.rockspec` at the repo root isn't used by the
+  Makefile or the scripts, now that LuaRocks packaging has been removed.
+- `docs/performance/gitignore-benchmark.md` describes a baseline from before
+  the current implementation (see A2).
 
-**Status: COMPLETE.** Split buffer listing, row state/marks, open, navigation,
-and sync into focused modules under `lua/direct/buffer/`. Extracted history
-paste and reverse handling, plus filesystem path/listing/identity operations.
-The changes move code only; `make ci` passes (589 specs: 587 passed, 2
-skipped), and `make lint` passes with the existing warning baseline.
+**Change.** Update the README's CI paragraph. Delete the rockspec if nothing
+needs it. Refresh or clearly date the benchmark.
 
-**Change.** Split `buffer.lua` (about 2.4k lines) into the listing, row
-state and marks, open and navigation, and sync. Split `history.lua` and
-`fs.lua` the same way where the boundaries are clear. Move code only, with no
-behaviour changes, and keep the tests passing at every commit.
+### A15 — The positional root classifier is still used (P4)
 
-### M5 — `vim.fn.confirm` is replaced temporarily (P4)
+**Problem.** `sync_plan.classify` still pairs rows by position. It's kept
+"observable for compatibility" and is only used to detect duplicate lines
+before `classify_identity` runs (`lua/direct/buffer/sync.lua`, around line
+333). It's exported as `M.classify` from `lua/direct/buffer/buffer.lua`, so a
+future change could rely on it again by mistake.
 
-**Status: COMPLETE.** Neovim's `apply_workspace_edit` has no cancellation
-return value, but its public `changeAnnotations` fields identify confirmation-
-required text edits. Direct now confirms each edit group before applying the
-WorkspaceEdit, clears `needsConfirmation` only on a deep copy after approval,
-and rejects declines before any workspace edits run. It never replaces the
-global `vim.fn.confirm`. Tests cover acceptance, decline, and apply exceptions.
-
-**Problem.** `lua/direct/file_operations.lua` (around lines 494–510) swaps
-the global `vim.fn.confirm` while a workspace edit is applied, to tell
-whether the user declined it.
-
-**Change.** Find a supported way to tell whether an edit was declined (for
-example, checking the edit's change annotations before applying it). If
-there isn't one, keep the swap, but restore it in every code path and add a
-test that it always is.
-
-### M6 — Neovim version floor (P4)
-
-**Status: COMPLETE.** Lowered the minimum to Neovim 0.11.7 after adding a
-byte-safe SHA-256 fallback for the NUL-delimited register and trash keys. The
-fallback produces the same digest as `vim.fn.sha256()` on 0.12, preserving
-existing keys. The full suite passes on both 0.11.7 and 0.12; CI and the README
-now use the 0.11.7 floor.
-
-**Change.** Lower the minimum Neovim version where practical, add compatibility
-fallbacks for required APIs, and test the chosen floor in CI.
+**Change.** Move the duplicate check into `classify_identity`, stop exporting
+the positional classifier, and delete it along with its tests (or turn the
+tests into identity-based ones).
 
 ## Suggested order
 
-1. S1, S2 and S3 (P1), one pull request each, in that order: S2 builds on
-   S1's modified-buffer guard.
-2. S5, R1 and S4.
-3. M1 and M2, so later changes are released and tested properly.
-4. Everything else, in any order. Do F5 before M4, since both change
-   `buffer.lua` and the sync planner. M4 is easiest when nothing else is
-   changing the same files.
+1. A1 on its own, first.
+2. A2 and A3 together, since they touch the same scan, then A5 and A6.
+3. A4 as soon as A1 is merged, so users on `version = '*'` get the fixes.
+4. Everything else, in any order. A13's formatting-only commit is easiest
+   when nothing else is changing `lua/`.
