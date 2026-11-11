@@ -1,8 +1,7 @@
 # Spec: direct.vim improvements, second review
 
-**Status:** PROPOSED. Nothing here has been implemented yet. This replaces the
-first gap review, whose tasks (S1–S6, R1–R3, F1–F6, M1–M6) have all landed
-on `master`.
+**Status:** A1 is complete; A2–A15 remain proposed. This replaces the first gap
+review, whose tasks (S1–S6, R1–R3, F1–F6, M1–M6) have all landed on `master`.
 
 **Source:** a second static review of `origin/master` at `d72b7ea`
 (November 2026). As before, the findings come from reading the code; none has
@@ -72,6 +71,14 @@ Checked by reading the code at `d72b7ea`:
 ## Safety
 
 ### A1 — `p` / `P` discard unsaved listing edits (P1)
+
+**Status: COMPLETE.** `p`, `P`, `:DirectPaste` without a directory, and
+`:DirectPasteAs` refuse to paste while the current listing has unsaved edits,
+preserving the buffer and filesystem. Explicit `:DirectPaste {dir}` remains
+available because it does not refresh the current listing. The help and README
+explain that `p` / `P` perform filesystem paste rather than Vim text put.
+Regression tests cover mapped keys, paste-as, the refusal message, and the
+explicit-directory form.
 
 **Problem.** `M.paste` in `lua/direct/init.lua` doesn't check whether the
 listing is modified. It copies the direct register onto disk at once, then

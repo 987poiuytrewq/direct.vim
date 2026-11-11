@@ -5,6 +5,12 @@ Notable changes to direct.vim are documented here. Versions follow
 
 ## [Unreleased]
 
+### Fixed
+
+- Refuse `p`, `P`, `:DirectPaste` without a directory, and `:DirectPasteAs` in
+  a listing with unsaved edits, rather than pasting to disk and refreshing away
+  those edits.
+
 ### Added
 
 - Add directory-targeted `:DirectGitStatus` and `:DirectGitDiff` commands; the

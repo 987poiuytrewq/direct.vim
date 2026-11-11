@@ -294,6 +294,50 @@ H.describe('async paste prompts', function()
       'DirectPasteAs relists after its callback')
   end)
 
+  H.it('mapped paste and DirectPasteAs refuse modified listings without discarding edits', function()
+    pcall(vim.cmd, '%bwipeout!')
+    local live_direct = require('direct')
+    local live_register = require('direct.register')
+    local sb = H.sandbox()
+    local src = H.mkfile(sb.root, 'source.txt', { 'REGISTER' })
+    local dst = H.mkdir(sb.root, 'dest')
+    H.mkfile(dst, 'keep.txt', { 'KEEP' })
+    H.mkfile(dst, 'other.txt', { 'OTHER' })
+    H.assert_true(live_register.yank({ src }) == true, 'yank source')
+    live_direct.list(dst)
+    local paste_calls = 0
+    local restore_paste = H.stub(live_register, 'paste', function(_, _, callback)
+      paste_calls = paste_calls + 1
+      if callback then callback('source.txt', nil, nil, true, 'source.txt') end
+      return true
+    end)
+    H.capture_messages()
+
+    vim.cmd('normal! dd')
+    local edited_lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    H.assert_true(vim.bo.modified, 'dd makes the listing dirty')
+    vim.api.nvim_feedkeys('p', 'mx', false)
+    vim.api.nvim_feedkeys('P', 'mx', false)
+    pcall(vim.cmd, 'DirectPasteAs renamed.txt')
+
+    H.assert_true(vim.bo.modified, 'refused pastes keep the listing modified')
+    H.assert_eq(vim.api.nvim_buf_get_lines(0, 0, -1, false), edited_lines,
+      'refused pastes preserve the deleted row edit')
+    H.assert_nil(vim.uv.fs_lstat(dst .. '/source.txt'), 'p does not paste to disk')
+    H.assert_nil(vim.uv.fs_lstat(dst .. '/renamed.txt'), 'DirectPasteAs does not paste to disk')
+    H.assert_eq(vim.fn.readfile(dst .. '/keep.txt'), { 'KEEP' }, 'existing entries stay unchanged')
+    H.assert_eq(paste_calls, 0, 'refused pastes never start a filesystem paste')
+    H.assert_notified('sync or discard them first', vim.log.levels.ERROR)
+
+    local explicit_dst = H.mkdir(sb.root, 'explicit')
+    vim.cmd('DirectPaste ' .. vim.fn.fnameescape(explicit_dst))
+    H.assert_eq(paste_calls, 1, 'an explicit destination remains available')
+    H.assert_true(vim.bo.modified, 'explicit-directory paste does not refresh the current listing')
+    H.assert_eq(vim.api.nvim_buf_get_lines(0, 0, -1, false), edited_lines,
+      'explicit-directory paste preserves current listing edits')
+    restore_paste()
+  end)
+
   H.it('redo of an Unpaste uses async Paste and records only after callback completion', function()
     pcall(vim.cmd, '%bwipeout!')
     local live_direct = require('direct')
