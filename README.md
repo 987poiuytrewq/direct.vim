@@ -456,10 +456,13 @@ restore an entry (or add a destination for old entries without metadata), and
 never overwritten.
 
 If a forced restore or empty would invalidate undo/redo steps that refer to the
-trash payload, Direct asks before proceeding and removes only those dependent
-history records. Use `:DirectHistory drop undo` or `:DirectHistory drop redo`
-to discard just one irrecoverable top step while preserving the rest of that
-stack. The command defaults to `undo` when the direction is omitted.
+trash payload, Direct asks before proceeding and removes those records plus
+earlier history steps that overlap the affected paths, so surviving entries do
+not depend on a missing operation. Use `:DirectHistory drop undo` or
+`:DirectHistory drop redo` to discard just one irrecoverable top step while
+preserving the rest of that stack. The command defaults to `undo` when the
+direction is omitted. If undo/redo fails because its source is missing, the
+error suggests the matching `:DirectHistory drop` command.
 
 `:DirectHistory` shows both filesystem history stacks newest first, with each
 action's summary and affected paths. It is a read-only snapshot: it does not

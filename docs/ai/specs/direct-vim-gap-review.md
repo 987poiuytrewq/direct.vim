@@ -1,6 +1,6 @@
 # Spec: direct.vim improvements, second review
 
-**Status:** A1–A6, A16–A18 and A20 are complete; A7–A15 and A19 remain proposed.
+**Status:** A1–A6 and A16–A20 are complete; A7–A15 and A21 are proposed.
 This replaces the first gap review, whose tasks (S1–S6, R1–R3, F1–F6, M1–M6)
 have all landed on `master`.
 
@@ -10,10 +10,11 @@ been reproduced in a running Neovim. Each task's first step is to write a
 failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
-**Last checked:** `origin/master` at `0577a4e` (11 November 2026). That check
-read #107 (Git views target the current listing) and #108 (listings shown in
-other windows are kept), and confirmed A18 and A20 in the code. It found no new
-tasks. A7–A15 and A19 are unchanged.
+**Last checked:** `origin/master` at `51cb174` (11 November 2026). That check
+read #107 (Git views use the current listing), #108 (window-safe listing
+clean-up) and #109 (dependent history when dropping steps), and confirmed A18,
+A19 and A20 in the code. It added A21: paste steps aren't linked to the
+entries they created, so the A19 fix misses them. A7–A15 are unchanged.
 
 ## Conventions
 
@@ -72,8 +73,9 @@ Checked by reading the code at `d72b7ea`:
 | A16 | P2 | Complete | Let a listing made during a Git timeout be saved once Git recovers |
 | A17 | P3 | Complete | Make listings opened with `buffers.reuse = false` readable and tidy |
 | A18 | P3 | Complete | Make `:DirectGitStatus` and `:DirectGitDiff` use the current listing |
-| A19 | P3 | Proposed | Don't strand earlier history steps when a step is dropped |
+| A19 | P3 | Complete | Don't strand earlier history steps when a step is dropped |
 | A20 | P3 | Complete | Don't close other windows when a listing is removed |
+| A21 | P3 | Proposed | Link paste steps to the entries they created when dropping history |
 
 ## Safety
 
@@ -460,7 +462,7 @@ listing or working directory according to invocation context. Add completion
 for command options, `--dir`, branch/tag refs and directories. Tests cover
 current-buffer targeting, relative `--dir` and completion; `make test` passes.
 
-*Checked at `0577a4e`:* the code matches (`lua/direct/git_commands.lua`).
+*Checked at `51cb174`:* the code matches (`lua/direct/git_commands.lua`).
 Without `--dir`, both commands use the current listing; a relative `--dir` is
 resolved against it. `--ref` completion runs `git for-each-ref` with the
 `git.timeout_ms` limit.
@@ -485,6 +487,22 @@ the same as `gd`. Outside a listing it uses the working directory.
 Completion returns the options and a branch name.
 
 ### A19 — Dropping a history step can strand the step below it (P3)
+
+**Status: COMPLETE.** Forced trash cleanup now removes the transitive set of
+history records whose paths overlap the deleted record's paths, so earlier
+undo/redo entries cannot remain stranded beneath it. Confirmation counts all
+removed records. Missing-source undo/redo errors recommend
+`:DirectHistory drop undo|redo`, and that command completes its subcommand and
+stack direction. Tests cover the rename/delete dependency, recovery after a
+failed undo, and completion.
+
+*Checked at `51cb174`:* the code matches for steps that record the paths they
+touch. `filter_trash_records` (`lua/direct/history/history.lua`) keeps
+dropping records whose `src` or `dst` overlaps a dropped record's paths until
+none are left, and the prompt counts all of them. Because it follows overlaps
+in both directions, a step that touched a high-level folder can pull in many
+others; the confirmation count is the only guard, which seems acceptable.
+Paste steps are missed; see A21.
 
 **Problem.** Forced trash operations remove every history record that refers
 to the affected trash entries (`filter_trash_records` and
@@ -517,9 +535,9 @@ only when no window displays them. Modified buffers remain preserved as before.
 Tests cover file opens and `buffers.reuse = false` directory navigation from
 one split while another still displays the source listing.
 
-*Checked at `0577a4e`:* the code matches. Both `discard_left_clean_listing`
+*Checked at `51cb174`:* the code matches. Both `discard_left_clean_listing`
 (`lua/direct/buffer/list.lua`) and `Buffer:open` (`lua/direct/buffer/open.lua`)
-now skip the removal when `vim.fn.win_findbuf` finds the listing in another
+skip the removal when `vim.fn.win_findbuf` finds the listing in another
 window.
 
 **Problem.** `discard_left_clean_listing` (`lua/direct/buffer/list.lua`) and
@@ -538,6 +556,31 @@ as usual.
 **Tests.** Open a listing in two splits, open a file from one: the other
 split still shows the listing. With `reuse = false`, go into a folder from
 one split: the other split keeps its listing.
+
+### A21 — Paste steps aren't linked to the entries they created (P3)
+
+**Problem.** The A19 dependency walk reads each record's `src` and `dst`, and
+the `actions` of batches (`action_path_entries` in
+`lua/direct/history/history.lua`). A paste record (`M.Paste` in
+`lua/direct/action/action.lua`) stores the register folder as `src`, the
+destination folder as `dst`, and the pasted names in `renames`, which the walk
+doesn't read. The destination usually has no trailing separator (it comes
+from `vim.fs.dirname` or the listing root in `Buffer:paste_destination`), and
+`p` isn't one of the action names treated as a folder, so files inside it
+don't count as overlapping.
+
+So with an undo stack of "paste `x` into `d`", then "delete `d/x`",
+force-emptying the trash drops the delete but keeps the paste. Undoing the
+paste then fails, because `d/x` is gone, and `:DirectHistory drop` is needed
+again.
+
+**Change.** Teach `action_path_entries` about paste and unpaste records: add
+`dst/<name>` for each `renames` entry, marked as a folder when the pasted
+entry is one. Alternatively, treat a paste's `dst` as a folder. That's
+simpler, but drops more than needed.
+
+**Tests.** Paste a file, delete it, force-empty the trash: the confirmation
+counts both steps, and undo afterwards doesn't fail on the paste.
 
 ## Project maturity
 
@@ -609,9 +652,9 @@ tests into identity-based ones).
 
 ## Suggested order
 
-A1–A4 and A16 were released in `v0.2.0`; A5–A6 and A17–A18 are complete.
+A1–A4 and A16 were released in `v0.2.0`; A5–A6 and A17–A20 are complete.
 
-1. A19, which follows on from the history stack work in A6.
-2. A release (`v0.2.1` or `v0.3.0`) with A5, A6, A17, A18 and A20.
+1. A21, since it finishes A19.
+2. A release (`v0.2.1` or `v0.3.0`) with A5–A6 and A17–A21.
 3. Everything else, in any order. A13's formatting-only commit is easiest
    when nothing else is changing `lua/`.

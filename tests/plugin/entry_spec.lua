@@ -97,7 +97,7 @@ local EXPECTED_CMDS = {
   DirectToggleGitIgnore = { nargs = '0' },
   DirectUndo = { nargs = '0' },
   DirectRedo = { nargs = '0' },
-  DirectHistory = { nargs = '*' },
+  DirectHistory = { nargs = '*', complete = 'custom' },
   DirectHistoryReset = { nargs = '0' },
   DirectTrash = { nargs = '*', bang = true },
   DirectTrash = { nargs = '*', bang = true },

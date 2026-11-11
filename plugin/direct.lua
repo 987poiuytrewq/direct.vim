@@ -158,7 +158,13 @@ vim.api.nvim_create_user_command('DirectHistory', function(args)
     require('direct.ui').notify('direct: usage: :DirectHistory [drop [undo|redo]]',
       vim.log.levels.ERROR)
   end
-end, { nargs = '*', desc = 'direct: show or edit filesystem history' })
+end, {
+  nargs = '*',
+  complete = function(arg_lead, cmdline, cursor_pos)
+    return require('direct.history.history').complete_history(arg_lead, cmdline, cursor_pos)
+  end,
+  desc = 'direct: show or edit filesystem history',
+})
 
 vim.api.nvim_create_user_command('DirectHistoryReset', function()
   require('direct').reset_history()
