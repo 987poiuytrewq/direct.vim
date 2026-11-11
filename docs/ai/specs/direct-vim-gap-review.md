@@ -10,10 +10,10 @@ been reproduced in a running Neovim. Each task's first step is to write a
 failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
-**Last checked:** `origin/master` at `19614a2` (11 November 2026). That hourly
-review added A21; it is addressed in this PR. A7–A15 remain unchanged. The
-deferred `v0.2.1` release PR includes A21 and will tag its resulting master
-commit.
+**Last checked:** `origin/master` at `707db8d` (11 November 2026). That check
+read #111 (paste entries in trash history dependencies) and confirmed A21 in
+the code. It found no new tasks. A7–A15 are unchanged. `v0.2.1` isn't tagged
+yet; the latest tag is still `v0.2.0`.
 
 ## Conventions
 
@@ -565,6 +565,12 @@ one of its files—or a descendant of one of its pasted directories—is deleted
 Tests verify both cases, confirmation counts both actions, and no broken paste
 undo remains.
 
+*Checked at `707db8d`:* the code matches. `action_path_entries`
+(`lua/direct/history/history.lua`) adds one path per `renames` entry for `p`
+and `up` records, the pasted entry in the destination folder. It checks the
+register copy to tell folders from files, and treats the entry as a folder if
+that copy is gone.
+
 **Problem.** The A19 dependency walk reads each record's `src` and `dst`, and
 the `actions` of batches (`action_path_entries` in
 `lua/direct/history/history.lua`). A paste record (`M.Paste` in
@@ -658,7 +664,8 @@ tests into identity-based ones).
 
 ## Suggested order
 
-A1–A4 and A16 were released in `v0.2.0`; A5–A6 and A17–A20 are complete.
+A1–A4 and A16 were released in `v0.2.0`; A5–A6 and A17–A21 are complete but
+not released.
 
 1. Release `v0.2.1` with A5–A6 and A17–A21.
 2. Everything else, in any order. A13's formatting-only commit is easiest
