@@ -26,6 +26,8 @@ Notable changes to direct.vim are documented here. Versions follow
   a missing source makes undo/redo fail, explain how to drop that stack entry.
   Link paste/unpaste records to each created destination, including pasted
   directories, so deleting a pasted entry cannot leave its creator undoable.
+- Limit automatic trash retention to one full scan per data directory per
+  Neovim session; `:DirectTrash` still forces a fresh pass.
 - Preserve other windows showing a Direct listing when opening a file or
   navigating directories removes the source buffer.
 

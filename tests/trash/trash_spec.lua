@@ -4,6 +4,7 @@ local action = require('direct.action.action')
 local fs = require('direct.fs')
 local history = require('direct.history.history')
 local log = require('direct.log')
+local paths = require('direct.paths')
 local register = require('direct.register')
 local trash = require('direct.trash')
 
@@ -429,5 +430,55 @@ H.describe('trash management', function()
     local entries = trash.entries()
     H.assert_eq(#entries, 1, 'the history-referenced payload survives retention')
     H.assert_eq(entries[1].original, ws .. '/logged.txt', 'the protected path is identified')
+  end)
+
+  H.it('automatic retention scans trash at most once per data directory session', function()
+    clean_buffers()
+    require('direct.config').setup({ trash_retention = false })
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local old_tree = H.mkdir(ws, 'old-tree')
+    for index = 1, 20 do
+      H.mkfile(old_tree, string.format('entry-%02d.txt', index), { 'retained payload' })
+    end
+    list_dir(ws)
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, {})
+    H.assert_true(require('direct').sync(), 'move a directory tree into trash')
+
+    require('direct.config').setup({ trash_retention = { max_size_bytes = 1024 * 1024 } })
+    local trash_root = paths.data_dir_path('trash')
+    local root_key = paths.canonical(trash_root):gsub('\\', '/'):lower()
+    local original_scandir = vim.uv.fs_scandir
+    local trash_scans = 0
+    vim.uv.fs_scandir = function(path, ...)
+      local key = paths.canonical(path):gsub('\\', '/'):lower()
+      if key == root_key or key:sub(1, #root_key + 1) == root_key .. '/' then
+        trash_scans = trash_scans + 1
+      end
+      return original_scandir(path, ...)
+    end
+
+    list_dir(ws)
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'first.txt' })
+    local first_save, first_err = require('direct').sync()
+    local first_save_scans = trash_scans
+    trash_scans = 0
+    list_dir(ws)
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'first.txt', 'second.txt' })
+    local second_save, second_err = require('direct').sync()
+    local later_save_scans = trash_scans
+    local trash_bufnr = trash.show()
+    local explicit_scans = trash_scans
+    vim.uv.fs_scandir = original_scandir
+    require('direct.config').setup({})
+
+    H.assert_true(first_save, 'the first post-retention save succeeds: ' .. tostring(first_err))
+    H.assert_true(second_save, 'the second post-retention save succeeds: ' .. tostring(second_err))
+    H.assert_true(first_save_scans > 0, 'the first automatic retention pass walks the trash tree')
+    H.assert_eq(later_save_scans, 0,
+      'later saves do not recursively rescan trash again during the session')
+    H.assert_not_nil(trash_bufnr, 'opening the trash view succeeds')
+    H.assert_true(explicit_scans > first_save_scans + later_save_scans,
+      'opening the trash view explicitly forces a fresh trash walk')
   end)
 end)
