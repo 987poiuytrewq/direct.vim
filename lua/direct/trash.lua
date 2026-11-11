@@ -205,7 +205,12 @@ function M.restore(id, destination, force)
     if not force then
       return nil, referenced_message(path)
     end
-    local plan, plan_err = history.plan_trash_history(state, { path })
+    local stat = lstat(path)
+    local is_directory = metadata and metadata.kind == 'directory'
+      or (stat and stat.type == 'directory') or false
+    local plan, plan_err = history.plan_trash_history(state, {
+      { path = path, directory = is_directory },
+    })
     if not plan then return nil, plan_err end
     local step_count = plan.undo_dropped + plan.redo_dropped
     if step_count > 0 then
@@ -343,7 +348,11 @@ function M.empty(force)
       local entries, entries_err = M.entries({ include_reserved = true })
       if not entries then return nil, entries_err end
       local paths_to_remove = {}
-      for _, entry in ipairs(entries) do paths_to_remove[#paths_to_remove + 1] = entry.path end
+      for _, entry in ipairs(entries) do
+        paths_to_remove[#paths_to_remove + 1] = {
+          path = entry.path, directory = entry.kind == 'directory',
+        }
+      end
       local plan, plan_err = history.plan_trash_history(state, paths_to_remove)
       if not plan then return nil, plan_err end
       local step_count = plan.undo_dropped + plan.redo_dropped

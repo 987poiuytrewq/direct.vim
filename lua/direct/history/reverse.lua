@@ -18,6 +18,16 @@ return function(context)
   local write_paste_journal = context.write_paste_journal
   local expand_batch_stack
 
+  local function missing_source_hint(which, err)
+    local message = tostring(err or ''):lower()
+    if message:find('enoent', 1, true) or message:find('no such file', 1, true)
+      or message:find('not found', 1, true) then
+      return '; use :DirectHistory drop ' .. which
+        .. ' to remove this irrecoverable step and continue with earlier history'
+    end
+    return ''
+  end
+
 function M.undo()
   return M._reverse('undo')
 end
@@ -123,6 +133,7 @@ local function reverse_locked(which)
     local why = not ran and tostring(result)
       or (execute_err ~= nil and tostring(execute_err) or 'action failed')
     if not settled then why = why .. '; ' .. tostring(recovery_err) end
+    why = why .. missing_source_hint(which, why)
     M.ui.notify('Failed to ' .. which .. ' action - '
       .. M.action.summarize({ reversal }) .. ' (' .. why .. ')',
       vim.log.levels.ERROR)
@@ -511,6 +522,7 @@ function M._reverse_async(which, callback, options)
       end
       local why = execution_err ~= nil and tostring(execution_err)
         or 'action failed or all paste entries were skipped'
+      why = why .. missing_source_hint(which, why)
       if paste_operation then
         local cleared, clear_err = clear_transaction(state.transaction_path)
         if not cleared then why = why .. '; ' .. tostring(clear_err) end

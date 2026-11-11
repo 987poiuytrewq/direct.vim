@@ -213,6 +213,71 @@ H.describe('trash management', function()
     H.assert_false(H.exists(ws, 'logged.txt'), 'the emptied trash item stays deleted')
   end)
 
+  H.it('force-empty also drops earlier actions that depend on the removed path', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkfile(ws, 'b.txt', { 'rename then delete' })
+
+    list_dir(ws)
+    vim.api.nvim_buf_set_text(0, 0, 0, 0, #'b.txt', { 'a.txt' })
+    H.assert_true(require('direct').sync(), 'rename b.txt to a.txt')
+    list_dir(ws)
+    vim.api.nvim_buf_set_lines(0, 0, 1, false, {})
+    H.assert_true(require('direct').sync(), 'delete a.txt into trash')
+    H.assert_eq(#trash.entries(), 1, 'the delete has one trash payload')
+
+    local prompts = {}
+    local restore_confirm = H.stub(vim.fn, 'confirm', function(prompt)
+      prompts[#prompts + 1] = prompt
+      return 1
+    end)
+    local emptied = require('direct').trash_empty(true)
+    restore_confirm()
+
+    H.assert_true(emptied, 'the confirmed force empties the trash')
+    H.assert_eq(#prompts, 1, 'the dependent steps are confirmed together')
+    H.assert_true(prompts[1]:find('2 undo steps and 0 redo steps', 1, true) ~= nil,
+      'the prompt includes the earlier rename that depends on the deleted path')
+    local state = require('direct.history.history').preflight()
+    H.assert_eq(#state.undo_lines, 1,
+      'both the delete and dependent rename records are removed from undo history')
+    H.assert_false(H.exists(ws, 'a.txt'), 'the deleted path remains empty')
+    H.assert_false(H.exists(ws, 'b.txt'), 'the earlier rename is not left as a broken undo')
+  end)
+
+  H.it('force-empty treats descendants of a removed directory as dependent paths', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+
+    list_dir(ws)
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'sub/' })
+    H.assert_true(require('direct').sync(), 'create the directory')
+    local sub = vim.fs.joinpath(ws, 'sub')
+    list_dir(sub)
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'inside.txt' })
+    H.assert_true(require('direct').sync(), 'create a child file')
+    list_dir(ws)
+    vim.api.nvim_buf_set_lines(0, 0, 1, false, {})
+    H.assert_true(require('direct').sync(), 'move the directory tree into trash')
+    H.assert_eq(#trash.entries(), 1, 'the directory tree has one trash entry')
+
+    local prompts = {}
+    local restore_confirm = H.stub(vim.fn, 'confirm', function(prompt)
+      prompts[#prompts + 1] = prompt
+      return 1
+    end)
+    local emptied = require('direct').trash_empty(true)
+    restore_confirm()
+
+    H.assert_true(emptied, 'the directory trash entry is emptied')
+    H.assert_true(prompts[1]:find('3 undo steps and 0 redo steps', 1, true) ~= nil,
+      'the prompt includes mkdir, child creation, and directory deletion')
+    local state = require('direct.history.history').preflight()
+    H.assert_eq(#state.undo_lines, 1, 'all path-dependent directory history is removed')
+  end)
+
   H.it('force-empty removes redo references to reserved trash slots', function()
     clean_buffers()
     local sb = H.sandbox()
