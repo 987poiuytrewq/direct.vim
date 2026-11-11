@@ -1,6 +1,7 @@
 # Spec: direct.vim improvements, second review
 
-**Status:** A1–A5 and A16 are complete; A6–A15 and A17–A18 remain proposed.
+**Status:** A1–A4 and A16 are complete, and A5 is partly done; A6–A15 and
+A17–A18 remain proposed.
 This replaces the first gap review, whose tasks (S1–S6, R1–R3, F1–F6, M1–M6)
 have all landed on `master`.
 
@@ -10,11 +11,10 @@ been reproduced in a running Neovim. Each task's first step is to write a
 failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
-**Last checked:** `origin/master` at `3d7e746` (11 November 2026). That check
-read #101 (saves after Git-ignore timeouts) and #102 (the `v0.2.0` release),
-confirmed A16 in the code, and confirmed the `v0.2.0` tag and GitHub release
-are published. It found no new tasks. A5–A15 and A17–A18 are unchanged; A5 is
-now complete in this PR.
+**Last checked:** `origin/master` at `d201a5c` (11 November 2026). That check
+read #103 (saves after unrelated disk changes). It confirmed the top-level
+part of A5 in the code, but expanded folders still refuse, so A5 is partly
+done. It found no new tasks. A6–A15 and A17–A18 are unchanged.
 
 ## Conventions
 
@@ -59,7 +59,7 @@ Checked by reading the code at `d72b7ea`:
 | A2 | P2 | Complete | Stop Git-ignore filtering from blocking, and from walking the whole tree |
 | A3 | P2 | Complete | Don't fail the whole listing when one subfolder can't be read |
 | A4 | P2 | Complete | Release what the README documents |
-| A5 | P2 | Complete | Let a save continue after unrelated changes on disk, without losing edits |
+| A5 | P2 | Partly done | Let a save continue after unrelated changes on disk, without losing edits |
 | A6 | P2 | Proposed | Keep forced trash operations from leaving undo history stuck |
 | A7 | P3 | Proposed | Stop trash retention from walking the whole trash on every save |
 | A8 | P3 | Proposed | Fill in metadata for trash entries that don't have it |
@@ -116,12 +116,31 @@ edit, and reports the refusal. A paste in a clean listing works as now.
 
 ### A5 — A save is refused after any change on disk (P2)
 
-**Status: COMPLETE.** Saves now reconcile unrelated disk additions, removals
-and replacements, then re-list the current contents. Edits still refuse if an
-edited source is missing or has changed identity, or if a requested destination
-became occupied. Refusal messages name the path and give the next step. Tests
-cover unrelated external creation/deletion, a replaced source and a colliding
-destination; `make test` passes.
+**Status: PARTLY DONE** (#103, checked at `d201a5c`). For top-level rows,
+`classify_identity` now checks only rows the user edited, deleted or moved
+against the disk. Entries added, removed or replaced elsewhere no longer block
+the save, and a new entry that takes a requested name is still refused at
+build time. Tests cover unrelated creation and deletion, a replaced source
+and a colliding destination.
+
+Still left:
+
+- **Expanded folders.** When the user edits inside an expanded folder,
+  `lua/direct/buffer/tree.lua` (around line 597) still compares that folder's
+  whole listing with the disk and refuses with "expanded directory changed on
+  disk since it was read" if anything in it changed, edited or not. Apply the
+  same edited-rows-only rule there.
+- **After text undo.** `classify_identity` still refuses with "re-list this
+  directory" when `:undo` or `:redo` has lost row identities
+  (`lua/direct/buffer/sync_plan.lua`, around lines 238 and 265). Re-listing
+  refuses while there are unsaved edits, so `:DirectList!` (which discards
+  them) is still the only way out. Either recover identities by matching names
+  against the list-time rows, or say plainly that the edits must be redone.
+
+Tests for the rest: inside an expanded folder, rename one child while an
+outside process creates another child; the save succeeds. After `:undo`, a
+save either succeeds or the message names the way forward without implying a
+re-list will keep the edits.
 
 **Problem.** `classify_identity` (`lua/direct/buffer/sync_plan.lua`) refuses
 the whole save with "directory changed on disk since it was listed" if any
@@ -515,9 +534,10 @@ tests into identity-based ones).
 
 ## Suggested order
 
-A1–A4 and A16 are done, and released in `v0.2.0`.
+A1–A4 and A16 are done, and released in `v0.2.0`. A5 is done for top-level
+rows.
 
-1. A5 and A6.
+1. The rest of A5 (expanded folders), then A6.
 2. A17 and A18, since they're small and follow on from recent changes.
 3. Everything else, in any order. A13's formatting-only commit is easiest
    when nothing else is changing `lua/`.
