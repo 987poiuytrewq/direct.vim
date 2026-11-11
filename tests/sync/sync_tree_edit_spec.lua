@@ -85,12 +85,14 @@ H.describe('sync: editable expanded subtrees', function()
     local ws = H.mkdir(sb.root, 'ws')
     local sub = H.mkdir(ws, 'sub')
     H.mkfile(sub, 'rename.txt', { 'original' })
+    local replacement = H.mkdir(sb.root, 'external-replacement')
+    H.mkfile(replacement, 'replacement.txt', { 'replacement' })
     local listing = buffer.list(ws)
     listing:expand(1)
     vim.api.nvim_buf_set_text(0, 1, 2, 1, 2 + #'rename.txt', { 'renamed.txt' })
     vim.fn.delete(vim.fs.joinpath(sub, 'rename.txt'))
-    H.mkdir(sub, 'rename.txt')
-    H.mkfile(vim.fs.joinpath(sub, 'rename.txt'), 'replacement.txt', { 'replacement' })
+    H.assert_true(vim.uv.fs_rename(replacement, vim.fs.joinpath(sub, 'rename.txt')),
+      'move a separately allocated directory into the old path')
 
     local ok, err = listing:sync()
 
