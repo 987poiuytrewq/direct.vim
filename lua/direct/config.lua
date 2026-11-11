@@ -308,7 +308,7 @@ M.BUFFER_MAPS = {
   { action = 'git_unstage', mode = 'n', lhs = '<leader>gu', rhs = '<Cmd>DirectGit git reset -- {}<CR>' },
   { action = 'git_restore', mode = 'n', lhs = '<leader>gr', rhs = '<Cmd>DirectGitRestore<CR>' },
   { action = 'toggle_git_status', mode = 'n', lhs = 'gs', rhs = '<Cmd>DirectToggleGitStatus<CR>' },
-  { action = 'git_diff', mode = 'n', lhs = 'gd', rhs = '<Cmd>DirectGitDiff<CR>' },
+  { action = 'git_diff', mode = 'n', lhs = 'gd', rhs = '<Cmd>lua require("direct").git_diff()<CR>' },
   { action = 'next_change', mode = 'n', lhs = ']c', rhs = '<Cmd>DirectNextChange<CR>' },
   { action = 'previous_change', mode = 'n', lhs = '[c', rhs = '<Cmd>DirectPreviousChange<CR>' },
   { action = 'next_file', mode = 'n', lhs = ']f', rhs = '<Cmd>DirectNextFile<CR>' },

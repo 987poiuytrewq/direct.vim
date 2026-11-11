@@ -22,6 +22,7 @@ local function make_repo(sb)
   H.mkfile(root, 'modified.txt', 'base contents\n')
   H.mkfile(root, 'deleted.txt', 'remove me\n')
   H.mkfile(root, 'rename-old.txt', 'rename this file\nwith enough contents\n')
+  H.mkfile(root, 'local-rename-old.txt', 'local rename contents\nwith enough similarity\n')
   H.mkfile(root, 'unchanged.txt', 'not changed\n')
   git_at(root, 'init', '-q', '-b', 'main')
   git_at(root, 'config', 'user.name', 'Direct Test')
@@ -55,6 +56,13 @@ local function entry_map(snapshot)
   return result
 end
 
+local function wait_for_git_status(bufnr)
+  H.assert_true(vim.wait(5000, function()
+    local state = require('direct.buffer.buffer')._state_for_test(bufnr)
+    return state and not state.git_status_pending
+  end), 'Git status query completes')
+end
+
 H.describe('Git branch diff filter', function()
   H.it('compares the merge base to HEAD and excludes local index and worktree changes', function()
     local sb = H.sandbox()
@@ -63,6 +71,7 @@ H.describe('Git branch diff filter', function()
     H.mkfile(root, 'untracked.txt', 'not committed\n')
     H.mkfile(root, 'staged-only.txt', 'not committed\n')
     git_at(root, 'add', 'staged-only.txt')
+    git_at(root, 'mv', 'local-rename-old.txt', 'local-rename-new.txt')
 
     local snapshot, err = git.compare_snapshot(root)
     H.assert_not_nil(snapshot, 'the configured origin default is available')
@@ -78,6 +87,29 @@ H.describe('Git branch diff filter', function()
     H.assert_nil(entries['target-only.txt'], 'target-only commits are excluded by merge-base comparison')
     H.assert_nil(entries['untracked.txt'], 'untracked local files are excluded')
     H.assert_nil(entries['staged-only.txt'], 'staged local files are excluded')
+    H.assert_nil(entries['local-rename-new.txt'], 'local renames are excluded by default')
+
+    H.assert_true(vim.uv.fs_unlink(vim.fs.joinpath(root, 'unchanged.txt')),
+      'a tracked file is deleted only in the worktree')
+    local inclusive, inclusive_err = git.compare_snapshot(root, nil,
+      { include_uncommitted = true })
+    H.assert_not_nil(inclusive, 'the inclusive diff snapshot is available')
+    H.assert_nil(inclusive_err, 'including uncommitted paths succeeds')
+    local inclusive_entries = entry_map(inclusive)
+    H.assert_eq(inclusive_entries['modified.txt'].status, 'M',
+      'committed paths stay present in the combined result')
+    H.assert_eq(inclusive_entries['untracked.txt'].status, 'A',
+      'non-ignored untracked files are included')
+    H.assert_eq(inclusive_entries['staged-only.txt'].status, 'A',
+      'staged files are included')
+    H.assert_eq(inclusive_entries['unchanged.txt'].status, 'D',
+      'unstaged tracked deletions are included')
+    H.assert_eq(inclusive_entries['local-rename-new.txt'].status, 'R',
+      'staged renames include their destination path')
+    local old_rename = require('direct.paths').canonical(
+      vim.fs.joinpath(root, 'local-rename-old.txt'))
+    H.assert_true(inclusive.deleted[old_rename] ~= nil,
+      'the previous local rename path remains represented as a deletion')
   end)
 
   H.it('falls back to local main then master when origin/HEAD is missing', function()
@@ -112,7 +144,7 @@ H.describe('Git branch diff filter', function()
     buffer.list(root)
     local bufnr = vim.api.nvim_get_current_buf()
 
-    vim.cmd('DirectGitDiff main')
+    vim.cmd('DirectGitDiff --ref main --dir ' .. vim.fn.fnameescape(root))
     local state = buffer._state_for_test(bufnr)
     H.assert_true(state.view_git_diff_only, 'an explicit ref enables diff filtering')
     H.assert_eq(state.git_diff_snapshot.ref, 'main', 'the requested ref is remembered')
@@ -124,19 +156,84 @@ H.describe('Git branch diff filter', function()
     H.assert_true(vim.tbl_contains(lines, 'rename-new.txt'), 'renamed destinations remain visible')
     H.assert_false(vim.tbl_contains(lines, 'unchanged.txt'), 'unchanged paths are filtered out')
 
-    vim.cmd('DirectGitDiff main')
+    vim.cmd('DirectGitDiff --ref main --dir ' .. vim.fn.fnameescape(root))
     state = buffer._state_for_test(bufnr)
     H.assert_false(state.view_git_diff_only, 'invoking the same ref again turns the filter off')
     lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
     H.assert_true(vim.tbl_contains(lines, 'unchanged.txt'), 'the normal listing is restored')
 
-    vim.cmd('DirectGitDiff')
+    vim.cmd('DirectGitDiff --dir ' .. vim.fn.fnameescape(root))
     state = buffer._state_for_test(bufnr)
     H.assert_true(state.view_git_diff_only, 'no argument enables the default-branch filter')
     H.assert_eq(state.git_diff_snapshot.ref, 'origin/main', 'origin/HEAD supplies the default ref')
-    vim.cmd('DirectGitDiff')
+    vim.cmd('DirectGitDiff --dir ' .. vim.fn.fnameescape(root))
     H.assert_false(buffer._state_for_test(bufnr).view_git_diff_only,
       'no-argument invocation toggles the default filter off')
+  end)
+
+  H.it('opens or reuses the requested listing for DirectGitStatus from any buffer', function()
+    local sb = H.sandbox()
+    local root = make_repo(sb)
+    H.mkfile(root, 'modified.txt', 'local modification\n')
+    H.mkfile(root, 'local-untracked.txt', 'untracked\n')
+    local outside = H.mkfile(sb.root, 'outside.txt', 'outside\n')
+    vim.cmd('edit ' .. vim.fn.fnameescape(outside))
+
+    vim.cmd('DirectGitStatus --dir ' .. vim.fn.fnameescape(root))
+    local bufnr = vim.api.nvim_get_current_buf()
+    H.assert_eq(vim.bo.filetype, 'direct', 'the command opens the target Direct listing')
+    H.assert_eq(vim.api.nvim_buf_get_name(bufnr), root, 'the requested directory is the listing root')
+    wait_for_git_status(bufnr)
+    local state = require('direct.buffer.buffer')._state_for_test(bufnr)
+    H.assert_true(state.view_git_status_only, 'the target listing enters Git-status view')
+    local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    H.assert_true(vim.tbl_contains(lines, 'modified.txt'), 'modified tracked files are shown')
+    H.assert_true(vim.tbl_contains(lines, 'local-untracked.txt'), 'untracked files are shown')
+    H.assert_false(vim.tbl_contains(lines, 'unchanged.txt'), 'unchanged files are filtered out')
+
+    vim.cmd('edit ' .. vim.fn.fnameescape(outside))
+    vim.cmd('DirectGitStatus --dir ' .. vim.fn.fnameescape(root))
+    H.assert_eq(vim.api.nvim_get_current_buf(), bufnr,
+      'the existing Direct buffer for the requested directory is reused')
+
+    H.with_cwd(root, function()
+      vim.cmd('edit ' .. vim.fn.fnameescape(outside))
+      vim.cmd('DirectGitStatus')
+      H.assert_eq(vim.api.nvim_get_current_buf(), bufnr,
+        'the working directory is the default target')
+    end)
+  end)
+
+  H.it('unions uncommitted paths into DirectGitDiff when requested from another buffer', function()
+    local sb = H.sandbox()
+    local root = make_repo(sb)
+    H.mkfile(root, 'modified.txt', 'local modification\n')
+    H.mkfile(root, 'local-untracked.txt', 'untracked\n')
+    H.mkfile(root, 'local-staged.txt', 'staged\n')
+    git_at(root, 'add', 'local-staged.txt')
+    local outside = H.mkfile(sb.root, 'outside.txt', 'outside\n')
+    vim.cmd('edit ' .. vim.fn.fnameescape(outside))
+
+    H.with_cwd(root, function() vim.cmd('DirectGitDiff --ref main') end)
+    local bufnr = vim.api.nvim_get_current_buf()
+    local buffer = require('direct.buffer.buffer')
+    local state = buffer._state_for_test(bufnr)
+    H.assert_true(state.view_git_diff_only, 'the directory filter is enabled')
+    H.assert_false(state.git_diff_snapshot.include_uncommitted,
+      'the default committed-only comparison excludes local paths')
+    local entries = entry_map(state.git_diff_snapshot)
+    H.assert_nil(entries['local-untracked.txt'], 'untracked files are absent by default')
+
+    vim.cmd('DirectGitDiff --ref main --dir ' .. vim.fn.fnameescape(root)
+      .. ' --include-uncommitted')
+    state = buffer._state_for_test(bufnr)
+    H.assert_true(state.view_git_diff_only, 'changing options keeps the filter enabled')
+    H.assert_true(state.git_diff_snapshot.include_uncommitted,
+      'the command records the inclusive comparison mode')
+    entries = entry_map(state.git_diff_snapshot)
+    H.assert_true(entries['local-untracked.txt'] ~= nil, 'untracked files are unioned in')
+    H.assert_true(entries['local-staged.txt'] ~= nil, 'staged files are unioned in')
+    H.assert_true(entries['modified.txt'] ~= nil, 'local edits do not remove committed diff paths')
   end)
 
   H.it('refuses to toggle Git diff outside a Direct listing', function()

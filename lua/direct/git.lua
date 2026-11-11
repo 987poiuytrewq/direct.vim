@@ -76,9 +76,14 @@ end
 -- compare_snapshot(root[, ref]) returns the committed paths changed between
 -- the target ref's merge base with HEAD and HEAD. Working-tree/index changes
 -- are deliberately excluded, matching a pull-request file list.
-function M.compare_snapshot(root, ref)
+function M.compare_snapshot(root, ref, options)
   if type(root) ~= 'string' or root == '' then return nil, 'repository path is required' end
   if vim.fn.executable('git') ~= 1 then return nil, 'Git executable is unavailable' end
+  if options ~= nil and type(options) ~= 'table' then
+    return nil, 'Git diff options must be a table'
+  end
+  options = options or {}
+  local include_uncommitted = options.include_uncommitted == true
   if ref ~= nil and (type(ref) ~= 'string' or ref:find('\0', 1, true)) then
     return nil, 'Git ref must be a non-empty string'
   end
@@ -127,6 +132,71 @@ function M.compare_snapshot(root, ref)
       }
     end
   end
+
+  local uncommitted_deleted = {}
+  if include_uncommitted then
+    local status_output, status_err = command({ '--no-optional-locks', '-C', repo_root,
+      'status', '--porcelain=v1', '-z', '--untracked-files=all' })
+    if not status_output then
+      return nil, 'cannot read uncommitted Git changes: ' .. tostring(status_err)
+    end
+    local committed_paths = {}
+    for _, entry in ipairs(entries) do committed_paths[entry.path] = true end
+    local function add_uncommitted_deleted(relative)
+      local path = normalize(vim.fs.joinpath(repo_root, relative))
+      uncommitted_deleted[path] = { kind = 'file' }
+      local parent = path:match('^(.*)/[^/]+$')
+      while parent do
+        uncommitted_deleted[parent] = { kind = 'directory' }
+        if parent == repo_root or parent == '/' then break end
+        parent = parent:match('^(.*)/[^/]+$')
+      end
+    end
+    local status_fields, status_index = nul_fields(status_output), 1
+    while status_index <= #status_fields do
+      local record = status_fields[status_index]
+      status_index = status_index + 1
+      if #record >= 4 then
+        local xy, relative = record:sub(1, 2), record:sub(4)
+        local old_path
+        local code
+        if xy == '??' then
+          code = 'A'
+        elseif xy:find('R', 1, true) then
+          code = 'R'
+          old_path = status_fields[status_index]
+          status_index = status_index + 1
+        elseif xy:find('C', 1, true) then
+          code = 'C'
+          old_path = status_fields[status_index]
+          status_index = status_index + 1
+        elseif xy:find('A', 1, true) then
+          code = 'A'
+        elseif xy:find('D', 1, true) then
+          code = 'D'
+        elseif xy:find('T', 1, true) then
+          code = 'T'
+        elseif xy:find('M', 1, true) then
+          code = 'M'
+        elseif xy:find('U', 1, true) then
+          code = 'U'
+        end
+        if code and relative ~= '' then
+          if not committed_paths[relative] then
+            entries[#entries + 1] = {
+              path = relative,
+              old_path = old_path,
+              status = code,
+              uncommitted = true,
+            }
+            committed_paths[relative] = true
+          end
+          if code == 'D' then add_uncommitted_deleted(relative) end
+          if code == 'R' and old_path then add_uncommitted_deleted(old_path) end
+        end
+      end
+    end
+  end
   table.sort(entries, function(a, b)
     if a.path == b.path then return a.status < b.status end
     return a.path < b.path
@@ -153,6 +223,7 @@ function M.compare_snapshot(root, ref)
       parent = parent:match('^(.*)/[^/]+$')
     end
   end
+  for path, entry in pairs(uncommitted_deleted) do deleted[path] = entry end
   return {
     root = repo_root,
     ref = ref,
@@ -163,6 +234,7 @@ function M.compare_snapshot(root, ref)
     paths = diff_paths,
     deleted = deleted,
     force_deleted = true,
+    include_uncommitted = include_uncommitted,
   }
 end
 

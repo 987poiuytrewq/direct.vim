@@ -177,10 +177,11 @@ end
 
 --- Toggle the committed Git-diff filter for the current Direct listing.
 ---@param ref string|nil
-function M.git_diff(ref)
+---@param include_uncommitted boolean|nil
+function M.git_diff(ref, include_uncommitted)
   if not guard('DirectGitDiff') then return nil end
   if pending.refuse('change the Git-diff filter') then return nil end
-  return buffer.toggle_git_diff(ref)
+  return buffer.toggle_git_diff(ref, include_uncommitted)
 end
 
 function M.next_change()

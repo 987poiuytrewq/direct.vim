@@ -7,8 +7,10 @@ Notable changes to direct.vim are documented here. Versions follow
 
 ### Added
 
-- Add `:DirectGitDiff [ref]` (also mapped to `gd`) to toggle a listing filter for
-  committed changes from a branch's merge base to `HEAD`.
+- Add directory-targeted `:DirectGitStatus` and `:DirectGitDiff` commands; the
+  latter can include staged, unstaged, and non-ignored untracked paths.
+- Add `:DirectGitDiff` filtering for committed changes from a branch's merge
+  base to `HEAD`, toggled in the current listing with `gd`.
 
 ## [0.1.0] - 2026-11-09
 
