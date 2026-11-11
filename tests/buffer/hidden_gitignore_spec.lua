@@ -421,6 +421,8 @@ H.describe('hidden and Git-ignore filtering', function()
     H.assert_eq(count_message(H.messages(), 'Git-ignore filtering timed out'), warnings,
       'repeated timeouts in one repository do not repeat the warning')
     vim.system = original_system
+    require('direct.config').setup({ map_default_keys = false, respect_gitignore = true,
+      git = { enabled = false, timeout_ms = 5000 } })
 
     vim.api.nvim_buf_set_lines(0, -1, -1, false, { 'new.txt' })
     local ok, err = listing:sync()
