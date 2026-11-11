@@ -54,6 +54,15 @@ local function modified_listing_at(root)
   end
 end
 
+local function discard_left_clean_listing(source, target, open_in)
+  if open_in ~= 'current' or source == target or not vim.api.nvim_buf_is_valid(source) then
+    return
+  end
+  if vim.bo[source].filetype == constants.FILETYPE and not vim.bo[source].modified then
+    pcall(vim.api.nvim_buf_delete, source, { force = false })
+  end
+end
+
 -- Attach to the current buffer's directory without listing; the caller decides when to refresh.
 function M.restore()
   local bufnr = vim.api.nvim_get_current_buf()
@@ -68,16 +77,38 @@ end
 function M.list(path, options)
   options = options or {}
   local root = paths.root(path)
+  local configured = require('direct.config').options.buffers
   local reuse = options.reuse
-  if reuse == nil then reuse = require('direct.config').options.buffers.reuse end
+  if reuse == nil then reuse = configured.reuse end
+  local open_in = options.open_in
+  if open_in == nil then open_in = configured.open_in end
+  local source_bufnr = vim.api.nvim_get_current_buf()
   if reuse and not options.discard and modified_listing_at(root) then
     local reason = modified_listing_reason()
     ui.notify('direct: ' .. reason, vim.log.levels.ERROR)
     return nil, reason
   end
+
+  if not reuse and not options.discard then
+    local modified = modified_listing_at(root)
+    if modified then
+      local answer = vim.fn.confirm('A listing of ' .. root
+        .. ' has unsaved edits. Switch to it instead?',
+        '&Switch to existing listing\n&Open another listing\n&Cancel', 1)
+      if answer == 1 then
+        vim.api.nvim_set_current_buf(modified)
+        discard_left_clean_listing(source_bufnr, modified, open_in)
+        return M.restore()
+      end
+      if answer ~= 2 then return nil, 'listing creation cancelled' end
+    end
+  end
+
   local buffer = M.Buffer(root, options)
+  local target_bufnr = vim.api.nvim_get_current_buf()
   local listed, err = buffer:list(options)
   if not listed then return nil, err end
+  if not reuse then discard_left_clean_listing(source_bufnr, target_bufnr, open_in) end
   return buffer
 end
 

@@ -17,6 +17,9 @@ Notable changes to direct.vim are documented here. Versions follow
 ### Added
 
 - Add `:DirectHistory drop [undo|redo]` to remove one irrecoverable top step.
+- Make `buffers.reuse = false` listings show their directory path, clean up
+  clean buffers during navigation, and offer to switch to an existing modified
+  listing for the same directory.
 
 ## [0.2.0] - 2026-11-11
 

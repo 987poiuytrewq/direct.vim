@@ -221,7 +221,7 @@ H.describe('buffer: attach by path identity', function()
   H.it('creates independently named Direct listings when reuse is disabled', function()
     clean_buffers()
     local config = require('direct.config')
-    config.setup({ buffers = { reuse = false }, git = { enabled = false } })
+    config.setup({ buffers = { reuse = false, open_in = 'new' }, git = { enabled = false } })
     local sb = H.sandbox()
     local root = H.mkdir(sb.root, 'ws')
     root = paths.root(root)
@@ -235,6 +235,10 @@ H.describe('buffer: attach by path identity', function()
     H.assert_true(first_nr ~= second_nr, 'each request creates a distinct listing')
     H.assert_true(vim.api.nvim_buf_get_name(first_nr) ~= vim.api.nvim_buf_get_name(second_nr),
       'independent listings have unique buffer names')
+    H.assert_true(vim.api.nvim_buf_get_name(first_nr):find(root, 1, true) ~= nil,
+      'the first buffer name visibly includes its directory')
+    H.assert_true(vim.api.nvim_buf_get_name(second_nr):find(root, 1, true) ~= nil,
+      'the second buffer name visibly includes its directory')
     H.assert_eq(vim.b[first_nr].direct_root, root, 'the first buffer retains its filesystem root')
     H.assert_eq(vim.b[second_nr].direct_root, root, 'the second buffer retains its filesystem root')
     H.assert_buf_eq({ 'entry.txt' }, first_nr, 'the first listing remains available')
@@ -298,7 +302,8 @@ H.describe('buffer: open and ranged paths', function()
     H.assert_eq(vim.b[child_buf].direct_root, paths.root(sub),
       'the new buffer records the selected directory')
     H.assert_buf_eq({ 'inner.txt' }, child_buf)
-    H.assert_true(vim.api.nvim_buf_is_valid(parent_buf), 'the source listing remains available')
+    H.assert_false(vim.api.nvim_buf_is_valid(parent_buf),
+      'open_in=current removes the clean listing being left')
   end)
 
   H.it('navigation back to a parent directory reuses its existing buffer', function()
@@ -320,7 +325,74 @@ H.describe('buffer: open and ranged paths', function()
     H.assert_eq(vim.api.nvim_get_current_buf(), parent_bufnr,
       'the existing parent buffer is reused')
     H.assert_true(vim.api.nvim_buf_is_valid(child_bufnr),
-      'the child listing remains available')
+      'the child listing remains available for reuse when reuse=true')
+  end)
+
+  H.it('reuse=false navigation does not accumulate clean listings', function()
+    clean_buffers()
+    local config = require('direct.config')
+    config.setup({ buffers = { reuse = false }, git = { enabled = false } })
+    local sb = H.sandbox()
+    local root = H.mkdir(sb.root, 'ws')
+    local sub = H.mkdir(root, 'sub')
+    H.mkfile(sub, 'inside.txt', { 'inside' })
+    buffer.list(root)
+
+    for iteration = 1, 5 do
+      H.assert_true(buffer.restore():open('sub/'), 'open child on iteration ' .. iteration)
+      local child = vim.api.nvim_get_current_buf()
+      H.assert_true(vim.api.nvim_buf_get_name(child):find(sub, 1, true) ~= nil,
+        'child buffer names remain readable')
+      H.assert_true(require('direct').open_parent_expanded(), 'return to parent on iteration')
+      H.assert_true(vim.api.nvim_buf_get_name(0):find(root, 1, true) ~= nil,
+        'parent buffer name remains readable')
+
+      local direct_buffers = 0
+      for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+        if vim.api.nvim_buf_is_valid(bufnr) and vim.bo[bufnr].filetype == 'direct' then
+          direct_buffers = direct_buffers + 1
+        end
+      end
+      H.assert_eq(direct_buffers, 1,
+        'only the current clean listing remains after a down/up round trip')
+    end
+    config.setup({})
+  end)
+
+  H.it('reuse=false offers to switch to a hidden dirty listing for the same directory', function()
+    clean_buffers()
+    local config = require('direct.config')
+    config.setup({ buffers = { reuse = false }, git = { enabled = false } })
+    local sb = H.sandbox()
+    local root = H.mkdir(sb.root, 'ws')
+    local sub = H.mkdir(root, 'sub')
+    H.mkfile(sub, 'inside.txt', { 'inside' })
+    buffer.list(sub)
+    local dirty_buf = vim.api.nvim_get_current_buf()
+    vim.api.nvim_buf_set_lines(dirty_buf, -1, -1, false, { 'unsaved.txt' })
+    buffer.list(root)
+    local parent_buf = vim.api.nvim_get_current_buf()
+    local original_lines = vim.api.nvim_buf_get_lines(dirty_buf, 0, -1, false)
+    local prompts = {}
+    local restore_confirm = H.stub(vim.fn, 'confirm', function(prompt, choices, default)
+      prompts[#prompts + 1] = prompt
+      return 1
+    end)
+
+    H.assert_true(buffer.restore():open('sub/', { reuse = false }),
+      'opening the directory switches to its hidden dirty listing')
+    restore_confirm()
+
+    H.assert_eq(vim.api.nvim_get_current_buf(), dirty_buf, 'the existing dirty buffer is selected')
+    H.assert_eq(vim.api.nvim_buf_get_lines(dirty_buf, 0, -1, false), original_lines,
+      'the unsaved rows are preserved')
+    H.assert_false(vim.api.nvim_buf_is_valid(parent_buf),
+      'the clean source listing is removed after switching')
+    H.assert_eq(#prompts, 1, 'Direct offers the existing dirty listing')
+    H.assert_true(prompts[1]:find(sub, 1, true) ~= nil
+      and prompts[1]:find('unsaved edits', 1, true) ~= nil,
+      'the prompt identifies the directory and its unsaved edits')
+    config.setup({})
   end)
 
   H.it('open() edits a file whose name contains a space', function()

@@ -1,6 +1,6 @@
 # Spec: direct.vim improvements, second review
 
-**Status:** A1–A6 and A16 are complete; A7–A15 and A17–A18 remain proposed.
+**Status:** A1–A6, A16, and A17 are complete; A7–A15 and A18 remain proposed.
 This replaces the first gap review, whose tasks (S1–S6, R1–R3, F1–F6, M1–M6)
 have all landed on `master`.
 
@@ -10,7 +10,7 @@ been reproduced in a running Neovim. Each task's first step is to write a
 failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
-**Last checked:** `origin/master` at `874dc10` (11 November 2026). The review
+**Last checked:** `origin/master` at `c7c77be` (11 November 2026). The review
 identified the remaining expanded-folder and text-undo gaps in A5. Both are
 addressed here; A7–A15 and A17–A18 are unchanged.
 
@@ -69,7 +69,7 @@ Checked by reading the code at `d72b7ea`:
 | A14 | P4 | Proposed | Fix stale docs and remove stray files |
 | A15 | P4 | Proposed | Retire the positional root classifier |
 | A16 | P2 | Complete | Let a listing made during a Git timeout be saved once Git recovers |
-| A17 | P3 | Proposed | Make listings opened with `buffers.reuse = false` readable and tidy |
+| A17 | P3 | Complete | Make listings opened with `buffers.reuse = false` readable and tidy |
 | A18 | P3 | Proposed | Make `:DirectGitStatus` and `:DirectGitDiff` use the current listing |
 
 ## Safety
@@ -407,6 +407,13 @@ the clash in the README's key table with a one-line `mappings` example
 showing how to move them. Note any change in the changelog.
 
 ### A17 — Listings opened with `buffers.reuse = false` are hard to tell apart (P3)
+
+**Status: COMPLETE.** Independent listings now use readable `direct://<path>#<n>`
+names. With `open_in = 'current'`, navigation removes the clean listing being
+left while keeping modified listings hidden. Opening a directory that already
+has a modified listing asks whether to switch to it or create a second listing.
+Tests cover path-readable names, five down/up cycles without buffer buildup,
+and switching to a hidden modified listing; `make test` passes.
 
 **Problem.** With `buffers = { reuse = false }`, `M.Buffer`
 (`lua/direct/buffer/buffer.lua`) names each new listing
