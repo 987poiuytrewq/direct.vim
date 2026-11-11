@@ -585,6 +585,7 @@ local collapse_single_entry_paths = require('direct.buffer.collapse')({
   paths = paths,
   fs = fs,
   entry_path = M.entry_path,
+  path_identity = path_identity,
   list_with_snapshot = list_with_snapshot,
   filter_git_status_lines = filter_git_status_lines,
   filter_git_diff_lines = filter_git_diff_lines,
@@ -689,6 +690,45 @@ function M.toggle_hidden()
     for key, value in pairs(previous) do
       state[key] = value
     end
+    return nil, err
+  end
+  return listed
+end
+
+function M.toggle_collapse_single_entry_directories()
+  local bufnr = vim.api.nvim_get_current_buf()
+  if vim.bo[bufnr].modified then
+    local reason = 'cannot toggle directory collapsing with unsaved edits; sync or discard them first'
+    ui.notify('direct: ' .. reason, vim.log.levels.ERROR)
+    return nil, reason
+  end
+  local state = states[bufnr]
+  if not state then
+    local reason = 'direct listing state is unavailable; re-list this directory'
+    ui.notify('direct: ' .. reason, vim.log.levels.ERROR)
+    return nil, reason
+  end
+  local previous = {
+    view_collapse_single_entry_directories = state.view_collapse_single_entry_directories,
+    view_collapse_single_entry_directories_override = state.view_collapse_single_entry_directories_override,
+    expanded = state.expanded,
+    known_children = state.known_children,
+    directory_snapshots = state.directory_snapshots,
+    materialization_undos = state.materialization_undos,
+    materialization_recoveries = state.materialization_recoveries,
+    collapse_undos = state.collapse_undos,
+  }
+  state.view_collapse_single_entry_directories = not state.collapse_single_entry_directories
+  state.view_collapse_single_entry_directories_override = true
+  state.expanded = {}
+  state.known_children = {}
+  state.directory_snapshots = {}
+  state.materialization_undos = {}
+  state.materialization_recoveries = {}
+  state.collapse_undos = {}
+  local listed, err = M.restore():list({ reset_undo = true })
+  if not listed then
+    for key, value in pairs(previous) do state[key] = value end
     return nil, err
   end
   return listed

@@ -189,6 +189,14 @@ return function(context)
     then
       respect_gitignore_override = old_state.view_respect_gitignore
     end
+    local collapse_enabled = require('direct.config').options.collapse_single_entry_directories == true
+    if
+      old_state
+      and old_state.view_collapse_single_entry_directories_override
+      and type(old_state.view_collapse_single_entry_directories) == 'boolean'
+    then
+      collapse_enabled = old_state.view_collapse_single_entry_directories
+    end
     local lines, snapshot, err = list_with_snapshot(self.root, show_hidden_override, respect_gitignore_override)
     if not lines then
       ui.notify('direct: cannot list ' .. tostring(self.root) .. ': ' .. tostring(err), vim.log.levels.ERROR)
@@ -242,7 +250,6 @@ return function(context)
     end
     if next(deleted_paths) == nil then deleted_paths = {} end
 
-    local collapse_enabled = require('direct.config').options.collapse_single_entry_directories == true
     local collapsed_components, nested_snapshots
     if collapse_enabled then
       local collapse_err
@@ -325,6 +332,9 @@ return function(context)
         or {},
       view_show_hidden = snapshot.show_hidden,
       view_respect_gitignore = snapshot.respect_gitignore,
+      view_collapse_single_entry_directories = collapse_enabled,
+      view_collapse_single_entry_directories_override = old_state
+        and old_state.view_collapse_single_entry_directories_override or false,
       view_show_deleted = show_deleted,
       view_show_hidden_override = old_state and old_state.view_show_hidden_override or false,
       view_respect_gitignore_override = old_state and old_state.view_respect_gitignore_override or false,

@@ -602,7 +602,7 @@ Calling `setup()` is optional. These are the defaults:
       map_default_keys = true,
       show_hidden = true,
       respect_gitignore = true,
-      collapse_single_entry_directories = false,
+      collapse_single_entry_directories = true,
       indent_size = 2,
       undo_confirm = 'elsewhere',
       trash_retention = false,
@@ -689,9 +689,9 @@ mappings                table (default: `{}`)
 <
     Action names include `open`, `open_horizontal`, `open_vertical`, `open_tab`,
     `undo`, `redo`, `yank`, `paste`, `toggle_hidden`, `toggle_gitignore`,
-    `git_add`, `git_unstage`, `git_restore`, `git_diff`, `next_change`, `expand`,
-    `collapse`, `toggle`, and the recursive folder actions. Each action has a
-    `<Plug>(direct-...)` mapping.
+    `toggle_directory_collapse`, `git_add`, `git_unstage`, `git_restore`,
+    `git_diff`, `next_change`, `expand`, `collapse`, `toggle`, and the recursive
+    folder actions. Each action has a `<Plug>(direct-...)` mapping.
     `map_default_keys = false` suppresses defaults but not explicit overrides
     or `<Plug>` mappings.
 
@@ -706,12 +706,14 @@ respect_gitignore       boolean (default: `true`)
     the current listing. See |direct.vim-git-ignore|.
 
                                             *direct-collapse_single_entry_directories*
-collapse_single_entry_directories boolean (default: `false`)
+collapse_single_entry_directories boolean (default: `true`)
     Display a chain of directories with one visible directory child as a single
-    slash-separated path, such as `foo/bar/`. Files are not absorbed into the
-    path; expanding the final directory shows its files. Entry counts follow
-    the current listing filters (including the Git-status-only view). Each path
-    component remains editable as its corresponding directory entry.
+    slash-separated path, such as `foo/bar/`. Files are not
+    absorbed into the path; expanding the final directory shows its files.
+    Entry counts follow the current listing filters (including the Git-status-
+    only view). Each path component remains editable as its corresponding
+    directory entry. `gC` (|:DirectToggleDirectoryCollapse|) toggles this in the
+    current listing.
 
                                                            *direct-indent_size*
 indent_size             integer (default: `2`)
@@ -975,6 +977,12 @@ Viewing ~
     disk and expanded directories are collapsed. Refused while the listing
     has unsaved edits.
 
+                                                   *:DirectToggleDirectoryCollapse*
+:DirectToggleDirectoryCollapse
+    Turn single-entry directory collapsing on or off in this listing. The
+    listing is refreshed from disk and expanded directories are collapsed.
+    Refused while the listing has unsaved edits.
+
                                                       *:DirectToggleGitIgnore*
 :DirectToggleGitIgnore
     Turn Git-ignore filtering on or off in this listing. The listing is
@@ -1086,6 +1094,7 @@ In a listing (buffer-local):
     v       y               |:DirectYank| on the selected lines
     n       p  P            |:DirectPaste|
     n       gh              |:DirectToggleHidden|
+    n       gC              |:DirectToggleDirectoryCollapse|
     n       gi              |:DirectToggleGitIgnore|
     n       gs              |:DirectToggleGitStatus|
     n       gd              |:DirectGitDiff|
@@ -1136,6 +1145,7 @@ The functions in `require('direct')` mirror the commands:
     `paste_as(name)`              |:DirectPasteAs|
     `fold_all()`  `unfold_all()`    |:DirectFoldAll|  |:DirectUnfoldAll|
     `toggle_hidden()`             |:DirectToggleHidden|
+    `toggle_collapse_single_entry_directories()` |:DirectToggleDirectoryCollapse|
     `toggle_gitignore()`          |:DirectToggleGitIgnore|
     `toggle_git_status()`         |:DirectToggleGitStatus|
     `show_git_status()`           |:DirectGitStatus|

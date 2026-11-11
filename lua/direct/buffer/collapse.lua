@@ -3,6 +3,7 @@ return function(deps)
   local paths = deps.paths
   local fs = deps.fs
   local entry_path = deps.entry_path
+  local path_identity = deps.path_identity
   local list_with_snapshot = deps.list_with_snapshot
   local filter_git_status_lines = deps.filter_git_status_lines
   local filter_git_diff_lines = deps.filter_git_diff_lines
@@ -41,7 +42,7 @@ return function(deps)
       return children
     end
 
-    local function render_chain(path, entry_name, components, deleted)
+    local function render_chain(path, entry_name, components, deleted, seen_directories)
       local name = paths.strip_directory_marker(entry_name)
       local is_directory = is_dir_line(entry_name)
       local next_components = vim.deepcopy(components)
@@ -58,6 +59,13 @@ return function(deps)
       end
       if not is_directory or deleted then return append_current() end
 
+      local identity = path_identity(path)
+      local identity_key = identity and (identity.inode or identity.path)
+      if identity_key and seen_directories[identity_key] then
+        return append_current()
+      end
+      if identity_key then seen_directories[identity_key] = true end
+
       local directory = paths.strip_trailing_separator(path)
       local children, err = children_for(directory)
       if not children then
@@ -66,7 +74,8 @@ return function(deps)
       end
       if #children == 1 and is_dir_line(children[1]) then
         local child = children[1]
-        return render_chain(entry_path(directory, child), child, next_components, false)
+        return render_chain(entry_path(directory, child), child, next_components, false,
+          seen_directories)
       end
       return append_current()
     end
@@ -74,7 +83,7 @@ return function(deps)
     for _, line in ipairs(lines or {}) do
       local path = entry_path(root, line)
       local deleted = options.deleted_paths and options.deleted_paths[vim.fs.normalize(path)] ~= nil
-      local ok, err = render_chain(path, line, {}, deleted)
+      local ok, err = render_chain(path, line, {}, deleted, {})
       if not ok then return nil, nil, nil, err end
     end
 
