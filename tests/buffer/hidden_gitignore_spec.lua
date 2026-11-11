@@ -378,7 +378,7 @@ H.describe('hidden and Git-ignore filtering', function()
 
   H.it('falls back to an unfiltered listing when Git-ignore queries time out', function()
     require('direct.config').setup({ map_default_keys = false, respect_gitignore = true,
-      git = { timeout_ms = 40 } })
+      git = { enabled = false, timeout_ms = 40 } })
     local sb = H.sandbox()
     local root = H.mkdir(sb.root, 'timed-out-ignore-repo')
     H.mkfile(root, '.gitignore', '*.tmp\n')
@@ -424,7 +424,7 @@ H.describe('hidden and Git-ignore filtering', function()
 
     vim.api.nvim_buf_set_lines(0, -1, -1, false, { 'new.txt' })
     local ok, err = listing:sync()
-    H.assert_true(ok, 'sync retries the ignore snapshot after Git is available')
+    H.assert_true(ok, 'sync retries the ignore snapshot after Git is available: ' .. tostring(err))
     H.assert_nil(err, 'the recovered ignore query has no error')
     H.assert_true(H.exists(root, 'new.txt'), 'the visible edit is saved')
   end)
