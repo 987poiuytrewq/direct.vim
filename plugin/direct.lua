@@ -133,9 +133,20 @@ vim.api.nvim_create_user_command('DirectRedo', function()
   require('direct').redo()
 end, { nargs = 0, desc = 'direct: redo the last undone action' })
 
-vim.api.nvim_create_user_command('DirectHistory', function()
-  require('direct.history.view').show()
-end, { nargs = 0, desc = 'direct: show read-only filesystem history' })
+vim.api.nvim_create_user_command('DirectHistory', function(args)
+  if #args.fargs == 0 then
+    require('direct.history.view').show()
+  elseif args.fargs[1] == 'drop' and #args.fargs <= 2 then
+    local which = args.fargs[2] or 'undo'
+    local dropped, err = require('direct.history.history').drop_top(which)
+    if not dropped and err then
+      require('direct.ui').notify('direct: ' .. tostring(err), vim.log.levels.ERROR)
+    end
+  else
+    require('direct.ui').notify('direct: usage: :DirectHistory [drop [undo|redo]]',
+      vim.log.levels.ERROR)
+  end
+end, { nargs = '*', desc = 'direct: show or edit filesystem history' })
 
 vim.api.nvim_create_user_command('DirectHistoryReset', function()
   require('direct').reset_history()

@@ -764,6 +764,94 @@ local function trash_references(state)
   return references
 end
 
+local function filter_trash_records(lines, trash_paths)
+  local kept, dropped = { M.HEADER }, 0
+  for index = 2, #(lines or {}) do
+    local record = lines[index]
+    local action = M.action.deserialize(record)
+    local matches = false
+    for _, path in ipairs(action_paths(action)) do
+      if trash_paths[M.paths.canonical(path)] then
+        matches = true
+        break
+      end
+    end
+    if matches then
+      dropped = dropped + 1
+    else
+      kept[#kept + 1] = record
+    end
+  end
+  return kept, dropped
+end
+
+-- Plan removal of history records that refer to trash payloads which a forced
+-- operation will move or delete. The caller confirms before applying this plan.
+function M.plan_trash_history(state, paths)
+  if type(state) ~= 'table' or type(paths) ~= 'table' then
+    return nil, 'history.plan_trash_history: state and paths are required'
+  end
+  local targets = {}
+  for _, path in ipairs(paths) do
+    if type(path) == 'string' and path ~= '' then
+      targets[M.paths.canonical(path)] = true
+    end
+  end
+  local undo_lines, undo_dropped = filter_trash_records(state.undo_lines, targets)
+  local redo_lines, redo_dropped = filter_trash_records(state.redo_lines, targets)
+  return {
+    undo_lines = undo_lines,
+    redo_lines = redo_lines,
+    undo_dropped = undo_dropped,
+    redo_dropped = redo_dropped,
+    changed = undo_dropped + redo_dropped > 0,
+  }
+end
+
+-- Apply a plan under the caller's history lock. `persist` is used by trash
+-- emptying; history.apply instead embeds these stack snapshots in its own
+-- filesystem-operation journal and calls this with persist=false.
+function M.apply_trash_history_plan(state, plan, persist)
+  if type(state) ~= 'table' or type(plan) ~= 'table' then
+    return nil, 'history.apply_trash_history_plan: state and plan are required'
+  end
+  if plan.changed and persist then
+    local committed, err = commit_stacks(state.undo_path, state.redo_path,
+      state.transaction_path, plan.undo_lines, plan.redo_lines)
+    if not committed then return nil, err end
+  end
+  state.undo_lines = plan.undo_lines
+  state.redo_lines = plan.redo_lines
+  return {
+    undo_dropped = plan.undo_dropped or 0,
+    redo_dropped = plan.redo_dropped or 0,
+  }
+end
+
+function M.drop_top(which)
+  if which ~= 'undo' and which ~= 'redo' then
+    return nil, 'history.drop_top: expected "undo" or "redo"'
+  end
+  return M.with_lock(function()
+    local state, preflight_err = preflight_locked()
+    if not state then return nil, preflight_err end
+    local lines = which == 'undo' and copy_lines(state.undo_lines)
+      or copy_lines(state.redo_lines)
+    if #lines <= 1 then return nil, which .. ' history is empty' end
+    local record = table.remove(lines)
+    local undo_lines = which == 'undo' and lines or copy_lines(state.undo_lines)
+    local redo_lines = which == 'redo' and lines or copy_lines(state.redo_lines)
+    local committed, commit_err = commit_stacks(state.undo_path, state.redo_path,
+      state.transaction_path, undo_lines, redo_lines)
+    if not committed then return nil, commit_err end
+    local dropped = M.action.deserialize(record)
+    local summary = dropped and M.action.summarize({ dropped }) or 'unknown action'
+    M.ui.notify('direct: dropped the top ' .. which .. ' step: ' .. summary,
+      vim.log.levels.WARN)
+    return true, { which = which, record = record }
+  end)
+end
+
 -- Run a trash operation while holding the history lock and with a verified
 -- snapshot of every undo/redo reference to trash paths.
 function M.with_trash_references(callback)

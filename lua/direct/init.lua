@@ -48,6 +48,8 @@ local function guard(name)
   return false
 end
 
+local function is_cancelled(err) return type(err) == 'string' and err:find('cancelled', 1, true) ~= nil end
+
 local function refuse_modified_listing_paste()
   local bufnr = vim.api.nvim_get_current_buf()
   if not vim.bo[bufnr].modified then return false end
@@ -313,7 +315,7 @@ end
 function M.trash_restore(id, destination, force)
   if pending.refuse('restore trash entry') then return nil end
   local restored, err = trash.restore(id, destination, force)
-  if not restored and err then
+  if not restored and err and not is_cancelled(err) then
     ui.notify('direct: cannot restore trash entry: ' .. tostring(err), vim.log.levels.ERROR)
   end
   return restored, err
@@ -323,7 +325,9 @@ end
 function M.trash_empty(force)
   if pending.refuse('empty trash') then return nil end
   local emptied, err = trash.empty(force)
-  if not emptied and err then ui.notify('direct: cannot empty trash: ' .. tostring(err), vim.log.levels.ERROR) end
+  if not emptied and err and not is_cancelled(err) then
+    ui.notify('direct: cannot empty trash: ' .. tostring(err), vim.log.levels.ERROR)
+  end
   return emptied, err
 end
 

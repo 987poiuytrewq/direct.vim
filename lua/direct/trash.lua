@@ -10,6 +10,10 @@ local log = require('direct.log')
 
 local metadata_suffix = '.direct-trash.json'
 
+local function step_word(count)
+  return count == 1 and 'step' or 'steps'
+end
+
 local function lstat(path)
   local ok, stat = pcall(vim.uv.fs_lstat, path)
   return ok and stat or nil
@@ -193,14 +197,37 @@ function M.restore(id, destination, force)
     return nil, 'restore destination already exists: ' .. destination
   end
   local restore_action = action.Restore(path, destination)
+  local dropped = { undo_dropped = 0, redo_dropped = 0 }
   local restored, restore_err = history.apply(restore_action, function()
     return restore_action['do']()
-  end, function(_, references)
-    if not force and references[paths.canonical(path)] then
+  end, function(state, references)
+    if not references[paths.canonical(path)] then return true end
+    if not force then
       return nil, referenced_message(path)
+    end
+    local plan, plan_err = history.plan_trash_history(state, { path })
+    if not plan then return nil, plan_err end
+    local step_count = plan.undo_dropped + plan.redo_dropped
+    if step_count > 0 then
+      local prompt = string.format(
+        'Restore this trash entry and discard %d undo %s and %d redo %s?',
+        plan.undo_dropped, step_word(plan.undo_dropped),
+        plan.redo_dropped, step_word(plan.redo_dropped))
+      if vim.fn.confirm(prompt, '&Restore and drop history\n&Cancel', 2) ~= 1 then
+        return nil, 'restore cancelled; history and trash entry were preserved'
+      end
+      local counts, prune_err = history.apply_trash_history_plan(state, plan, false)
+      if not counts then return nil, prune_err end
+      dropped = counts
     end
     return true
   end)
+  local dropped_count = dropped.undo_dropped + dropped.redo_dropped
+  if restored and dropped_count > 0 then
+    ui.notify(string.format('direct: discarded %d undo %s and %d redo %s '
+      .. 'while restoring trash', dropped.undo_dropped, step_word(dropped.undo_dropped),
+      dropped.redo_dropped, step_word(dropped.redo_dropped)), vim.log.levels.WARN)
+  end
   if restored then ui.notify(action.summarize({ restore_action }), vim.log.levels.INFO) end
   return restored, restore_err
 end
@@ -310,8 +337,38 @@ function M.apply_retention()
 end
 
 function M.empty(force)
-  return history.with_trash_references(function(references)
-    return empty_locked(force == true, references)
+  return history.with_trash_references(function(references, state)
+    local dropped = { undo_dropped = 0, redo_dropped = 0 }
+    if force == true then
+      local entries, entries_err = M.entries({ include_reserved = true })
+      if not entries then return nil, entries_err end
+      local paths_to_remove = {}
+      for _, entry in ipairs(entries) do paths_to_remove[#paths_to_remove + 1] = entry.path end
+      local plan, plan_err = history.plan_trash_history(state, paths_to_remove)
+      if not plan then return nil, plan_err end
+      local step_count = plan.undo_dropped + plan.redo_dropped
+      if step_count > 0 then
+        local prompt = string.format(
+          'Empty %d trash entr%s and discard %d undo %s and %d redo %s?',
+          #entries, #entries == 1 and 'y' or 'ies', plan.undo_dropped,
+          step_word(plan.undo_dropped), plan.redo_dropped, step_word(plan.redo_dropped))
+        if vim.fn.confirm(prompt, '&Empty and drop history\n&Cancel', 2) ~= 1 then
+          return nil, 'empty cancelled; history and trash entries were preserved'
+        end
+        local counts, prune_err = history.apply_trash_history_plan(state, plan, true)
+        if not counts then return nil, prune_err end
+        dropped = counts
+      end
+    end
+
+    local emptied, result = empty_locked(force == true, references)
+    local dropped_count = dropped.undo_dropped + dropped.redo_dropped
+    if emptied and dropped_count > 0 then
+      ui.notify(string.format('direct: discarded %d undo %s and %d redo %s '
+        .. 'to empty trash', dropped.undo_dropped, step_word(dropped.undo_dropped),
+        dropped.redo_dropped, step_word(dropped.redo_dropped)), vim.log.levels.WARN)
+    end
+    return emptied, result
   end)
 end
 

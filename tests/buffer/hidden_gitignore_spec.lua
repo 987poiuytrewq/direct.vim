@@ -454,11 +454,14 @@ H.describe('hidden and Git-ignore filtering', function()
     end
     local listing = require('direct').list(root)
     vim.system = original_system
+    require('direct.config').setup({ map_default_keys = false, respect_gitignore = true,
+      git = { enabled = false, timeout_ms = 5000 } })
     H.assert_not_nil(listing, 'initial timeout leaves a listing available')
     H.assert_true(vim.b.direct_gitignore_timed_out, 'unfiltered state is visibly marked')
     vim.api.nvim_buf_set_lines(0, -1, -1, false, { 'new.txt' })
 
-    H.assert_true(listing:sync(), 'sync retries the timed-out Git snapshot')
+    local saved, save_err = listing:sync()
+    H.assert_true(saved, 'sync retries the timed-out Git snapshot: ' .. tostring(save_err))
     H.assert_true(H.exists(root, 'new.txt'), 'a safe, visible edit is saved')
     H.assert_false(vim.b.direct_gitignore_timed_out, 'the indicator clears after a successful refresh')
   end)

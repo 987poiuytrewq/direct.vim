@@ -9,6 +9,12 @@ Notable changes to direct.vim are documented here. Versions follow
 
 - Allow saves to proceed after unrelated external additions/removals while
   preserving conflicts on edited sources and requested destinations.
+- Keep forced trash restore/empty from stranding undo history: confirm and drop
+  only history records that depend on the affected payload.
+
+### Added
+
+- Add `:DirectHistory drop [undo|redo]` to remove one irrecoverable top step.
 
 ## [0.2.0] - 2026-11-11
 
