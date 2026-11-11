@@ -203,6 +203,10 @@ require('direct').setup({
   trash_retention = false,           -- or { max_age_days = 30, max_size_bytes = 1e9 }
   directory_separator = package.config:sub(1, 1), -- '/' or '\\'
   max_recursive_expand_depth = false, -- limit for zO/zR; false = unlimited
+  buffers = {
+    reuse = true,        -- reuse an existing Direct listing for the same directory
+    open_in = 'current', -- or 'new' to keep the source buffer when opening files
+  },
   show_folder_icons = true,
   show_file_icons = true,
   show_filetype_icons = true,        -- bufferline-style filename icons via nvim-web-devicons
@@ -240,6 +244,21 @@ the listing usable without status and reports one warning per repository.
 You can call `setup()` more than once. Each call replaces the previous options,
 and unknown or invalid options are reported as errors instead of being silently
 ignored.
+
+`buffers.reuse` applies to Direct directory listings. Set it to `false` to
+create a separate listing buffer each time; Direct keeps the real directory in
+buffer-local metadata and gives each listing a unique internal name. Regular
+file buffers keep Neovim's normal path-based reuse. `buffers.open_in = 'new'`
+keeps the source listing (including unsaved edits) when opening a file, without
+creating a split. It defaults to `'current'`, which opens in the current window
+and removes the source Direct buffer after a successful file open. These can be
+overridden per call:
+
+```lua
+require('direct').open({ reuse = false, open_in = 'new' })
+```
+
+Explicit split options continue to preserve the source.
 
 `mappings` accepts action names such as `open`, `undo`, `redo`, `yank`,
 `paste`, `toggle_hidden`, `toggle_gitignore`, `git_add`, `git_diff`, `next_change`,

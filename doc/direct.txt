@@ -575,6 +575,10 @@ Calling `setup()` is optional. These are the defaults:
       trash_retention = false,
       directory_separator = package.config:sub(1, 1),
       max_recursive_expand_depth = false,
+      buffers = {
+        reuse = true,
+        open_in = 'current',
+      },
       show_folder_icons = true,
       show_file_icons = true,
       show_filetype_icons = true,
@@ -606,7 +610,29 @@ You can call `setup()` more than once. Each call replaces the previous options
 rather than merging with them. An unknown or invalid option is reported as an
 error, and its default is used instead.
 
-                                                     *direct-map_default_keys*
+                                                               *direct-buffers*
+buffers                 table (defaults: `{ reuse = true, open_in = 'current' }`)
+    `reuse` controls whether opening a directory selects an existing Direct
+    listing for the same path. Set it to `false` to create an independent
+    listing buffer; Direct tracks that listing's real directory separately from
+    its unique internal buffer name. Regular file buffers continue to follow
+    Neovim's normal path-based buffer reuse.
+
+    `open_in` controls file navigation when no per-call split is requested.
+    `'current'` (the default) opens in the current window and removes the source
+    Direct buffer after a successful file open. `'new'` opens in the current
+    window while keeping the source buffer, including unsaved listing edits,
+    available. It does not create a split. Directory navigation reuses a
+    matching listing when `reuse = true`; otherwise it creates a new listing.
+    Explicit `open({ split = ... })` options continue to take precedence and
+    preserve the source buffer.
+
+    Both settings can also be overridden for one `open()` call:
+>
+        require('direct').open({ reuse = false, open_in = 'new' })
+<
+
+                                                      *direct-map_default_keys*
 map_default_keys        boolean (default: `true`)
     Install the global `-` mapping and the buffer-local mappings in
     listings. Set to `false` to disable default physical keys; explicit
