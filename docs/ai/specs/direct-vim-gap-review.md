@@ -10,12 +10,10 @@ been reproduced in a running Neovim. Each task's first step is to write a
 failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
-**Last checked:** `origin/master` at `ed554ce` (11 November 2026). That check
-read #104 (forced trash operations and history), #105 (the rest of A5), and
-#106 (independent listings). It confirmed A5, A6 and A17 in the code and added
-A19 (dropping a history step can strand the step below it) and A20 (removing a
-listing closes other windows showing it). A18 is complete in #107; A20 is
-addressed here. A7–A15 and A19 remain.
+**Last checked:** `origin/master` at `0577a4e` (11 November 2026). That check
+read #107 (Git views target the current listing) and #108 (listings shown in
+other windows are kept), and confirmed A18 and A20 in the code. It found no new
+tasks. A7–A15 and A19 are unchanged.
 
 ## Conventions
 
@@ -462,6 +460,11 @@ listing or working directory according to invocation context. Add completion
 for command options, `--dir`, branch/tag refs and directories. Tests cover
 current-buffer targeting, relative `--dir` and completion; `make test` passes.
 
+*Checked at `0577a4e`:* the code matches (`lua/direct/git_commands.lua`).
+Without `--dir`, both commands use the current listing; a relative `--dir` is
+resolved against it. `--ref` completion runs `git for-each-ref` with the
+`git.timeout_ms` limit.
+
 **Problem.** Without `--dir`, both commands open a listing of the working
 directory (`open_listing` in `lua/direct/git_commands.lua`), even when run from
 a listing of another directory. `gd` calls `require('direct').git_diff()` and
@@ -513,6 +516,11 @@ message mentions `:DirectHistory drop`.
 only when no window displays them. Modified buffers remain preserved as before.
 Tests cover file opens and `buffers.reuse = false` directory navigation from
 one split while another still displays the source listing.
+
+*Checked at `0577a4e`:* the code matches. Both `discard_left_clean_listing`
+(`lua/direct/buffer/list.lua`) and `Buffer:open` (`lua/direct/buffer/open.lua`)
+now skip the removal when `vim.fn.win_findbuf` finds the listing in another
+window.
 
 **Problem.** `discard_left_clean_listing` (`lua/direct/buffer/list.lua`) and
 `Buffer:open` (`lua/direct/buffer/open.lua`, when opening a file with
