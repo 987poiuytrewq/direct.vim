@@ -30,10 +30,21 @@ return function(context)
 -- Child paths resolve from their row identities rather than their display text.
 function Buffer:open(line, options)
   options = options or {}
-  if type(options) ~= 'table'
-    or (options.split ~= nil and options.split ~= 'horizontal'
-      and options.split ~= 'vertical' and options.split ~= 'tab') then
+  if type(options) ~= 'table' then
+    return nil, 'open options must be a table'
+  end
+  if options.split ~= nil and options.split ~= 'horizontal'
+    and options.split ~= 'vertical' and options.split ~= 'tab' then
     return nil, "open split must be 'horizontal', 'vertical', or 'tab'"
+  end
+  local configured = require('direct.config').options.buffers
+  local open_in = options.open_in
+  if open_in == nil then open_in = configured.open_in end
+  if options.reuse ~= nil and type(options.reuse) ~= 'boolean' then
+    return nil, 'open reuse must be a boolean'
+  end
+  if open_in ~= 'current' and open_in ~= 'new' then
+    return nil, "open_in must be 'current' or 'new'"
   end
   local bufnr = vim.api.nvim_get_current_buf()
   local direct_buf = bufnr
@@ -68,17 +79,18 @@ function Buffer:open(line, options)
   end
 
   if is_dir_line(record and record.name or line) then
-    local listed, list_err = M.list(path)
+    local listed, list_err = M.list(path, { reuse = options.reuse, open_in = open_in })
     if not listed then return nil, list_err end
   else
     if vim.bo[direct_buf].filetype == constants.FILETYPE
-      and vim.bo[direct_buf].modified and not options.split then
+      and vim.bo[direct_buf].modified and not options.split and open_in == 'current' then
       local reason = 'cannot open a file with unsaved edits; sync or discard them first'
       ui.notify('direct: ' .. reason, vim.log.levels.ERROR)
       return nil, reason
     end
-    vim.cmd('edit ' .. vim.fn.fnameescape(path))
-    if not options.split and vim.api.nvim_buf_is_valid(direct_buf)
+    vim.cmd((open_in == 'new' and not options.split and 'hide edit ' or 'edit ')
+      .. vim.fn.fnameescape(path))
+    if not options.split and open_in == 'current' and vim.api.nvim_buf_is_valid(direct_buf)
       and vim.api.nvim_get_current_buf() ~= direct_buf then
       pcall(vim.api.nvim_buf_delete, direct_buf, { force = true })
     end

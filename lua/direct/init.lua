@@ -4,6 +4,8 @@
 
 ---@class direct.OpenOptions
 ---@field split? 'horizontal'|'vertical'|'tab'
+---@field reuse? boolean Reuse an existing Direct listing for the target directory.
+---@field open_in? 'current'|'new' Open in the current buffer or preserve the source buffer.
 
 ---@alias direct.SyncCallback fun(ok: boolean|nil, err: string|nil)
 
@@ -86,7 +88,7 @@ function M.open(line, options)
 end
 
 function M.open_parent_expanded()
-  local parent = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ':h')
+  local parent = vim.fn.fnamemodify(buffer.root_for_buffer(), ':h')
   local opened = M.list(parent)
   if not opened then return opened end
   return buffer.expand()
@@ -177,10 +179,11 @@ end
 
 --- Toggle the committed Git-diff filter for the current Direct listing.
 ---@param ref string|nil
-function M.git_diff(ref)
+---@param include_uncommitted boolean|nil
+function M.git_diff(ref, include_uncommitted)
   if not guard('DirectGitDiff') then return nil end
   if pending.refuse('change the Git-diff filter') then return nil end
-  return buffer.toggle_git_diff(ref)
+  return buffer.toggle_git_diff(ref, include_uncommitted)
 end
 
 function M.next_change()
@@ -436,9 +439,16 @@ function M.restore_git()
     return nil, reason
   end
 
+  local restore_command, command_err = git_status.worktree_restore_command(listing.root)
+  if not restore_command then
+    ui.notify('direct: cannot prepare Git restore: ' .. tostring(command_err),
+      vim.log.levels.ERROR)
+    return nil, command_err
+  end
+
   buffer.cancel_git_status()
   return run.current_entry(
-    git_status.worktree_restore_command(listing.root),
+    restore_command,
     function(_, bufnr, root) buffer.refresh_git_status(bufnr, root) end,
     { quiet_success = true }
   )

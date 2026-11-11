@@ -548,28 +548,65 @@ end
 -- Attach / create
 -- ---------------------------------------------------------------------------
 
--- Capture current_entry before switching buffers, then reuse a buffer only when
--- fs.same_path confirms that it represents the requested directory.
-function M.Buffer(path)
+-- direct_root keeps a directory listing's filesystem path independent of its
+-- buffer name. This is needed when reuse is disabled because Neovim requires
+-- buffer names to be unique.
+function M.root_for_buffer(bufnr)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  if vim.bo[bufnr].filetype == constants.FILETYPE then
+    local root = vim.b[bufnr].direct_root
+    if type(root) == 'string' and root ~= '' then return root end
+  end
+  return vim.api.nvim_buf_get_name(bufnr)
+end
+
+-- Capture current_entry before switching buffers. Reuse uses path identity so
+-- symlink aliases still select the same listing.
+function M.Buffer(path, options)
+  options = options or {}
+  local configured = require('direct.config').options.buffers
+  local reuse = options.reuse
+  if reuse == nil then reuse = configured.reuse end
+  local open_in = options.open_in
+  if open_in == nil then open_in = configured.open_in end
   local root = paths.root(path)
   local self = setmetatable({
     root = root,
     current_entry = M.current_entry(),
   }, Buffer)
 
-  for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
-    local name = vim.api.nvim_buf_get_name(bufnr)
-    -- Compare by path identity, never `==` (a symlinked prefix makes the buffer
-    -- name and root different spellings of the same directory) and never
-    -- `vim.fn.bufnr` (which pattern-matches and is spelling-sensitive).
-    if name ~= '' and fs.same_path(name, root) then
-      vim.api.nvim_set_current_buf(bufnr)
-      return self
+  if reuse then
+    for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+      local name = M.root_for_buffer(bufnr)
+      -- Compare by path identity, never `==` (a symlinked prefix makes the buffer
+      -- name and root different spellings of the same directory) and never
+      -- `vim.fn.bufnr` (which pattern-matches and is spelling-sensitive).
+      if name ~= '' and fs.same_path(name, root) then
+        vim.api.nvim_set_current_buf(bufnr)
+        vim.b[bufnr].direct_root = root
+        return self
+      end
     end
   end
 
-  vim.cmd('enew')
-  vim.api.nvim_buf_set_name(0, root)
+  local bufnr
+  if not reuse then
+    -- Neovim forbids two buffers with the same name (E95). Keep the real root
+    -- in buffer-local metadata and give this independent listing a unique URI.
+    bufnr = vim.api.nvim_create_buf(true, false)
+    vim.api.nvim_set_current_buf(bufnr)
+    vim.api.nvim_buf_set_name(bufnr,
+      string.format('direct://listing/%s/%d', vim.fn.sha256(root), bufnr))
+  elseif open_in == 'new' then
+    bufnr = vim.api.nvim_create_buf(true, false)
+    vim.api.nvim_set_current_buf(bufnr)
+    vim.api.nvim_buf_set_name(bufnr, root)
+  else
+    vim.cmd('enew')
+    bufnr = vim.api.nvim_get_current_buf()
+    vim.api.nvim_buf_set_name(bufnr, root)
+  end
+  vim.b[bufnr].direct_root = root
   return self
 end
 
@@ -787,7 +824,7 @@ function M.show_git_status()
   return set_git_status_only(true)
 end
 
-local function set_git_diff_only(ref)
+local function set_git_diff_only(ref, include_uncommitted)
   local bufnr = vim.api.nvim_get_current_buf()
   if ref ~= nil and type(ref) ~= 'string' then
     local reason = 'Git ref must be a string'
@@ -806,12 +843,19 @@ local function set_git_diff_only(ref)
     return nil, reason
   end
 
-  local turning_off = state.view_git_diff_only
-    and (ref == nil or vim.trim(ref) == state.git_diff_snapshot.ref)
+  local active_snapshot = type(state.git_diff_snapshot) == 'table'
+    and state.git_diff_snapshot or nil
+  local same_ref = ref == nil
+    or (active_snapshot and vim.trim(ref) == active_snapshot.ref)
+  local same_uncommitted = include_uncommitted == nil
+    or (active_snapshot and include_uncommitted == active_snapshot.include_uncommitted)
+  local turning_off = state.view_git_diff_only and same_ref and same_uncommitted
   local snapshot = false
   if not turning_off then
     local err
-    snapshot, err = git.compare_snapshot(state.root, ref)
+    snapshot, err = git.compare_snapshot(state.root, ref, {
+      include_uncommitted = include_uncommitted == true,
+    })
     if not snapshot then
       ui.notify('direct: cannot compare Git diff: ' .. tostring(err), vim.log.levels.ERROR)
       return nil, err
@@ -850,8 +894,8 @@ local function set_git_diff_only(ref)
   return listed
 end
 
-function M.toggle_git_diff(ref)
-  return set_git_diff_only(ref)
+function M.toggle_git_diff(ref, include_uncommitted)
+  return set_git_diff_only(ref, include_uncommitted)
 end
 
 -- Visible file/Git navigation and folding accessors live in navigation.lua.

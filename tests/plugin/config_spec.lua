@@ -29,6 +29,23 @@ local function global_dash_count()
 end
 
 H.describe('config', function()
+  H.it('configures buffer reuse and target placement independently', function()
+    local config = fresh_config()
+    config.clear_mappings()
+    H.assert_eq(config.defaults.buffers, { reuse = true, open_in = 'current' },
+      'buffer defaults preserve current reuse and open behavior')
+    H.assert_eq(config.setup({ buffers = { reuse = false } }).buffers,
+      { reuse = false, open_in = 'current' }, 'reuse can be disabled independently')
+    H.assert_eq(config.setup({ buffers = { open_in = 'new' } }).buffers,
+      { reuse = true, open_in = 'new' }, 'new-buffer opening can be enabled independently')
+    H.capture_messages()
+    H.assert_eq(config.setup({ buffers = { reuse = 'yes', open_in = 'split' } }).buffers,
+      config.defaults.buffers, 'invalid values leave their defaults in place')
+    H.assert_notified('buffers.reuse: expected a boolean', vim.log.levels.ERROR)
+    H.assert_notified("buffers.open_in: expected 'current' or 'new'", vim.log.levels.ERROR)
+    config.clear_mappings()
+  end)
+
   H.it('validates the optional single-entry directory collapse setting', function()
     local config = fresh_config()
     config.clear_mappings()
@@ -348,18 +365,18 @@ H.describe('config', function()
     H.mkfile(ws, 'file.txt', { 'file' })
     buffer.list(ws)
     local bufnr = vim.api.nvim_get_current_buf()
-    H.assert_eq(vim.fn.maparg('gd', 'n'), '<Cmd>DirectGitDiff<CR>',
+    H.assert_eq(vim.fn.maparg('gd', 'n'), '<Cmd>lua require("direct").git_diff()<CR>',
       'the default buffer-local gd invokes the branch diff filter')
-    H.assert_eq(vim.fn.maparg('<Plug>(direct-git-diff)', 'n'), '<Cmd>DirectGitDiff<CR>',
+    H.assert_eq(vim.fn.maparg('<Plug>(direct-git-diff)', 'n'), '<Cmd>lua require("direct").git_diff()<CR>',
       'the Git diff action has a Plug entry point')
 
     config.setup({ map_default_keys = false })
     H.assert_eq(vim.fn.maparg('gd', 'n'), '', 'disabling defaults removes buffer-local gd')
-    H.assert_eq(vim.fn.maparg('<Plug>(direct-git-diff)', 'n'), '<Cmd>DirectGitDiff<CR>',
+    H.assert_eq(vim.fn.maparg('<Plug>(direct-git-diff)', 'n'), '<Cmd>lua require("direct").git_diff()<CR>',
       'the Plug entry point remains available')
 
     config.setup({ map_default_keys = false, mappings = { git_diff = '<leader>gd' } })
-    H.assert_eq(vim.fn.maparg('<leader>gd', 'n'), '<Cmd>DirectGitDiff<CR>',
+    H.assert_eq(vim.fn.maparg('<leader>gd', 'n'), '<Cmd>lua require("direct").git_diff()<CR>',
       'the buffer-local action can be remapped explicitly')
     config.clear_mappings()
     H.assert_eq(vim.fn.maparg('<leader>gd', 'n'), '', 'clear_mappings removes the override')

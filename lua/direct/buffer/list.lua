@@ -45,7 +45,8 @@ local function modified_listing_at(root)
     if vim.api.nvim_buf_is_valid(bufnr) then
       local name = vim.api.nvim_buf_get_name(bufnr)
       if name ~= '' and vim.bo[bufnr].filetype == constants.FILETYPE
-        and vim.bo[bufnr].modified and fs.same_path(name, root) then
+        and vim.bo[bufnr].modified
+        and fs.same_path(M.root_for_buffer(bufnr), root) then
         return bufnr
       end
     end
@@ -54,20 +55,26 @@ end
 
 -- Attach to the current buffer's directory without listing; the caller decides when to refresh.
 function M.restore()
-  local name = vim.api.nvim_buf_get_name(vim.api.nvim_get_current_buf())
-  return M.Buffer(name)
+  local bufnr = vim.api.nvim_get_current_buf()
+  local name = M.root_for_buffer(bufnr)
+  return setmetatable({
+    root = paths.root(name),
+    current_entry = M.current_entry(),
+  }, Buffer)
 end
 
 -- List a directory in an attached direct buffer.
 function M.list(path, options)
   options = options or {}
   local root = paths.root(path)
-  if not options.discard and modified_listing_at(root) then
+  local reuse = options.reuse
+  if reuse == nil then reuse = require('direct.config').options.buffers.reuse end
+  if reuse and not options.discard and modified_listing_at(root) then
     local reason = modified_listing_reason()
     ui.notify('direct: ' .. reason, vim.log.levels.ERROR)
     return nil, reason
   end
-  local buffer = M.Buffer(root)
+  local buffer = M.Buffer(root, options)
   local listed, err = buffer:list(options)
   if not listed then return nil, err end
   return buffer

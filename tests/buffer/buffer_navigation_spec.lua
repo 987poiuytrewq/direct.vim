@@ -217,6 +217,34 @@ H.describe('buffer: attach by path identity', function()
     H.assert_eq(matches, 1, 'exactly one buffer for the directory (no duplicate)')
     H.assert_true(#vim.api.nvim_list_bufs() >= before, 'no buffer was destroyed')
   end)
+
+  H.it('creates independently named Direct listings when reuse is disabled', function()
+    clean_buffers()
+    local config = require('direct.config')
+    config.setup({ buffers = { reuse = false }, git = { enabled = false } })
+    local sb = H.sandbox()
+    local root = H.mkdir(sb.root, 'ws')
+    root = paths.root(root)
+    H.mkfile(root, 'entry.txt', { 'entry' })
+
+    local first = buffer.list(root)
+    local first_nr = vim.api.nvim_get_current_buf()
+    local second = buffer.list(root)
+    local second_nr = vim.api.nvim_get_current_buf()
+
+    H.assert_true(first_nr ~= second_nr, 'each request creates a distinct listing')
+    H.assert_true(vim.api.nvim_buf_get_name(first_nr) ~= vim.api.nvim_buf_get_name(second_nr),
+      'independent listings have unique buffer names')
+    H.assert_eq(vim.b[first_nr].direct_root, root, 'the first buffer retains its filesystem root')
+    H.assert_eq(vim.b[second_nr].direct_root, root, 'the second buffer retains its filesystem root')
+    H.assert_buf_eq({ 'entry.txt' }, first_nr, 'the first listing remains available')
+    H.assert_buf_eq({ 'entry.txt' }, second_nr, 'the second listing is populated')
+
+    vim.api.nvim_set_current_buf(first_nr)
+    H.assert_true(fs.same_path(buffer.restore().root, root),
+      'restore resolves the actual root instead of the internal buffer name')
+    config.setup({})
+  end)
 end)
 
 H.describe('buffer: open and ranged paths', function()
@@ -254,6 +282,25 @@ H.describe('buffer: open and ranged paths', function()
       'the new buffer denotes the sub directory')
   end)
 
+  H.it('open({ reuse = false }) makes a distinct listing for the selected directory', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local sub = H.mkdir(ws, 'sub')
+    H.mkfile(sub, 'inner.txt', { 'i' })
+
+    local parent = buffer.list(ws)
+    local parent_buf = vim.api.nvim_get_current_buf()
+    H.assert_true(parent:open('sub/', { reuse = false }), 'the directory opens')
+    local child_buf = vim.api.nvim_get_current_buf()
+
+    H.assert_true(child_buf ~= parent_buf, 'the parent buffer remains separate')
+    H.assert_eq(vim.b[child_buf].direct_root, paths.root(sub),
+      'the new buffer records the selected directory')
+    H.assert_buf_eq({ 'inner.txt' }, child_buf)
+    H.assert_true(vim.api.nvim_buf_is_valid(parent_buf), 'the source listing remains available')
+  end)
+
   H.it('navigation back to a parent directory reuses its existing buffer', function()
     clean_buffers()
     local sb = H.sandbox()
@@ -288,6 +335,30 @@ H.describe('buffer: open and ranged paths', function()
     H.assert_true(fs.same_path(vim.api.nvim_buf_get_name(0), ws .. '/my file.txt'),
       'the space-named file is current')
     H.assert_buf_eq({ 'x' }, 0)
+  end)
+
+  H.it('open_in=new preserves an edited source listing while opening a file', function()
+    clean_buffers()
+    local config = require('direct.config')
+    config.setup({ buffers = { open_in = 'new' }, git = { enabled = false } })
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkfile(ws, 'a.txt', { 'hello' })
+    local listing = buffer.list(ws)
+    local source_buf = vim.api.nvim_get_current_buf()
+    local source_lines = vim.api.nvim_buf_get_lines(source_buf, 0, -1, false)
+    source_lines[#source_lines + 1] = 'unsaved listing edit'
+    vim.api.nvim_buf_set_lines(source_buf, 0, -1, false, source_lines)
+
+    H.assert_true(listing:open('a.txt'), 'the file opens from an edited listing')
+
+    H.assert_true(fs.same_path(vim.api.nvim_buf_get_name(0), ws .. '/a.txt'),
+      'the file buffer is current')
+    H.assert_true(vim.api.nvim_buf_is_valid(source_buf), 'the source listing remains available')
+    H.assert_eq(vim.api.nvim_buf_get_lines(source_buf, 0, -1, false), source_lines,
+      'unsaved source text is preserved')
+    H.assert_true(vim.bo[source_buf].modified, 'the source remains modified')
+    config.setup({})
   end)
 
   H.it('get_paths() returns absolute paths for the range, directories keep the slash', function()

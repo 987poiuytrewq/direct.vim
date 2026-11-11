@@ -94,6 +94,110 @@ H.describe('Git status display', function()
     H.assert_eq(system_calls, 0, 'all-tracked input launches no ls-files process')
   end)
 
+  H.it('starts independent ignore-snapshot queries before waiting for them', function()
+    local sb = H.sandbox()
+    local root = H.mkdir(sb.root, 'parallel-snapshot')
+    init_repo(root)
+
+    local original_system = vim.system
+    local started, starts_at_wait = {}, {}
+    vim.system = function(argv)
+      started[#started + 1] = argv
+      local output = ''
+      for _, arg in ipairs(argv) do
+        if arg == '--show-toplevel' then
+          output = root .. '\n'
+        elseif arg == '--show-prefix' then
+          output = ''
+        elseif arg == '--cached' then
+          output = 'tracked.txt\0'
+        end
+      end
+      return {
+        wait = function()
+          starts_at_wait[#starts_at_wait + 1] = #started
+          return { code = 0, stdout = output, stderr = '' }
+        end,
+      }
+    end
+    local ok, snapshot, snapshot_err = pcall(git_status.ignore_snapshot, root)
+    vim.system = original_system
+
+    H.assert_true(ok, tostring(snapshot))
+    H.assert_not_nil(snapshot, 'ignore snapshot is returned')
+    H.assert_nil(snapshot_err, 'ignore snapshot has no error')
+    H.assert_eq(#started, 4, 'root, prefix, tracked, and ignored queries are launched')
+    H.assert_eq(starts_at_wait, { 1, 4, 4, 4 },
+      'repo guard finishes first, then prefix and both inventories start before any is awaited')
+    H.assert_true(snapshot.tracked['tracked.txt'], 'tracked index data is retained')
+  end)
+
+  H.it('stops repository-scoped Git operations after the guard outside Git', function()
+    local sb = H.sandbox()
+    local directory = H.mkdir(sb.root, 'not-a-repository')
+    local original_system = vim.system
+    local function rejected_git(calls, guarded_path)
+      return function(argv, _, on_exit)
+        if vim.tbl_contains(argv, guarded_path) then calls[#calls + 1] = argv end
+        local result = {
+          code = 128,
+          stdout = '',
+          stderr = 'fatal: not a git repository (or any parent directory): .git',
+        }
+        if on_exit then vim.schedule(function() on_exit(result) end) end
+        return {
+          wait = function() return result end,
+          kill = function() return true end,
+        }
+      end
+    end
+
+    local operations = {
+      { 'status read', function() git_status.read(directory) end },
+      { 'worktree-change inspection', function()
+        git_status.worktree_changes(directory, directory, true)
+      end },
+      { 'restore command selection', function() git_status.worktree_restore_command(directory) end },
+      { 'ignore-context discovery', function() git_status.ignore_context(directory) end },
+      { 'ignore snapshot', function() git_status.ignore_snapshot(directory) end },
+      { 'ignore-snapshot validation', function()
+        git_status.ignore_snapshot_matches(nil, directory)
+      end },
+      { 'live ignored inventory', function()
+        git_status.ignored_paths({
+          root = directory,
+          scope_path = directory,
+          repo_prefix = '',
+          tracked = {},
+          ignored = {},
+        }, { directory .. '/candidate' }, {})
+      end },
+    }
+    for _, operation in ipairs(operations) do
+      local calls = {}
+      vim.system = rejected_git(calls, directory)
+      local ok, result = pcall(operation[2])
+      vim.system = original_system
+      H.assert_true(ok, operation[1] .. ' completes safely: ' .. tostring(result))
+      H.assert_eq(#calls, 1, operation[1] .. ' runs only the repository guard')
+      H.assert_true(vim.tbl_contains(calls[1], '--show-toplevel'),
+        operation[1] .. ' does not proceed past repository discovery')
+    end
+
+    local calls, completed = {}, nil
+    vim.system = rejected_git(calls, directory)
+    git_status.read_async(directory, 1000, function(snapshot, err, timed_out)
+      completed = { snapshot, err, timed_out }
+    end)
+    local callback_finished = vim.wait(1000, function() return completed ~= nil end)
+    vim.system = original_system
+    H.assert_true(callback_finished, 'asynchronous status guard completes')
+    H.assert_eq(#calls, 1, 'asynchronous status runs only the repository guard')
+    H.assert_false(completed[1], 'outside-repository status has no snapshot')
+    H.assert_nil(completed[2], 'outside-repository status is not an error')
+    H.assert_false(completed[3], 'outside-repository status does not time out')
+  end)
+
   H.it('preserves porcelain columns and aggregates each directory column independently', function()
     local sb = H.sandbox()
     local root = H.mkdir(sb.root, 'repo')
