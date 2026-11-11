@@ -1,6 +1,6 @@
 # Spec: direct.vim improvements, second review
 
-**Status:** A1–A9 and A16–A21 are complete; A10–A15 remain proposed.
+**Status:** A1–A9 and A16–A21 are complete; A10–A15, A22 and A23 are proposed.
 This replaces the first gap review, whose tasks (S1–S6, R1–R3, F1–F6, M1–M6)
 have all landed on `master`.
 
@@ -10,10 +10,12 @@ been reproduced in a running Neovim. Each task's first step is to write a
 failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
-**Last checked:** `origin/master` at `2ccbe80` (11 November 2026). That check
-read #114 (legacy trash metadata recovery) and found no new task IDs. A7 is
-complete in #113; A8 is complete in #114. A9 is addressed in this PR; A10–A15
-remain proposed.
+**Last checked:** `origin/master` at `f4d214f` (11 November 2026). That check
+read the `v0.2.1` release (#110, #112, tagged at `06063c3`) and #113–#115 (trash
+retention, legacy trash metadata and the trash view). It confirmed A7–A9 in
+the code and added two tasks: A22 (the changelog lists unreleased trash
+changes under 0.2.1) and A23 (trash completion is expensive, and recovered
+entries get the wrong deletion time). A10–A15 are unchanged.
 
 ## Conventions
 
@@ -75,6 +77,8 @@ Checked by reading the code at `d72b7ea`:
 | A19 | P3 | Complete | Don't strand earlier history steps when a step is dropped |
 | A20 | P3 | Complete | Don't close other windows when a listing is removed |
 | A21 | P3 | Complete | Link paste steps to the entries they created when dropping history |
+| A22 | P4 | Proposed | Move unreleased trash changes out of the 0.2.1 changelog section |
+| A23 | P3 | Proposed | Make trash completion cheap, and date recovered entries sensibly |
 
 ## Safety
 
@@ -335,6 +339,12 @@ health diagnostics continue to report current trash sizes. Regression tests
 count scans for a nested trash tree across repeated saves and verify that
 retention still prunes when it runs.
 
+*Checked at `f4d214f`:* the code matches (#113). `apply_retention` in
+`lua/direct/trash.lua` skips after its first run per data directory per
+session, and `:DirectTrash` forces a pass. Sizes still aren't stored in the
+metadata, so that first pass, which can run during a save, still walks the
+whole trash synchronously. That's within what this task asked for.
+
 **Problem.** When `trash_retention` is set, `Buffer:sync` and
 `Buffer:sync_async` (`lua/direct/buffer/sync.lua`, around lines 969 and 1005)
 call `trash.apply_retention()` after every successful save. That calls
@@ -361,6 +371,11 @@ deletion time. Unknown entries with no matching history remain recoverable via
 an explicit path. Tests cover the listing, metadata reconstruction, and restore
 without a supplied destination.
 
+*Checked at `f4d214f`:* the code matches (#114). `M.entries` looks up
+entries without metadata in the history's delete records and writes metadata
+for them (`action.recover_trash_metadata`). The deletion time it writes is the
+time of recovery, not an estimate of when the entry was deleted; see A23.
+
 **Problem.** Entries trashed before metadata files existed, including those
 from the Python version, show as "unknown" in `:DirectTrash`. They can't be
 restored without typing the original path. Age-based retention never removes
@@ -381,6 +396,11 @@ its original path, and restores without one being typed.
 read-only view, `r` and `<CR>` confirm and restore the selected entry, then
 refresh the view; `q` closes it. Tests cover command completion, alignment,
 confirmed restore and view refresh/close.
+
+*Checked at `f4d214f`:* the code matches (#115). The view's `r` and `<CR>`
+restore with `force = true`, so restoring an entry the history still uses goes
+through A6's prompt, which asks before dropping history steps. Completion is
+tracked in A23.
 
 **Problem.** The view (`trash.show`) is tab-separated text that isn't lined
 up. Restoring means typing a 64-character hex ID. `:DirectTrash` has no
@@ -614,6 +634,49 @@ simpler, but drops more than needed.
 **Tests.** Paste a file, delete it, force-empty the trash: the confirmation
 counts both steps, and undo afterwards doesn't fail on the paste.
 
+### A22 — The changelog lists unreleased changes under 0.2.1 (P4)
+
+**Problem.** `v0.2.1` is tagged at `06063c3`. #113, #114 and #115 landed after
+that, but each added its entry to the `[0.2.1]` section of `CHANGELOG.md` (the
+retention scan limit, recovered trash metadata and the trash view), not to
+`[Unreleased]`. Anyone reading the changelog will think `v0.2.1` has them, and
+the next release's notes will leave them out. The README's release checklist
+already says to add entries under Unreleased.
+
+**Change.** Move those three entries to `[Unreleased]`. To catch this next
+time, add a CI check that fails when a change edits a released section of
+`CHANGELOG.md`, with a label to skip it for release PRs.
+
+**Tests.** After the move, `git show v0.2.1:CHANGELOG.md` and the
+`[0.2.1]` section on `master` match.
+
+### A23 — Trash completion is expensive, and recovered entries get the wrong date (P3)
+
+**Problem.**
+
+- `:DirectTrash restore <Tab>` calls `trash.complete`, which calls
+  `M.entries()` (`lua/direct/trash.lua`). That measures every entry with the
+  recursive `path_size`, and when entries lack metadata it takes the history
+  lock and writes metadata files. So pressing Tab walks the whole trash and can
+  change files on disk.
+- `action.recover_trash_metadata` (`lua/direct/action/action.lua`) sets
+  `deleted_at` to the current time. A trash entry deleted months ago therefore
+  looks new, so age-based retention won't remove it for another full
+  `max_age_days`, and the view shows the wrong date with no sign it's a guess.
+
+**Change.**
+
+- Give completion a cheap path: list the trash directory's names (skipping
+  `.direct-trash.json` files) without measuring sizes or recovering metadata.
+- When recovering metadata, estimate the deletion time from the trash entry
+  itself (its `ctime`, which a rename into the trash updates, or else its
+  `mtime`), and record that the time is estimated, for example
+  `deleted_at_estimated = true`. Show it as estimated in the view.
+
+**Tests.** Completion on a trash with a large folder entry doesn't measure
+sizes (count the calls) and writes nothing. A recovered entry whose file is
+two days old gets a deletion time about two days ago, marked as estimated.
+
 ## Project maturity
 
 ### A4 — The tagged release lags the README (P2)
@@ -689,5 +752,9 @@ tests into identity-based ones).
 A1–A4 and A16 were released in `v0.2.0`; A5–A6 and A17–A21 were released in
 `v0.2.1`.
 
-1. A10–A15, in any order. A13's formatting-only commit is easiest
-   when nothing else is changing `lua/`.
+A7–A9 are complete but not released.
+
+1. A22, before the next release, so its notes are right.
+2. A23, which follows on from A8 and A9.
+3. A10–A15, in any order. A13's formatting-only commit is easiest when
+   nothing else is changing `lua/`.
