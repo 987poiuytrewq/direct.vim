@@ -25,6 +25,14 @@ local function row_of(lines, value)
   end
 end
 
+local function wait_git_status()
+  local bufnr = vim.api.nvim_get_current_buf()
+  H.assert_true(vim.wait(5000, function()
+    local state = require('direct.buffer.buffer')._state_for_test(bufnr)
+    return state and not state.git_status_pending
+  end), 'background Git status completes')
+end
+
 H.describe('hidden and Git-ignore filtering', function()
   H.it('defaults dot-hidden entries visible and accepts validated filter options', function()
     local config = require('direct.config')
@@ -137,11 +145,13 @@ H.describe('hidden and Git-ignore filtering', function()
     H.mkfile(root, 'untracked.txt', 'new')
 
     require('direct').list(root)
+    wait_git_status()
     H.assert_true(contains(H.buf_lines(), 'clean.txt'), 'clean entries show normally')
     H.assert_eq(vim.fn.maparg('gs', 'n', false, true).rhs,
       '<Cmd>DirectToggleGitStatus<CR>', 'gs is the plugin-owned status-filter mapping')
 
     pcall(vim.cmd, 'DirectToggleGitStatus')
+    wait_git_status()
     local filtered = H.buf_lines()
     H.assert_true(contains(filtered, 'changed-dir/'), 'changed descendant keeps its directory visible')
     H.assert_true(contains(filtered, 'changed.txt'), 'modified files are included')
@@ -155,18 +165,44 @@ H.describe('hidden and Git-ignore filtering', function()
     H.assert_false(contains(filtered, '  clean-child.txt'), 'clean children are hidden')
 
     pcall(vim.cmd, 'DirectToggleGitStatus')
+    wait_git_status()
     local restored = H.buf_lines()
     H.assert_true(contains(restored, 'clean.txt'), 'second toggle restores clean entries')
     H.assert_false(contains(restored, '  changed-child.txt'),
       'toggling rebuilds the root and collapses old expansions')
 
     pcall(vim.cmd, 'DirectGitStatus')
+    wait_git_status()
     local direct_status = H.buf_lines()
     H.assert_true(contains(direct_status, '    nested-change.txt'),
       'DirectGitStatus enters the filtered view with all folds expanded')
     pcall(vim.cmd, 'DirectGitStatus')
     H.assert_false(contains(H.buf_lines(), 'clean.txt'),
       'DirectGitStatus is idempotent rather than toggling the view off')
+  end)
+
+  H.it('collapses directories by the entries visible in the Git-status-only view', function()
+    local config = require('direct.config')
+    config.setup({ map_default_keys = true, collapse_single_entry_directories = true })
+    local sb = H.sandbox()
+    local root = H.mkdir(sb.root, 'repo')
+    local directory = H.mkdir(root, 'changed-dir')
+    local nested = H.mkdir(directory, 'nested')
+    init_repo(root)
+    H.mkfile(nested, 'changed.txt', 'before')
+    H.mkfile(nested, 'clean.txt', 'clean')
+    git(root, 'add', '.')
+    git(root, 'commit', '-qm', 'baseline')
+    H.mkfile(nested, 'changed.txt', 'after')
+
+    require('direct').list(root)
+    wait_git_status()
+    pcall(vim.cmd, 'DirectToggleGitStatus')
+    wait_git_status()
+
+    H.assert_buf_eq({ 'changed-dir/nested/', '  changed.txt' }, 0,
+      'gs counts visible directories when collapsing and reveals the changed file on expansion')
+    config.setup({})
   end)
 
   H.it('does not treat status-filtered entries as deletions during sync', function()
@@ -181,7 +217,9 @@ H.describe('hidden and Git-ignore filtering', function()
     H.mkfile(root, 'changed.txt', 'after')
 
     local listing = require('direct').list(root)
+    wait_git_status()
     pcall(vim.cmd, 'DirectToggleGitStatus')
+    wait_git_status()
     H.assert_buf_eq({ 'changed.txt' }, 0, 'only the modified entry is shown')
     vim.api.nvim_buf_set_lines(0, 0, -1, false, {})
     H.assert_true(listing:sync(), 'deleting the visible changed entry syncs')
@@ -224,7 +262,9 @@ H.describe('hidden and Git-ignore filtering', function()
     H.mkfile(directory, 'changed.txt', 'after')
 
     local listing = require('direct').list(root)
+    wait_git_status()
     pcall(vim.cmd, 'DirectToggleGitStatus')
+    wait_git_status()
     local row = row_of(H.buf_lines(), 'dir/')
     listing:expand(row)
     vim.api.nvim_buf_set_lines(0, row - 1, row, false, { 'moved/' })

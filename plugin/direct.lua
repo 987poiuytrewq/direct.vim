@@ -1,4 +1,4 @@
--- plugin/direct.lua -- the command/autocmd surface: fourteen commands, the netrw
+-- plugin/direct.lua -- the command/autocmd surface, the netrw
 -- neutralisation, the directory intercept and the deferred `-` mapping. Every
 -- registration is idempotent (the harness sources this at every spec boundary).
 
@@ -75,7 +75,10 @@ vim.api.nvim_create_user_command('DirectListCwd', function(args)
 end, { nargs = 0, bang = true, desc = 'direct: list the current working directory' })
 
 vim.api.nvim_create_user_command('DirectSync', function()
-  require('direct').sync()
+  local synced, err = require('direct').sync(function() end)
+  if synced == nil and err ~= 'another direct operation is pending' then
+    error(err or 'sync refused')
+  end
 end, { nargs = 0, desc = 'direct: sync the listing with the filesystem' })
 
 vim.api.nvim_create_user_command('DirectFoldAll', function()
@@ -102,6 +105,10 @@ vim.api.nvim_create_user_command('DirectGitStatus', function()
   require('direct').show_git_status()
 end, { nargs = 0, desc = 'direct: show only entries with Git status' })
 
+vim.api.nvim_create_user_command('DirectGitDiff', function(args)
+  require('direct').git_diff(args.fargs[1])
+end, { nargs = '?', desc = 'direct: toggle filtering to files changed from a Git ref' })
+
 vim.api.nvim_create_user_command('DirectNextChange', function()
   require('direct').next_change()
 end, { nargs = 0, desc = 'direct: navigate to the next changed entry' })
@@ -126,9 +133,28 @@ vim.api.nvim_create_user_command('DirectRedo', function()
   require('direct').redo()
 end, { nargs = 0, desc = 'direct: redo the last undone action' })
 
+vim.api.nvim_create_user_command('DirectHistory', function()
+  require('direct.history.view').show()
+end, { nargs = 0, desc = 'direct: show read-only filesystem history' })
+
 vim.api.nvim_create_user_command('DirectHistoryReset', function()
   require('direct').reset_history()
 end, { nargs = 0, desc = 'direct: back up and reset filesystem history' })
+
+vim.api.nvim_create_user_command('DirectTrash', function(args)
+  local api = require('direct')
+  local operation = args.fargs[1]
+  if not operation then
+    api.trash_list()
+  elseif operation == 'restore' and args.fargs[2] then
+    api.trash_restore(args.fargs[2], args.fargs[3], args.bang)
+  elseif operation == 'empty' then
+    api.trash_empty(args.bang)
+  else
+    require('direct.ui').notify(
+      'direct: usage: :DirectTrash [restore {id} [path] | empty]', vim.log.levels.ERROR)
+  end
+end, { nargs = '*', bang = true, desc = 'direct: list and manage trashed entries' })
 
 vim.api.nvim_create_user_command('DirectYank', function(args)
   require('direct').yank(args.line1, args.line2)
@@ -149,6 +175,10 @@ end, { nargs = '+', desc = 'direct: run a shell command for the current entry' }
 vim.api.nvim_create_user_command('DirectGit', function(args)
   require('direct').git(args.args)
 end, { nargs = '+', desc = 'direct: run a Git command and refresh status' })
+
+vim.api.nvim_create_user_command('DirectGitRestore', function()
+  require('direct').restore_git()
+end, { nargs = 0, desc = 'direct: confirm and restore Git worktree changes' })
 
 -- Under `nvim --headless -l` `v:vim_did_enter` is 1, so this installs the global
 -- `-` immediately; a real startup defers to a one-shot VimEnter handler (config).

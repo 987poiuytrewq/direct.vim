@@ -172,7 +172,7 @@ H.describe('DirectRun', function()
     H.assert_eq(system_calls, 0, 'invalid invocations never launch a process')
   end)
 
-  H.it('runs Git commands for missing tracked entries and refreshes after gc', function()
+  H.it('runs explicit Git commands for missing tracked entries and refreshes after checkout', function()
     clean_buffers()
     local sb = H.sandbox()
     local root = H.mkdir(sb.root, 'deleted-repo')
@@ -190,6 +190,10 @@ H.describe('DirectRun', function()
 
     require('direct').setup({ git = { enabled = true } })
     require('direct').list(root)
+    H.assert_true(vim.wait(5000, function()
+      local state = require('direct.buffer.buffer')._state_for_test(vim.api.nvim_get_current_buf())
+      return state and not state.git_status_pending
+    end), 'Git status completes before selecting deleted rows')
     local row = find_line('gone.txt')
     H.assert_not_nil(row, 'the deleted tracked row is visible')
     vim.api.nvim_win_set_cursor(0, { row, 0 })
@@ -222,7 +226,7 @@ H.describe('DirectRun', function()
     H.assert_true(vim.wait(3000, function()
       local state = require('direct.buffer.buffer')._state_for_test(vim.api.nvim_get_current_buf())
       return state and state.git_status and state.git_status.paths[path] == ' D'
-    end), 'gr-style Git reset updates the row status')
+    end), 'Git reset updates the row status')
 
     local directory_row = find_line('gone-dir/')
     H.assert_not_nil(directory_row, 'missing tracked directories are listed')
@@ -237,16 +241,16 @@ H.describe('DirectRun', function()
 
     vim.api.nvim_win_set_cursor(0, { find_line('gone-dir/'), 0 })
     local reset_directory = direct.git('git reset -- {}')
-    H.assert_not_nil(reset_directory, 'gr accepts a missing tracked directory')
+    H.assert_not_nil(reset_directory, 'Git reset accepts a missing tracked directory')
     reset_directory:wait()
     H.assert_true(vim.wait(3000, function()
       local state = require('direct.buffer.buffer')._state_for_test(vim.api.nvim_get_current_buf())
       return state and state.git_status and state.git_status.paths[child] == ' D'
-    end), 'gr unstages a deleted directory through its pathspec')
+    end), 'Git reset unstages a deleted directory through its pathspec')
 
     vim.api.nvim_win_set_cursor(0, { find_line('gone-dir/'), 0 })
     local restore_directory = direct.git('git checkout -- {}')
-    H.assert_not_nil(restore_directory, 'gc accepts a missing tracked directory')
+    H.assert_not_nil(restore_directory, 'explicit checkout accepts a missing tracked directory')
     restore_directory:wait()
     H.assert_true(vim.wait(3000, function()
       return vim.uv.fs_stat(child) ~= nil
@@ -256,7 +260,7 @@ H.describe('DirectRun', function()
             find_line('gone-dir/')
           ]
         ].deleted_kind
-    end), 'gc restores the deleted directory subtree')
+    end), 'explicit checkout restores the deleted directory subtree')
 
     vim.api.nvim_win_set_cursor(0, { find_line('gone.txt'), 0 })
     local restore = direct.git('git checkout -- {}')
@@ -267,7 +271,7 @@ H.describe('DirectRun', function()
         and not require('direct.buffer.buffer')._state_for_test(vim.api.nvim_get_current_buf()).rows[
           require('direct.buffer.buffer')._state_for_test(vim.api.nvim_get_current_buf()).display_ids[find_line('gone.txt')]
         ].deleted_kind
-    end), 'gc restores the file and re-lists it as an ordinary entry')
+    end), 'explicit checkout restores the file and re-lists it as an ordinary entry')
     H.assert_eq(vim.fn.readfile(path), { 'tracked content' },
       'checkout restores the tracked contents')
   end)

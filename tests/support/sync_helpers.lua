@@ -21,10 +21,13 @@ function M.new()
   -- The command facade should share the test's captured buffer state module.
   local function route_write_to_test_buffer()
     package.loaded['direct.buffer.buffer'] = buffer
+    package.loaded['direct.pending'] = buffer._pending_for_test
     package.loaded['direct'] = nil
     require('direct')
     assert(require('direct.buffer.buffer') == buffer,
       'DirectSync facade must share the test buffer state registry')
+    assert(require('direct.pending') == buffer._pending_for_test,
+      'DirectSync facade must share the test buffer pending-operation state')
   end
 
   local function history_lines(name)
@@ -36,7 +39,7 @@ function M.new()
 
   local function list_edit_and_sync(ws, lines)
     local listing = buffer.list(ws)
-    vim.api.nvim_buf_set_lines(0, 0, -1, false, lines)
+    H.set_direct_rows(0, lines)
     local ok, reason = listing:sync()
     return listing, ok, reason
   end

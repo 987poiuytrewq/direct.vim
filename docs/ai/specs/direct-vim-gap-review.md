@@ -1,6 +1,6 @@
 # Spec: direct.vim gap review follow-ups
 
-**Status:** S1, S2 and S3 are complete; the remaining tasks are proposed and have
+**Status:** S1 through S6, R1 through R3, F1 through F6, and M1 through M2 are complete; the remaining tasks are proposed and have
 not been checked item by item. This replaces `direct-vim-remaining-improvements.md`.
 Its main pieces (JSONL history, no-overwrite moves, exclusive `touch`, the
 safeguard on undoing a paste) appear in the current code, but that was not
@@ -29,20 +29,20 @@ the problem, or to record that it can't be reproduced.
 | S1 | P1 | Complete | Stop opening, navigating or refreshing from throwing away unsaved listing edits |
 | S2 | P1 | Complete | Make `u` / `<C-r>` safe when the listing has unsaved edits, and make clear what they undo |
 | S3 | P1 | Complete | Keep a damaged or unrecognised history file instead of wiping it |
-| S4 | P2 | Proposed | Add a way to see, restore from and empty the trash, and keep it from growing forever |
-| S5 | P2 | Proposed | Ask before `gc` discards Git changes, and review the `gc` / `gr` key clashes |
-| S6 | P4 | Proposed | Put the lock file inside the `direct/` data directory |
-| R1 | P2 | Proposed | Stop `git status` from freezing the editor |
-| R2 | P3 | Proposed | Run long moves during `:w` without blocking the editor |
-| R3 | P3 | Proposed | Make `:checkhealth direct` check more |
-| F1 | P3 | Proposed | Let users remap individual keys |
-| F2 | P3 | Proposed | Open entries in a split, vertical split or new tab |
-| F3 | P3 | Proposed | Send `User` events for other plugins and configs to hook into |
-| F4 | P3 | Proposed | Add a command to view the history |
-| F5 | P3 | Proposed | Allow renames, creates and deletes together in one top-level save |
-| F6 | P3 | Proposed | Give every message the same `direct:` prefix |
-| M1 | P4 | Proposed | Version tags, releases and a changelog |
-| M2 | P4 | Proposed | Widen CI: latest stable and nightly Neovim, and pushes to `master` |
+| S4 | P2 | Complete | Add a way to see, restore from and empty the trash, and keep it from growing forever |
+| S5 | P2 | Complete | Ask before `gc` discards Git changes, and review the `gc` / `gr` key clashes |
+| S6 | P4 | Complete | Put the lock file inside the `direct/` data directory |
+| R1 | P2 | Complete | Stop `git status` from freezing the editor |
+| R2 | P3 | Complete | Run long moves during `:w` without blocking the editor |
+| R3 | P3 | Complete | Make `:checkhealth direct` check more |
+| F1 | P3 | Complete | Let users remap individual keys |
+| F2 | P3 | Complete | Open entries in a split, vertical split or new tab |
+| F3 | P3 | Complete | Send `User` events for other plugins and configs to hook into |
+| F4 | P3 | Complete | Add a command to view the history |
+| F5 | P3 | Complete | Allow renames, creates and deletes together in one top-level save |
+| F6 | P3 | Complete | Give every message the same `direct:` prefix |
+| M1 | P4 | Complete | Version tags, releases and a changelog |
+| M2 | P4 | Complete | Widen CI: latest stable and nightly Neovim, and pushes to `master` |
 | M3 | P4 | Proposed | Add linting, formatting and type checks |
 | M4 | P4 | Proposed | Split the largest modules up |
 | M5 | P4 | Proposed | Replace the temporary override of `vim.fn.confirm` |
@@ -158,6 +158,15 @@ then reset, with a warning. The reset command creates a backup.
 
 ### S4 — No way to manage the trash (P2)
 
+**Status: COMPLETE.** Trash entries now have sidecars with original paths and
+deletion times. `:DirectTrash` lists entries; its `restore` and `empty`
+subcommands never overwrite destinations, and history-referenced entries are
+protected unless `!` is used. Optional age/size retention is off by default,
+and `:checkhealth direct` reports trash size. Cross-filesystem directory
+deletions warn that they will copy the tree to trash. Regression tests cover
+metadata, undo/redo reservations, restore, protection, force, retention, and
+health output. `make test` passes.
+
 **Problem.** Deleted entries go to `<data>/trash/<sha256>`
 (`lua/direct/action.lua`, `first_free_trash`) and are never removed. There's
 no way to list them, restore one, or empty the trash. Deleting a large tree on
@@ -182,6 +191,14 @@ existing path is refused.
 
 ### S5 — `gc` discards Git changes with no confirmation (P2)
 
+**Status: COMPLETE.** The Git restore shortcut now confirms, names the selected
+path and number of affected tracked files, and leaves staged-only or untracked
+files alone. The conflicting `gc` and `gr` mappings were replaced by
+`<leader>gr` (restore) and `<leader>gu` (unstage); the mapping change is recorded
+in `CHANGELOG.md`. `git restore --worktree` is used when supported, with a
+checkout fallback. Tests cover decline, acceptance, scope, and staged-only
+changes; `make test` passes.
+
 **Problem.** `gc` runs `git checkout -- {}` (`lua/direct/config.lua`,
 `BUFFER_MAPS`). It can't be undone with `u`, and on a directory row it
 discards every change beneath it. Inside listings, `gc` also overrides
@@ -201,6 +218,12 @@ it restores the file.
 
 ### S6 — Lock file outside the data directory (P4)
 
+**Status: COMPLETE.** The persistent lock now lives at
+`<data>/direct/.direct-history.lock`. The old parent-level lock is left
+untouched. README and help docs warn not to run old and new plugin versions
+concurrently, because they would use distinct lock files. Tests verify the
+location and that the old path is not created.
+
 **Problem.** The lock is at `$XDG_DATA_HOME/.direct-history.lock`
 (`lua/direct/history/lock.lua`, `lock_path`), not under `direct/`.
 
@@ -211,6 +234,13 @@ document that, or check both locks during one release.
 ## Robustness and performance
 
 ### R1 — `git status` blocks with no timeout (P2)
+
+**Status: COMPLETE.** Git status now runs asynchronously, with a configurable
+`git.timeout_ms` deadline (default 1000 ms). Listings render immediately; when
+status arrives, decorations and Git-deleted rows update without replacing a
+modified listing. A timeout kills the process and emits one warning per
+repository. Tests use a hung Git status process to verify the listing returns
+before the deadline and the warning is not repeated. `make test` passes.
 
 **Problem.** `lua/direct/git.lua` calls `vim.system(...):wait()` with no
 timeout on every listing and refresh. A large repository or a slow
@@ -226,12 +256,28 @@ timeout and shows a warning.
 
 ### R2 — Long moves during `:w` block the editor (P3)
 
+**Status: COMPLETE.** `:write` and `:DirectSync` now run planned actions
+sequentially through `execute_async` while retaining the history lock and the
+pending-operation guard. Cross-filesystem file/tree moves use asynchronous
+copies, verify source and destination before removal, preserve no-overwrite
+placement, and show copy progress. Same-filesystem renames remain atomic. Tests
+cover a deferred cross-filesystem directory copy, lock/pending refusals, LSP
+rename integration and existing sync safety cases. `make test` passes.
+
 **Change.** Run the actions from `:w` in the background the same way paste,
 undo and redo already do (`execute_async`), keeping the lock and the
 "operation pending" refusals. Show progress for long copies to another
 filesystem.
 
 ### R3 — `:checkhealth direct` checks very little (P3)
+
+**Status: COMPLETE.** `:checkhealth direct` now reports Git availability/version,
+the resolved and writable data directory, read-only classifications of undo
+and redo history, any damaged or unfinished transaction journal, trash size,
+whether nvim-web-devicons is installed, and current icon settings. It uses the
+history lock while inspecting state and does not recover, reset, or rewrite
+history. Tests cover healthy, damaged, interrupted, unwritable, and Git-missing
+cases. `make test` passes.
 
 **Change.** Check that Git is available and its version, that the data
 directory can be written to, the state of the history files (OK, kept because
@@ -241,6 +287,13 @@ whether nvim-web-devicons is installed, and the current icon settings.
 ## Features and usability
 
 ### F1 — Keys can't be remapped one at a time (P3)
+
+**Status: COMPLETE.** The `mappings` option now overrides or disables individual
+actions without changing the existing `map_default_keys` default. All actions
+have public `<Plug>(direct-...)` entry points, and the folder expand/collapse
+and navigation functions are exposed from `require('direct')`. README and help
+docs cover customization; tests cover overrides, disabled keys, Plug mappings,
+the public folder API, and the default behavior. `make test` passes.
 
 **Problem.** `map_default_keys` turns every mapping on or off at once. There
 are no `<Plug>` mappings, and the folder keys (`zo`, `zc`, `za` and their
@@ -254,11 +307,26 @@ key, or `false` to turn it off. Add `<Plug>(direct-…)` mappings. Expose
 
 ### F2 — No split, vertical split or tab open (P3)
 
+**Status: COMPLETE.** `require('direct').open({ split = ... })` opens files or
+directories horizontally, vertically, or in a new tab without replacing the
+source listing. Modified listings retain their text and buffer state. Default
+`<C-s>`, `<C-v>`, and `<C-t>` bindings are remappable through the F1 mapping
+options. README and help docs describe the behavior; tests cover all layouts,
+including modified listings. `make test` passes.
+
 **Change.** Add `open({ split = 'horizontal' | 'vertical' | 'tab' })` and
 default keys (for example `<C-s>`, `<C-v>`, `<C-t>`). These must follow S1:
 the listing isn't discarded.
 
 ### F3 — No events for other plugins to hook into (P3)
+
+**Status: COMPLETE.** Direct now emits `User` events for list completion, sync
+pre/post, undo/redo post, and paste post. Event data contains an absolute root
+and detached action records; sync data also reports applied/failed actions and
+paste/undo data reports completion. A `DirectSyncPre` callback that edits the
+listing causes a safe refusal rather than applying a stale plan. README and
+`:help direct.vim-events` document the event names and payloads; tests cover
+payloads, ordering, and copy isolation. `make test` passes.
 
 **Change.** Send `User` events (for example `DirectListPost`,
 `DirectSyncPre`, `DirectSyncPost`, `DirectUndoPost`, `DirectPastePost`) with
@@ -266,10 +334,28 @@ the root and the actions in `data`. Document them.
 
 ### F4 — No history view (P3)
 
+**Status: COMPLETE.** `:DirectHistory` shows undo and redo actions newest first
+with summaries and affected paths in an unlisted, read-only scratch buffer. It
+reads raw history without initializing missing logs, recovering transactions,
+or rewriting damaged bytes, and preserves the previous buffer. README and help
+docs describe the snapshot and its safety limits. Tests cover both stacks,
+empty and damaged logs, read-only behavior, and byte-for-byte preservation.
+`make test` passes.
+
 **Change.** Add `:DirectHistory` to show the undo and redo stacks with each
 action's summary and paths, read-only.
 
 ### F5 — Top-level saves can't mix change types (P3)
+
+**Status: COMPLETE.** Root saves now classify rows by their extmark identities,
+not line positions, and can combine renames, creates, and deletes into one
+history batch. Moves still use staged no-overwrite execution; deletes are
+yanked first, and one undo/redo reverses the complete mixed save. A stale root
+directory snapshot, duplicate destination, or unsafe identity still refuses
+before filesystem changes. Tests cover delete/create without positional
+pairing, delete-and-rename into a freed path, mixed child/root changes, undo,
+redo, and safety refusals. README and help docs explain mark-preserving edits
+versus whole-line replacements. `make test` passes.
 
 **Problem.** At the root level, `classify` in `lua/direct/buffer/sync_plan.lua`
 sorts each save into exactly one of `ADD`, `DELETE` or `RENAME` by comparing
@@ -328,6 +414,13 @@ with a test first. If it happens, fixing it is part of this task.
 
 ### F6 — Message prefixes aren't consistent (P3)
 
+**Status: COMPLETE.** `direct.ui.notify()` now adds `direct:` to unprefixed
+messages and leaves existing prefixes alone. This covers history's empty-stack
+and failure notices, register summaries, and other notifications without
+duplicating prefixes at each call site. Workspace-edit warnings use the same
+helper; the transient copy progress echo already uses the prefix. Tests cover
+automatic and idempotent prefixing plus formatted errors. `make test` passes.
+
 **Change.** Give every user-facing message the `direct:` prefix (for example
 `Nothing to undo` and `Failed to undo action - …` in `history.lua`), and
 route them all through `ui.notify`.
@@ -336,17 +429,34 @@ route them all through `ui.notify`.
 
 ### M1 — No version tags, releases or changelog (P4)
 
+**Status: COMPLETE.** Added the initial `0.1.0` changelog and a versioned
+lazy.nvim example. The first version tag `v0.1.0` and its GitHub release were
+created after this pull request was merged. Distribution is through GitHub
+releases and Neovim plugin managers; LuaRocks packaging is intentionally omitted.
+
 **Change.** Add `CHANGELOG.md`, tag versions (starting at `v1.0.0` or
-`v0.x`), and publish GitHub releases. Look at publishing to LuaRocks so
-`rocks.nvim` and lazy.nvim can use it.
+`v0.x`), and publish GitHub releases.
 
 ### M2 — CI covers too little (P4)
+
+**Status: COMPLETE.** CI now runs on pull requests and pushes to `master`. The
+minimum supported Neovim `v0.11.7` is tested on Linux, macOS, and Windows;
+additional Ubuntu jobs run the latest stable Neovim and nightly. Nightly uses
+step-level `continue-on-error` and reports failures as warnings, so upstream
+breakage remains visible without failing the required CI check. Coverage
+artifacts include the Neovim track in their names. `make ci` passes locally.
 
 **Change.** Run CI on pushes to `master` as well as pull requests. Add jobs
 for the latest stable Neovim and nightly. Nightly may fail without failing
 the build.
 
 ### M3 — No linting, formatting or type checks (P4)
+
+**Status: COMPLETE.** Added Luacheck and StyLua configuration, LuaLS
+annotations for the public API and configuration options, and a `make lint`
+target wired into CI. The Luacheck gate currently caps existing warnings at
+48 while still failing on errors; new warnings require reducing the baseline
+or an explicit cap adjustment.
 
 **Change.** Add a `luacheck` (or `selene`) config and `stylua`, plus a
 `make lint` target that runs in CI. Add LuaLS type annotations for the
@@ -355,12 +465,25 @@ public API in `lua/direct/init.lua` and `config.lua`, and check them with
 
 ### M4 — The largest modules are hard to work on (P4)
 
+**Status: COMPLETE.** Split buffer listing, row state/marks, open, navigation,
+and sync into focused modules under `lua/direct/buffer/`. Extracted history
+paste and reverse handling, plus filesystem path/listing/identity operations.
+The changes move code only; `make ci` passes (589 specs: 587 passed, 2
+skipped), and `make lint` passes with the existing warning baseline.
+
 **Change.** Split `buffer.lua` (about 2.4k lines) into the listing, row
 state and marks, open and navigation, and sync. Split `history.lua` and
 `fs.lua` the same way where the boundaries are clear. Move code only, with no
 behaviour changes, and keep the tests passing at every commit.
 
 ### M5 — `vim.fn.confirm` is replaced temporarily (P4)
+
+**Status: COMPLETE.** Neovim's `apply_workspace_edit` has no cancellation
+return value, but its public `changeAnnotations` fields identify confirmation-
+required text edits. Direct now confirms each edit group before applying the
+WorkspaceEdit, clears `needsConfirmation` only on a deep copy after approval,
+and rejects declines before any workspace edits run. It never replaces the
+global `vim.fn.confirm`. Tests cover acceptance, decline, and apply exceptions.
 
 **Problem.** `lua/direct/file_operations.lua` (around lines 494–510) swaps
 the global `vim.fn.confirm` while a workspace edit is applied, to tell
@@ -371,11 +494,16 @@ example, checking the edit's change annotations before applying it). If
 there isn't one, keep the swap, but restore it in every code path and add a
 test that it always is.
 
-### M6 — Neovim 0.12 is required (P4)
+### M6 — Neovim version floor (P4)
 
-**Change.** Find out which 0.12-only APIs are used. Then either support 0.11
-with fallbacks and add it to CI, or keep 0.12 and explain why in the
-README.
+**Status: COMPLETE.** Lowered the minimum to Neovim 0.11.7 after adding a
+byte-safe SHA-256 fallback for the NUL-delimited register and trash keys. The
+fallback produces the same digest as `vim.fn.sha256()` on 0.12, preserving
+existing keys. The full suite passes on both 0.11.7 and 0.12; CI and the README
+now use the 0.11.7 floor.
+
+**Change.** Lower the minimum Neovim version where practical, add compatibility
+fallbacks for required APIs, and test the chosen floor in CI.
 
 ## Suggested order
 

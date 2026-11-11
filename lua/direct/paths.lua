@@ -7,6 +7,14 @@ local M = {}
 local fs = require('direct.fs')
 local platform = require('direct.platform')
 local constants = require('direct.constants')
+local sha256
+if pcall(vim.fn.sha256, 'a\0b') then
+  sha256 = vim.fn.sha256
+else
+  -- Neovim 0.11 marshals NUL-containing Vimscript strings as Blobs and sha256()
+  -- rejects them. Keep the same digest bytes for persisted register/trash keys.
+  sha256 = require('direct.sha256')
+end
 
 M.separator = platform.separator
 
@@ -185,7 +193,7 @@ function M.digest(...)
   if #paths == 1 and type(paths[1]) == 'table' then
     paths = paths[1]
   end
-  return vim.fn.sha256(table.concat(paths, '\0'))
+  return sha256(table.concat(paths, '\0'))
 end
 
 function M.dirname(path)

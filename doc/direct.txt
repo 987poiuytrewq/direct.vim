@@ -21,9 +21,10 @@ CONTENTS                                                 *direct.vim-contents*
     13. Commands ....................................... |direct.vim-commands|
     14. Mappings ....................................... |direct.vim-mappings|
     15. Lua API ............................................. |direct.vim-api|
-    16. Data and safety .................................... |direct.vim-data|
-    17. Upgrading from the Python version ............... |direct.vim-upgrade|
-    18. Licence ......................................... |direct.vim-licence|
+    16. User events ..................................... |direct.vim-events|
+    17. Data and safety .................................... |direct.vim-data|
+    18. Upgrading from the Python version ............... |direct.vim-upgrade|
+    19. Licence ......................................... |direct.vim-licence|
 
 ==============================================================================
 1. Introduction                                             *direct.vim-intro*
@@ -56,7 +57,7 @@ direct.vim is pure Lua and replaces |netrw| for directory buffers.
 ==============================================================================
 2. Requirements                                      *direct.vim-requirements*
 
-    - Neovim 0.12 or later, on Linux, macOS or Windows.
+    - Neovim 0.11.7 or later, on Linux, macOS or Windows.
     - Git, for Git status and Git-ignore filtering (optional). Ignore
       filtering is on by default; see |direct-respect_gitignore|.
     - A Nerd Font with the Font Awesome glyphs, for the default icons
@@ -94,9 +95,10 @@ data directory in use, run:
 4. Press `u` to undo the filesystem change.
 
 Directory names end with the separator (`archive/`); file names do not. At the
-root level, save one kind of change at a time. If direct.vim can't tell what
-you meant, the save is refused and nothing on disk changes. See
-|direct.vim-edit| for the full rules.
+root level, a save can mix renames, creates and deletes. Rows are paired by
+their identities, not by position. If direct.vim can't tell what you meant,
+the save is refused and nothing on disk changes. See |direct.vim-edit| for the
+full rules.
 
 ==============================================================================
 4. Navigating                                            *direct.vim-navigate*
@@ -171,17 +173,25 @@ and lists the directory again.
 
 Rename, create and delete ~
                                                          *direct.vim-classify*
-At the root level, each save is classified as exactly one of these:
+At the root level, direct.vim compares rows by their extmark identities rather
+than pairing lines by position. A single save can mix:
 
     Rename      Change the text of an existing line.
     Create      Add new lines anywhere.
     Delete      Delete lines. Deleted entries are yanked first, so you can
                 paste them back with `p`.
 
-An edit that both adds and deletes root rows, or that leaves a duplicated
-line, is ambiguous. The error names both sides of the comparison. Nothing is
-changed, no history is written, and the buffer stays modified so you can fix
-it.
+A mixed save is one history entry, so one `u` reverses all its filesystem
+actions. Two rows with the same destination are refused. The root directory is
+also checked against its list-time snapshot; visible entries added, removed or
+replaced on disk since listing cause a refusal instead of a guessed operation.
+
+A row whose mark survives a text edit is a rename. An unmarked row is a create,
+and a marked row that disappears is a delete. Whole-line replacements such as
+`cc` or `S` may invalidate the mark: if so, direct.vim treats the old row as a
+delete and the new row as a create. The deleted entry is yanked first. If text
+undo/redo leaves an original row's identity unclear, the save is refused and
+the listing must be reviewed or re-listed. A duplicate line is always refused.
 
 Directories and files ~
                                                    *direct.vim-separator-rule*
@@ -237,9 +247,10 @@ If you move or rename a directory and also edit its descendants, you may need
 to save the two changes separately. direct.vim refuses the save when it can't
 determine a safe order for the filesystem actions.
 
-When a whole line is replaced, direct.vim treats it as a rename only when the
-surrounding entries make the pairing unambiguous. Otherwise the save is
-refused. Root-level edits always follow the rename/create/delete rules above.
+When a whole line is replaced, direct.vim uses the row mark if it survives. If
+the edit invalidates it, the old row is deleted and the replacement is created;
+the two rows are never paired by position or by a guessed filename match. Root
+and expanded-directory changes can be combined into the same save.
 
 What gets checked before a save ~
 
@@ -406,8 +417,8 @@ are directories that contain them. Their names use the colour of their status.
 Hide these rows with |direct-git.show_deleted|.
 
 You can expand and collapse deleted rows, run |:DirectRun| or |:DirectGit| on
-them, and stage, reset or restore them with `ga`, `gr` and `gc`. Edits, opens,
-yanks and pastes on them are ignored.
+them, and stage, unstage or restore them with `ga`, `<leader>gu` and
+`<leader>gr`. Edits, opens, yanks and pastes on them are ignored.
 
 Showing only changes ~
                                                          *direct.vim-git-view*
@@ -422,6 +433,25 @@ and the entries it hides are never treated as deleted. Outside a repository,
 or with |direct-git.enabled| off, the view is empty. These commands are
 refused while the listing has unsaved edits.
 
+Comparing with a branch ~
+                                                       *direct.vim-git-diff*
+`gd` or `:DirectGitDiff` toggles the current listing to show only committed
+paths changed between the merge base of a target ref and `HEAD`. Staged and
+unstaged worktree changes are excluded. With no argument, the target is
+`origin/HEAD`, falling back to local `main` and then local `master`. Supply any
+commit-ish accepted by Git to choose another target:
+>
+    :DirectGitDiff
+    :DirectGitDiff release/2.x
+    :DirectGitDiff v1.4.0
+<
+Directories appear only when they contain changed paths and are expanded so
+their changed descendants are visible. Deleted files are included. Run the
+command again to restore the normal listing. It operates on the current Direct
+listing and refuses while the listing has unsaved edits. `:DirectGitDiff {ref}`
+switches the filter to another ref; invoking the same ref again turns the filter
+off.
+
 Jumping between changes ~
                                                      *direct.vim-git-navigate*
 `]c` and `[c` (|:DirectNextChange| and |:DirectPreviousChange|) move to the
@@ -432,11 +462,14 @@ ones), and stop at the ends rather than wrapping.
 Staging ~
 
     ga          `git add -- {entry}`
-    gr          `git reset -- {entry}`
-    gc          `git checkout -- {entry}`
+    <leader>gu  `git reset -- {entry}`
+    <leader>gr  |:DirectGitRestore|
 
-These run through |:DirectGit|, so the status display refreshes when they
-finish.
+`ga` and `<leader>gu` run through |:DirectGit|. `<leader>gr` asks before
+discarding tracked worktree changes, naming the selected path and number of
+changed files it covers. It leaves staged-only and untracked files alone, then
+uses `git restore --worktree` where available (falling back to `git checkout`
+on older Git). The status display refreshes when the command finishes.
 
 Ignore filtering ~
                                                        *direct.vim-git-ignore*
@@ -531,8 +564,10 @@ Calling `setup()` is optional. These are the defaults:
       map_default_keys = true,
       show_hidden = true,
       respect_gitignore = true,
+      collapse_single_entry_directories = false,
       indent_size = 2,
       undo_confirm = 'elsewhere',
+      trash_retention = false,
       directory_separator = package.config:sub(1, 1),
       max_recursive_expand_depth = false,
       show_folder_icons = true,
@@ -569,8 +604,26 @@ error, and its default is used instead.
                                                      *direct-map_default_keys*
 map_default_keys        boolean (default: `true`)
     Install the global `-` mapping and the buffer-local mappings in
-    listings. Set to `false` to install none of them. See
-    |direct.vim-mappings|.
+    listings. Set to `false` to disable default physical keys; explicit
+    per-action mappings are still installed. `<Plug>` mappings are always
+    available. See |direct.vim-mappings|.
+
+                                                             *direct-mappings*
+mappings                table (default: `{}`)
+    Per-action key overrides. Use an action name as the key and a non-empty
+    key string as its value, or `false` to disable that action's default key.
+    For example:
+>
+        require('direct').setup({
+          mappings = { expand = 'o', undo = '<leader>u', toggle_hidden = false },
+        })
+<
+    Action names include `open`, `open_horizontal`, `open_vertical`, `open_tab`,
+    `undo`, `redo`, `yank`, `paste`, `toggle_hidden`, `toggle_gitignore`,
+    `git_add`, `git_diff`, `next_change`, `expand`, `collapse`, `toggle`, and
+    the recursive folder actions. Each action has a `<Plug>(direct-...)` mapping.
+    `map_default_keys = false` suppresses defaults but not explicit overrides
+    or `<Plug>` mappings.
 
                                                           *direct-show_hidden*
 show_hidden             boolean (default: `true`)
@@ -582,6 +635,14 @@ respect_gitignore       boolean (default: `true`)
     Hide Git-ignored entries. `gi` (|:DirectToggleGitIgnore|) toggles this in
     the current listing. See |direct.vim-git-ignore|.
 
+                                            *direct-collapse_single_entry_directories*
+collapse_single_entry_directories boolean (default: `false`)
+    Display a chain of directories with one visible directory child as a single
+    slash-separated path, such as `foo/bar/`. Files are not absorbed into the
+    path; expanding the final directory shows its files. Entry counts follow
+    the current listing filters (including the Git-status-only view). Each path
+    component remains editable as its corresponding directory entry.
+
                                                            *direct-indent_size*
 indent_size             integer (default: `2`)
     Spaces per tree level in expanded directories. Must be greater than 1.
@@ -591,6 +652,12 @@ undo_confirm             `true`, `false` or `'elsewhere'` (default)
     Confirm before filesystem undo/redo always (`true`), never (`false`), or
     only when the affected paths are outside the current listing directory
     (`'elsewhere'`).
+
+                                                      *direct-trash_retention*
+trash_retention          `false` or a table (default: `false`)
+    Optionally prune old, unreferenced trash entries. Set `max_age_days`,
+    `max_size_bytes`, or both to positive integers. Entries referenced by undo
+    or redo history are protected, even when a retention limit is exceeded.
 
                                                   *direct-directory_separator*
 directory_separator     `'/'` or `'\'` (default: the platform separator)
@@ -640,6 +707,13 @@ icons                   table
 git.enabled             boolean (default: `true`)
     Show Git status. Turning this off doesn't affect
     |direct-respect_gitignore|.
+
+                                                       *direct-git.timeout_ms*
+git.timeout_ms           positive integer (default: `1000`)
+    Maximum time in milliseconds for the background Git status query. Listings
+    appear immediately without waiting. When the query completes, status
+    decorations and deleted rows are applied. If it times out, the listing
+    remains usable without status and Direct reports one warning per repository.
 
                                                      *direct-git.show_symbols*
 git.show_symbols        boolean (default: `true`)
@@ -708,6 +782,8 @@ syntax loading is turned off.
 Unless noted otherwise, these commands work only in a listing. In any other
 buffer they report an error and do nothing.
 
+All direct.vim notifications use the `direct:` prefix.
+
 Opening listings ~
                                                                  *:DirectList*
 :DirectList[!] {dir}
@@ -727,17 +803,52 @@ Opening listings ~
     List the working directory. Works from any buffer. `!` deliberately
     discards unsaved edits in the listing being refreshed.
 
+                                                              *:DirectGitDiff*
+:DirectGitDiff [ref]
+    Toggle the current listing to show committed paths changed from the merge
+    base of [ref] and `HEAD`. With no [ref], use `origin/HEAD`, then local
+    `main`, then local `master`. Refused while the listing has unsaved edits.
+    Invoke it again to turn the filter off. The buffer-local `gd` mapping invokes
+    this command.
+
 Editing ~
                                                                  *:DirectSync*
 :DirectSync
     Apply the edits in the listing to the filesystem. |:write| does the same.
+    The operation runs asynchronously: the command returns while it is pending,
+    and the listing stays modified until the filesystem and history are
+    committed. Other direct operations are refused meanwhile. Long copies to
+    another filesystem report progress.
 
-                                                     *:DirectHistoryReset*
+Viewing history ~
+                                                            *:DirectHistory*
+:DirectHistory
+    Show the undo and redo stacks newest first, with summaries and affected
+    paths, in a read-only scratch buffer. Works from any buffer and preserves
+    the current buffer. This is a raw snapshot: it does not initialize missing
+    logs, recover an unfinished transaction, or rewrite damaged history.
+
+                                                      *:DirectHistoryReset*
 :DirectHistoryReset
     Back up each readable, non-empty history stack to a unique timestamped file
     in `history/`, then start with empty undo and redo stacks. Works from any
     buffer. Use this only when history is damaged or you deliberately want to
     discard it; backups are not automatically removed.
+
+                                                               *:DirectTrash*
+:DirectTrash
+    Open a read-only listing of trash entries with their IDs, deletion times,
+    sizes, and original paths.
+>
+    :DirectTrash restore {id} [path]
+    :DirectTrash empty
+    :DirectTrash! restore {id} [path]
+    :DirectTrash! empty
+<
+    Restore an entry without overwriting an existing path, or empty entries
+    that no longer appear in undo/redo history. The `!` form overrides history
+    protection, but never overwrites a restore destination. Older trash entries
+    without metadata need an explicit [path] to restore.
 
                                                                  *:DirectUndo*
 :DirectUndo
@@ -830,10 +941,18 @@ Running commands ~
 :DirectGit {command}
     Like |:DirectRun|, then refresh the Git status in the listing.
 
+                                                          *:DirectGitRestore*
+:DirectGitRestore
+    Ask before restoring the tracked worktree changes under the entry. A
+    directory row covers its changed tracked descendants. Staged-only and
+    untracked files are left alone.
+
 ==============================================================================
 14. Mappings                                             *direct.vim-mappings*
 
-All mappings are installed only when |direct-map_default_keys| is on.
+Default physical mappings are installed when |direct-map_default_keys| is on.
+Per-action overrides are installed regardless of that option, and `<Plug>`
+entry points are always available.
 
 Global, in Normal mode:
 
@@ -843,6 +962,9 @@ In a listing (buffer-local):
 
     Mode    Key             Action ~
     n       <CR>            open the entry under the cursor
+    n       <C-s>           open in a horizontal split
+    n       <C-v>           open in a vertical split
+    n       <C-t>           open in a new tab
     n       <2-LeftMouse>   open the entry under the cursor
     n       <LeftMouse>     on a folder icon, expand or collapse it
     n       -               go to the parent directory
@@ -864,18 +986,18 @@ In a listing (buffer-local):
     n       gh              |:DirectToggleHidden|
     n       gi              |:DirectToggleGitIgnore|
     n       gs              |:DirectToggleGitStatus|
+    n       gd              |:DirectGitDiff|
     n       ]f  [f          |:DirectNextFile| and |:DirectPreviousFile|
     n       ]c  [c          |:DirectNextChange| and |:DirectPreviousChange|
     n       ga              `:DirectGit git add -- {}`
-    n       gr              `:DirectGit git reset -- {}`
-    n       gc              `:DirectGit git checkout -- {}`
+    n       <leader>gu      `:DirectGit git reset -- {}` (unstage)
+    n       <leader>gr      |:DirectGitRestore| (confirm worktree restore)
 
 In a listing, the buffer-local `-` takes priority over the global one.
 
-To use your own keys, set |direct-map_default_keys| to `false` and map the
-commands or the |direct.vim-api| functions yourself, for example:
+Use `mappings` to override one action, or map a `<Plug>` entry point yourself:
 >lua
-    vim.keymap.set('n', '<leader>e', '<Cmd>DirectListBuffer<CR>')
+    vim.keymap.set('n', '<leader>e', '<Plug>(direct-expand)', { remap = true })
 <
 ==============================================================================
 15. Lua API                                                   *direct.vim-api*
@@ -887,9 +1009,11 @@ The functions in `require('direct')` mirror the commands:
     `list(path)`                  |:DirectList|
     `list_buffer()`               |:DirectListBuffer|
     `list_cwd()`                  |:DirectListCwd|
-    `open()`                      `<CR>`
+    `open([line], [options])`      `<CR>` or open with layout options
     `open_parent_expanded()`      `z-`
-    `sync()`                      |:DirectSync|
+    `expand()` `collapse()` `toggle()`   folder expansion actions
+    `expand_recursive()` `collapse_recursive()` `toggle_recursive()` recursive folder actions
+    `sync([callback])`             |:DirectSync|
     `undo()`  `redo()`              |:DirectUndo|  |:DirectRedo|
     `yank(first, last)`           |:DirectYank| on lines {first} to {last}
     `paste(dir)`                  |:DirectPaste|
@@ -899,19 +1023,59 @@ The functions in `require('direct')` mirror the commands:
     `toggle_gitignore()`          |:DirectToggleGitIgnore|
     `toggle_git_status()`         |:DirectToggleGitStatus|
     `show_git_status()`           |:DirectGitStatus|
+    `git_diff([ref])`              |:DirectGitDiff|
     `next_change()`               |:DirectNextChange|
     `previous_change()`           |:DirectPreviousChange|
+    `next_directory()` `previous_directory()`   visible directory navigation
     `next_file()`                 |:DirectNextFile|
     `previous_file()`             |:DirectPreviousFile|
     `run(command)`                |:DirectRun|
     `git(command)`                |:DirectGit|
 
+`open({ split = 'horizontal' })`, `open({ split = 'vertical' })` and
+`open({ split = 'tab' })` open the selected entry in a new window or tab. The
+existing listing remains open and its unsaved text is preserved.
+
 Like their commands, `list()`, `list_buffer()`, `list_cwd()` and
 `paste(dir)` with a directory work from any buffer. The others report an
 error outside a listing.
 
+`sync()` without a callback runs synchronously for Lua callers.
+`sync(callback)` uses the same asynchronous path as |:DirectSync| and |:write|;
+the callback receives `(result, error)` when the operation has finished.
+
 ==============================================================================
-16. Data and safety                                          *direct.vim-data*
+16. User events                                            *direct.vim-events*
+
+direct.vim sends Neovim `User` autocmds so other plugins can observe completed
+operations. In callbacks, event data is available as `args.data`:
+>
+    vim.api.nvim_create_autocmd('User', {
+      pattern = 'DirectSyncPost',
+      callback = function(args)
+        if args.data.success then
+          print(args.data.root, #args.data.actions)
+        end
+      end,
+    })
+<
+All events include `root` (an absolute path) and `actions` (an array). Action
+records have `name`, `src`, `dst`, and, for grouped actions, nested `actions`.
+
+    Event               When and additional data ~
+    DirectListPost      After a successful list; actions is empty, `bufnr` is set.
+    DirectSyncPre       After plan validation and before filesystem effects; includes `yanks` and `bufnr`.
+    DirectSyncPost      After sync and refresh; includes `applied`, `failed`, `yanks`, `success`, `error`, and `bufnr`.
+    DirectUndoPost      After filesystem undo and listing refresh; includes `success` and `error`.
+    DirectRedoPost      After filesystem redo and listing refresh; includes `success` and `error`.
+    DirectPastePost     After paste completion; `root` is the destination and data includes `changed`, `entry`, `success`, and `error`.
+
+Event data is copied before dispatch; editing it does not change Direct's
+operation. Keep `DirectSyncPre` handlers read-only. If one edits the listing,
+the sync is refused and the listing remains modified for review.
+
+==============================================================================
+17. Data and safety                                          *direct.vim-data*
 
 Data directory ~
 
@@ -927,9 +1091,17 @@ the current one. It contains:
 
     `history/`               `undo.log`, `redo.log` and the transaction
                            journal
-    `trash/`                 deleted entries, kept so undo can restore them
+    `trash/`                 deleted entries and sidecars with original path
+                            and deletion time, kept so undo can restore them
     `register/`              the latest yank
     `.direct-history.lock`   the lock file shared by Neovim instances
+                             (inside `direct/`)
+
+The lock coordinates current versions on the same machine. Older versions
+used `$XDG_DATA_HOME/.direct-history.lock` (or the equivalent data-home path),
+so do not run an old and a new version at the same time: they would use
+different locks. The old lock file is left in place and is harmless when no
+older version is running.
 
 History format ~
                                                    *direct.vim-history-format*
@@ -1005,7 +1177,7 @@ and the next step; if that happens, direct.vim keeps the temporary path and
 reports it so you can recover it. Network filesystems are not guaranteed.
 
 ==============================================================================
-17. Upgrading from the Python version                     *direct.vim-upgrade*
+18. Upgrading from the Python version                     *direct.vim-upgrade*
 
 The Lua version uses a new data format and doesn't migrate the Python
 version's data:
@@ -1019,7 +1191,7 @@ version's data:
     - Trash: entries deleted with the Python version can still be restored.
 
 ==============================================================================
-18. Licence                                               *direct.vim-licence*
+19. Licence                                               *direct.vim-licence*
 
 Copyright (c) 2017-2026 Duncan Williams
 

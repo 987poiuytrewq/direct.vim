@@ -108,6 +108,23 @@ return function(M)
     })
   end
 
+  local function serialize_batch(action)
+    local members = action.actions
+    if type(members) ~= 'table' or #members < 2 then
+      return nil, 'cannot serialize batch: at least two actions are required'
+    end
+    local records = {}
+    for _, member in ipairs(members) do
+      local record, err = M.serialize(member)
+      if not record then return nil, 'cannot serialize batch member: ' .. tostring(err) end
+      records[#records + 1] = record
+    end
+    return encode_object({
+      { 'op', encode_string('batch') },
+      { 'actions', encode_array(records) },
+    })
+  end
+
   -- Every action kind declares its serialized fields, parser, and reversal in one
   -- place. Factories keep the behavior on each action instance; execute dispatch
   -- uses this table so callers do not need to know that implementation detail.
@@ -235,6 +252,29 @@ return function(M)
         return M.Group(members)
       end,
     },
+    batch = {
+      fields = {},
+      record_fields = { 'op', 'actions' },
+      serialize = serialize_batch,
+      deserialize = function(record)
+        local members = {}
+        for _, nested in ipairs(record.actions) do
+          local member, err = M.deserialize(nested)
+          if not member then return nil, err end
+          members[#members + 1] = member
+        end
+        return M.Batch(members)
+      end,
+      reverse = function(action)
+        local members = {}
+        for i = #(action.actions or {}), 1, -1 do
+          local reversed, err = M.reverse_action(action.actions[i])
+          if not reversed then return nil, err end
+          members[#members + 1] = reversed
+        end
+        return M.Batch(members)
+      end,
+    },
   }
 
   for name, kind in pairs(KINDS) do
@@ -290,6 +330,105 @@ return function(M)
       finish(result ~= nil, result, err)
     end
     return true
+  end
+
+  function M.Batch(actions)
+    local self = { name = 'batch', _kind = 'batch', actions = actions or {} }
+    self._execute = function()
+      local completed = {}
+      for _, member in ipairs(self.actions) do
+        local called, result, err = pcall(M.execute, member)
+        if not called or result == nil then
+          local failure = not called and tostring(result) or tostring(err or 'action failed')
+          for index = #completed, 1, -1 do
+            local inverse, reverse_err = M.reverse_action(completed[index])
+            local rolled, rollback_result, rollback_err
+            if inverse then rolled, rollback_result, rollback_err = pcall(M.execute, inverse) end
+            if not inverse or not rolled or rollback_result == nil then
+              failure = failure .. '; batch rollback failed: '
+                .. tostring(reverse_err or (not rolled and rollback_result)
+                  or rollback_err or 'action failed')
+            end
+          end
+          return nil, failure
+        end
+        completed[#completed + 1] = member
+      end
+      return true
+    end
+
+    self._execute_async = function(callback)
+      local completed, settled = {}, false
+      local function finish(ok, result, err)
+        if settled then return end
+        settled = true
+        callback(ok, result, err)
+      end
+      local function rollback(original_err)
+        local inverses = {}
+        for index = #completed, 1, -1 do
+          local inverse, reverse_err = M.reverse_action(completed[index])
+          if not inverse then
+            finish(false, nil, tostring(original_err) .. '; batch rollback could not be planned: '
+              .. tostring(reverse_err))
+            return
+          end
+          inverses[#inverses + 1] = inverse
+        end
+        local index = 1
+        local function next_inverse()
+          if index > #inverses then
+            finish(false, nil, tostring(original_err))
+            return
+          end
+          local inverse = inverses[index]
+          index = index + 1
+          local started, start_err = M.execute_async(inverse,
+            function(ok, result, rollback_err)
+              if not ok or result == nil then
+                finish(false, nil, tostring(original_err) .. '; batch rollback failed: '
+                  .. tostring(rollback_err or 'action failed'))
+                return
+              end
+              next_inverse()
+            end)
+          if not started then
+            finish(false, nil, tostring(original_err) .. '; batch rollback failed: '
+              .. tostring(start_err))
+          end
+        end
+        next_inverse()
+      end
+      local index = 1
+      local function next_action()
+        if index > #self.actions then
+          finish(true, true)
+          return
+        end
+        local member = self.actions[index]
+        index = index + 1
+        local started, start_err = M.execute_async(member, function(ok, result, err)
+          if not ok or result == nil then
+            rollback(err or 'action failed')
+            return
+          end
+          completed[#completed + 1] = member
+          next_action()
+        end)
+        if not started then rollback(start_err or 'could not start action') end
+      end
+      next_action()
+      return true
+    end
+
+    function self.describe()
+      local descriptions = {}
+      for _, member in ipairs(self.actions) do
+        descriptions[#descriptions + 1] = M.describe_action(member)
+      end
+      return table.concat(descriptions, ', ')
+    end
+    return self
   end
 
   -- serialize(action) -> a canonical JSON record with fixed key order | nil, err.
@@ -476,6 +615,19 @@ return function(M)
       end
       if not group_is_connected(record.moves) then
         return nil, 'group moves are not interlinked'
+      end
+    elseif record.op == 'batch' then
+      if not is_array(record.actions) or #record.actions < 2 then
+        return nil, 'a batch requires at least two actions'
+      end
+      for _, nested in ipairs(record.actions) do
+        if type(nested) ~= 'string' then
+          return nil, 'a batch action must be a serialized action record'
+        end
+        local decoded, decode_err = M.deserialize(nested)
+        if not decoded then
+          return nil, 'invalid batch action: ' .. tostring(decode_err)
+        end
       end
     end
     return true

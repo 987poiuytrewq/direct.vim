@@ -44,6 +44,128 @@ local function nul_fields(output)
   return fields
 end
 
+local function trimmed_output(output)
+  return (output or ''):gsub('[\r\n]+$', '')
+end
+
+local function default_compare_ref(repo_root)
+  local remote_head = command({ '-C', repo_root, 'symbolic-ref', '--quiet', '--short',
+    'refs/remotes/origin/HEAD' })
+  local remote_ref = remote_head and trimmed_output(remote_head) or nil
+  if remote_ref and remote_ref ~= '' then
+    local _, _, code = command({ '-C', repo_root, 'rev-parse', '--verify', '--quiet',
+      '--end-of-options', remote_ref .. '^{commit}' })
+    if code == 0 then return remote_ref end
+  end
+
+  for _, branch in ipairs({ 'main', 'master' }) do
+    local _, _, code = command({ '-C', repo_root, 'show-ref', '--verify', '--quiet',
+      'refs/heads/' .. branch })
+    if code == 0 then return branch end
+  end
+  return nil, 'cannot determine the default branch (origin/HEAD, main, or master)'
+end
+
+local function resolve_commit(repo_root, ref)
+  local output, err = command({ '-C', repo_root, 'rev-parse', '--verify',
+    '--end-of-options', ref .. '^{commit}' })
+  if not output then return nil, err end
+  return trimmed_output(output)
+end
+
+-- compare_snapshot(root[, ref]) returns the committed paths changed between
+-- the target ref's merge base with HEAD and HEAD. Working-tree/index changes
+-- are deliberately excluded, matching a pull-request file list.
+function M.compare_snapshot(root, ref)
+  if type(root) ~= 'string' or root == '' then return nil, 'repository path is required' end
+  if vim.fn.executable('git') ~= 1 then return nil, 'Git executable is unavailable' end
+  if ref ~= nil and (type(ref) ~= 'string' or ref:find('\0', 1, true)) then
+    return nil, 'Git ref must be a non-empty string'
+  end
+
+  local repo_output, repo_err = command({ '-C', root, 'rev-parse', '--show-toplevel' })
+  if not repo_output then return nil, repo_err end
+  local repo_root = normalize(trimmed_output(repo_output))
+
+  if ref == nil or vim.trim(ref) == '' then
+    local default_ref, default_err = default_compare_ref(repo_root)
+    if not default_ref then return nil, default_err end
+    ref = default_ref
+  end
+  local target, target_err = resolve_commit(repo_root, ref)
+  if not target then return nil, 'cannot resolve Git ref ' .. ref .. ': ' .. tostring(target_err) end
+  local head, head_err = resolve_commit(repo_root, 'HEAD')
+  if not head then return nil, 'cannot resolve HEAD: ' .. tostring(head_err) end
+
+  local base_output, base_err = command({ '-C', repo_root, 'merge-base', target, head })
+  if not base_output then
+    return nil, 'Git ref ' .. ref .. ' has no merge base with HEAD: ' .. tostring(base_err)
+  end
+  local base = trimmed_output(base_output)
+  local output, diff_err = command({ '-C', repo_root, 'diff', '--no-ext-diff',
+    '--name-status', '-z', '-M', base, head, '--' })
+  if not output then return nil, 'cannot diff against ' .. ref .. ': ' .. tostring(diff_err) end
+
+  local fields, entries, index = nul_fields(output), {}, 1
+  while index <= #fields do
+    local status = fields[index]
+    index = index + 1
+    local code = status:sub(1, 1)
+    local old_path, relative
+    if code == 'R' or code == 'C' then
+      old_path, relative = fields[index], fields[index + 1]
+      index = index + 2
+    else
+      relative = fields[index]
+      index = index + 1
+    end
+    if relative and relative ~= '' then
+      entries[#entries + 1] = {
+        path = relative,
+        old_path = old_path,
+        status = code,
+      }
+    end
+  end
+  table.sort(entries, function(a, b)
+    if a.path == b.path then return a.status < b.status end
+    return a.path < b.path
+  end)
+  local diff_paths, deleted = {}, {}
+  local function add_diff_path(path, status)
+    path = normalize(path)
+    local previous = diff_paths[path]
+    if previous and previous ~= status then
+      diff_paths[path] = 'M'
+    else
+      diff_paths[path] = status
+    end
+  end
+  for _, entry in ipairs(entries) do
+    local path = normalize(vim.fs.joinpath(repo_root, entry.path))
+    add_diff_path(path, entry.status)
+    if entry.status == 'D' then deleted[path] = { kind = 'file' } end
+    local parent = path:match('^(.*)/[^/]+$')
+    while parent do
+      add_diff_path(parent, entry.status)
+      if entry.status == 'D' then deleted[parent] = { kind = 'directory' } end
+      if parent == repo_root or parent == '/' then break end
+      parent = parent:match('^(.*)/[^/]+$')
+    end
+  end
+  return {
+    root = repo_root,
+    ref = ref,
+    target = target,
+    base = base,
+    head = head,
+    entries = entries,
+    paths = diff_paths,
+    deleted = deleted,
+    force_deleted = true,
+  }
+end
+
 local function normalize_status(xy)
   if xy == '??' then return ' A' end
   return (xy:gsub('T', 'M'))
@@ -105,20 +227,9 @@ local function add_with_parent_directories(paths, conflicts, root, relative, sta
   end
 end
 
--- read(root) -> { root = repository root, paths = absolute path -> porcelain XY }
--- or nil when Git is unavailable / root is not in a repository. One status
--- query covers the repository; directory status is aggregated from descendants.
-function M.read(root)
-  if type(root) ~= 'string' or root == '' then return nil end
-  local root_output = run({ 'git', '-C', root, 'rev-parse', '--show-toplevel' })
-  if not root_output then return nil end
-  local repo_root = normalize(root_output:gsub('[\r\n]+$', ''))
-  local output = run({ 'git', '-C', repo_root, 'status', '--porcelain=v1', '-z',
-    '--untracked-files=all', '--ignored=matching' })
-  if not output then return nil end
-
+local function parse_status(repo_root, output, include_ignored)
   local fields = nul_fields(output)
-  local paths, conflicts, deleted = {}, {}, {}
+  local statuses, conflicts, deleted = {}, {}, {}
   local index = 1
   while index <= #fields do
     local record = fields[index]
@@ -133,15 +244,122 @@ function M.read(root)
         if xy:find('R', 1, true) or xy:find('C', 1, true) then
           index = index + 1
         end
-        add_with_parent_directories(paths, conflicts, repo_root, relative, status,
-          is_unmerged(xy))
+        if include_ignored or status ~= '!!' then
+          add_with_parent_directories(statuses, conflicts, repo_root, relative, status,
+            is_unmerged(xy))
+        end
         if xy:find('D', 1, true) then
           add_deleted(deleted, repo_root, relative)
         end
       end
     end
   end
-  return { root = repo_root, paths = paths, conflicts = conflicts, deleted = deleted }
+  return { root = repo_root, paths = statuses, conflicts = conflicts, deleted = deleted }
+end
+
+-- read(root) -> { root = repository root, paths = absolute path -> porcelain XY }
+-- or nil when Git is unavailable / root is not in a repository. One status
+-- query covers the repository; directory status is aggregated from descendants.
+function M.read(root)
+  if type(root) ~= 'string' or root == '' then return nil end
+  local root_output = run({ 'git', '-C', root, 'rev-parse', '--show-toplevel' })
+  if not root_output then return nil end
+  local repo_root = normalize(root_output:gsub('[\r\n]+$', ''))
+  local output = run({ 'git', '-C', repo_root, 'status', '--porcelain=v1', '-z',
+    '--untracked-files=all', '--ignored=matching' })
+  if not output then return nil end
+
+  return parse_status(repo_root, output, true)
+end
+
+-- read_async(root, timeout_ms, callback) starts Git in the background. The
+-- callback receives snapshot, error, timed_out; snapshot is false outside a
+-- repository or when Git fails. The timeout covers discovery and status.
+function M.read_async(root, timeout_ms, callback)
+  if type(callback) ~= 'function' then return nil, 'callback is required' end
+  if type(root) ~= 'string' or root == '' then
+    callback(false, 'invalid Git root', false)
+    return nil
+  end
+  timeout_ms = tonumber(timeout_ms) or 1000
+  timeout_ms = math.max(1, math.floor(timeout_ms))
+
+  local finished, process, timer = false, nil, nil
+  local function finish(snapshot, err, timed_out)
+    if finished then return end
+    finished = true
+    if timer then
+      timer:stop()
+      if not timer:is_closing() then timer:close() end
+      timer = nil
+    end
+    callback(snapshot, err, timed_out == true)
+  end
+
+  local function cancel()
+    if finished then return false end
+    finished = true
+    if timer then
+      timer:stop()
+      if not timer:is_closing() then timer:close() end
+      timer = nil
+    end
+    local running = process
+    if running then pcall(running.kill, running, 15) end
+    return true
+  end
+
+  timer = vim.uv.new_timer()
+  timer:start(timeout_ms, 0, function()
+    vim.schedule(function()
+      if finished then return end
+      local running = process
+      if running then pcall(running.kill, running, 15) end
+      finish(false, 'Git status timed out after ' .. timeout_ms .. ' ms', true)
+    end)
+  end)
+
+  local function spawn(args, on_result)
+    local ok, child = pcall(vim.system, args, { text = false }, function(result)
+      vim.schedule(function()
+        if finished then return end
+        on_result(result)
+      end)
+    end)
+    if not ok or not child then
+      finish(false, tostring(child or 'could not start Git'), false)
+      return false
+    end
+    process = child
+    return true
+  end
+
+  spawn({ 'git', '-C', root, 'rev-parse', '--show-toplevel' }, function(result)
+    if result.code ~= 0 then
+      local err = result.stderr and result.stderr:gsub('%s+$', '') or 'git command failed'
+      local lower = err:lower()
+      if lower:find('not a git repository', 1, true)
+        or lower:find('must be run in a work tree', 1, true) then
+        finish(false, nil, false)
+      else
+        finish(false, err, false)
+      end
+      return
+    end
+    local repo_root = normalize((result.stdout or ''):gsub('[\r\n]+$', ''))
+    process = nil
+    spawn({ 'git', '--no-optional-locks', '-C', repo_root, 'status', '--porcelain=v1', '-z',
+      '--untracked-files=all', '--ignored=matching' }, function(status_result)
+      if status_result.code ~= 0 then
+        local err = status_result.stderr and status_result.stderr:gsub('%s+$', '')
+          or 'git status failed'
+        finish(false, err, false)
+        return
+      end
+      finish(parse_status(repo_root, status_result.stdout or '', true), nil, false)
+    end)
+  end)
+  return cancel
 end
 
 -- deleted_children(snapshot, directory) returns absent tracked entries directly
@@ -153,7 +371,8 @@ function M.deleted_children(snapshot, directory)
   local prefix = directory == '/' and '/' or (directory .. '/')
   local result = {}
   for path, entry in pairs(snapshot.deleted) do
-    if path:sub(1, #prefix) == prefix and path_is_missing(path) then
+    if path:sub(1, #prefix) == prefix
+      and (snapshot.force_deleted == true or path_is_missing(path)) then
       local name = path:sub(#prefix + 1)
       if name ~= '' and not name:find('/', 1, true) then
         if entry.kind == 'directory' then
@@ -186,6 +405,60 @@ local function discover_repo(path)
     return nil, err
   end
   return normalize(output:gsub('[\r\n]+$', ''))
+end
+
+-- worktree_changes(root, path, directory) -> the absolute tracked paths whose
+-- unstaged worktree changes a restore would discard. Untracked files are not
+-- included because `git restore --worktree` does not remove them.
+function M.worktree_changes(root, path, directory)
+  local repo_root, repo_err = discover_repo(root)
+  if repo_root == false then return nil, 'path is not in a Git repository' end
+  if not repo_root then return nil, repo_err end
+  local output, status_err = command({ '-C', repo_root, 'status', '--porcelain=v1', '-z',
+    '--untracked-files=all' })
+  if not output then return nil, status_err end
+
+  path = normalize(path)
+  local prefix = path == '/' and '/' or (path .. '/')
+  local function covers(candidate)
+    return candidate == path or (directory and candidate:sub(1, #prefix) == prefix)
+  end
+
+  local fields, changes, seen = nul_fields(output), {}, {}
+  local index = 1
+  while index <= #fields do
+    local record = fields[index]
+    index = index + 1
+    if #record >= 4 then
+      local xy, relative = record:sub(1, 2), record:sub(4)
+      if xy:find('R', 1, true) or xy:find('C', 1, true) then index = index + 1 end
+      -- Column two is the worktree state. `??` is untracked, not a change that
+      -- restore --worktree can discard; staged-only changes have a blank second
+      -- column and likewise remain untouched.
+      if xy ~= '??' and xy:sub(2, 2) ~= ' ' and relative ~= '' then
+        local absolute = normalize(vim.fs.joinpath(repo_root, relative))
+        if covers(absolute) and not seen[absolute] then
+          seen[absolute] = true
+          changes[#changes + 1] = absolute
+        end
+      end
+    end
+  end
+  table.sort(changes)
+  return changes
+end
+
+function M.worktree_restore_command(root)
+  local version = run({ 'git', '-C', root, '--version' })
+  local major, minor
+  if type(version) == 'string' then
+    major, minor = version:match('git version (%d+)%.(%d+)')
+  end
+  major, minor = tonumber(major), tonumber(minor)
+  if major and (major > 2 or (major == 2 and minor >= 23)) then
+    return 'git --literal-pathspecs restore --worktree -- {}'
+  end
+  return 'git --literal-pathspecs checkout -- {}'
 end
 
 local function add_tracked_path(tracked, relative)

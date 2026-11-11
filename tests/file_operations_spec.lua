@@ -261,7 +261,11 @@ H.describe('LSP file operations', function()
     local sb = H.sandbox()
     local root = H.mkdir(sb.root, 'workspace')
     local apply = vim.lsp.util.apply_workspace_edit
-    vim.lsp.util.apply_workspace_edit = function() error('apply failed') end
+    local confirm = vim.fn.confirm
+    vim.lsp.util.apply_workspace_edit = function()
+      H.assert_eq(vim.fn.confirm, confirm, 'confirm is not temporarily replaced')
+      error('apply failed')
+    end
     local opted = client(1, { willRename = true }, root, function(_, _, _, callback)
       vim.schedule(function() callback(nil, { changes = {} }) end)
       return true, 1
@@ -275,6 +279,7 @@ H.describe('LSP file operations', function()
       H.assert_true(vim.wait(200, function() return result ~= nil end, 5))
     end)
     vim.lsp.util.apply_workspace_edit = apply
+    H.assert_eq(vim.fn.confirm, confirm, 'confirm remains unchanged after apply errors')
     H.assert_false(result[1])
     H.assert_true(result[2]:find('apply failed', 1, true) ~= nil)
   end)
@@ -313,7 +318,7 @@ H.describe('LSP file operations', function()
     unsupported.notify = function() unsupported_calls = unsupported_calls + 1 end
     with_clients({ opted, unsupported }, function()
       local listing = buffer.list(root)
-      vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'after.txt' })
+      H.set_direct_rows(0, { 'after.txt' })
       vim.bo.modified = true
       vim.cmd('write')
       H.assert_true(listing ~= nil)
@@ -353,7 +358,7 @@ H.describe('LSP file operations', function()
     with_clients({ opted }, function()
       operations._timeout_ms = 15
       local listing = buffer.list(root)
-      vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'after.txt' })
+      H.set_direct_rows(0, { 'after.txt' })
       vim.bo.modified = true
       H.assert_true(listing:sync())
       H.assert_true(vim.wait(ASYNC_WAIT_MS, function()
@@ -383,7 +388,7 @@ H.describe('LSP file operations', function()
     vim.lsp.util.apply_workspace_edit = function() error('forced apply failure') end
     with_clients({ opted }, function()
       local listing = buffer.list(root)
-      vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'after.txt' })
+      H.set_direct_rows(0, { 'after.txt' })
       vim.bo.modified = true
       H.assert_true(listing:sync())
       H.assert_true(vim.wait(ASYNC_WAIT_MS, function() return not pending.is_pending() end, 5))
@@ -409,7 +414,7 @@ H.describe('LSP file operations', function()
     vim.notify = function(message) warnings[#warnings + 1] = tostring(message) end
     with_clients({ opted }, function()
       local listing = buffer.list(root)
-      vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'after.txt' })
+      H.set_direct_rows(0, { 'after.txt' })
       vim.bo.modified = true
       H.assert_true(listing:sync())
       H.assert_true(vim.wait(ASYNC_WAIT_MS, function() return not pending.is_pending() end, 5),
@@ -447,7 +452,7 @@ H.describe('LSP file operations', function()
       end)
     with_clients({ opted }, function()
       local listing = buffer.list(root)
-      vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'renamed.txt' })
+      H.set_direct_rows(0, { 'renamed.txt' })
       vim.bo.modified = true
       H.assert_true(listing:sync())
       H.assert_true(vim.wait(ASYNC_WAIT_MS, function() return not pending.is_pending() end, 5))
@@ -480,19 +485,85 @@ H.describe('LSP file operations', function()
         end)
         return true, 1
       end)
-    local confirm = vim.fn.confirm
-    vim.fn.confirm = function() return 2 end
+    local original_confirm = vim.fn.confirm
+    local apply = vim.lsp.util.apply_workspace_edit
+    local confirm_calls, apply_calls = 0, 0
+    local decline = function()
+      confirm_calls = confirm_calls + 1
+      return 2
+    end
+    vim.fn.confirm = decline
+    vim.lsp.util.apply_workspace_edit = function(...)
+      apply_calls = apply_calls + 1
+      return apply(...)
+    end
     with_clients({ opted }, function()
       local listing = buffer.list(root)
-      vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'renamed.txt' })
+      H.set_direct_rows(0, { 'renamed.txt' })
       vim.bo.modified = true
       H.assert_true(listing:sync())
       H.assert_true(vim.wait(ASYNC_WAIT_MS, function() return not pending.is_pending() end, 5))
     end)
-    vim.fn.confirm = confirm
+    vim.fn.confirm = original_confirm
+    vim.lsp.util.apply_workspace_edit = apply
+    H.assert_eq(confirm_calls, 1, 'the annotation confirmation is observed directly')
+    H.assert_eq(apply_calls, 0, 'a declined edit is rejected before Neovim applies it')
+    H.assert_eq(vim.fn.confirm, original_confirm, 'confirm is never replaced')
     H.assert_true(vim.uv.fs_stat(root .. '/before.txt') ~= nil)
     H.assert_nil(vim.uv.fs_stat(root .. '/renamed.txt'))
     H.assert_eq(vim.fn.readfile(side .. '/note.txt'), { 'original' })
+  end)
+
+  H.it('confirms annotated edits before applying without replacing vim.fn.confirm', function()
+    local sb = H.sandbox()
+    local root = H.mkdir(sb.root, 'workspace')
+    local side = H.mkdir(sb.root, 'side')
+    local note = H.mkfile(side, 'note.txt', 'original')
+    local calls, original_confirm = {}, vim.fn.confirm
+    local apply, apply_calls = vim.lsp.util.apply_workspace_edit, 0
+    local accept = function(message, buttons, default, title)
+      calls[#calls + 1] = { message, buttons, default, title }
+      return 1
+    end
+    vim.fn.confirm = accept
+    vim.lsp.util.apply_workspace_edit = function(edit, encoding)
+      apply_calls = apply_calls + 1
+      H.assert_eq(vim.fn.confirm, accept, 'confirm remains untouched during native apply')
+      H.assert_false(edit.changeAnnotations.confirm.needsConfirmation,
+        'the accepted annotation is not confirmed a second time')
+      return apply(edit, encoding)
+    end
+    local opted = client(1, { willRename = true }, root, function(_, _, _, callback)
+      vim.schedule(function()
+        callback(nil, {
+          changes = { [vim.uri_from_fname(note)] = { {
+            range = { start = { line = 0, character = 0 },
+              ['end'] = { line = 0, character = 8 } },
+            newText = 'updated', annotationId = 'confirm',
+          } } },
+          changeAnnotations = { confirm = { label = 'Confirm this edit',
+            needsConfirmation = true } },
+        })
+      end)
+      return true, 1
+    end)
+    local result
+    with_clients({ opted }, function()
+      operations.will_rename({ { oldUri = vim.uri_from_fname(root .. '/before.txt'),
+        newUri = vim.uri_from_fname(root .. '/after.txt') } }, function(ok, err)
+        result = { ok, err }
+      end)
+      H.assert_true(vim.wait(ASYNC_WAIT_MS, function() return result ~= nil end, 5))
+    end)
+    vim.fn.confirm = original_confirm
+    vim.lsp.util.apply_workspace_edit = apply
+    H.assert_true(result[1], 'accepted WorkspaceEdit completes')
+    H.assert_eq(apply_calls, 1)
+    H.assert_eq(#calls, 1)
+    H.assert_eq(calls[1], { 'Apply all changes?\nConfirm this edit', '&Yes\n&No', 1, 'Question' })
+    local note_buf = vim.uri_to_bufnr(vim.uri_from_fname(note))
+    H.assert_eq(vim.api.nvim_buf_get_lines(note_buf, 0, -1, false), { 'updated' })
+    H.assert_eq(vim.fn.confirm, original_confirm)
   end)
 
   H.it('rejects yank while willRename is pending without changing the register', function()
@@ -686,10 +757,10 @@ H.describe('LSP file operations', function()
     opted.notify = function() notifications = notifications + 1 end
     with_clients({ opted }, function()
       local listing = buffer.list(root)
-      vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'after.txt' })
+      H.set_direct_rows(0, { 'after.txt' })
       vim.bo.modified = true
       H.assert_true(listing:sync())
-      vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'other.txt' })
+      H.set_direct_rows(0, { 'other.txt' })
       vim.schedule(function() respond(nil, nil) end)
       H.assert_true(vim.wait(ASYNC_WAIT_MS, function() return not pending.is_pending() end, 5))
     end)
@@ -711,7 +782,7 @@ H.describe('LSP file operations', function()
       end)
     with_clients({ opted }, function()
       local listing = buffer.list(root)
-      vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'after.txt' })
+      H.set_direct_rows(0, { 'after.txt' })
       vim.bo.modified = true
       H.assert_true(listing:sync())
       local bufnr = vim.api.nvim_get_current_buf()
@@ -744,7 +815,7 @@ H.describe('LSP file operations', function()
     end
     with_clients({ opted }, function()
       local listing = buffer.list(direct_root)
-      vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'after.txt' })
+      H.set_direct_rows(0, { 'after.txt' })
       vim.bo.modified = true
       H.assert_true(listing:sync())
       local bufnr = vim.api.nvim_get_current_buf()
@@ -794,7 +865,7 @@ H.describe('LSP file operations', function()
     end
     with_clients({ opted }, function()
       local listing = buffer.list(direct_root)
-      vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'after.txt' })
+      H.set_direct_rows(0, { 'after.txt' })
       vim.bo.modified = true
       H.assert_true(listing:sync())
       H.assert_true(vim.wait(ASYNC_WAIT_MS, function() return not pending.is_pending() end, 5))
@@ -835,7 +906,7 @@ H.describe('LSP file operations', function()
     end
     with_clients({ opted }, function()
       local listing = buffer.list(direct_root)
-      vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'after.txt' })
+      H.set_direct_rows(0, { 'after.txt' })
       vim.bo.modified = true
       H.assert_true(listing:sync())
       H.assert_true(vim.wait(ASYNC_WAIT_MS, function() return not pending.is_pending() end, 5))
@@ -881,7 +952,7 @@ H.describe('LSP file operations', function()
     end
     with_clients({ opted }, function()
       local listing = buffer.list(direct_root)
-      vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'after.txt' })
+      H.set_direct_rows(0, { 'after.txt' })
       vim.bo.modified = true
       H.assert_true(listing:sync())
       H.assert_true(vim.wait(ASYNC_WAIT_MS, function() return not pending.is_pending() end, 5))
@@ -926,7 +997,7 @@ H.describe('LSP file operations', function()
     with_clients({ opted }, function()
       local listing = buffer.list(direct_root)
       local function rename_to(name)
-        vim.api.nvim_buf_set_lines(0, 0, -1, false, { name })
+        H.set_direct_rows(0, { name })
         vim.bo.modified = true
         local synced, sync_err = listing:sync()
         H.assert_true(synced == true, tostring(sync_err) .. '\n' .. H.messages())
@@ -974,7 +1045,7 @@ H.describe('LSP file operations', function()
     with_clients({ opted }, function()
       local listing = buffer.list(direct_root)
       local function rename_to(name)
-        vim.api.nvim_buf_set_lines(0, 0, -1, false, { name })
+        H.set_direct_rows(0, { name })
         vim.bo.modified = true
         H.assert_true(listing:sync())
         H.assert_true(vim.wait(ASYNC_WAIT_MS, function() return not pending.is_pending() end, 5))

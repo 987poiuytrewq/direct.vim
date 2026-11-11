@@ -23,6 +23,22 @@ function M.is_windows()
   return platform.is_windows
 end
 
+function M.wait_for_direct(timeout_ms)
+  M.assert_true(vim.wait(timeout_ms or 5000, function()
+    local registries = { require('direct.pending') }
+    local buffer = package.loaded['direct.buffer.buffer']
+    local history = package.loaded['direct.history.history']
+    if buffer and buffer._pending_for_test then
+      registries[#registries + 1] = buffer._pending_for_test
+    end
+    if history and history.pending then registries[#registries + 1] = history.pending end
+    for _, pending in ipairs(registries) do
+      if pending.is_pending() then return false end
+    end
+    return true
+  end), 'pending Direct operation completes')
+end
+
 -- ---------------------------------------------------------------------------
 -- Configuration and per-run state
 -- ---------------------------------------------------------------------------
@@ -263,6 +279,59 @@ function M.mkfile(root, rel, contents)
   vim.fn.mkdir(vim.fs.dirname(path), 'p')
   vim.fn.writefile(to_lines(contents), path)
   return path
+end
+
+-- Replace the listing text while modeling normal per-row edits that preserve
+-- direct's row extmarks. Exact names keep their own identities; otherwise
+-- unmatched rows are paired only when the counts are equal (an explicit
+-- one-for-one rename). Tests for whole-line replacements should use
+-- nvim_buf_set_lines directly so the marks are intentionally lost.
+function M.set_direct_rows(bufnr, lines)
+  if bufnr == nil or bufnr == 0 then bufnr = vim.api.nvim_get_current_buf() end
+  local state = require('direct.buffer.buffer')._state_for_test(bufnr)
+  if not state then
+    return vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+  end
+  local namespace = vim.api.nvim_get_namespaces()['direct-listing-rows']
+  local old_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local ids_by_row = {}
+  for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, namespace,
+      0, -1, { details = true })) do
+    if not (mark[4] and mark[4].invalid) then ids_by_row[mark[2] + 1] = mark[1] end
+  end
+
+  local target_ids, used = {}, {}
+  for target_row, line in ipairs(lines) do
+    for old_row, old_line in ipairs(old_lines) do
+      if not used[old_row] and old_line == line and ids_by_row[old_row] then
+        target_ids[target_row] = ids_by_row[old_row]
+        used[old_row] = true
+        break
+      end
+    end
+  end
+  local old_unmatched, new_unmatched = {}, {}
+  for old_row = 1, #old_lines do
+    if ids_by_row[old_row] and not used[old_row] then old_unmatched[#old_unmatched + 1] = old_row end
+  end
+  for target_row = 1, #lines do
+    if not target_ids[target_row] then new_unmatched[#new_unmatched + 1] = target_row end
+  end
+  if #old_unmatched == #new_unmatched then
+    for index, old_row in ipairs(old_unmatched) do
+      target_ids[new_unmatched[index]] = ids_by_row[old_row]
+    end
+  end
+
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+  for row, id in pairs(target_ids) do
+    vim.api.nvim_buf_set_extmark(bufnr, namespace, row - 1, 0, {
+      id = id,
+      right_gravity = true,
+      invalidate = true,
+      undo_restore = true,
+    })
+  end
 end
 
 function M.mkdir(root, rel)

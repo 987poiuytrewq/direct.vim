@@ -31,6 +31,7 @@ H.describe('sync with expanded children', function()
     listing:collapse(1)
     H.assert_buf_eq({ 'sub/' }, 0, 'collapse leaves only the root directory row')
     vim.cmd('write')
+    H.wait_for_direct()
 
     H.assert_eq(H.fs_snapshot(ws), before, 'write after collapse does not delete children')
     H.assert_buf_eq({ 'sub/' }, 0, 'sync preserves the collapsed view')
@@ -93,6 +94,7 @@ H.describe('sync with expanded children', function()
     end
     local called, err = pcall(vim.cmd, 'write')
     buffer.classify = classify
+    H.wait_for_direct()
 
     H.assert_true(called, tostring(err))
     H.assert_eq(classified, { { 'sub/', 'new.txt' }, { 'sub/' } },
@@ -123,6 +125,7 @@ H.describe('sync with expanded children', function()
     end
     local called, err = pcall(vim.cmd, 'write')
     buffer.classify = classify
+    H.wait_for_direct()
 
     H.assert_true(called, tostring(err))
     H.assert_eq(classified, { { 'sub/' }, { 'sub/', 'root.txt' } },
@@ -250,6 +253,7 @@ H.describe('sync with expanded children', function()
     vim.api.nvim_feedkeys('ccrenamed.txt\27', 'xt', false)
 
     local called, err = pcall(vim.cmd, 'write')
+    H.wait_for_direct()
 
     H.assert_true(called, tostring(err))
     H.assert_buf_eq({ 'sub/', 'renamed.txt' }, 0,
@@ -332,6 +336,7 @@ H.describe('sync with expanded children', function()
 
     local no_op_ok, no_op_err = pcall(vim.cmd, 'write')
     H.assert_true(no_op_ok, tostring(no_op_err))
+    H.wait_for_direct()
     H.assert_eq(H.fs_snapshot(ws), {
       'a/', 'a/nested/', 'a/nested/deep.txt', 'root.txt',
     }, 'a no-op write accepts redone children without filesystem changes')
@@ -339,6 +344,7 @@ H.describe('sync with expanded children', function()
     vim.api.nvim_buf_set_text(bufnr, 3, 0, 3, #'root.txt', { 'renamed.txt' })
     local write_ok, write_err = pcall(vim.cmd, 'write')
     H.assert_true(write_ok, tostring(write_err))
+    H.wait_for_direct()
     H.assert_eq(H.fs_snapshot(ws), {
       'a/', 'a/nested/', 'a/nested/deep.txt', 'renamed.txt',
     }, 'a root-only edit never treats redone children as root actions')
@@ -419,6 +425,7 @@ H.describe('sync with expanded children', function()
 
       local write_ok, write_err = pcall(vim.cmd, 'write')
       H.assert_true(write_ok, tostring(write_err))
+      H.wait_for_direct()
       H.assert_eq(H.fs_snapshot(ws), fs_before, 'a no-op write changes no filesystem entries')
       H.assert_eq(register.content(), register_before, 'a no-op write does not change the register')
 
@@ -751,6 +758,7 @@ H.describe('sync with expanded children', function()
       'the materialization not undone retains its child identity before save')
 
     local called, err = pcall(vim.cmd, 'write')
+    H.wait_for_direct()
 
     H.assert_true(called, tostring(err))
     H.assert_eq(H.fs_snapshot(ws), {
@@ -785,6 +793,7 @@ H.describe('sync with expanded children', function()
       'undo removes only the materialized child rows, not the earlier rename')
     H.assert_eq(H.fs_snapshot(ws), before, 'undo has no filesystem effects')
     local called, err = pcall(vim.cmd, 'write')
+    H.wait_for_direct()
 
     H.assert_true(called, tostring(err))
     H.assert_buf_eq({ 'sub/', 'renamed.txt' }, 0,
@@ -847,6 +856,7 @@ H.describe('sync with expanded children', function()
     end
 
     local ok, err = pcall(vim.cmd, 'write')
+    H.wait_for_direct()
     H.assert_true(ok, tostring(err))
     H.assert_buf_eq({ 'sub/' }, 0, 'write keeps the root-only view coherent')
     state = buffer._state_for_test(vim.api.nvim_get_current_buf())
@@ -884,6 +894,7 @@ H.describe('sync with expanded children', function()
       'view undo has no filesystem effects')
 
     local called, err = pcall(vim.cmd, 'write')
+    H.wait_for_direct()
     H.assert_true(called, tostring(err))
     H.assert_buf_eq({ 'a/', 'b/' }, 0, 'write retains the coherent root listing')
     local state = buffer._state_for_test(vim.api.nvim_get_current_buf())
@@ -953,6 +964,7 @@ H.describe('sync with expanded children', function()
       'undo returns to the child materialization history baseline')
 
     local ok, err = pcall(vim.cmd, 'write')
+    H.wait_for_direct()
 
     H.assert_true(ok, tostring(err))
     H.assert_buf_eq({ 'sub/', '  inside.txt', 'root.txt' }, 0,
@@ -1391,6 +1403,28 @@ H.describe('sync with expanded children', function()
     H.assert_fs_eq(ws, { 'sub/', 'sub/inside.txt' }, 'no filesystem action was needed')
   end)
 
+  H.it('refuses an unidentifiable root row after text undo/redo', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkfile(ws, 'a.txt', { 'original' })
+    local listing = buffer.list(ws)
+    local bufnr = vim.api.nvim_get_current_buf()
+    local namespace = vim.api.nvim_get_namespaces()['direct-listing-rows']
+    vim.api.nvim_buf_clear_namespace(bufnr, namespace, 0, -1)
+    vim.b[bufnr].direct_text_undo_mode = true
+    vim.bo[bufnr].modified = true
+
+    local ok, reason = listing:sync()
+
+    H.assert_nil(ok, 'missing identity is not guessed from row position or spelling')
+    H.assert_true(tostring(reason):find('identity', 1, true) ~= nil, tostring(reason))
+    H.assert_eq(vim.fn.readfile(vim.fs.joinpath(ws, 'a.txt')), { 'original' },
+      'the filesystem is unchanged')
+    H.assert_eq(history_lines('undo.log'), {}, 'no history is written')
+    H.assert_true(vim.bo[bufnr].modified, 'the row remains available for review')
+  end)
+
   H.it('root containment guard rejects traversal paths before classification', function()
     for _, malicious in ipairs({ '../escaped' }) do
       clean_buffers()
@@ -1419,7 +1453,7 @@ H.describe('sync with expanded children', function()
     local ws = H.mkdir(sb.root, 'ws')
     H.mkfile(ws, 'old.txt', { 'old' })
     local listing = buffer.list(ws)
-    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'x/new.txt' })
+    vim.api.nvim_buf_set_text(0, 0, 1, 0, #('old.txt'), { '/new.txt' })
     local classified = 0
     local classify = buffer.classify
     buffer.classify = function(...) classified = classified + 1; return classify(...) end
@@ -1429,7 +1463,7 @@ H.describe('sync with expanded children', function()
     H.assert_true(tostring(reason):find('component', 1, true) ~= nil, tostring(reason))
     H.assert_eq(classified, 0, 'path guard precedes rename classification')
     H.assert_true(fs.exists(ws .. '/old.txt'), 'rename source remains intact')
-    H.assert_false(fs.exists(ws .. '/x'), 'nested rename did not create a directory')
+    H.assert_false(fs.exists(ws .. '/o'), 'nested rename did not create a directory')
     H.assert_eq(history_lines('undo.log'), {}, 'unsafe rename writes no history')
   end)
 

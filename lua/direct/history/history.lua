@@ -32,7 +32,7 @@ local function rename_files(action, files, paths)
     }
     paths[#paths + 1] = action.src
     paths[#paths + 1] = action.dst
-  elseif action.name == 'g' then
+  elseif action.name == 'g' or action.name == 'batch' then
     for _, member in ipairs(action.actions or {}) do
       rename_files(member, files, paths)
     end
@@ -726,15 +726,55 @@ end
 
 local function action_paths(action)
   local result = {}
+  local function visit(current)
+    if type(current) ~= 'table' then return end
+    if type(current.src) == 'string' then result[#result + 1] = current.src end
+    if type(current.dst) == 'string' then result[#result + 1] = current.dst end
+    for _, member in ipairs(current.actions or {}) do visit(member) end
+  end
   if type(action) == 'table' then
-    if type(action.src) == 'string' then result[#result + 1] = action.src end
-    if type(action.dst) == 'string' then result[#result + 1] = action.dst end
-    for _, member in ipairs(action.actions or {}) do
-      if type(member.src) == 'string' then result[#result + 1] = member.src end
-      if type(member.dst) == 'string' then result[#result + 1] = member.dst end
-    end
+    visit(action)
   end
   return result
+end
+
+local function trash_references(state)
+  local references = {}
+  local function add(path)
+    if type(path) == 'string' and path ~= '' then
+      references[M.paths.canonical(path)] = true
+    end
+  end
+  local function visit(action)
+    if type(action) ~= 'table' then return end
+    if action.name == 'g' or action.name == 'batch' then
+      for _, member in ipairs(action.actions or {}) do visit(member) end
+    elseif action.name == 'rm' or action.name == 'rmdir' then
+      add(action.dst)
+    elseif action.name == 'rs' or action.name == 'rsdir' then
+      add(action.src)
+    end
+  end
+  for _, lines in ipairs({ state.undo_lines, state.redo_lines }) do
+    for index = 2, #lines do
+      local action = M.action.deserialize(lines[index])
+      if action then visit(action) end
+    end
+  end
+  return references
+end
+
+-- Run a trash operation while holding the history lock and with a verified
+-- snapshot of every undo/redo reference to trash paths.
+function M.with_trash_references(callback)
+  if type(callback) ~= 'function' then
+    return nil, 'history.with_trash_references: callback is required'
+  end
+  return M.with_lock(function()
+    local state, err = preflight_locked()
+    if not state then return nil, err end
+    return callback(trash_references(state), state)
+  end)
 end
 
 -- Paths changed on disk by a reversal, excluding the private trash/register
@@ -751,7 +791,7 @@ local function affected_paths(action, result)
     result[#result + 1] = path
   end
   local name = action.name
-  if name == 'g' then
+  if name == 'g' or name == 'batch' then
     for _, member in ipairs(action.actions or {}) do
       affected_paths(member, result)
     end
@@ -807,7 +847,7 @@ end
 -- history while holding the process lock for the entire critical section. The
 -- durable intent journal supports restart recovery; keeping
 -- the lock across execute prevents it from replaying that intent concurrently.
-function M.apply(action, execute)
+function M.apply(action, execute, preflight_guard)
   if type(action) ~= 'table' then
     return nil, 'history.apply: an action is required'
   end
@@ -820,6 +860,10 @@ function M.apply(action, execute)
   return M.with_lock(function()
     local state, preflight_err = preflight_locked(action_paths(action))
     if not state then return nil, preflight_err end
+    if type(preflight_guard) == 'function' then
+      local allowed, guard_err = preflight_guard(state, trash_references(state))
+      if not allowed then return nil, guard_err end
+    end
 
     local transaction, transaction_err = write_apply_intent(state, action, record)
     if transaction == false then
@@ -882,30 +926,19 @@ function M.apply(action, execute)
   end)
 end
 
-local function write_paste_journal(operation)
-  local called, ok, err = pcall(function()
-    return log_mod.write_raw_atomic(operation.transaction_path,
-      vim.json.encode(operation.transaction) .. '\n')
-  end)
-  if not called then return nil, tostring(ok) end
-  if not ok then return nil, err end
-  return true
-end
-
-local function release_paste_lock(operation)
-  if not operation.locked then return true end
-  operation.locked = false
-  return M.lock.release()
-end
-
--- begin_paste holds the same-host history lock until finish_paste. The initial
--- journal is durable before the async executor can create its first destination.
-function M.begin_paste(action)
-  if type(action) ~= 'table' or action.name ~= 'p' then
-    return nil, 'history.begin_paste: a Paste action is required'
+-- apply_async keeps the same process lock and durable intent across an
+-- asynchronous filesystem executor. The callback receives result, err.
+function M.apply_async(action, execute_async, callback, preflight_guard)
+  if type(action) ~= 'table' then return nil, 'history.apply_async: an action is required' end
+  if type(execute_async) ~= 'function' then
+    return nil, 'history.apply_async: an executor is required'
+  end
+  if type(callback) ~= 'function' then
+    return nil, 'history.apply_async: a completion callback is required'
   end
   local record, serialize_err = M.action.serialize(action)
   if not record then return nil, serialize_err end
+
   local acquired, acquire_err = M.lock.acquire()
   if not acquired then
     notify_unavailable(acquire_err)
@@ -918,125 +951,115 @@ function M.begin_paste(action)
     M.lock.release()
     return nil, called and preflight_err or state
   end
-  local transaction = {
-    format = TRANSACTION_FORMAT,
-    version = TRANSACTION_VERSION,
-    kind = 'paste',
-    direction = 'apply',
-    action = record,
-    source_action = vim.NIL,
-    base_undo = copy_lines(state.undo_lines),
-    base_redo = copy_lines(state.redo_lines),
-    completed = {},
-    pending = vim.NIL,
-  }
-  local operation = {
-    transaction = transaction,
-    transaction_path = state.transaction_path,
-    undo_path = state.undo_path,
-    redo_path = state.redo_path,
-    locked = true,
-  }
-  local written, write_err = write_paste_journal(operation)
-  if not written then
-    release_paste_lock(operation)
-    notify_unavailable(write_err)
-    return nil, write_err
+  if type(preflight_guard) == 'function' then
+    local guard_ok, allowed, guard_err = pcall(preflight_guard, state, trash_references(state))
+    if not guard_ok or not allowed then
+      M.lock.release()
+      return nil, guard_ok and guard_err or allowed
+    end
   end
-  return operation
-end
 
-function M.note_paste_pending(operation, pair, source, destination)
-  if type(operation) ~= 'table' or not operation.locked
-    or type(pair) ~= 'table' or type(source) ~= 'string'
-    or type(destination) ~= 'string' then
-    return nil, 'invalid pending paste update'
+  local transaction, transaction_err = write_apply_intent(state, action, record)
+  if transaction == false then
+    M.lock.release()
+    notify_unavailable(transaction_err)
+    return nil, transaction_err
   end
-  if M.action.entry_name_reason(pair.src) or M.action.entry_name_reason(pair.dst) then
-    return nil, 'invalid paste entry name'
+
+  local finished = false
+  local function finish(result, execute_err)
+    if finished then return end
+    finished = true
+    local final_result, final_err = result, execute_err
+
+    if result == nil then
+      local why = tostring(execute_err or 'action failed')
+      if transaction then
+        if transaction.steps then
+          if transaction.next_step == 1
+            and recovery.move_step_status(transaction.steps[1]) == 'not-started' then
+            clear_transaction(state.transaction_path)
+          else
+            why = why .. '; grouped move recovery journal preserved at '
+              .. state.transaction_path
+          end
+        else
+          local status = recovery.reverse_operation_status(transaction)
+          if status == 'not-started' then
+            clear_transaction(state.transaction_path)
+          elseif status == 'completed' then
+            local committed, commit_err = commit_stacks(state.undo_path,
+              state.redo_path, state.transaction_path,
+              transaction.undo, transaction.redo)
+            if not committed then why = why .. '; ' .. tostring(commit_err) end
+          else
+            why = why .. '; filesystem outcome is ambiguous; recovery journal preserved at '
+              .. state.transaction_path
+          end
+        end
+      end
+      final_err = why
+    else
+      local undo_lines, redo_lines
+      if transaction then
+        undo_lines, redo_lines = transaction.undo, transaction.redo
+      else
+        undo_lines = copy_lines(state.undo_lines)
+        undo_lines[#undo_lines + 1] = record
+        redo_lines = { M.HEADER }
+      end
+      local committed, commit_err = commit_stacks(state.undo_path, state.redo_path,
+        state.transaction_path, undo_lines, redo_lines)
+      if not committed then
+        final_result = nil
+        final_err = 'action completed but history commit is pending recovery: '
+          .. tostring(commit_err)
+      end
+    end
+
+    local released, release_err = M.lock.release()
+    if not released then
+      notify_unavailable('could not release history lock: ' .. tostring(release_err))
+      if final_result ~= nil then
+        final_result = nil
+        final_err = 'action completed but the history lock could not be released: '
+          .. tostring(release_err)
+      end
+    end
+    local callback_ok, callback_err = pcall(callback, final_result, final_err)
+    if not callback_ok then
+      M.ui.report_error('finish asynchronous history action', callback_err)
+    end
   end
-  local source_identity, source_stat = M.action.fs.entry_identity(source)
-  if not source_stat or not source_identity or not source_identity.inode then
-    return nil, 'cannot identify paste source: ' .. source
+
+  if transaction and transaction.steps then
+    recovery.complete_move_steps_async(transaction, state.transaction_path,
+      function(result, execute_err) finish(result, execute_err) end)
+    return true
   end
-  local previous = operation.transaction.pending
-  if previous ~= vim.NIL then return nil, 'another paste entry is already pending' end
-  operation.transaction.pending = {
-    src = pair.src,
-    dst = pair.dst,
-    source = M.paths.canonical(source),
-    destination = M.paths.canonical(destination),
-    source_identity = source_identity,
-  }
-  local written, write_err = write_paste_journal(operation)
-  if not written then
-    operation.transaction.pending = previous
-    return nil, write_err
-  end
+
+  local started, start_err = pcall(execute_async, function(ok, result, execute_err)
+    if ok and result ~= nil then finish(result, nil)
+    else finish(nil, execute_err or result or 'action failed') end
+  end)
+  if not started then finish(nil, start_err) end
   return true
 end
 
-function M.note_paste_complete(operation, pair)
-  if type(operation) ~= 'table' or not operation.locked
-    or type(pair) ~= 'table' then
-    return nil, 'invalid completed paste update'
-  end
-  local transaction = operation.transaction
-  local pending = transaction.pending
-  if type(pending) ~= 'table' or pending.src ~= pair.src or pending.dst ~= pair.dst then
-    return nil, 'completed paste entry does not match its durable intent'
-  end
-  transaction.completed[#transaction.completed + 1] = { src = pair.src, dst = pair.dst }
-  transaction.pending = vim.NIL
-  local written, write_err = write_paste_journal(operation)
-  if not written then
-    table.remove(transaction.completed)
-    transaction.pending = pending
-    return nil, write_err
-  end
-  return true
-end
-
-function M.cancel_paste_pending(operation, pair)
-  if type(operation) ~= 'table' or not operation.locked then
-    return nil, 'paste history operation is not active'
-  end
-  local transaction = operation.transaction
-  local pending = transaction.pending
-  if type(pending) ~= 'table' or pending.src ~= pair.src or pending.dst ~= pair.dst then
-    return nil, 'paste conflict does not match the pending destination'
-  end
-  transaction.pending = vim.NIL
-  local written, write_err = write_paste_journal(operation)
-  if not written then
-    transaction.pending = pending
-    return nil, write_err
-  end
-  return true
-end
-
-function M.finish_paste(operation)
-  if type(operation) ~= 'table' or not operation.locked then
-    return nil, 'paste history operation is not active'
-  end
-  local called, result, result_err = xpcall(function()
-    local completed, settle_err = recovery.settle_paste_pending(operation.transaction)
-    if not completed then return nil, settle_err end
-    if #completed == 0 then return clear_transaction(operation.transaction_path) end
-    local undo, redo, stack_err = recovery.paste_stack_snapshot(
-      operation.transaction, completed)
-    if not undo then return nil, stack_err end
-    return commit_stacks(operation.undo_path, operation.redo_path,
-      operation.transaction_path, undo, redo)
-  end, debug.traceback)
-  if not called then
-    result, result_err = nil, result
-  end
-  local released, release_err = release_paste_lock(operation)
-  if result and not released then return nil, release_err end
-  if not result then return nil, result_err end
-  return true
-end
+local paste_helpers = require('direct.history.paste')({
+  M = M,
+  log_mod = log_mod,
+  TRANSACTION_FORMAT = TRANSACTION_FORMAT,
+  TRANSACTION_VERSION = TRANSACTION_VERSION,
+  preflight_locked = preflight_locked,
+  action_paths = action_paths,
+  copy_lines = copy_lines,
+  notify_unavailable = notify_unavailable,
+  recovery = recovery,
+  clear_transaction = clear_transaction,
+  commit_stacks = commit_stacks,
+})
+local write_paste_journal = paste_helpers.write_paste_journal
 
 -- log(action) appends one action and clears redo through a recoverable paired
 -- stack transaction.
@@ -1072,459 +1095,65 @@ function M.log(action)
   end)
 end
 
-function M.undo()
-  return M._reverse('undo')
-end
-
-function M.redo()
-  return M._reverse('redo')
-end
-
--- Keep the source record durable while the filesystem action runs. The paired
--- stack commit happens only after success, so a failed action (or a crash before
--- it starts) cannot lose its undo record.
-local function reverse_locked(which)
-  if M.pending.refuse(which) then return nil, 'another direct operation is pending' end
-  local state, preflight_err = M.preflight()
-  if not state then
-    return nil, preflight_err
+-- Replace the most recently logged independent actions with one durable batch
+-- record. Sync holds the process lock across execution and calls this only after
+-- every member has already committed its ordinary journaled history entry.
+function M.combine_recent(actions, stack_name)
+  if type(actions) ~= 'table' or #actions < 2 then
+    return nil, 'history.combine_recent: at least two actions are required'
   end
-  local src_path, dst_path, src_lines, dst_lines
-  if which == 'undo' then
-    src_path, dst_path = state.undo_path, state.redo_path
-    src_lines, dst_lines = state.undo_lines, state.redo_lines
-  elseif which == 'redo' then
-    src_path, dst_path = state.redo_path, state.undo_path
-    src_lines, dst_lines = state.redo_lines, state.undo_lines
-  else
-    return nil, 'history._reverse: expected undo or redo'
+  stack_name = stack_name or 'undo'
+  if stack_name ~= 'undo' and stack_name ~= 'redo' then
+    return nil, "history.combine_recent: stack must be 'undo' or 'redo'"
   end
-  if #src_lines <= 1 then
-    M.ui.notify(which == 'undo' and 'Nothing to undo' or 'Nothing to redo',
-      vim.log.levels.INFO)
-    return nil
-  end
+  local batch = M.action.Batch(actions)
+  local batch_record, serialize_err = M.action.serialize(batch)
+  if not batch_record then return nil, serialize_err end
 
-  local record = src_lines[#src_lines]
-  local reversal, reverse_err = M.action.reverse(record)
-  if not reversal then
-    M.ui.notify('Failed to ' .. which .. ' action - ' .. tostring(reverse_err),
-      vim.log.levels.ERROR)
-    return nil, reverse_err
-  end
-
-  local files, paths = {}, {}
-  rename_files(reversal, files, paths)
-  if #files > 0 and #file_operations.clients('workspace/willRenameFiles', paths) > 0 then
-    -- Preserve the synchronous no-client path, but route a real LSP rename
-    -- through the same guarded async preflight used by Direct's public commands.
-    return M._reverse_async(which, nil)
-  end
-
-  local inverse, serialize_err = M.action.serialize(reversal)
-  if not inverse then
-    M.ui.notify('Failed to ' .. which .. ' action - cannot serialize reversal: '
-      .. tostring(serialize_err), vim.log.levels.ERROR)
-    return nil, serialize_err
-  end
-
-  local reverse_transaction, transaction_err = write_reverse_intent(
-    state, which, reversal, inverse)
-  if reverse_transaction == false then
-    M.ui.notify('Failed to ' .. which .. ' action - cannot write recovery journal: '
-      .. tostring(transaction_err), vim.log.levels.ERROR)
-    return nil, transaction_err
-  end
-
-  if reverse_transaction and reverse_transaction.kind == 'unpaste' then
-    attach_unpaste_journal(reversal, reverse_transaction, state.transaction_path)
-  end
-
-  local ran, result, execute_err
-  if reverse_transaction and reverse_transaction.steps then
-    ran = true
-    result, execute_err = recovery.complete_move_steps(reverse_transaction,
-      state.transaction_path)
-  else
-    ran, result, execute_err = pcall(M.action.execute, reversal)
-  end
-  if not ran or result == nil then
-    if reversal.name == 'g' and #(reversal._completed_actions or {}) > 0
-      or reversal.name == 'up' and #(reversal._completed_renames or {}) > 0 then
-      file_operations.emit_actions({ reversal })
-    end
-    local settled, recovery_err = settle_failed_reverse(state, reverse_transaction)
-    local why = not ran and tostring(result)
-      or (execute_err ~= nil and tostring(execute_err) or 'action failed')
-    if not settled then why = why .. '; ' .. tostring(recovery_err) end
-    M.ui.notify('Failed to ' .. which .. ' action - '
-      .. M.action.summarize({ reversal }) .. ' (' .. why .. ')',
-      vim.log.levels.ERROR)
-    return nil, why
-  end
-
-  file_operations.emit_actions({ reversal })
-
-  local next_src, next_dst = copy_lines(src_lines), copy_lines(dst_lines)
-  table.remove(next_src)
-  next_dst[#next_dst + 1] = inverse
-  local next_undo, next_redo = which == 'undo' and next_src or next_dst,
-    which == 'undo' and next_dst or next_src
-  local appended, append_err = commit_stacks(state.undo_path, state.redo_path,
-    state.transaction_path, next_undo, next_redo)
-  if not appended then
-    M.ui.notify('Failed to ' .. which .. ' action - cannot write history: '
-      .. tostring(append_err), vim.log.levels.ERROR)
-  end
-  M.ui.notify(M.action.summarize({ reversal }), vim.log.levels.INFO)
-  return reversal
-end
-
-function M._reverse(which)
   return M.with_lock(function()
-    return reverse_locked(which)
+    local state, preflight_err = preflight_locked()
+    if not state then return nil, preflight_err end
+    local source = stack_name == 'undo' and state.undo_lines or state.redo_lines
+    local next_source = copy_lines(source)
+    local first = #next_source - #actions + 1
+    if first <= 1 then
+      return nil, 'the recent history entries changed before they could be grouped'
+    end
+    local records = {}
+    for index, action in ipairs(actions) do
+      local record, err = M.action.serialize(action)
+      if not record then return nil, err end
+      records[index] = record
+      if next_source[first + index - 1] ~= record then
+        return nil, 'the recent history entries changed before they could be grouped'
+      end
+    end
+    for _ = 1, #records do table.remove(next_source) end
+    next_source[#next_source + 1] = batch_record
+    local next_undo = stack_name == 'undo' and next_source or copy_lines(state.undo_lines)
+    local next_redo = stack_name == 'redo' and next_source or copy_lines(state.redo_lines)
+    local committed, commit_err = commit_stacks(state.undo_path, state.redo_path,
+      state.transaction_path, next_undo, next_redo)
+    if not committed then return nil, commit_err end
+    return true
   end)
 end
 
-local function finish_callback(callback, result, err)
-  if type(callback) ~= 'function' then return end
-  local ok, callback_err = pcall(callback, result, err)
-  if not ok then
-    M.ui.notify('direct: history completion callback failed: '
-      .. tostring(callback_err), vim.log.levels.ERROR)
-  end
-end
-
-function M.undo_async(callback, options)
-  return M._reverse_async('undo', callback, options)
-end
-
-function M.redo_async(callback, options)
-  return M._reverse_async('redo', callback, options)
-end
-
-function M._reverse_async(which, callback, options)
-  options = options or {}
-  local token = options.pending_token
-  if token and not M.pending.is_active(token) then
-    finish_callback(callback, nil, 'pending history operation was canceled')
-    return nil, 'pending history operation was canceled'
-  end
-  if not token and M.pending.refuse(which) then
-    return nil, 'another direct operation is pending'
-  end
-  local state, preflight_err = M.preflight()
-  if not state then
-    if token then M.pending.finish(token) end
-    finish_callback(callback, nil, preflight_err)
-    return nil, preflight_err
-  end
-  local src_path, dst_path, src_lines, dst_lines
-  if which == 'undo' then
-    src_path, dst_path = state.undo_path, state.redo_path
-    src_lines, dst_lines = state.undo_lines, state.redo_lines
-  elseif which == 'redo' then
-    src_path, dst_path = state.redo_path, state.undo_path
-    src_lines, dst_lines = state.redo_lines, state.undo_lines
-  else
-    if token then M.pending.finish(token) end
-    return nil, 'history._reverse_async: expected undo or redo'
-  end
-  if #src_lines <= 1 then
-    M.ui.notify(which == 'undo' and 'Nothing to undo' or 'Nothing to redo',
-      vim.log.levels.INFO)
-    if token then M.pending.finish(token) end
-    finish_callback(callback, nil, nil)
-    return nil
-  end
-
-  local record = src_lines[#src_lines]
-  local reversal, reverse_err = M.action.reverse(record)
-  if not reversal then
-    M.ui.notify('Failed to ' .. which .. ' action - ' .. tostring(reverse_err),
-      vim.log.levels.ERROR)
-    if token then M.pending.finish(token) end
-    finish_callback(callback, nil, reverse_err)
-    return nil, reverse_err
-  end
-
-  if options.expected_record and record ~= options.expected_record then
-    local why = 'history changed while waiting for LSP willRenameFiles'
-    M.ui.notify('Failed to ' .. which .. ' action - ' .. why, vim.log.levels.WARN)
-    if token then M.pending.finish(token) end
-    finish_callback(callback, nil, why)
-    return nil, why
-  end
-
-  local files, paths = {}, {}
-  rename_files(reversal, files, paths)
-  if not token and not options.skip_will and #files > 0
-    and #file_operations.clients('workspace/willRenameFiles', paths) > 0 then
-    local began, begin_token = M.pending.begin('willRenameFiles')
-    if not began then
-      M.ui.notify('direct: cannot ' .. which .. ': another operation is pending',
-        vim.log.levels.WARN)
-      finish_callback(callback, nil, 'another direct operation is pending')
-      return nil, 'another direct operation is pending'
-    end
-    token = begin_token
-    file_operations.will_rename(files, function(ok, suppressed_or_err)
-      if not ok then
-        M.ui.notify('Failed to ' .. which .. ' after LSP WorkspaceEdit failure '
-          .. '(earlier server edits may already have applied): '
-          .. tostring(suppressed_or_err), vim.log.levels.ERROR)
-        M.pending.finish(token)
-        finish_callback(callback, nil, suppressed_or_err)
-        return
-      end
-      M._reverse_async(which, callback, {
-        pending_token = token,
-        skip_will = true,
-        expected_record = record,
-        suppressed = suppressed_or_err,
-      })
-    end, nil, function() return M.pending.is_active(token) end)
-    return true
-  end
-
-  if not token then
-    local began, begin_token = M.pending.begin(which)
-    if not began then
-      M.ui.notify('direct: cannot ' .. which .. ': another operation is pending',
-        vim.log.levels.WARN)
-      finish_callback(callback, nil, 'another direct operation is pending')
-      return nil, 'another direct operation is pending'
-    end
-    token = begin_token
-  end
-
-  if not M.pending.is_active(token) then
-    M.pending.finish(token)
-    finish_callback(callback, nil, 'pending history operation was canceled')
-    return nil, 'pending history operation was canceled'
-  end
-
-  -- Keep the process lock from the last history re-read through the async action
-  -- callback and the paired stack update. A process crash releases flock, while
-  -- the in-memory pending token still blocks overlapping operations in this one.
-  local locked, lock_err = M.lock.acquire()
-  if not locked then
-    M.pending.finish(token)
-    M.ui.notify('direct: cannot ' .. which .. ': ' .. tostring(lock_err),
-      vim.log.levels.ERROR)
-    finish_callback(callback, nil, lock_err)
-    return nil, lock_err
-  end
-  local lock_released = false
-  local function release_lock()
-    if lock_released then return true end
-    lock_released = true
-    local released, release_err = M.lock.release()
-    if not released then
-      M.ui.notify('direct: could not release history lock: '
-        .. tostring(release_err), vim.log.levels.ERROR)
-    end
-    return released, release_err
-  end
-
-  local latest, latest_err = preflight_locked()
-  if not latest then
-    release_lock()
-    M.pending.finish(token)
-    finish_callback(callback, nil, latest_err)
-    return nil, latest_err
-  end
-  local latest_src = which == 'undo' and latest.undo_lines or latest.redo_lines
-  if latest_src[#latest_src] ~= record then
-    local why = 'history changed while waiting for another process'
-    release_lock()
-    M.pending.finish(token)
-    M.ui.notify('Failed to ' .. which .. ' action - ' .. why, vim.log.levels.WARN)
-    finish_callback(callback, nil, why)
-    return nil, why
-  end
-  state = latest
-  if which == 'undo' then
-    src_path, dst_path = state.undo_path, state.redo_path
-    src_lines, dst_lines = state.undo_lines, state.redo_lines
-  else
-    src_path, dst_path = state.redo_path, state.undo_path
-    src_lines, dst_lines = state.redo_lines, state.undo_lines
-  end
-
-  local inverse, reverse_transaction, paste_operation
-  if recoverable_rename_kinds[reversal.name] then
-    local inverse_err
-    inverse, inverse_err = M.action.serialize(reversal)
-    if not inverse then
-      release_lock()
-      M.pending.finish(token)
-      M.ui.notify('Failed to ' .. which .. ' action - cannot serialize reversal: '
-        .. tostring(inverse_err), vim.log.levels.ERROR)
-      finish_callback(callback, nil, inverse_err)
-      return nil, inverse_err
-    end
-    local journal_result, journal_err = write_reverse_intent(
-      state, which, reversal, inverse)
-    if journal_result == false then
-      release_lock()
-      M.pending.finish(token)
-      M.ui.notify('Failed to ' .. which .. ' action - cannot write recovery journal: '
-        .. tostring(journal_err), vim.log.levels.ERROR)
-      finish_callback(callback, nil, journal_err)
-      return nil, journal_err
-    end
-    reverse_transaction = journal_result
-    if reverse_transaction and reverse_transaction.kind == 'unpaste' then
-      attach_unpaste_journal(reversal, reverse_transaction, state.transaction_path)
-    end
-  elseif reversal.name == 'p' then
-    local operation, journal_or_err = start_paste_reverse(
-      state, which, reversal, record)
-    if operation == false then
-      release_lock()
-      M.pending.finish(token)
-      M.ui.notify('Failed to ' .. which .. ' action - cannot write recovery journal: '
-        .. tostring(journal_or_err), vim.log.levels.ERROR)
-      finish_callback(callback, nil, journal_or_err)
-      return nil, journal_or_err
-    end
-    if operation then
-      paste_operation = operation
-      inverse = nil
-      reversal._before_copy = function(pair, source, destination)
-        return M.note_paste_pending(paste_operation, pair, source, destination)
-      end
-      reversal._after_copy = function(pair)
-        return M.note_paste_complete(paste_operation, pair)
-      end
-      reversal._on_copy_conflict = function(pair)
-        return M.cancel_paste_pending(paste_operation, pair)
-      end
-    end
-  end
-
-  local settled = false
-  local function complete_inner(ok, result, execution_err)
-    if paste_operation then
-      local completed, settle_err = recovery.settle_paste_pending(paste_operation.transaction)
-      if not completed then
-        local why = tostring(settle_err)
-          .. '; recovery journal preserved at ' .. paste_operation.transaction_path
-        M.ui.notify('direct: ' .. why, vim.log.levels.ERROR)
-        release_lock()
-        M.pending.finish(token)
-        finish_callback(callback, nil, why)
-        return
-      end
-      paste_operation.transaction.completed = completed
-      paste_operation.transaction.pending = vim.NIL
-      reversal.renames = completed
-      local persisted, persist_err = write_paste_journal(paste_operation)
-      if not persisted then
-        local why = 'could not update paste recovery journal: ' .. tostring(persist_err)
-        M.ui.notify('direct: ' .. why, vim.log.levels.ERROR)
-        release_lock()
-        M.pending.finish(token)
-        finish_callback(callback, nil, why)
-        return
-      end
-    end
-    local copied = reversal.name == 'p' and #(reversal.renames or {}) > 0
-    local all_skipped = reversal.name == 'p' and #(reversal.renames or {}) == 0
-      and result == nil
-    if (not ok and not copied) or all_skipped then
-      if reversal.name == 'g' and #(reversal._completed_actions or {}) > 0
-        or reversal.name == 'up' and #(reversal._completed_renames or {}) > 0 then
-        file_operations.emit_actions({ reversal }, nil, options.suppressed)
-      end
-      local why = execution_err ~= nil and tostring(execution_err)
-        or 'action failed or all paste entries were skipped'
-      if paste_operation then
-        local cleared, clear_err = clear_transaction(state.transaction_path)
-        if not cleared then why = why .. '; ' .. tostring(clear_err) end
-      else
-        local recovered, recovery_err = settle_failed_reverse(state, reverse_transaction)
-        if not recovered then why = why .. '; ' .. tostring(recovery_err) end
-      end
-      if not all_skipped then
-        M.ui.notify('Failed to ' .. which .. ' action - '
-          .. M.action.summarize({ reversal }) .. ' (' .. why .. ')',
-          vim.log.levels.ERROR)
-      end
-      release_lock()
-      M.pending.finish(token)
-      finish_callback(callback, nil, all_skipped and nil or why)
-      return
-    end
-
-    file_operations.emit_actions({ reversal }, nil, options.suppressed)
-
-    -- Async Paste may choose a collision-safe basename in its callback, so its
-    -- final inverse record can only be serialized once execution has settled.
-    local inverse_err
-    if not inverse then inverse, inverse_err = M.action.serialize(reversal) end
-    if not inverse then
-      M.ui.notify('Failed to ' .. which .. ' action - cannot serialize reversal: '
-        .. tostring(inverse_err), vim.log.levels.ERROR)
-      release_lock()
-      M.pending.finish(token)
-      finish_callback(callback, nil, inverse_err)
-      return
-    end
-    local next_src, next_dst = copy_lines(src_lines), copy_lines(dst_lines)
-    table.remove(next_src)
-    next_dst[#next_dst + 1] = inverse
-    local next_undo, next_redo = which == 'undo' and next_src or next_dst,
-      which == 'undo' and next_dst or next_src
-    local appended, append_err = commit_stacks(state.undo_path, state.redo_path,
-      state.transaction_path, next_undo, next_redo)
-    if not appended then
-      M.ui.notify('Failed to ' .. which .. ' action - cannot write history: '
-        .. tostring(append_err), vim.log.levels.ERROR)
-    end
-    if not ok then
-      M.ui.notify('Partially completed ' .. which .. ' action: '
-        .. tostring(execution_err), vim.log.levels.ERROR)
-    end
-    M.ui.notify(M.action.summarize({ reversal }), vim.log.levels.INFO)
-    release_lock()
-    M.pending.finish(token)
-    finish_callback(callback, reversal, appended and nil or append_err)
-  end
-  local function complete(ok, result, execution_err)
-    if settled then return end
-    settled = true
-    local finished, completion_err = xpcall(function()
-      complete_inner(ok, result, execution_err)
-    end, debug.traceback)
-    if not finished then
-      release_lock()
-      M.pending.finish(token)
-      M.ui.notify('Failed to complete async ' .. which .. ' history action: '
-        .. tostring(completion_err), vim.log.levels.ERROR)
-      finish_callback(callback, nil, completion_err)
-    end
-  end
-
-  if reverse_transaction and reverse_transaction.steps then
-    local called, result, step_err = pcall(recovery.complete_move_steps,
-      reverse_transaction, state.transaction_path)
-    if not called then
-      complete(false, nil, result)
-    else
-      complete(result ~= nil, result, step_err)
-    end
-  else
-    local called, start_result, start_err = pcall(
-      M.action.execute_async, reversal, complete)
-    if not called then
-      complete(false, nil, start_result)
-    elseif start_result == nil then
-      complete(false, nil, start_err or 'could not start action')
-    end
-  end
-  return true
-end
+require('direct.history.reverse')({
+  M = M,
+  file_operations = file_operations,
+  rename_files = rename_files,
+  preflight_locked = preflight_locked,
+  copy_lines = copy_lines,
+  commit_stacks = commit_stacks,
+  clear_transaction = clear_transaction,
+  recovery = recovery,
+  write_reverse_intent = write_reverse_intent,
+  start_paste_reverse = start_paste_reverse,
+  settle_failed_reverse = settle_failed_reverse,
+  attach_unpaste_journal = attach_unpaste_journal,
+  recoverable_rename_kinds = recoverable_rename_kinds,
+  write_paste_journal = write_paste_journal,
+})
 
 return M

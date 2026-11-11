@@ -10,11 +10,13 @@ return function(deps)
   local is_dir_line = deps.is_dir_line
   local strip_directory_marker = deps.strip_directory_marker
   local component_reason = deps.component_reason
+  local nested_path_reason = deps.nested_path_reason
   local same_lines = deps.same_lines
   local entry_path = deps.entry_path
   local ignore_set = deps.ignore_set
   local read_with_snapshot = deps.read_with_snapshot
   local filter_git_status_lines = deps.filter_git_status_lines
+  local filter_git_diff_lines = deps.filter_git_diff_lines
   local action_mod = deps.action_mod
   local indent_size = deps.indent_size
 
@@ -360,7 +362,12 @@ return function(deps)
       local id = marks_by_row[row - 1]
       local rec = id and state.rows[id] or nil
 
-      local reason = component_reason(name)
+      local reason
+      if depth == 0 and rec and rec.collapsed_components and nested_path_reason then
+        reason = nested_path_reason(name)
+      else
+        reason = component_reason(name)
+      end
       if reason then return nil, reason end
       local parent_key = parent and parent.key or nil
       local node = {
@@ -391,16 +398,21 @@ return function(deps)
     -- boundary. A root moved into a child remains in its original virtual slot;
     -- a child moved to the root is handled by the tree Move action, not ADD.
     roots = {}
-    local root_ids = {}
+    local root_rows, root_ids = {}, {}
     for _, id in ipairs(state.root_ids or {}) do
       root_ids[id] = true
       local rec, now = state.rows[id], nodes_by_id[id]
       if not rec.deleted_kind and now then
-        roots[#roots + 1] = now.depth == 0 and now.name or rec.name
+        local line = now.depth == 0 and now.name or rec.name
+        roots[#roots + 1] = line
+        root_rows[#root_rows + 1] = { id = id, line = line }
       end
     end
     for _, node in ipairs(nodes) do
-      if node.depth == 0 and not node.id then roots[#roots + 1] = node.name end
+      if node.depth == 0 and not node.id then
+        roots[#roots + 1] = node.name
+        root_rows[#root_rows + 1] = { line = node.name }
+      end
     end
     for _, siblings in pairs(children_by_parent) do
       local seen_names = {}
@@ -577,6 +589,9 @@ return function(deps)
           end
           if disk and state.view_git_status_only and filter_git_status_lines then
             disk = filter_git_status_lines(parent.path, disk, state.git_status)
+          end
+          if disk and state.view_git_diff_only and filter_git_diff_lines then
+            disk = filter_git_diff_lines(parent.path, disk, state.git_diff_snapshot)
           end
           if not disk or not same_lines(disk, expansion.listing_lines or {}) then
             return nil, 'expanded directory changed on disk since it was read'
@@ -756,6 +771,7 @@ return function(deps)
     table.sort(expanded_targets, function(a, b) return a.depth < b.depth end)
     return {
       root_lines = roots,
+      root_rows = root_rows,
       actions = actions,
       yanks = yanks,
       changed_parents = changed_parents,

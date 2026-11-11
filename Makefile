@@ -2,8 +2,12 @@ NVIM ?= nvim
 COVERAGE_PLATFORM ?= local
 DEMO_FONT ?= JetBrainsMono Nerd Font
 DEMO_GIF ?= demo/tour.gif
+LUACHECK ?= luacheck
+LUACHECK_MAX_WARNINGS ?= 48
+LUALS ?= lua-language-server
+LUALS_LOGPATH ?= $(CURDIR)/.cache/luals
 
-.PHONY: ci test coverage coverage-deps coverage-summary live-startup demo demo-record demo-gif demo-check check-nvim
+.PHONY: ci test lint coverage coverage-deps coverage-summary live-startup demo demo-record demo-gif demo-check check-nvim
 
 ci:
 	$(MAKE) coverage
@@ -12,6 +16,19 @@ ci:
 
 test: check-nvim
 	$(NVIM) --headless -l tests/run.lua
+
+lint:
+	@mkdir -p .cache
+	@set +e; $(LUACHECK) --no-color lua/direct > .cache/luacheck.log 2>&1; result=$$?; set -e; \
+	  cat .cache/luacheck.log; \
+	  warnings=$$(sed -n 's/^Total: \([0-9][0-9]*\) warnings.*/\1/p' .cache/luacheck.log); \
+	  if [ "$$result" -gt 1 ] || [ -z "$$warnings" ] || [ "$$warnings" -gt '$(LUACHECK_MAX_WARNINGS)' ]; then \
+	    echo "luacheck failed (exit $$result, warnings=$${warnings:-unknown}, maximum=$(LUACHECK_MAX_WARNINGS))" >&2; exit 1; \
+	  fi
+	stylua --check lua/direct/init.lua lua/direct/config.lua
+	@mkdir -p '$(LUALS_LOGPATH)'
+	$(LUALS) --check=lua/direct/init.lua --configpath='$(CURDIR)/.luarc.json' --checklevel=Warning --logpath='$(LUALS_LOGPATH)'
+	$(LUALS) --check=lua/direct/config.lua --configpath='$(CURDIR)/.luarc.json' --checklevel=Warning --logpath='$(LUALS_LOGPATH)'
 
 coverage-deps:
 	bash tests/install_coverage_deps.sh
@@ -46,5 +63,5 @@ demo-check: check-nvim
 	NVIM='$(NVIM)' ./demo/demo.sh --check
 
 check-nvim:
-	@command -v $(NVIM) >/dev/null 2>&1 || { echo 'Neovim >= 0.12 is required (set NVIM=/path/to/nvim if needed)' >&2; exit 1; }
+	@command -v $(NVIM) >/dev/null 2>&1 || { echo 'Neovim >= 0.11.7 is required (set NVIM=/path/to/nvim if needed)' >&2; exit 1; }
 	@$(NVIM) --headless -u NONE -l tests/check_nvim.lua

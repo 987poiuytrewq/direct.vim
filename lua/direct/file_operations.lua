@@ -256,7 +256,7 @@ local function resource_paths(edit)
   return seen
 end
 
--- Neovim 0.12's apply_workspace_edit intentionally has no success return value.
+-- Neovim's apply_workspace_edit intentionally has no success return value.
 -- Its rename helper can skip work and CreateFile silently ignores io.open('w')
 -- failures. Model expected resource state before applying and verify it after,
 -- rather than treating pcall(true, nil) as success. For an existing non-empty
@@ -404,6 +404,65 @@ local function stale_document_edit(edit)
   end
 end
 
+-- Neovim's apply_text_edits prompts through vim.fn.confirm but returns no
+-- indication that the user declined. Confirm annotated text-edit groups before
+-- calling apply_workspace_edit, then clear those flags on a copy so Neovim does
+-- not prompt a second time. This uses the public LSP changeAnnotations fields
+-- and leaves the process-wide vim.fn.confirm untouched.
+local function confirm_workspace_edit(edit)
+  local groups = {}
+  if edit.documentChanges then
+    for _, change in ipairs(edit.documentChanges) do
+      if type(change) == 'table' and not change.kind then
+        groups[#groups + 1] = change.edits or {}
+      end
+    end
+  else
+    for _, edits in pairs(edit.changes or {}) do
+      groups[#groups + 1] = edits
+    end
+  end
+
+  local annotations = edit.changeAnnotations or {}
+  local approved = {}
+  for _, edits in ipairs(groups) do
+    local confirmations = {}
+    for _, text_edit in ipairs(edits) do
+      local id = text_edit.annotationId
+      if id ~= nil then
+        local annotation = annotations[id]
+        if type(annotation) ~= 'table' then
+          return nil, 'annotated WorkspaceEdit is missing change annotation: ' .. tostring(id)
+        end
+        if annotation.needsConfirmation then
+          confirmations[id] = (confirmations[id] or 0) + 1
+        end
+      end
+    end
+
+    if next(confirmations) then
+      local message = { 'Apply all changes?' }
+      for id, count in pairs(confirmations) do
+        local annotation = annotations[id]
+        message[#message + 1] = annotation.label
+          .. (annotation.description and (': ' .. annotation.description) or '')
+          .. (count > 1 and string.format(' (%d)', count) or '')
+      end
+      if vim.fn.confirm(table.concat(message, '\n'), '&Yes\n&No', 1, 'Question') ~= 1 then
+        return false, 'WorkspaceEdit changes were not confirmed'
+      end
+      for id in pairs(confirmations) do approved[id] = true end
+    end
+  end
+
+  if next(approved) == nil then return edit end
+  local confirmed_edit = vim.deepcopy(edit)
+  for id in pairs(approved) do
+    confirmed_edit.changeAnnotations[id].needsConfirmation = false
+  end
+  return confirmed_edit
+end
+
 function M.will_rename(files, callback, warn, is_active)
   local paths = {}
   for _, file in ipairs(files or {}) do
@@ -488,30 +547,20 @@ function M.will_rename(files, callback, warn, is_active)
           if not verify then return false, tostring(preflight_err) end
           local stale_err = stale_document_edit(response.edit)
           if stale_err then return false, tostring(stale_err) end
-          -- Neovim's apply_workspace_edit returns nil even when an annotated edit
-          -- is declined. Observe the confirmation result while preserving the
-          -- native prompt and its behavior.
-          local confirm, declined = vim.fn.confirm, false
-          local cancelled = false
+          local edit, confirm_err = confirm_workspace_edit(response.edit)
+          if edit == false then return false, confirm_err end
+          if edit == nil then return false, confirm_err end
           local applied, result = pcall(function()
-            vim.fn.confirm = function(...)
-              local confirmed = confirm(...)
-              if confirmed ~= 1 then declined = true end
-              return confirmed
-            end
             if not active() then
-              cancelled = true
               cancel()
               return nil
             end
-            return vim.lsp.util.apply_workspace_edit(response.edit,
+            return vim.lsp.util.apply_workspace_edit(edit,
               response.client.offset_encoding or 'utf-16')
           end)
-          vim.fn.confirm = confirm
-          if cancelled then return nil end
+          if settled then return nil end
           if not applied then return false, tostring(result) end
           if result == false then return false, 'workspace edit application failed' end
-          if declined then return false, 'WorkspaceEdit changes were not confirmed' end
           local verified, verify_err = verify()
           if not verified then return false, tostring(verify_err) end
           for path in pairs(resource_paths(response.edit)) do suppressed[path] = true end

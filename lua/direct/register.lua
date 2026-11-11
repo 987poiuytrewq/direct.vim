@@ -11,6 +11,7 @@ M.log = require('direct.log')
 M.ui = require('direct.ui')
 M.pending = require('direct.pending')
 local file_operations = require('direct.file_operations')
+local events = require('direct.events')
 
 -- content -> the absolute register path recorded in register/content (the
 -- yanked entry directory), or nil when no yank has happened, or nil, err when
@@ -300,7 +301,16 @@ function M.paste(dst, name, callback)
       if not called then
         M.ui.report_error('refresh after pasting', callback_err)
       end
+      execution_err = execution_err or (not called and callback_err or nil)
     end
+    events.emit('DirectPastePost', {
+      root = dst,
+      actions = changed and { paste_action } or {},
+      success = ok and final_ok,
+      changed = changed,
+      error = execution_err or final_err,
+      entry = pasted_entry,
+    })
   end
   local called, start_result, start_err = pcall(
     M.action.execute_async, paste_action, finish)
