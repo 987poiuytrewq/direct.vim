@@ -655,7 +655,8 @@ buffers                 table (defaults: `{ reuse = true, open_in = 'current' }`
     window while keeping the source buffer, including unsaved listing edits,
     available. It does not create a split. Directory navigation reuses a
     matching listing when `reuse = true`; with `reuse = false`, it creates a new
-    listing and removes the clean listing being left. Modified listings are kept.
+    listing and removes the clean listing being left. Modified listings, and
+    clean listings still displayed in another window, are kept.
     Explicit `open({ split = ... })` options continue to take precedence and
     preserve the source buffer.
 

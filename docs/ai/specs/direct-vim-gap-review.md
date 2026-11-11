@@ -1,6 +1,6 @@
 # Spec: direct.vim improvements, second review
 
-**Status:** A1–A6 and A16–A18 are complete; A7–A15 and A19–A20 remain proposed.
+**Status:** A1–A6, A16–A18 and A20 are complete; A7–A15 and A19 remain proposed.
 This replaces the first gap review, whose tasks (S1–S6, R1–R3, F1–F6, M1–M6)
 have all landed on `master`.
 
@@ -10,12 +10,12 @@ been reproduced in a running Neovim. Each task's first step is to write a
 failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
-**Last checked:** `origin/master` at `f6a41cc` (11 November 2026). That check
-read #104 (forced trash operations and history), #105 (the rest of A5) and
+**Last checked:** `origin/master` at `ed554ce` (11 November 2026). That check
+read #104 (forced trash operations and history), #105 (the rest of A5), and
 #106 (independent listings). It confirmed A5, A6 and A17 in the code and added
-two tasks: A19 (dropping a history step can strand the step below it) and A20
-(removing a listing closes other windows showing it). A18 is complete in this
-follow-up; A7–A15 and A19–A20 remain.
+A19 (dropping a history step can strand the step below it) and A20 (removing a
+listing closes other windows showing it). A18 is complete in #107; A20 is
+addressed here. A7–A15 and A19 remain.
 
 ## Conventions
 
@@ -75,7 +75,7 @@ Checked by reading the code at `d72b7ea`:
 | A17 | P3 | Complete | Make listings opened with `buffers.reuse = false` readable and tidy |
 | A18 | P3 | Complete | Make `:DirectGitStatus` and `:DirectGitDiff` use the current listing |
 | A19 | P3 | Proposed | Don't strand earlier history steps when a step is dropped |
-| A20 | P3 | Proposed | Don't close other windows when a listing is removed |
+| A20 | P3 | Complete | Don't close other windows when a listing is removed |
 
 ## Safety
 
@@ -509,6 +509,11 @@ message mentions `:DirectHistory drop`.
 
 ### A20 — Removing a listing closes other windows that show it (P3)
 
+**Status: COMPLETE.** Clean Direct buffers are now deleted after navigation
+only when no window displays them. Modified buffers remain preserved as before.
+Tests cover file opens and `buffers.reuse = false` directory navigation from
+one split while another still displays the source listing.
+
 **Problem.** `discard_left_clean_listing` (`lua/direct/buffer/list.lua`) and
 `Buffer:open` (`lua/direct/buffer/open.lua`, when opening a file with
 `open_in = 'current'`) remove the listing being left with
@@ -596,12 +601,9 @@ tests into identity-based ones).
 
 ## Suggested order
 
-A1–A4 and A16 were released in `v0.2.0`; A5, A6 and A17 are complete but not
-released yet.
+A1–A4 and A16 were released in `v0.2.0`; A5–A6 and A17–A18 are complete.
 
-1. A20 and A19, since they follow on directly from A17 and A6.
-2. A18.
-3. A release (`v0.2.1` or `v0.3.0`) with A5, A6, A17 and whatever of the above
-   is done.
-4. Everything else, in any order. A13's formatting-only commit is easiest
+1. A19, which follows on from the history stack work in A6.
+2. A release (`v0.2.1` or `v0.3.0`) with A5, A6, A17, A18 and A20.
+3. Everything else, in any order. A13's formatting-only commit is easiest
    when nothing else is changing `lua/`.

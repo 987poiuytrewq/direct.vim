@@ -91,7 +91,8 @@ function Buffer:open(line, options)
     vim.cmd((open_in == 'new' and not options.split and 'hide edit ' or 'edit ')
       .. vim.fn.fnameescape(path))
     if not options.split and open_in == 'current' and vim.api.nvim_buf_is_valid(direct_buf)
-      and vim.api.nvim_get_current_buf() ~= direct_buf then
+      and vim.api.nvim_get_current_buf() ~= direct_buf
+      and #vim.fn.win_findbuf(direct_buf) == 0 then
       pcall(vim.api.nvim_buf_delete, direct_buf, { force = true })
     end
   end
