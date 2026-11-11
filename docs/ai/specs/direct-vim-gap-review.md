@@ -1,6 +1,6 @@
 # Spec: direct.vim improvements, second review
 
-**Status:** A1–A6, A16, and A17 are complete; A7–A15 and A18 remain proposed.
+**Status:** A1–A6, A16 and A17 are complete; A7–A15 and A18–A20 are proposed.
 This replaces the first gap review, whose tasks (S1–S6, R1–R3, F1–F6, M1–M6)
 have all landed on `master`.
 
@@ -10,9 +10,12 @@ been reproduced in a running Neovim. Each task's first step is to write a
 failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
-**Last checked:** `origin/master` at `c7c77be` (11 November 2026). The review
-identified the remaining expanded-folder and text-undo gaps in A5. Both are
-addressed here; A7–A15 and A17–A18 are unchanged.
+**Last checked:** `origin/master` at `f6a41cc` (11 November 2026). That check
+read #104 (forced trash operations and history), #105 (the rest of A5) and
+#106 (independent listings). It confirmed A5, A6 and A17 in the code and added
+two tasks: A19 (dropping a history step can strand the step below it) and A20
+(removing a listing closes other windows showing it). A7–A15 and A18 are
+unchanged.
 
 ## Conventions
 
@@ -71,6 +74,8 @@ Checked by reading the code at `d72b7ea`:
 | A16 | P2 | Complete | Let a listing made during a Git timeout be saved once Git recovers |
 | A17 | P3 | Complete | Make listings opened with `buffers.reuse = false` readable and tidy |
 | A18 | P3 | Proposed | Make `:DirectGitStatus` and `:DirectGitDiff` use the current listing |
+| A19 | P3 | Proposed | Don't strand earlier history steps when a step is dropped |
+| A20 | P3 | Proposed | Don't close other windows when a listing is removed |
 
 ## Safety
 
@@ -155,6 +160,11 @@ lock. Remaining history stays usable. `:DirectHistory drop [undo|redo]`
 explicitly removes only the chosen stack's top record. Tests cover forced
 restore and empty, confirmation cancellation, retaining lower stack entries,
 and both drop directions; `make test` passes.
+
+*Checked at `f6a41cc`:* the code matches. The forced paths in
+`lua/direct/trash.lua` plan which history records refer to the affected trash
+entries (`history.plan_trash_history`), ask with the step counts, and rewrite
+the stacks before removing anything. One consequence is tracked as A19.
 
 **Problem.** `:DirectTrash! empty` and `:DirectTrash! restore`
 (`lua/direct/trash.lua`, `empty_locked` and `M.restore` with `force`) remove
@@ -415,6 +425,11 @@ has a modified listing asks whether to switch to it or create a second listing.
 Tests cover path-readable names, five down/up cycles without buffer buildup,
 and switching to a hidden modified listing; `make test` passes.
 
+*Checked at `f6a41cc`:* the code matches (`M.Buffer` in
+`lua/direct/buffer/buffer.lua` and `discard_left_clean_listing` in
+`lua/direct/buffer/list.lua`). The way the clean listing is removed closes
+other windows that show it; that's tracked as A20.
+
 **Problem.** With `buffers = { reuse = false }`, `M.Buffer`
 (`lua/direct/buffer/buffer.lua`) names each new listing
 `direct://listing/<sha256 of the path>/<bufnr>`. Buffer lists, tab lines and
@@ -458,6 +473,51 @@ in the same buffer. Neither command has completion for its options or for
 **Tests.** `:DirectGitDiff` in a listing of `src/` filters that listing,
 the same as `gd`. Outside a listing it uses the working directory.
 Completion returns the options and a branch name.
+
+### A19 — Dropping a history step can strand the step below it (P3)
+
+**Problem.** Forced trash operations remove every history record that refers
+to the affected trash entries (`filter_trash_records` and
+`plan_trash_history` in `lua/direct/history/history.lua`), wherever those
+records sit in the stack. Records below a removed one may depend on what it
+did. For example, with an undo stack of "rename `b` to `a`", then "delete
+`a`", force-emptying the trash removes the delete. Undoing the rename then
+looks for `a`, which isn't there, so that undo fails and stays at the top of
+the stack. `:DirectHistory drop` gets past it, but only one step at a time,
+and the confirmation prompt didn't mention that earlier steps might stop
+working.
+
+**Change.**
+
+- When planning which records to remove, also find earlier records whose
+  paths overlap with a removed record's paths, and either remove them too or
+  list them in the confirmation prompt as likely to fail.
+- When an undo or redo fails because its source is missing, say in the error
+  that `:DirectHistory drop` removes that step.
+- Add completion for `:DirectHistory` (`drop`, `undo`, `redo`).
+
+**Tests.** With the stack above, force-empty the trash: either both steps
+are removed, or the prompt names the rename as affected. A failed undo's
+message mentions `:DirectHistory drop`.
+
+### A20 — Removing a listing closes other windows that show it (P3)
+
+**Problem.** `discard_left_clean_listing` (`lua/direct/buffer/list.lua`) and
+`Buffer:open` (`lua/direct/buffer/open.lua`, when opening a file with
+`open_in = 'current'`) remove the listing being left with
+`nvim_buf_delete`. That wipes the buffer, which closes every other window
+still showing it. So with the same listing in two splits, opening a file or
+going into a folder in one split closes the other split. The `buffers.reuse =
+false` clean-up from A17 makes this happen on every folder change, not just
+when opening a file.
+
+**Change.** Only remove the listing when no other window shows it (check
+`vim.fn.win_findbuf`). Otherwise leave it in place, or let it become hidden
+as usual.
+
+**Tests.** Open a listing in two splits, open a file from one: the other
+split still shows the listing. With `reuse = false`, go into a folder from
+one split: the other split keeps its listing.
 
 ## Project maturity
 
@@ -529,8 +589,12 @@ tests into identity-based ones).
 
 ## Suggested order
 
-A1–A4 and A16 were released in `v0.2.0`; A5 and A6 are complete.
+A1–A4 and A16 were released in `v0.2.0`; A5, A6 and A17 are complete but not
+released yet.
 
-1. A17 and A18, since they're small and follow on from recent changes.
-2. Everything else, in any order. A13's formatting-only commit is easiest
+1. A20 and A19, since they follow on directly from A17 and A6.
+2. A18.
+3. A release (`v0.2.1` or `v0.3.0`) with A5, A6, A17 and whatever of the above
+   is done.
+4. Everything else, in any order. A13's formatting-only commit is easiest
    when nothing else is changing `lua/`.
