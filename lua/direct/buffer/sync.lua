@@ -36,6 +36,7 @@ return function(context)
   local current_row_record = context.current_row_record
   local remove_expanded_subtree = context.remove_expanded_subtree
   local collapse_single_entry_paths = context.collapse_single_entry_paths
+  local set_git_timeout_indicator = context.set_git_timeout_indicator
 
 -- ---------------------------------------------------------------------------
 -- sync
@@ -132,6 +133,37 @@ local function sync_signature(actions, yanks)
   return signature
 end
 
+local function action_paths_in_scope(actions, scope)
+  scope = paths.canonical(scope)
+  local prefix = scope:gsub('/+$', '') .. '/'
+  local result, seen = {}, {}
+  for _, action in ipairs(actions or {}) do
+    for _, field in ipairs({ 'src', 'dst' }) do
+      local path = action[field]
+      if type(path) == 'string' then
+        local normalized = paths.canonical(path)
+        if normalized:sub(1, #prefix) == prefix and not seen[normalized] then
+          seen[normalized] = true
+          result[#result + 1] = path
+        end
+      end
+    end
+  end
+  return result
+end
+
+local function refuse_git_query(bufnr, err)
+  vim.bo[bufnr].modified = true
+  local reason
+  if git.is_timeout(err) then
+    reason = tostring(err) .. '; retry after Git recovers, or use gi to disable Git-ignore filtering'
+  else
+    reason = 'Git ignore query failed: ' .. tostring(err)
+  end
+  ui.notify('Refusing to sync: ' .. reason .. '; nothing was changed.', vim.log.levels.ERROR)
+  return nil, reason
+end
+
 -- Buffer:sync -> true when all classified actions succeeded (the buffer was
 -- re-listed and marked nomodified), nil, reason when preflight refused the
 -- sync or any action failed. Failed action batches are still re-listed so the
@@ -154,22 +186,34 @@ local function sync_locked(self, options)
     return nil, reason
   end
   local checked_git = {}
+  local timed_out_snapshots = {}
   for _, directory_snapshot in ipairs(state.directory_snapshots or {}) do
     if directory_snapshot.respect_gitignore then
       local matches, git_err
       if directory_snapshot.git_timeout then
-        git_err = directory_snapshot.git_timeout_error
+        local retry_snapshot
+        retry_snapshot, git_err = git.ignore_snapshot(directory_snapshot.path)
+        if git_err then return refuse_git_query(bufnr, git_err) end
+        timed_out_snapshots[#timed_out_snapshots + 1] = {
+          snapshot = directory_snapshot,
+          git = retry_snapshot,
+        }
+      elseif directory_snapshot.git_unfiltered then
+        local retry_snapshot = directory_snapshot.git_retry_snapshot
+        matches, git_err = git.ignore_snapshot_matches(
+          retry_snapshot, directory_snapshot.path, checked_git)
+        if matches ~= true then return refuse_git_query(bufnr, git_err) end
+        timed_out_snapshots[#timed_out_snapshots + 1] = {
+          snapshot = directory_snapshot,
+          git = retry_snapshot,
+        }
       else
         matches, git_err = git.ignore_snapshot_matches(
           directory_snapshot.git, directory_snapshot.path, checked_git)
       end
-      if matches ~= true then
-        vim.bo[bufnr].modified = true
-        local reason = matches == false and git_err
-          or ('Git ignore query failed: ' .. tostring(git_err))
-        ui.notify('Refusing to sync: ' .. tostring(reason) .. '; nothing was changed.',
-          vim.log.levels.ERROR)
-        return nil, reason
+      if not directory_snapshot.git_timeout and not directory_snapshot.git_unfiltered
+        and matches ~= true then
+        return refuse_git_query(bufnr, git_err)
       end
     end
   end
@@ -374,6 +418,37 @@ local function sync_locked(self, options)
       .. '; nothing was changed.', vim.log.levels.ERROR)
     return nil, build_err
   end
+  for _, retry in ipairs(timed_out_snapshots) do
+    local directory_snapshot, retry_snapshot = retry.snapshot, retry.git
+    if retry_snapshot then
+      local unchanged, git_err = git.ignore_snapshot_matches(
+        retry_snapshot, directory_snapshot.path, checked_git)
+      if unchanged ~= true then return refuse_git_query(bufnr, git_err) end
+      local ignored, ignored_err = git.ignored_candidates(retry_snapshot,
+        action_paths_in_scope(actions, directory_snapshot.path))
+      if not ignored then return refuse_git_query(bufnr, ignored_err) end
+      if #ignored > 0 then
+        local reason = 'an entry changed by this save is Git-ignored: ' .. ignored[1]
+          .. '; re-list it or use gi to disable Git-ignore filtering'
+        vim.bo[bufnr].modified = true
+        ui.notify('Refusing to sync: ' .. reason .. '; nothing was changed.', vim.log.levels.ERROR)
+        return nil, reason
+      end
+      git.record_ignore_candidates(retry_snapshot, directory_snapshot.path,
+        directory_snapshot.git_candidates or {})
+    else
+      local unchanged, git_err = git.ignore_snapshot_matches(nil,
+        directory_snapshot.path, checked_git)
+      if unchanged ~= true then return refuse_git_query(bufnr, git_err) end
+    end
+    directory_snapshot.git = nil
+    directory_snapshot.git_repo = retry_snapshot ~= nil
+    directory_snapshot.git_timeout = false
+    directory_snapshot.git_timeout_error = nil
+    directory_snapshot.git_unfiltered = retry_snapshot ~= nil
+    directory_snapshot.git_retry_snapshot = retry_snapshot
+  end
+  if #timed_out_snapshots > 0 then set_git_timeout_indicator(bufnr, state) end
   local added_expand_paths, added_focus_path = {}, nil
   if #(plan.added or {}) > 0 then
     local added_set, expand_by_path = {}, {}

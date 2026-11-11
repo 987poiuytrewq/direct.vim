@@ -241,9 +241,10 @@ Git status is read in the background so it doesn't delay the initial listing.
 When the query completes, Direct adds the status decorations and deleted rows.
 `git.timeout_ms` sets the deadline in milliseconds. A timed-out status query
 leaves the listing usable without status; a timed-out Git-ignore query leaves
-ignored entries visible for that listing. Both report one warning per repository.
-Saving a listing whose ignore snapshot timed out is refused until it is listed
-again, so an incomplete filter cannot authorize filesystem changes.
+ignored entries visible for that listing, with an in-buffer warning. Saving
+retries the ignore query: it proceeds if the changed paths are still visible,
+and refuses if the query still times out or a changed path would be hidden. In
+that case, `gi` can turn the filter off without discarding the unsaved edits.
 
 You can call `setup()` more than once. Each call replaces the previous options,
 and unknown or invalid options are reported as errors instead of being silently
@@ -348,9 +349,10 @@ restore them.
 - `gi` toggles ignore filtering. Filtering uses Git itself, so nested
   `.gitignore` files, `.git/info/exclude` and your global excludes file all
   apply. Tracked files are never hidden. Ignore queries use `git.timeout_ms`;
-  a timeout leaves entries visible for that listing and warns once, while saves
-  are refused until a complete snapshot is available. Unreadable subfolders are
-  skipped with a warning during nested-repository discovery.
+  a timeout leaves entries visible with an in-buffer warning. Saving retries the
+  query and refuses only if it still times out or a changed entry would be
+  hidden; `gi` can disable the filter without losing unsaved edits. Unreadable
+  subfolders are skipped with a warning during nested-repository discovery.
 
 ### Run commands on entries
 

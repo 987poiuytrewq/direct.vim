@@ -1,8 +1,8 @@
 # Spec: direct.vim improvements, second review
 
-**Status:** A1–A3 are complete and A4 is partly done; the rest are proposed,
-including three new tasks (A16–A18). This replaces the first gap review, whose
-tasks (S1–S6, R1–R3, F1–F6, M1–M6) have all landed on `master`.
+**Status:** A1–A3 and A16 are complete; A4 is partly done, and the rest remain
+proposed. This replaces the first gap review, whose tasks (S1–S6, R1–R3, F1–F6,
+M1–M6) have all landed on `master`.
 
 **Source:** a second static review of `origin/master` at `d72b7ea`
 (November 2026). As before, the findings come from reading the code; none has
@@ -71,7 +71,7 @@ Checked by reading the code at `d72b7ea`:
 | A13 | P4 | Proposed | Widen lint, formatting and type-check coverage |
 | A14 | P4 | Proposed | Fix stale docs and remove stray files |
 | A15 | P4 | Proposed | Retire the positional root classifier |
-| A16 | P2 | Proposed | Let a listing made during a Git timeout be saved once Git recovers |
+| A16 | P2 | Complete | Let a listing made during a Git timeout be saved once Git recovers |
 | A17 | P3 | Proposed | Make listings opened with `buffers.reuse = false` readable and tidy |
 | A18 | P3 | Proposed | Make `:DirectGitStatus` and `:DirectGitDiff` use the current listing |
 
@@ -254,6 +254,15 @@ sure the replacement handles this case too.
 warning. On Windows, skip the test or use an equivalent ACL.
 
 ### A16 — A listing made during a Git timeout can never be saved (P2)
+
+**Status: COMPLETE.** Sync retries Git-ignore queries for a timed-out listing
+and checks every planned source/destination against the recovered rules. Saves
+proceed when changed paths remain visible, and refuse if a changed path would be
+hidden or the retry times out. `gi` can disable filtering without re-listing or
+discarding edits when the listing is already unfiltered. A persistent virtual
+line marks timed-out listings even after the one-time notification is suppressed.
+Regression tests cover recovery, ignored-row refusal, repeated timeouts, the
+`gi` escape hatch and visible marking; `make test` passes.
 
 **Problem.** When a Git-ignore query times out, `capture_filter` and
 `filtered_paths` (`lua/direct/buffer/listing.lua`) set `git_timeout = true`

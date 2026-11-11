@@ -3,6 +3,31 @@ local M = {}
 local fs = require('direct.fs')
 local git = require('direct.git')
 local paths = require('direct.paths')
+local git_timeout_namespace = vim.api.nvim_create_namespace('direct.git-ignore-timeout')
+
+function M.set_git_timeout_indicator(bufnr, state)
+  if not vim.api.nvim_buf_is_valid(bufnr) then return end
+  pcall(vim.api.nvim_buf_clear_namespace, bufnr, git_timeout_namespace, 0, -1)
+  local timed_out = false
+  if state and state.view_respect_gitignore then
+    for _, snapshot in ipairs(state.directory_snapshots or {}) do
+      if snapshot.respect_gitignore and (snapshot.git_timeout or snapshot.git_unfiltered) then
+        timed_out = true
+        break
+      end
+    end
+  end
+  pcall(vim.api.nvim_buf_set_var, bufnr, 'direct_gitignore_timed_out', timed_out)
+  if timed_out then
+    pcall(vim.api.nvim_buf_set_extmark, bufnr, git_timeout_namespace, 0, 0, {
+      virt_lines = { { { 'Git-ignore filter timed out; this listing is unfiltered', 'WarningMsg' } } },
+      virt_lines_above = true,
+      priority = 200,
+    })
+  end
+end
+
+M.git_timeout_namespace = git_timeout_namespace
 
 local function path_identity(path)
   return fs.path_identity(path, fs.stat(path))
@@ -174,6 +199,7 @@ local function list_with_snapshot(root, read, show_hidden_override, respect_giti
   if snapshot.git then
     git.record_ignore_candidates(snapshot.git, root, all_names)
   end
+  if snapshot.git_timeout then snapshot.git_candidates = vim.deepcopy(all_names) end
   return visible, snapshot
 end
 

@@ -23,6 +23,7 @@ return function(context)
   local row_path = context.row_path
   local recorded_row_text = context.recorded_row_text
   local set_directory_snapshot = context.set_directory_snapshot
+  local set_git_timeout_indicator = context.set_git_timeout_indicator
   local get_directory_snapshot = context.get_directory_snapshot
   local list_with_snapshot = context.list_with_snapshot
   local filter_git_status_lines = context.filter_git_status_lines
@@ -339,6 +340,7 @@ function Buffer:expand(row)
 
   if just_materialized then vim.cmd('redraw') end
   refresh_icons(bufnr, state, display_row_ids)
+  set_git_timeout_indicator(bufnr, state)
   return true
 end
 
