@@ -10,6 +10,10 @@ been reproduced in a running Neovim. Each task's first step is to write a
 failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
+**Update:** A2 was revised after `e517c21` (Git-ignore queries in parallel,
+merged in #97, `origin/master` at `67a3063`). The other tasks have not been
+rechecked against commits after `d72b7ea`.
+
 ## Conventions
 
 - One task per branch and pull request, tests first, run with `make test` and
@@ -50,7 +54,7 @@ Checked by reading the code at `d72b7ea`:
 | ID | Priority | Task |
 |----|----------|------|
 | A1 | P1 | Stop `p` / `P` from discarding unsaved listing edits |
-| A2 | P2 | Make Git-ignore filtering fast and non-blocking |
+| A2 | P2 | Stop Git-ignore filtering from blocking, and from walking the whole tree |
 | A3 | P2 | Don't fail the whole listing when one subfolder can't be read |
 | A4 | P2 | Release what the README documents |
 | A5 | P2 | Let a save continue after unrelated changes on disk, without losing edits |
@@ -149,40 +153,56 @@ entry leaves the rest of the stack in place.
 
 ## Robustness and performance
 
-### A2 — Git-ignore filtering blocks and walks the whole tree (P2)
+### A2 — Git-ignore filtering still blocks and walks the whole tree (P2)
 
-**Problem.** `respect_gitignore` is on by default. Every listing calls
-`git.ignore_snapshot` (`lua/direct/buffer/listing.lua`, around line 97), and
-every save re-checks it (`current_repo_state` in `lua/direct/git.lua`). Each
-time this does the following, all synchronously and with no timeout:
+**What's improved.** Since `e517c21` (#97), `ignore_snapshot` starts
+`rev-parse --show-prefix` and both `git ls-files` inventories at the same time
+after the repository check, instead of one after another.
+`docs/performance/ignore-snapshot-approaches.md` measures the snapshot about
+28% faster on its 20,000-file fixtures (for example 72 → 52 ms).
 
-- runs `git rev-parse` and two `git ls-files` commands through
-  `vim.system(...):wait()`, plus `rev-parse --show-prefix` for each nested
-  repository;
-- calls `nested_repo_roots`, which scans every directory under the listed
-  root to look for nested `.git` folders, including `node_modules`, build
-  output and ignored folders.
+**What's left.** `respect_gitignore` is on by default. Every listing calls
+`git.ignore_snapshot` (`lua/direct/buffer/listing.lua`), and every save
+re-checks it (`current_repo_state` in `lua/direct/git.lua`). Both still:
 
-Listing or saving at the root of a large repository can therefore freeze the
-editor for seconds. The background `git status` from the first review
-doesn't help, because this is a separate code path. The numbers in
-`docs/performance/gitignore-benchmark.md` predate the current implementation.
+- wait for Git synchronously, with no timeout. The commands overlap now, but
+  `run_parallel` still blocks on `process:wait()`, so a slow or hung Git (a
+  network filesystem, a locked index, a credential prompt from a hook) still
+  freezes the editor. Only `git status` (`read_async`) has a timeout;
+- call `nested_repo_roots`, which is unchanged. It scans every directory
+  under the listed root looking for nested `.git` folders, including
+  `node_modules`, build output and ignored folders. The benchmark fixtures
+  are one level deep, so this cost isn't in the numbers above;
+- rebuild the snapshot from scratch each time, with no cache between
+  listings and saves. The new repository checks add a `rev-parse` call per
+  scope in `current_repo_state`, `inventory_for` and for each nested
+  repository.
+
+The benchmark also shows row construction and rendering costing about 530 ms
+for a flat 20,000-entry listing with filtering off. That's a separate cost
+worth tracking, but it isn't part of this task.
 
 **Change.**
 
 - Find nested repositories without scanning the tree: use gitlinks from
   `git ls-files --stage` (mode `160000`) for submodules, and skip ignored and
-  untracked folders when scanning for other nested repositories.
-- Cache the snapshot per repository and reuse it until the index or the
-  ignore files change, instead of rebuilding it for every listing and save.
-- Add a timeout to these Git calls, like the one `git.timeout_ms` gives
-  `git status`. If filtering can't finish, list without it once and say so.
-  Don't refuse to list.
-- Re-measure and update `docs/performance/gitignore-benchmark.md`.
+  untracked folders (already known from the inventories) when scanning for
+  other nested repositories.
+- Give the ignore queries a timeout, configurable like `git.timeout_ms`. If
+  filtering can't finish in time, list without it once and say so, rather
+  than freezing or refusing to list. At save time, refuse with a clear message
+  rather than wait indefinitely.
+- Cache the snapshot per repository and scope, and reuse it until the index or
+  the ignore files change. Reuse the repository check within one listing or
+  save instead of repeating `rev-parse`.
+- Add a benchmark fixture with a deep tree (for example a nested
+  `node_modules`) to `bench/ignore_snapshot_approaches.py`, and record the
+  results in `docs/performance/ignore-snapshot-approaches.md`.
 
 **Tests.** A fake `git` that hangs doesn't hold up the listing past the
 timeout. A test that counts directory scans shows ignored folders aren't
-entered. Nested repositories and submodules are still found.
+entered. Nested repositories and submodules are still found, and a second
+listing of an unchanged repository doesn't re-run the inventories.
 
 ### A3 — One unreadable subfolder fails the whole listing (P2)
 
@@ -329,10 +349,12 @@ module, and turn `undefined-field` back on where the annotations allow.
 - `luacov-reporters-0.1.0-1.rockspec` at the repo root isn't used by the
   Makefile or the scripts, now that LuaRocks packaging has been removed.
 - `docs/performance/gitignore-benchmark.md` describes a baseline from before
-  the current implementation (see A2).
+  the current implementation. Its successor,
+  `docs/performance/ignore-snapshot-approaches.md`, now covers the current
+  code.
 
 **Change.** Update the README's CI paragraph. Delete the rockspec if nothing
-needs it. Refresh or clearly date the benchmark.
+needs it. Remove the old benchmark, or point it at the new one.
 
 ### A15 — The positional root classifier is still used (P4)
 
