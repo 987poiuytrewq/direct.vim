@@ -17,10 +17,14 @@ local function normalize(path)
   return paths.canonical(path)
 end
 
-local function run(args, stdin)
-  local ok, result = pcall(function()
-    return vim.system(args, { text = false, stdin = stdin }):wait()
-  end)
+local function start(args, stdin)
+  local ok, process = pcall(vim.system, args, { text = false, stdin = stdin })
+  if not ok then return nil, tostring(process), -1 end
+  return process
+end
+
+local function finish(process)
+  local ok, result = pcall(function() return process:wait() end)
   if not ok then return nil, tostring(result), -1 end
   if result.code ~= 0 then
     local stderr = result.stderr and result.stderr:gsub('%s+$', '') or ''
@@ -29,8 +33,68 @@ local function run(args, stdin)
   return result.stdout or '', nil, result.code
 end
 
+local function run(args, stdin)
+  local process, err, code = start(args, stdin)
+  if not process then return nil, err, code end
+  return finish(process)
+end
+
+-- Start every independent command before waiting for any one of them. Waiting
+-- remains synchronous for callers, but the child processes overlap instead of
+-- paying their startup and scan times serially.
+local function run_parallel(commands)
+  local processes, start_errors = {}, {}
+  for index, spec in ipairs(commands) do
+    local process, err, code = start(spec.args, spec.stdin)
+    processes[index] = process
+    if not process then start_errors[index] = { err, code } end
+  end
+
+  local outputs, errors = {}, start_errors
+  for index, process in ipairs(processes) do
+    if process then
+      local output, err, code, stderr = finish(process)
+      if output then
+        outputs[index] = output
+      elseif not errors[index] then
+        errors[index] = { err, code, stderr }
+      end
+    end
+  end
+
+  for index = 1, #commands do
+    local failure = errors[index]
+    if failure then return nil, failure[1], failure[2], failure[3] end
+  end
+  return outputs
+end
+
 local function command(args, stdin)
   return run(vim.list_extend({ 'git' }, args), stdin)
+end
+
+local function commands_parallel(args_list)
+  local commands = {}
+  for index, args in ipairs(args_list) do
+    commands[index] = { args = vim.list_extend({ 'git' }, args) }
+  end
+  return run_parallel(commands)
+end
+
+-- Returns false when path is outside Git, or the repository root when it is.
+-- Repository-scoped commands must not run until this check succeeds.
+local function discover_repo(path)
+  if vim.fn.executable('git') ~= 1 then return nil, 'Git executable is unavailable' end
+  local output, err = command({ '-C', path, 'rev-parse', '--show-toplevel' })
+  if not output then
+    local lower = tostring(err):lower()
+    if lower:find('not a git repository', 1, true)
+      or lower:find('must be run in a work tree', 1, true) then
+      return false
+    end
+    return nil, err
+  end
+  return normalize(output:gsub('[\r\n]+$', ''))
 end
 
 local function nul_fields(output)
@@ -334,9 +398,8 @@ end
 -- query covers the repository; directory status is aggregated from descendants.
 function M.read(root)
   if type(root) ~= 'string' or root == '' then return nil end
-  local root_output = run({ 'git', '-C', root, 'rev-parse', '--show-toplevel' })
-  if not root_output then return nil end
-  local repo_root = normalize(root_output:gsub('[\r\n]+$', ''))
+  local repo_root = discover_repo(root)
+  if not repo_root or repo_root == false then return nil end
   local output = run({ 'git', '-C', repo_root, 'status', '--porcelain=v1', '-z',
     '--untracked-files=all', '--ignored=matching' })
   if not output then return nil end
@@ -465,20 +528,6 @@ function M.deleted_children(snapshot, directory)
   return result
 end
 
-local function discover_repo(path)
-  if vim.fn.executable('git') ~= 1 then return nil, 'Git executable is unavailable' end
-  local output, err = command({ '-C', path, 'rev-parse', '--show-toplevel' })
-  if not output then
-    local lower = tostring(err):lower()
-    if lower:find('not a git repository', 1, true)
-      or lower:find('must be run in a work tree', 1, true) then
-      return false
-    end
-    return nil, err
-  end
-  return normalize(output:gsub('[\r\n]+$', ''))
-end
-
 -- worktree_changes(root, path, directory) -> the absolute tracked paths whose
 -- unstaged worktree changes a restore would discard. Untracked files are not
 -- included because `git restore --worktree` does not remove them.
@@ -521,6 +570,9 @@ function M.worktree_changes(root, path, directory)
 end
 
 function M.worktree_restore_command(root)
+  local repo_root, repo_err = discover_repo(root)
+  if repo_root == false then return nil, 'path is not in a Git repository' end
+  if not repo_root then return nil, repo_err end
   local version = run({ 'git', '-C', root, '--version' })
   local major, minor
   if type(version) == 'string' then
@@ -553,27 +605,28 @@ local function path_set(output)
   return result
 end
 
-local function ls_files_args(repo_root, options, prefix)
-  local args = { '-C', repo_root, 'ls-files' }
+local function ls_files_args(scope_path, options)
+  local args = { '-C', scope_path, 'ls-files' }
   vim.list_extend(args, options)
   vim.list_extend(args, { '--full-name' })
-  if prefix and prefix ~= '' then
-    vim.list_extend(args, { '--', ':(literal)' .. prefix:gsub('/+$', '') })
-  end
   return args
 end
 
-local function read_ignore_state(repo_root, prefix)
-  local tracked_output, tracked_err = command(ls_files_args(repo_root,
-    { '--cached', '-z' }, prefix))
-  if not tracked_output then return nil, tracked_err end
-  local ignored_output, ignored_err = command(ls_files_args(repo_root,
-    { '--others', '--ignored', '--exclude-standard', '--directory', '-z' }, prefix))
-  if not ignored_output then return nil, ignored_err end
-
+local function ignore_state_from_outputs(tracked_output, ignored_output)
   local tracked, tracked_exact = {}, path_set(tracked_output)
   for relative in pairs(tracked_exact) do add_tracked_path(tracked, relative) end
   return { tracked = tracked, tracked_exact = tracked_exact, ignored = path_set(ignored_output) }
+end
+
+local function read_ignore_state(repo_root, prefix, scope_path)
+  scope_path = scope_path or vim.fs.joinpath(repo_root, prefix or '')
+  local outputs, err = commands_parallel({
+    ls_files_args(scope_path, { '--cached', '-z' }),
+    ls_files_args(scope_path,
+      { '--others', '--ignored', '--exclude-standard', '--directory', '-z' }),
+  })
+  if not outputs then return nil, err end
+  return ignore_state_from_outputs(outputs[1], outputs[2])
 end
 
 local function nested_repo_roots(repo_root, scope_path)
@@ -598,13 +651,14 @@ local function nested_repo_roots(repo_root, scope_path)
   return roots
 end
 
-local function capture_repo_snapshot(repo_root, scope_path, prefix, seen)
+local function capture_repo_snapshot(repo_root, scope_path, prefix, seen, initial_state)
   if seen[repo_root] then
     return nil, 'nested Git repository cycle detected'
   end
   scope_path = normalize(scope_path or repo_root)
   seen[repo_root] = true
-  local state, state_err = read_ignore_state(repo_root, prefix)
+  local state, state_err = initial_state, nil
+  if not state then state, state_err = read_ignore_state(repo_root, prefix, scope_path) end
   if not state then return nil, state_err end
   local snapshot = {
     root = repo_root,
@@ -619,15 +673,25 @@ local function capture_repo_snapshot(repo_root, scope_path, prefix, seen)
   local roots, roots_err = nested_repo_roots(repo_root, scope_path)
   if not roots then return nil, roots_err end
   for _, nested_root in ipairs(roots) do
-    local nested_prefix, prefix_err = command({ '-C', nested_root,
-      'rev-parse', '--show-prefix' })
-    if not nested_prefix then return nil, prefix_err end
-    nested_prefix = nested_prefix:gsub('[\r\n]+$', ''):gsub('/+$', '')
-    if nested_prefix ~= '' then nested_prefix = nested_prefix .. '/' end
-    local nested, nested_err = capture_repo_snapshot(nested_root, nested_root,
-      nested_prefix, seen)
-    if not nested then return nil, nested_err end
-    snapshot.nested[nested_root] = nested
+    local nested_repo, nested_repo_err = discover_repo(nested_root)
+    if nested_repo == false then
+      return nil, 'nested Git repository context changed; re-list this directory'
+    end
+    if not nested_repo then return nil, nested_repo_err end
+    if nested_repo ~= repo_root then
+      if nested_repo ~= nested_root then
+        return nil, 'nested Git repository root changed; re-list this directory'
+      end
+      local nested_prefix, prefix_err = command({ '-C', nested_root,
+        'rev-parse', '--show-prefix' })
+      if not nested_prefix then return nil, prefix_err end
+      nested_prefix = nested_prefix:gsub('[\r\n]+$', ''):gsub('/+$', '')
+      if nested_prefix ~= '' then nested_prefix = nested_prefix .. '/' end
+      local nested, nested_err = capture_repo_snapshot(nested_root, nested_root,
+        nested_prefix, seen)
+      if not nested then return nil, nested_err end
+      snapshot.nested[nested_root] = nested
+    end
   end
   seen[repo_root] = nil
   return snapshot
@@ -638,14 +702,25 @@ end
 -- snapshot records Git's effective ignored and tracked path decisions instead
 -- of hashing every ignore source in the worktree.
 function M.ignore_snapshot(path)
+  -- Probe repository membership first. Outside Git, do not run prefix or
+  -- inventory queries; those are only meaningful after this succeeds.
   local repo_root, repo_err = discover_repo(path)
   if repo_root == false then return nil end
   if not repo_root then return nil, repo_err end
-  local prefix, prefix_err = command({ '-C', path, 'rev-parse', '--show-prefix' })
-  if not prefix then return nil, prefix_err end
-  prefix = prefix:gsub('[\r\n]+$', ''):gsub('/+$', '')
+  -- Once the repository guard succeeds, prefix discovery and both inventories
+  -- are independent. Running ls-files from the requested scope preserves Git's
+  -- subtree semantics without waiting for the prefix to build a pathspec.
+  local outputs, snapshot_err = commands_parallel({
+    { '-C', path, 'rev-parse', '--show-prefix' },
+    ls_files_args(path, { '--cached', '-z' }),
+    ls_files_args(path,
+      { '--others', '--ignored', '--exclude-standard', '--directory', '-z' }),
+  })
+  if not outputs then return nil, snapshot_err end
+  local prefix = outputs[1]:gsub('[\r\n]+$', ''):gsub('/+$', '')
   if prefix ~= '' then prefix = prefix .. '/' end
-  return capture_repo_snapshot(repo_root, path, prefix, {})
+  local state = ignore_state_from_outputs(outputs[2], outputs[3])
+  return capture_repo_snapshot(repo_root, path, prefix, {}, state)
 end
 
 function M.record_ignore_candidates(snapshot, scope_path, names)
@@ -698,7 +773,15 @@ local function current_repo_state(repo_root, prefix, scope_path, checked)
   local key = repo_root .. '\0' .. (prefix or '')
   local current = checked[key]
   if current then return current end
-  local state, err = read_ignore_state(repo_root, prefix)
+  local live_root, repo_err = discover_repo(scope_path)
+  if live_root == false then
+    return nil, 'Git repository context changed; re-list this directory'
+  end
+  if not live_root then return nil, repo_err end
+  if live_root ~= repo_root then
+    return nil, 'Git repository context changed; re-list this directory'
+  end
+  local state, err = read_ignore_state(repo_root, prefix, scope_path)
   if not state then return nil, err end
   local roots, roots_err = nested_repo_roots(repo_root, scope_path)
   if not roots then return nil, roots_err end
@@ -791,8 +874,17 @@ local function inventory_for(snapshot, cache)
     local key = snapshot.root .. '\0' .. prefix
     local state = cache[key]
     if state then return state.ignored, state.tracked end
-    local output, err = command(ls_files_args(snapshot.root,
-      { '--others', '--ignored', '--exclude-standard', '--directory', '-z' }, prefix))
+    local scope_path = snapshot.scope_path or snapshot.root
+    local repo_root, repo_err = discover_repo(scope_path)
+    if repo_root == false then
+      return nil, nil, 'Git repository context changed; re-list this directory'
+    end
+    if not repo_root then return nil, nil, repo_err end
+    if repo_root ~= snapshot.root then
+      return nil, nil, 'Git repository context changed; re-list this directory'
+    end
+    local output, err = command(ls_files_args(scope_path,
+      { '--others', '--ignored', '--exclude-standard', '--directory', '-z' }))
     if not output then return nil, nil, err end
     state = { ignored = path_set(output) }
     cache[key] = state

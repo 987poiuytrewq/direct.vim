@@ -437,9 +437,16 @@ function M.restore_git()
     return nil, reason
   end
 
+  local restore_command, command_err = git_status.worktree_restore_command(listing.root)
+  if not restore_command then
+    ui.notify('direct: cannot prepare Git restore: ' .. tostring(command_err),
+      vim.log.levels.ERROR)
+    return nil, command_err
+  end
+
   buffer.cancel_git_status()
   return run.current_entry(
-    git_status.worktree_restore_command(listing.root),
+    restore_command,
     function(_, bufnr, root) buffer.refresh_git_status(bufnr, root) end,
     { quiet_success = true }
   )
