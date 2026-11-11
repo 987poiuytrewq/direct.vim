@@ -27,7 +27,7 @@
 
 ---@class direct.GitConfig
 ---@field enabled? boolean
----@field timeout_ms? integer
+---@field timeout_ms? integer Deadline for Git status and Git-ignore queries.
 ---@field show_symbols? boolean
 ---@field show_deleted? boolean
 ---@field symbols? table<direct.GitSymbolName, string>

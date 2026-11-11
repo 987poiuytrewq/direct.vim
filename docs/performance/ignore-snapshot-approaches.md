@@ -7,11 +7,11 @@ Environment: macOS, Neovim 0.12.5, Apple Git 2.54.0, Python 3.9.6
 
 ## Method
 
-`bench/ignore_snapshot_approaches.py` creates a temporary Git repository with
-20,000 files, warms each path, and reports medians. The current Neovim snapshot
-measurement calls `direct.git.ignore_snapshot()` seven times in one headless
-Neovim process. The CLI measurements use five timed samples after one warm-up.
-All fixture paths are removed after each run.
+`bench/ignore_snapshot_approaches.py` creates a temporary Git repository,
+warms each path, and reports medians. The current Neovim snapshot measurement
+calls `direct.git.ignore_snapshot()` once cold, then seven times with an
+unchanged snapshot in one headless Neovim process. The CLI measurements use
+timed samples after one warm-up. All fixture paths are removed after each run.
 
 The serial and guarded-parallel variants collect the same tracked and ignored
 `git ls-files` inventories. Both first run `rev-parse --show-toplevel` as the
@@ -69,3 +69,27 @@ These are warm-cache measurements on synthetic repositories, not a claim about
 every real worktree. For actual listing latency, benchmark `Buffer:list()` as
 well: filesystem stats, row construction, rendering, and Git status can add
 costs outside `ignore_snapshot()`.
+
+## Deep ignored-tree fixture (A2)
+
+The A2 fixture adds an ignored `node_modules`-style tree with five directory
+levels, branching factor five (3,905 directories and 3,125 leaf files). This
+measures the cost of discovering nested repositories through a tree that Git
+already identifies as ignored. Measurements were taken on macOS with Neovim
+0.12.5 and Apple Git 2.54.0, using three CLI samples after warm-up.
+
+| Measurement | Median |
+|---|---:|
+| Neovim ignore snapshot, cold | 21.26 ms |
+| Neovim ignore snapshot, unchanged cached | 0.03 ms |
+| Full snapshot CLI, serial | 120.09 ms |
+| Full snapshot CLI, prefix and inventories parallel | 107.34 ms |
+| Candidate-only `check-ignore` prototype | 12.66 ms |
+| `Buffer:list()`, ignore on / off (warm) | 0.55 / 0.46 ms |
+
+The Neovim implementation prunes the ignored tree after Git returns its ignored
+directory inventory; the CLI comparison retains the original recursive scan.
+The unchanged-cache result still validates filesystem and ignore-source
+metadata, but launches no Git inventory processes. The candidate-only result is
+not equivalent for sync safety and remains a comparison, not the selected
+implementation.
