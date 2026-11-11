@@ -58,6 +58,16 @@ local function filter_git_status_lines(root, lines, snapshot)
   return filtered
 end
 
+local function filter_git_diff_lines(root, lines, snapshot)
+  local filtered = {}
+  for _, line in ipairs(lines or {}) do
+    if git.status_for(snapshot, M.entry_path(root, line)) then
+      filtered[#filtered + 1] = line
+    end
+  end
+  return filtered
+end
+
 local set_directory_snapshot = listing.set_directory_snapshot
 local get_directory_snapshot = listing.get_directory_snapshot
 local apply_snapshot = listing.apply_snapshot
@@ -336,6 +346,7 @@ local tree_planner = require('direct.buffer.tree')({
   ignore_set = M.ignore_set,
   read_with_snapshot = listing.read_with_snapshot,
   filter_git_status_lines = filter_git_status_lines,
+  filter_git_diff_lines = filter_git_diff_lines,
   action_mod = action_mod,
   indent_size = indent_size,
 })
@@ -389,6 +400,7 @@ local row_state = require('direct.buffer.row_state')({
   get_directory_snapshot = get_directory_snapshot,
   list_with_snapshot = list_with_snapshot,
   filter_git_status_lines = filter_git_status_lines,
+  filter_git_diff_lines = filter_git_diff_lines,
   ensure_git_snapshot = ensure_git_snapshot,
   indent_size = indent_size,
   path_identity = path_identity,
@@ -397,7 +409,16 @@ local row_state = require('direct.buffer.row_state')({
   action_mod = action_mod,
 })
 is_deleted_record = row_state.is_deleted_record
-merge_deleted_entries = row_state.merge_deleted_entries
+local merge_status_deleted_entries = row_state.merge_deleted_entries
+merge_deleted_entries = function(directory, lines, git_snapshot, show_hidden, diff_snapshot)
+  local result, deleted = merge_status_deleted_entries(
+    directory, lines, git_snapshot, show_hidden)
+  if not diff_snapshot then return result, deleted end
+  local with_diff, diff_deleted = merge_status_deleted_entries(
+    directory, result, diff_snapshot, show_hidden)
+  for path, kind in pairs(diff_deleted) do deleted[path] = kind end
+  return with_diff, deleted
+end
 hide_deleted_expansions = row_state.hide_deleted_expansions
 capture_deleted_guard_snapshot = row_state.capture_deleted_guard_snapshot
 restore_deleted_rows = row_state.restore_deleted_rows
@@ -559,6 +580,7 @@ local collapse_single_entry_paths = require('direct.buffer.collapse')({
   entry_path = M.entry_path,
   list_with_snapshot = list_with_snapshot,
   filter_git_status_lines = filter_git_status_lines,
+  filter_git_diff_lines = filter_git_diff_lines,
   get_directory_snapshot = get_directory_snapshot,
   apply_snapshot = apply_snapshot,
   is_dir_line = is_dir_line,
@@ -584,6 +606,7 @@ require('direct.buffer.list')({
   indent_size = indent_size,
   list_with_snapshot = list_with_snapshot,
   filter_git_status_lines = filter_git_status_lines,
+  filter_git_diff_lines = filter_git_diff_lines,
   merge_deleted_entries = merge_deleted_entries,
   hide_deleted_expansions = hide_deleted_expansions,
   path_identity = path_identity,
@@ -764,6 +787,73 @@ function M.show_git_status()
   return set_git_status_only(true)
 end
 
+local function set_git_diff_only(ref)
+  local bufnr = vim.api.nvim_get_current_buf()
+  if ref ~= nil and type(ref) ~= 'string' then
+    local reason = 'Git ref must be a string'
+    ui.notify('direct: ' .. reason, vim.log.levels.ERROR)
+    return nil, reason
+  end
+  if vim.bo[bufnr].modified then
+    local reason = 'cannot change the Git-diff filter with unsaved edits; sync or discard them first'
+    ui.notify('direct: ' .. reason, vim.log.levels.ERROR)
+    return nil, reason
+  end
+  local state = states[bufnr]
+  if not state then
+    local reason = 'direct listing state is unavailable; re-list this directory'
+    ui.notify('direct: ' .. reason, vim.log.levels.ERROR)
+    return nil, reason
+  end
+
+  local turning_off = state.view_git_diff_only
+    and (ref == nil or vim.trim(ref) == state.git_diff_snapshot.ref)
+  local snapshot = false
+  if not turning_off then
+    local err
+    snapshot, err = git.compare_snapshot(state.root, ref)
+    if not snapshot then
+      ui.notify('direct: cannot compare Git diff: ' .. tostring(err), vim.log.levels.ERROR)
+      return nil, err
+    end
+  end
+
+  local previous = {
+    view_git_diff_only = state.view_git_diff_only,
+    git_diff_snapshot = state.git_diff_snapshot,
+    expanded = state.expanded,
+    known_children = state.known_children,
+    directory_snapshots = state.directory_snapshots,
+    materialization_undos = state.materialization_undos,
+    materialization_recoveries = state.materialization_recoveries,
+    collapse_undos = state.collapse_undos,
+  }
+  state.view_git_diff_only = not turning_off
+  state.git_diff_snapshot = snapshot
+  state.expanded = {}
+  state.known_children = {}
+  state.directory_snapshots = {}
+  state.materialization_undos = {}
+  state.materialization_recoveries = {}
+  state.collapse_undos = {}
+  local listed, err = M.restore():list({
+    reset_undo = true,
+    git_diff_resolved = true,
+    git_diff_only = not turning_off,
+    git_diff_snapshot = snapshot,
+  })
+  if not listed then
+    for key, value in pairs(previous) do state[key] = value end
+    return nil, err
+  end
+  if not turning_off then return folding.expand_all(M) end
+  return listed
+end
+
+function M.toggle_git_diff(ref)
+  return set_git_diff_only(ref)
+end
+
 -- Visible file/Git navigation and folding accessors live in navigation.lua.
 require('direct.buffer.navigation')({
   M = M,
@@ -808,6 +898,7 @@ require('direct.buffer.sync')({
   build_actions = build_actions,
   apply_snapshot = apply_snapshot,
   filter_git_status_lines = filter_git_status_lines,
+  filter_git_diff_lines = filter_git_diff_lines,
   is_dir_line = is_dir_line,
   is_real_directory = is_real_directory,
   hidden_descendant = hidden_descendant,

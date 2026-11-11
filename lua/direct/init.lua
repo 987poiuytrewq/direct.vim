@@ -175,6 +175,14 @@ function M.show_git_status()
   return buffer.show_git_status()
 end
 
+--- Toggle the committed Git-diff filter for the current Direct listing.
+---@param ref string|nil
+function M.git_diff(ref)
+  if not guard('DirectGitDiff') then return nil end
+  if pending.refuse('change the Git-diff filter') then return nil end
+  return buffer.toggle_git_diff(ref)
+end
+
 function M.next_change()
   if not guard('DirectNextChange') then return nil end
   return buffer.next_change()

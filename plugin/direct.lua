@@ -105,6 +105,10 @@ vim.api.nvim_create_user_command('DirectGitStatus', function()
   require('direct').show_git_status()
 end, { nargs = 0, desc = 'direct: show only entries with Git status' })
 
+vim.api.nvim_create_user_command('DirectGitDiff', function(args)
+  require('direct').git_diff(args.fargs[1])
+end, { nargs = '?', desc = 'direct: toggle filtering to files changed from a Git ref' })
+
 vim.api.nvim_create_user_command('DirectNextChange', function()
   require('direct').next_change()
 end, { nargs = 0, desc = 'direct: navigate to the next changed entry' })

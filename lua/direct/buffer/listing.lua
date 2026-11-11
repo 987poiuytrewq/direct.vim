@@ -427,7 +427,9 @@ local function hidden_descendant(directory, root_snapshot, state)
         or (not filter.show_hidden and name:sub(1, 1) == '.')
         or git_hidden[vim.fs.normalize(child_path)]
         or (state and state.view_git_status_only
-          and not git.status_for(state.git_status, child_path)) then
+          and not git.status_for(state.git_status, child_path))
+        or (state and state.view_git_diff_only
+          and not git.status_for(state.git_diff_snapshot, child_path)) then
         return child_path
       end
 

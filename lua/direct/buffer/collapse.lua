@@ -5,6 +5,7 @@ return function(deps)
   local entry_path = deps.entry_path
   local list_with_snapshot = deps.list_with_snapshot
   local filter_git_status_lines = deps.filter_git_status_lines
+  local filter_git_diff_lines = deps.filter_git_diff_lines
   local get_directory_snapshot = deps.get_directory_snapshot
   local apply_snapshot = deps.apply_snapshot
   local is_dir_line = deps.is_dir_line
@@ -35,6 +36,9 @@ return function(deps)
         end
       end
       if options.status_only then children = filter_git_status_lines(directory, children, options.git_status) end
+      if options.git_diff_only then
+        children = filter_git_diff_lines(directory, children, options.git_diff)
+      end
       return children
     end
 

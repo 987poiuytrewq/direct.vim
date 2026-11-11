@@ -16,6 +16,7 @@ return function(deps)
   local ignore_set = deps.ignore_set
   local read_with_snapshot = deps.read_with_snapshot
   local filter_git_status_lines = deps.filter_git_status_lines
+  local filter_git_diff_lines = deps.filter_git_diff_lines
   local action_mod = deps.action_mod
   local indent_size = deps.indent_size
 
@@ -588,6 +589,9 @@ return function(deps)
           end
           if disk and state.view_git_status_only and filter_git_status_lines then
             disk = filter_git_status_lines(parent.path, disk, state.git_status)
+          end
+          if disk and state.view_git_diff_only and filter_git_diff_lines then
+            disk = filter_git_diff_lines(parent.path, disk, state.git_diff_snapshot)
           end
           if not disk or not same_lines(disk, expansion.listing_lines or {}) then
             return nil, 'expanded directory changed on disk since it was read'

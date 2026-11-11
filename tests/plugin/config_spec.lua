@@ -339,6 +339,35 @@ H.describe('config', function()
     config.clear_mappings()
   end)
 
+  H.it('installs buffer-local gd and supports a Git diff mapping override', function()
+    local config = fresh_config()
+    config.clear_mappings()
+    config.setup({ map_default_keys = true })
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkfile(ws, 'file.txt', { 'file' })
+    buffer.list(ws)
+    local bufnr = vim.api.nvim_get_current_buf()
+    H.assert_eq(vim.fn.maparg('gd', 'n'), '<Cmd>DirectGitDiff<CR>',
+      'the default buffer-local gd invokes the branch diff filter')
+    H.assert_eq(vim.fn.maparg('<Plug>(direct-git-diff)', 'n'), '<Cmd>DirectGitDiff<CR>',
+      'the Git diff action has a Plug entry point')
+
+    config.setup({ map_default_keys = false })
+    H.assert_eq(vim.fn.maparg('gd', 'n'), '', 'disabling defaults removes buffer-local gd')
+    H.assert_eq(vim.fn.maparg('<Plug>(direct-git-diff)', 'n'), '<Cmd>DirectGitDiff<CR>',
+      'the Plug entry point remains available')
+
+    config.setup({ map_default_keys = false, mappings = { git_diff = '<leader>gd' } })
+    H.assert_eq(vim.fn.maparg('<leader>gd', 'n'), '<Cmd>DirectGitDiff<CR>',
+      'the buffer-local action can be remapped explicitly')
+    config.clear_mappings()
+    H.assert_eq(vim.fn.maparg('<leader>gd', 'n'), '', 'clear_mappings removes the override')
+    H.assert_eq(vim.fn.maparg('<Plug>(direct-git-diff)', 'n'), '',
+      'clear_mappings removes the Plug entry point')
+    pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+  end)
+
   H.it('the VimEnter install runs exactly once and setup() suppresses it', function()
     local config = fresh_config()
     config.clear_mappings()

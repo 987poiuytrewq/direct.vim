@@ -44,6 +44,128 @@ local function nul_fields(output)
   return fields
 end
 
+local function trimmed_output(output)
+  return (output or ''):gsub('[\r\n]+$', '')
+end
+
+local function default_compare_ref(repo_root)
+  local remote_head = command({ '-C', repo_root, 'symbolic-ref', '--quiet', '--short',
+    'refs/remotes/origin/HEAD' })
+  local remote_ref = remote_head and trimmed_output(remote_head) or nil
+  if remote_ref and remote_ref ~= '' then
+    local _, _, code = command({ '-C', repo_root, 'rev-parse', '--verify', '--quiet',
+      '--end-of-options', remote_ref .. '^{commit}' })
+    if code == 0 then return remote_ref end
+  end
+
+  for _, branch in ipairs({ 'main', 'master' }) do
+    local _, _, code = command({ '-C', repo_root, 'show-ref', '--verify', '--quiet',
+      'refs/heads/' .. branch })
+    if code == 0 then return branch end
+  end
+  return nil, 'cannot determine the default branch (origin/HEAD, main, or master)'
+end
+
+local function resolve_commit(repo_root, ref)
+  local output, err = command({ '-C', repo_root, 'rev-parse', '--verify',
+    '--end-of-options', ref .. '^{commit}' })
+  if not output then return nil, err end
+  return trimmed_output(output)
+end
+
+-- compare_snapshot(root[, ref]) returns the committed paths changed between
+-- the target ref's merge base with HEAD and HEAD. Working-tree/index changes
+-- are deliberately excluded, matching a pull-request file list.
+function M.compare_snapshot(root, ref)
+  if type(root) ~= 'string' or root == '' then return nil, 'repository path is required' end
+  if vim.fn.executable('git') ~= 1 then return nil, 'Git executable is unavailable' end
+  if ref ~= nil and (type(ref) ~= 'string' or ref:find('\0', 1, true)) then
+    return nil, 'Git ref must be a non-empty string'
+  end
+
+  local repo_output, repo_err = command({ '-C', root, 'rev-parse', '--show-toplevel' })
+  if not repo_output then return nil, repo_err end
+  local repo_root = normalize(trimmed_output(repo_output))
+
+  if ref == nil or vim.trim(ref) == '' then
+    local default_ref, default_err = default_compare_ref(repo_root)
+    if not default_ref then return nil, default_err end
+    ref = default_ref
+  end
+  local target, target_err = resolve_commit(repo_root, ref)
+  if not target then return nil, 'cannot resolve Git ref ' .. ref .. ': ' .. tostring(target_err) end
+  local head, head_err = resolve_commit(repo_root, 'HEAD')
+  if not head then return nil, 'cannot resolve HEAD: ' .. tostring(head_err) end
+
+  local base_output, base_err = command({ '-C', repo_root, 'merge-base', target, head })
+  if not base_output then
+    return nil, 'Git ref ' .. ref .. ' has no merge base with HEAD: ' .. tostring(base_err)
+  end
+  local base = trimmed_output(base_output)
+  local output, diff_err = command({ '-C', repo_root, 'diff', '--no-ext-diff',
+    '--name-status', '-z', '-M', base, head, '--' })
+  if not output then return nil, 'cannot diff against ' .. ref .. ': ' .. tostring(diff_err) end
+
+  local fields, entries, index = nul_fields(output), {}, 1
+  while index <= #fields do
+    local status = fields[index]
+    index = index + 1
+    local code = status:sub(1, 1)
+    local old_path, relative
+    if code == 'R' or code == 'C' then
+      old_path, relative = fields[index], fields[index + 1]
+      index = index + 2
+    else
+      relative = fields[index]
+      index = index + 1
+    end
+    if relative and relative ~= '' then
+      entries[#entries + 1] = {
+        path = relative,
+        old_path = old_path,
+        status = code,
+      }
+    end
+  end
+  table.sort(entries, function(a, b)
+    if a.path == b.path then return a.status < b.status end
+    return a.path < b.path
+  end)
+  local diff_paths, deleted = {}, {}
+  local function add_diff_path(path, status)
+    path = normalize(path)
+    local previous = diff_paths[path]
+    if previous and previous ~= status then
+      diff_paths[path] = 'M'
+    else
+      diff_paths[path] = status
+    end
+  end
+  for _, entry in ipairs(entries) do
+    local path = normalize(vim.fs.joinpath(repo_root, entry.path))
+    add_diff_path(path, entry.status)
+    if entry.status == 'D' then deleted[path] = { kind = 'file' } end
+    local parent = path:match('^(.*)/[^/]+$')
+    while parent do
+      add_diff_path(parent, entry.status)
+      if entry.status == 'D' then deleted[parent] = { kind = 'directory' } end
+      if parent == repo_root or parent == '/' then break end
+      parent = parent:match('^(.*)/[^/]+$')
+    end
+  end
+  return {
+    root = repo_root,
+    ref = ref,
+    target = target,
+    base = base,
+    head = head,
+    entries = entries,
+    paths = diff_paths,
+    deleted = deleted,
+    force_deleted = true,
+  }
+end
+
 local function normalize_status(xy)
   if xy == '??' then return ' A' end
   return (xy:gsub('T', 'M'))
@@ -249,7 +371,8 @@ function M.deleted_children(snapshot, directory)
   local prefix = directory == '/' and '/' or (directory .. '/')
   local result = {}
   for path, entry in pairs(snapshot.deleted) do
-    if path:sub(1, #prefix) == prefix and path_is_missing(path) then
+    if path:sub(1, #prefix) == prefix
+      and (snapshot.force_deleted == true or path_is_missing(path)) then
       local name = path:sub(#prefix + 1)
       if name ~= '' and not name:find('/', 1, true) then
         if entry.kind == 'directory' then

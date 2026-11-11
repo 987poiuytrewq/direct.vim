@@ -433,6 +433,25 @@ and the entries it hides are never treated as deleted. Outside a repository,
 or with |direct-git.enabled| off, the view is empty. These commands are
 refused while the listing has unsaved edits.
 
+Comparing with a branch ~
+                                                       *direct.vim-git-diff*
+`gd` or `:DirectGitDiff` toggles the current listing to show only committed
+paths changed between the merge base of a target ref and `HEAD`. Staged and
+unstaged worktree changes are excluded. With no argument, the target is
+`origin/HEAD`, falling back to local `main` and then local `master`. Supply any
+commit-ish accepted by Git to choose another target:
+>
+    :DirectGitDiff
+    :DirectGitDiff release/2.x
+    :DirectGitDiff v1.4.0
+<
+Directories appear only when they contain changed paths and are expanded so
+their changed descendants are visible. Deleted files are included. Run the
+command again to restore the normal listing. It operates on the current Direct
+listing and refuses while the listing has unsaved edits. `:DirectGitDiff {ref}`
+switches the filter to another ref; invoking the same ref again turns the filter
+off.
+
 Jumping between changes ~
                                                      *direct.vim-git-navigate*
 `]c` and `[c` (|:DirectNextChange| and |:DirectPreviousChange|) move to the
@@ -601,8 +620,8 @@ mappings                table (default: `{}`)
 <
     Action names include `open`, `open_horizontal`, `open_vertical`, `open_tab`,
     `undo`, `redo`, `yank`, `paste`, `toggle_hidden`, `toggle_gitignore`,
-    `git_add`, `next_change`, `expand`, `collapse`, `toggle`, and the recursive
-    folder actions. Each action has a `<Plug>(direct-...)` mapping.
+    `git_add`, `git_diff`, `next_change`, `expand`, `collapse`, `toggle`, and
+    the recursive folder actions. Each action has a `<Plug>(direct-...)` mapping.
     `map_default_keys = false` suppresses defaults but not explicit overrides
     or `<Plug>` mappings.
 
@@ -784,6 +803,14 @@ Opening listings ~
     List the working directory. Works from any buffer. `!` deliberately
     discards unsaved edits in the listing being refreshed.
 
+                                                              *:DirectGitDiff*
+:DirectGitDiff [ref]
+    Toggle the current listing to show committed paths changed from the merge
+    base of [ref] and `HEAD`. With no [ref], use `origin/HEAD`, then local
+    `main`, then local `master`. Refused while the listing has unsaved edits.
+    Invoke it again to turn the filter off. The buffer-local `gd` mapping invokes
+    this command.
+
 Editing ~
                                                                  *:DirectSync*
 :DirectSync
@@ -959,6 +986,7 @@ In a listing (buffer-local):
     n       gh              |:DirectToggleHidden|
     n       gi              |:DirectToggleGitIgnore|
     n       gs              |:DirectToggleGitStatus|
+    n       gd              |:DirectGitDiff|
     n       ]f  [f          |:DirectNextFile| and |:DirectPreviousFile|
     n       ]c  [c          |:DirectNextChange| and |:DirectPreviousChange|
     n       ga              `:DirectGit git add -- {}`
@@ -995,6 +1023,7 @@ The functions in `require('direct')` mirror the commands:
     `toggle_gitignore()`          |:DirectToggleGitIgnore|
     `toggle_git_status()`         |:DirectToggleGitStatus|
     `show_git_status()`           |:DirectGitStatus|
+    `git_diff([ref])`              |:DirectGitDiff|
     `next_change()`               |:DirectNextChange|
     `previous_change()`           |:DirectPreviousChange|
     `next_directory()` `previous_directory()`   visible directory navigation

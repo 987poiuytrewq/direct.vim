@@ -20,6 +20,7 @@ return function(context)
   local indent_size = context.indent_size
   local list_with_snapshot = context.list_with_snapshot
   local filter_git_status_lines = context.filter_git_status_lines
+  local filter_git_diff_lines = context.filter_git_diff_lines
   local merge_deleted_entries = context.merge_deleted_entries
   local hide_deleted_expansions = context.hide_deleted_expansions
   local path_identity = context.path_identity
@@ -128,6 +129,13 @@ function Buffer:list(options)
   end
   local view_git_status_only = old_state
     and old_state.view_git_status_only == true or false
+  local view_git_diff_only = old_state
+    and old_state.view_git_diff_only == true or false
+  local git_diff_snapshot = old_state and old_state.git_diff_snapshot or false
+  if options.git_diff_resolved then
+    view_git_diff_only = options.git_diff_only == true
+    git_diff_snapshot = options.git_diff_snapshot or false
+  end
   local show_hidden_override
   if old_state and old_state.view_show_hidden_override
     and type(old_state.view_show_hidden) == 'boolean' then
@@ -167,11 +175,18 @@ function Buffer:list(options)
   if view_git_status_only then
     safe = filter_git_status_lines(self.root, safe, git_snapshot)
   end
+  if view_git_diff_only then
+    safe = filter_git_diff_lines(self.root, safe, git_diff_snapshot)
+  end
   local merged, deleted_paths = merge_deleted_entries(self.root, safe,
-    show_deleted and git_snapshot or nil, snapshot.show_hidden)
+    show_deleted and git_snapshot or nil, snapshot.show_hidden,
+    view_git_diff_only and git_diff_snapshot or nil)
   safe = merged
   if view_git_status_only then
     safe = filter_git_status_lines(self.root, safe, git_snapshot)
+  end
+  if view_git_diff_only then
+    safe = filter_git_diff_lines(self.root, safe, git_diff_snapshot)
   end
   local unlistable_deleted = {}
   for path in pairs(deleted_paths) do
@@ -206,6 +221,8 @@ function Buffer:list(options)
         respect_gitignore = snapshot.respect_gitignore,
         status_only = view_git_status_only,
         git_status = git_snapshot,
+        git_diff_only = view_git_diff_only,
+        git_diff = git_diff_snapshot,
         deleted_paths = deleted_paths,
       })
     if not safe then
@@ -284,6 +301,8 @@ function Buffer:list(options)
     view_respect_gitignore_override = old_state
       and old_state.view_respect_gitignore_override or false,
     view_git_status_only = view_git_status_only,
+    view_git_diff_only = view_git_diff_only,
+    git_diff_snapshot = git_diff_snapshot,
     collapse_single_entry_directories = collapse_enabled,
     git_status = git_snapshot,
     git_status_pending = git_options.enabled and not options.git_status_resolved,
