@@ -9,6 +9,9 @@ Notable changes to direct.vim are documented here. Versions follow
 
 - Make `:DirectGitStatus` and `:DirectGitDiff` use the current listing when run
   from one without `--dir`; add completion for their options, refs and dirs.
+- Make `buffers.reuse = false` listings show their directory path, clean up
+  clean buffers during navigation, and offer to switch to an existing modified
+  listing for the same directory.
 
 ### Fixed
 
@@ -18,13 +21,12 @@ Notable changes to direct.vim are documented here. Versions follow
   loses a row identity.
 - Keep forced trash restore/empty from stranding undo history: confirm and drop
   only history records that depend on the affected payload.
+- Preserve other windows showing a Direct listing when opening a file or
+  navigating directories removes the source buffer.
 
 ### Added
 
 - Add `:DirectHistory drop [undo|redo]` to remove one irrecoverable top step.
-- Make `buffers.reuse = false` listings show their directory path, clean up
-  clean buffers during navigation, and offer to switch to an existing modified
-  listing for the same directory.
 
 ## [0.2.0] - 2026-11-11
 

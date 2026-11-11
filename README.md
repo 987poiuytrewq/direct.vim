@@ -267,8 +267,8 @@ path-based reuse. `buffers.open_in = 'new'` keeps the source listing (including
 unsaved edits) when opening a file, without creating a split. It defaults to
 `'current'`, which opens in the current window and removes the clean source
 buffer after a successful file open. For directory navigation, clean source
-listings are also removed when `reuse = false`. These can be overridden per
-call:
+listings are also removed when `reuse = false`. A source buffer is only removed
+when no other window displays it. These settings can be overridden per call:
 
 ```lua
 require('direct').open({ reuse = false, open_in = 'new' })

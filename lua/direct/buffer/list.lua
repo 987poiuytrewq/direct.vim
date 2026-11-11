@@ -58,6 +58,7 @@ local function discard_left_clean_listing(source, target, open_in)
   if open_in ~= 'current' or source == target or not vim.api.nvim_buf_is_valid(source) then
     return
   end
+  if #vim.fn.win_findbuf(source) > 0 then return end
   if vim.bo[source].filetype == constants.FILETYPE and not vim.bo[source].modified then
     pcall(vim.api.nvim_buf_delete, source, { force = false })
   end

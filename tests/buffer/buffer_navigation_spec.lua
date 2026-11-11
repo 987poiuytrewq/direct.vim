@@ -270,6 +270,28 @@ H.describe('buffer: open and ranged paths', function()
       'the previous direct buffer is gone')
   end)
 
+  H.it('opening a file does not wipe a listing still displayed in another window', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkfile(ws, 'a.txt', { 'hello' })
+    local listing = buffer.list(ws)
+    local direct_nr = vim.api.nvim_get_current_buf()
+    local first_win = vim.api.nvim_get_current_win()
+    vim.cmd('vsplit')
+    local opening_win = vim.api.nvim_get_current_win()
+
+    H.assert_true(listing:open('a.txt'), 'the current split opens the file')
+
+    H.assert_true(vim.api.nvim_buf_is_valid(direct_nr), 'the displayed listing remains valid')
+    H.assert_true(vim.api.nvim_win_is_valid(first_win), 'the other split remains valid')
+    H.assert_eq(vim.api.nvim_win_get_buf(first_win), direct_nr,
+      'the other split continues to show the listing')
+    H.assert_eq(vim.api.nvim_get_current_win(), opening_win, 'the file opens in the selected split')
+    H.assert_true(fs.same_path(vim.api.nvim_buf_get_name(0), ws .. '/a.txt'),
+      'the selected split displays the opened file')
+  end)
+
   H.it('open() on a directory line opens a new direct listing', function()
     clean_buffers()
     local sb = H.sandbox()
@@ -356,6 +378,33 @@ H.describe('buffer: open and ranged paths', function()
       H.assert_eq(direct_buffers, 1,
         'only the current clean listing remains after a down/up round trip')
     end
+    config.setup({})
+  end)
+
+  H.it('reuse=false directory navigation preserves a source listing shown elsewhere', function()
+    clean_buffers()
+    local config = require('direct.config')
+    config.setup({ buffers = { reuse = false }, git = { enabled = false } })
+    local sb = H.sandbox()
+    local root = H.mkdir(sb.root, 'ws')
+    local sub = H.mkdir(root, 'sub')
+    H.mkfile(sub, 'inside.txt', { 'inside' })
+    buffer.list(root)
+    local source = vim.api.nvim_get_current_buf()
+    local other_win = vim.api.nvim_get_current_win()
+    vim.cmd('vsplit')
+    local opening_win = vim.api.nvim_get_current_win()
+
+    H.assert_true(buffer.restore():open('sub/'), 'the selected split opens the child listing')
+    local child = vim.api.nvim_get_current_buf()
+
+    H.assert_true(vim.api.nvim_buf_is_valid(source), 'the listing shown in the other split survives')
+    H.assert_true(vim.api.nvim_win_is_valid(other_win), 'the other split remains open')
+    H.assert_eq(vim.api.nvim_win_get_buf(other_win), source,
+      'the other split keeps showing its source listing')
+    H.assert_true(child ~= source, 'the selected split shows an independent child listing')
+    H.assert_eq(vim.api.nvim_get_current_win(), opening_win,
+      'directory navigation remains in the selected split')
     config.setup({})
   end)
 
