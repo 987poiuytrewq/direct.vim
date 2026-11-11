@@ -425,7 +425,8 @@ Showing only changes ~
 `gs` (|:DirectToggleGitStatus|) switches to a view that shows only entries
 with a Git status, with every directory expanded. Press it again to return to
 the normal listing. |:DirectGitStatus| switches to the view without toggling
-it off.
+it off. From any buffer, `:DirectGitStatus [--dir {dir}]` opens or reuses a
+Direct listing for {dir}; without `--dir`, {dir} is the working directory.
 
 Directories that contain changes stay visible, and their children are filtered
 the same way. The view combines with the other filters (|direct.vim-filters|),
@@ -436,21 +437,25 @@ refused while the listing has unsaved edits.
 Comparing with a branch ~
                                                        *direct.vim-git-diff*
 `gd` or `:DirectGitDiff` toggles the current listing to show only committed
-paths changed between the merge base of a target ref and `HEAD`. Staged and
-unstaged worktree changes are excluded. With no argument, the target is
-`origin/HEAD`, falling back to local `main` and then local `master`. Supply any
-commit-ish accepted by Git to choose another target:
+paths changed between the merge base of a target ref and `HEAD`. With no
+`--ref`, the target is `origin/HEAD`, falling back to local `main` and then
+local `master`. The command also works from any buffer and opens or reuses a
+Direct listing for `--dir {dir}`. Without `--dir`, it uses the working
+directory:
 >
     :DirectGitDiff
-    :DirectGitDiff release/2.x
-    :DirectGitDiff v1.4.0
+    :DirectGitDiff --ref release/2.x
+    :DirectGitDiff --ref v1.4.0 --dir src
+    :DirectGitDiff --include-uncommitted --dir src
 <
 Directories appear only when they contain changed paths and are expanded so
-their changed descendants are visible. Deleted files are included. Run the
-command again to restore the normal listing. It operates on the current Direct
-listing and refuses while the listing has unsaved edits. `:DirectGitDiff {ref}`
-switches the filter to another ref; invoking the same ref again turns the filter
-off.
+their changed descendants are visible. Deleted files are included. By default,
+staged, unstaged and untracked changes are excluded. `--include-uncommitted`
+unions staged, unstaged and non-ignored untracked paths with the committed
+diff.
+Run the command again with the same options to restore the normal listing; a
+different ref or option set switches the active filter. The command refuses
+while the target listing has unsaved edits.
 
 Jumping between changes ~
                                                      *direct.vim-git-navigate*
@@ -803,14 +808,6 @@ Opening listings ~
     List the working directory. Works from any buffer. `!` deliberately
     discards unsaved edits in the listing being refreshed.
 
-                                                              *:DirectGitDiff*
-:DirectGitDiff [ref]
-    Toggle the current listing to show committed paths changed from the merge
-    base of [ref] and `HEAD`. With no [ref], use `origin/HEAD`, then local
-    `main`, then local `master`. Refused while the listing has unsaved edits.
-    Invoke it again to turn the filter off. The buffer-local `gd` mapping invokes
-    this command.
-
 Editing ~
                                                                  *:DirectSync*
 :DirectSync
@@ -904,10 +901,20 @@ Git ~
     Switch to or from the view that shows only changed entries
     (|direct.vim-git-view|). Refused while the listing has unsaved edits.
 
-                                                            *:DirectGitStatus*
-:DirectGitStatus
-    Switch to the changed-entries view, and stay in it if it is already
-    active.
+                                                             *:DirectGitStatus*
+:DirectGitStatus [--dir {dir}]
+    Show only entries with Git status in a Direct listing for {dir}. The
+    default is the working directory. Works from any buffer and opens or reuses
+    the matching listing.
+
+                                                               *:DirectGitDiff*
+:DirectGitDiff [--ref {ref}] [--dir {dir}] [--include-uncommitted]
+    Toggle the branch-relative committed-change filter. Defaults to `origin/HEAD`,
+    then local `main`, then local `master`. Without `--dir`, uses the working
+    directory. The optional `--include-uncommitted` adds staged, unstaged and non-ignored
+    untracked paths. Works from any buffer and opens or reuses the matching
+    Direct listing. Refused while the target listing has unsaved edits. The
+    buffer-local `gd` mapping toggles the current listing's filter.
 
                                                            *:DirectNextChange*
 :DirectNextChange
@@ -1023,7 +1030,7 @@ The functions in `require('direct')` mirror the commands:
     `toggle_gitignore()`          |:DirectToggleGitIgnore|
     `toggle_git_status()`         |:DirectToggleGitStatus|
     `show_git_status()`           |:DirectGitStatus|
-    `git_diff([ref])`              |:DirectGitDiff|
+    `git_diff([ref], [include_uncommitted])` |:DirectGitDiff|
     `next_change()`               |:DirectNextChange|
     `previous_change()`           |:DirectPreviousChange|
     `next_directory()` `previous_directory()`   visible directory navigation

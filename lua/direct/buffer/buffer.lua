@@ -787,7 +787,7 @@ function M.show_git_status()
   return set_git_status_only(true)
 end
 
-local function set_git_diff_only(ref)
+local function set_git_diff_only(ref, include_uncommitted)
   local bufnr = vim.api.nvim_get_current_buf()
   if ref ~= nil and type(ref) ~= 'string' then
     local reason = 'Git ref must be a string'
@@ -806,12 +806,19 @@ local function set_git_diff_only(ref)
     return nil, reason
   end
 
-  local turning_off = state.view_git_diff_only
-    and (ref == nil or vim.trim(ref) == state.git_diff_snapshot.ref)
+  local active_snapshot = type(state.git_diff_snapshot) == 'table'
+    and state.git_diff_snapshot or nil
+  local same_ref = ref == nil
+    or (active_snapshot and vim.trim(ref) == active_snapshot.ref)
+  local same_uncommitted = include_uncommitted == nil
+    or (active_snapshot and include_uncommitted == active_snapshot.include_uncommitted)
+  local turning_off = state.view_git_diff_only and same_ref and same_uncommitted
   local snapshot = false
   if not turning_off then
     local err
-    snapshot, err = git.compare_snapshot(state.root, ref)
+    snapshot, err = git.compare_snapshot(state.root, ref, {
+      include_uncommitted = include_uncommitted == true,
+    })
     if not snapshot then
       ui.notify('direct: cannot compare Git diff: ' .. tostring(err), vim.log.levels.ERROR)
       return nil, err
@@ -850,8 +857,8 @@ local function set_git_diff_only(ref)
   return listed
 end
 
-function M.toggle_git_diff(ref)
-  return set_git_diff_only(ref)
+function M.toggle_git_diff(ref, include_uncommitted)
+  return set_git_diff_only(ref, include_uncommitted)
 end
 
 -- Visible file/Git navigation and folding accessors live in navigation.lua.

@@ -171,12 +171,12 @@ H.describe('hidden and Git-ignore filtering', function()
     H.assert_false(contains(restored, '  changed-child.txt'),
       'toggling rebuilds the root and collapses old expansions')
 
-    pcall(vim.cmd, 'DirectGitStatus')
+    pcall(vim.cmd, 'DirectGitStatus --dir ' .. vim.fn.fnameescape(root))
     wait_git_status()
     local direct_status = H.buf_lines()
     H.assert_true(contains(direct_status, '    nested-change.txt'),
       'DirectGitStatus enters the filtered view with all folds expanded')
-    pcall(vim.cmd, 'DirectGitStatus')
+    pcall(vim.cmd, 'DirectGitStatus --dir ' .. vim.fn.fnameescape(root))
     H.assert_false(contains(H.buf_lines(), 'clean.txt'),
       'DirectGitStatus is idempotent rather than toggling the view off')
   end)
