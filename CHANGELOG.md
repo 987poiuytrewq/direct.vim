@@ -5,6 +5,8 @@ Notable changes to direct.vim are documented here. Versions follow
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-11
+
 ### Changed
 
 - Make `:DirectGitStatus` and `:DirectGitDiff` use the current listing when run
