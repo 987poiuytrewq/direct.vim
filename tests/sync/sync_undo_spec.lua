@@ -1419,6 +1419,11 @@ H.describe('sync with expanded children', function()
 
     H.assert_nil(ok, 'missing identity is not guessed from row position or spelling')
     H.assert_true(tostring(reason):find('identity', 1, true) ~= nil, tostring(reason))
+    H.assert_true(tostring(reason):find(':DirectList!', 1, true) ~= nil
+      and tostring(reason):find('redo the change', 1, true) ~= nil,
+      'the refusal gives a clear recovery path')
+    H.assert_false(tostring(reason):find('re-list this directory', 1, true) ~= nil,
+      'the refusal does not suggest a refresh that would discard the edits')
     H.assert_eq(vim.fn.readfile(vim.fs.joinpath(ws, 'a.txt')), { 'original' },
       'the filesystem is unchanged')
     H.assert_eq(history_lines('undo.log'), {}, 'no history is written')

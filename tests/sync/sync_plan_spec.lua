@@ -156,7 +156,7 @@ H.describe('sync: mixed root edits', function()
 
     H.assert_nil(ok, 'a changed edited source remains a conflict')
     H.assert_true(tostring(reason):find('old.txt', 1, true) ~= nil, tostring(reason))
-    H.assert_true(tostring(reason):find('re-list this directory', 1, true) ~= nil,
+    H.assert_true(tostring(reason):find(':DirectList!', 1, true) ~= nil,
       'the refusal explains how to recover')
     H.assert_eq(vim.uv.fs_stat(vim.fs.joinpath(ws, 'old.txt')).type, 'directory',
       'the external replacement remains untouched')

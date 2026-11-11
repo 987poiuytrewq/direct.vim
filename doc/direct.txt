@@ -263,10 +263,18 @@ written to history:
 
     - Invalid indentation, or a child without a parent directory.
     - Two rows with the same destination.
-    - A row whose original entry can no longer be identified.
-    - An expanded directory whose contents changed on disk since it was
-      listed.
+    - An edited, deleted or moved row whose original entry changed or vanished.
+    - An external entry that now occupies an edited row's destination.
+    - A row identity lost after text undo or redo. The refusal explains that the
+      edit cannot be safely identified; restore the marked state or use
+      |:DirectList| with `!` to discard it and redo the change.
     - A filter change that affects the save. See |direct.vim-filters|.
+
+Unrelated entries added, removed or replaced on disk after listing do not block
+a save, including inside expanded directories. A successful save re-lists and
+displays the current contents. Refusals name the conflicting source or
+destination and say whether to restore the source, choose another destination,
+or use |:DirectList| with `!` to discard an unidentifiable edit.
 
 Text undo of expansions ~
 
