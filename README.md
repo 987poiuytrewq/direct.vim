@@ -156,7 +156,7 @@ that behavior.
 
 ## Key mappings
 
-All mappings are buffer-local to direct listings, except the global `-`.
+Mappings are buffer-local to direct listings, except the global `-`.
 
 | Key              | Action                                              |
 |------------------|-----------------------------------------------------|
@@ -175,6 +175,7 @@ All mappings are buffer-local to direct listings, except the global `-`.
 | `gh`             | Show or hide dotfiles                               |
 | `gi`             | Toggle `.gitignore` filtering                       |
 | `gs`             | Toggle a view of changed files only                 |
+| `gd`             | Toggle committed changes against the default branch |
 | `]c` `[c`        | Next or previous changed entry                      |
 | `ga` `<leader>gu` `<leader>gr` | Stage, unstage, or confirm restore of the entry |
 
@@ -241,7 +242,7 @@ and unknown or invalid options are reported as errors instead of being silently
 ignored.
 
 `mappings` accepts action names such as `open`, `undo`, `redo`, `yank`,
-`paste`, `toggle_hidden`, `toggle_gitignore`, `git_add`, `next_change`,
+`paste`, `toggle_hidden`, `toggle_gitignore`, `git_add`, `git_diff`, `next_change`,
 `open_horizontal`, `open_vertical`, `open_tab`, `expand`, `collapse`, `toggle`,
 and their recursive variants. A non-empty key string overrides that action's
 default; `false` disables its physical default.
@@ -303,6 +304,13 @@ their contents, and deleted tracked files appear as protected rows so you can
 restore them.
 
 - `gs` shows only changed entries, with directories fully expanded.
+- `gd` (or `:DirectGitDiff [ref]`) toggles a filter showing committed paths
+  changed from the merge base of the target ref to `HEAD`. Without a ref, Direct
+  uses `origin/HEAD`, then local `main`, then local `master`. Staged and
+  unstaged changes are excluded. Directories are expanded to show their changed
+  descendants; deleted paths remain visible. Run it again to restore the normal
+  listing. The command works in a Direct listing and refuses while it has
+  unsaved edits.
 - `]c` / `[c` jump between changed entries.
 - `ga` stages the entry; `<leader>gu` unstages it.
 - `<leader>gr` asks before discarding tracked worktree changes under the entry.

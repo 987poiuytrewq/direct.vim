@@ -28,6 +28,7 @@ return function(context)
   local build_actions = context.build_actions
   local apply_snapshot = context.apply_snapshot
   local filter_git_status_lines = context.filter_git_status_lines
+  local filter_git_diff_lines = context.filter_git_diff_lines
   local is_dir_line = context.is_dir_line
   local is_real_directory = context.is_real_directory
   local hidden_descendant = context.hidden_descendant
@@ -253,6 +254,9 @@ local function sync_locked(self, options)
   if state.view_git_status_only then
     expected = filter_git_status_lines(self.root, expected, state.git_status)
   end
+  if state.view_git_diff_only then
+    expected = filter_git_diff_lines(self.root, expected, state.git_diff_snapshot)
+  end
   if state.collapse_single_entry_directories then
     local projected, _, _, project_err = collapse_single_entry_paths(self.root,
       expected, {
@@ -261,6 +265,8 @@ local function sync_locked(self, options)
         respect_gitignore = snapshot.respect_gitignore,
         status_only = state.view_git_status_only,
         git_status = state.git_status,
+        git_diff_only = state.view_git_diff_only,
+        git_diff = state.git_diff_snapshot,
       })
     if not projected then
       vim.bo[bufnr].modified = true

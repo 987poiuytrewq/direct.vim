@@ -294,6 +294,7 @@ H.describe('entry: direct-buffer guard', function()
       'toggle_gitignore',
       'toggle_git_status',
       'show_git_status',
+      'git_diff',
       'next_change', 'previous_change', 'next_file', 'previous_file',
       'sync', 'fold_all', 'unfold_all', 'undo', 'redo', 'reset_history', 'yank', 'paste',
       'paste_as', 'run', 'git', 'restore_git', 'trash_list', 'trash_restore', 'trash_empty' }

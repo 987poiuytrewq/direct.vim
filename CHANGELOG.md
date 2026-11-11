@@ -5,6 +5,11 @@ Notable changes to direct.vim are documented here. Versions follow
 
 ## [Unreleased]
 
+### Added
+
+- Add `:DirectGitDiff [ref]` (also mapped to `gd`) to toggle a listing filter for
+  committed changes from a branch's merge base to `HEAD`.
+
 ## [0.1.0] - 2026-11-09
 
 Initial tagged release.

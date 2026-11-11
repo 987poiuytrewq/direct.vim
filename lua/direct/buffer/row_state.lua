@@ -26,6 +26,7 @@ return function(context)
   local get_directory_snapshot = context.get_directory_snapshot
   local list_with_snapshot = context.list_with_snapshot
   local filter_git_status_lines = context.filter_git_status_lines
+  local filter_git_diff_lines = context.filter_git_diff_lines
   local ensure_git_snapshot = context.ensure_git_snapshot
   local indent_size = context.indent_size
   local path_identity = context.path_identity
@@ -236,13 +237,17 @@ function Buffer:expand(row)
     local git_snapshot = ensure_git_snapshot(state)
     local show_deleted = options.git.enabled and options.git.show_deleted ~= false
     local children, deleted_children = merge_deleted_entries(path, physical_children,
-      show_deleted and git_snapshot or nil, state.view_show_hidden)
+      show_deleted and git_snapshot or nil, state.view_show_hidden,
+      state.view_git_diff_only and state.git_diff_snapshot or nil)
     -- Keep an unfiltered snapshot for destructive sync preflight. Ignored names
     -- are hidden from the view but still make the directory non-empty.
     local known_children = rec.deleted_kind and {} or fs.read_dir_lines(path)
     state.known_children[rec.id] = known_children or vim.deepcopy(physical_children)
     if state.view_git_status_only then
       children = filter_git_status_lines(path, children, state.git_status)
+    end
+    if state.view_git_diff_only then
+      children = filter_git_diff_lines(path, children, state.git_diff_snapshot)
     end
     local materialized = {}
     for order, child_name in ipairs(children) do
