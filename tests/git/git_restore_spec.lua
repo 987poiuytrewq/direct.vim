@@ -1,6 +1,7 @@
 -- tests/git_restore_spec.lua -- confirmation and scope for worktree restores.
 local H = require('tests.support.harness')
 local git = require('direct.git')
+local trash = require('direct.trash')
 
 local function clean_buffers()
   pcall(vim.cmd, '%bwipeout!')
@@ -119,16 +120,37 @@ H.describe('Git worktree restore confirmation', function()
       'declining leaves the first file untouched')
     H.assert_eq(vim.fn.readfile(directory .. '/two.txt'), { 'two changed' },
       'declining leaves the second file untouched')
+    H.assert_eq(#trash.entries(), 0, 'declining does not create backups')
 
     vim.fn.confirm = function() return 1 end
+    local notifications = {}
+    local restore_notify = H.stub(vim, 'notify', function(message)
+      notifications[#notifications + 1] = tostring(message)
+      return true
+    end)
     local accepted, accept_err = pcall(vim.cmd, 'DirectGitRestore')
     vim.fn.confirm = original_confirm
-    H.assert_true(accepted, 'accepting starts the restore: ' .. tostring(accept_err))
-    H.assert_true(vim.wait(5000, function()
+    local restored = vim.wait(5000, function()
       local ok_one, one = pcall(vim.fn.readfile, directory .. '/one.txt')
       local ok_two, two = pcall(vim.fn.readfile, directory .. '/two.txt')
       return ok_one and ok_two and one[1] == 'one base' and two[1] == 'two base'
-    end), 'accepted restore resets the tracked files')
+    end)
+    local backups = trash.entries()
+    local backup_by_original = {}
+    for _, backup in ipairs(backups) do backup_by_original[backup.original] = backup end
+    local one_backup = backup_by_original[directory .. '/one.txt']
+    local two_backup = backup_by_original[directory .. '/two.txt']
+    local one_contents = one_backup and vim.fn.readfile(one_backup.path) or nil
+    local two_contents = two_backup and vim.fn.readfile(two_backup.path) or nil
+    restore_notify()
+    H.assert_true(accepted, 'accepting starts the restore: ' .. tostring(accept_err))
+    H.assert_true(restored, 'accepted restore resets the tracked files')
+    H.assert_eq(#backups, 2, 'every changed worktree file has a trash backup')
+    H.assert_eq(one_contents, { 'one changed' }, 'the first worktree contents are preserved in trash')
+    H.assert_eq(two_contents, { 'two changed' }, 'the second worktree contents are preserved in trash')
+    H.assert_true(table.concat(notifications, '\n'):find('pre-restore worktree copies saved', 1, true) ~= nil,
+      'the restore notification names the trash backup location: '
+        .. table.concat(notifications, '\n'))
     H.assert_eq(vim.fn.readfile(root .. '/outside.txt'), { 'outside changed' },
       'restore stays scoped to the selected directory')
     H.assert_not_nil(listing, 'the original listing object remains valid')

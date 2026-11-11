@@ -1,6 +1,6 @@
 # Spec: direct.vim improvements, second review
 
-**Status:** A1–A9 and A16–A21 are complete; A10–A15, A22 and A23 are proposed.
+**Status:** A1–A10 and A16–A21 are complete; A11–A15 and A22–A23 remain proposed.
 This replaces the first gap review, whose tasks (S1–S6, R1–R3, F1–F6, M1–M6)
 have all landed on `master`.
 
@@ -10,12 +10,9 @@ been reproduced in a running Neovim. Each task's first step is to write a
 failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
-**Last checked:** `origin/master` at `f4d214f` (11 November 2026). That check
-read the `v0.2.1` release (#110, #112, tagged at `06063c3`) and #113–#115 (trash
-retention, legacy trash metadata and the trash view). It confirmed A7–A9 in
-the code and added two tasks: A22 (the changelog lists unreleased trash
-changes under 0.2.1) and A23 (trash completion is expensive, and recovered
-entries get the wrong deletion time). A10–A15 are unchanged.
+**Last checked:** `origin/master` at `9267d57` (11 November 2026). That review
+added A22 and A23. A7–A9 are complete in #113–#115; A10 is addressed in this
+PR. A11–A15 and A22–A23 remain proposed.
 
 ## Conventions
 
@@ -65,7 +62,7 @@ Checked by reading the code at `d72b7ea`:
 | A7 | P3 | Complete | Stop trash retention from walking the whole trash on every save |
 | A8 | P3 | Complete | Fill in metadata for trash entries that don't have it |
 | A9 | P3 | Complete | Make `:DirectTrash` easier to use |
-| A10 | P3 | Proposed | Make Git worktree restore undoable |
+| A10 | P3 | Complete | Preserve worktree contents before Git restore |
 | A11 | P3 | Proposed | Let `DirectSyncPre` cancel a save, and add the missing events |
 | A12 | P3 | Proposed | Review default keys that shadow common user mappings |
 | A13 | P4 | Proposed | Widen lint, formatting and type-check coverage |
@@ -416,6 +413,14 @@ from the view restores the right entry and refreshes the view.
 
 ### A10 — Git worktree restore can't be undone (P3)
 
+**Status: COMPLETE (safe-backup fallback).** Before `:DirectGitRestore` runs,
+existing changed tracked entries are copied into trash with metadata. The
+notification gives backup IDs and original paths so users can restore them
+manually. This takes the spec's explicitly allowed smaller alternative; the
+operation is not added to `u`/`:DirectUndo`. Tests cover a confirmed directory
+restore, backup contents for every changed tracked file, and the location
+notification.
+
 **Problem.** `<leader>gr` / `:DirectGitRestore` asks first now, but the
 discarded worktree changes are gone for good. They aren't in direct.vim's
 history or the trash.
@@ -752,9 +757,9 @@ tests into identity-based ones).
 A1–A4 and A16 were released in `v0.2.0`; A5–A6 and A17–A21 were released in
 `v0.2.1`.
 
-A7–A9 are complete but not released.
+A7–A10 are complete but not released.
 
 1. A22, before the next release, so its notes are right.
 2. A23, which follows on from A8 and A9.
-3. A10–A15, in any order. A13's formatting-only commit is easiest when
-   nothing else is changing `lua/`.
+3. A11–A15, in any order. A13's formatting-only commit is easiest
+   when nothing else is changing `lua/`.

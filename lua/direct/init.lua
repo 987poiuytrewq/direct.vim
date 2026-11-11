@@ -14,6 +14,7 @@ local M = {}
 local buffer = require('direct.buffer.buffer')
 local register = require('direct.register')
 local history = require('direct.history.history')
+local action = require('direct.action.action')
 local config = require('direct.config')
 local ui = require('direct.ui')
 local constants = require('direct.constants')
@@ -37,6 +38,53 @@ local function paste_and_refresh(destination, name)
     )
     if not ok then ui.report_error('refresh the directory after pasting', refresh_err) end
   end)
+end
+
+local function worktree_backups(changes)
+  local directory, directory_err = paths.ensure_data_dir('trash')
+  if not directory then return nil, directory_err end
+  local backups = {}
+  for _, path in ipairs(changes) do
+    local stat = vim.uv.fs_lstat(path)
+    if stat then
+      local backup_path = action.first_free_trash(directory, path)
+      local copied, copy_err
+      if stat.type == 'file' then
+        copied, copy_err = fs.copy_file_exclusive(path, backup_path)
+      elseif stat.type == 'link' then
+        local target, read_err = vim.uv.fs_readlink(path)
+        if not target then return nil, 'could not read symlink ' .. path .. ': ' .. tostring(read_err), backups end
+        copied, copy_err = vim.uv.fs_symlink(target, backup_path)
+      elseif stat.type == 'directory' then
+        copied, copy_err = fs.copy_tree_exclusive(path, backup_path, {
+          require_complete = true,
+          recreate_symlinks = true,
+          verify_source = true,
+        })
+      else
+        return nil, 'cannot back up unsupported worktree entry: ' .. path, backups
+      end
+      if not copied then return nil, 'could not back up ' .. path .. ': ' .. tostring(copy_err), backups end
+      backups[#backups + 1] = {
+        id = fs.basename(backup_path),
+        path = backup_path,
+        original = path,
+      }
+      local metadata, metadata_err = action.write_trash_metadata(backup_path, path)
+      if not metadata then
+        return nil, 'backup exists at ' .. backup_path .. ' but metadata failed: ' .. tostring(metadata_err), backups
+      end
+    end
+  end
+  return backups
+end
+
+local function backup_list(backups)
+  local result = {}
+  for _, backup in ipairs(backups or {}) do
+    result[#result + 1] = backup.id .. ' (' .. backup.original .. ')'
+  end
+  return table.concat(result, ', ')
 end
 
 ---@param opts direct.Config|nil
@@ -459,6 +507,24 @@ function M.restore_git()
   if not restore_command then
     ui.notify('direct: cannot prepare Git restore: ' .. tostring(command_err), vim.log.levels.ERROR)
     return nil, command_err
+  end
+
+  local backups, backup_err, partial_backups = worktree_backups(changes)
+  if not backups then
+    local reason = 'cannot back up Git worktree changes: ' .. tostring(backup_err)
+    if partial_backups and #partial_backups > 0 then
+      reason = reason .. '; copies already saved in trash: ' .. backup_list(partial_backups)
+    end
+    ui.notify('direct: ' .. reason, vim.log.levels.ERROR)
+    return nil, reason
+  end
+  if #backups > 0 then
+    ui.notify(
+      'direct: pre-restore worktree copies saved in trash: '
+        .. backup_list(backups)
+        .. '; restore them manually if needed',
+      vim.log.levels.WARN
+    )
   end
 
   buffer.cancel_git_status()
