@@ -5,6 +5,21 @@ Notable changes to direct.vim are documented here. Versions follow
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve changed worktree contents in trash before `:DirectGitRestore`; report
+  backup IDs and original paths for manual recovery.
+- Limit automatic trash retention to one full scan per data directory per
+  Neovim session; `:DirectTrash` still forces a fresh pass.
+
+### Added
+
+- Add `:DirectTrash` completion for subcommands and IDs, plus confirmed restore
+  and close mappings in the trash view.
+- Recover original paths and entry types from history, with an estimated
+  deletion time, when listing older trash entries without metadata. These
+  entries can then be restored normally and considered for age-based retention.
+
 ## [0.2.1] - 2026-11-11
 
 ### Changed
@@ -17,8 +32,6 @@ Notable changes to direct.vim are documented here. Versions follow
 
 ### Fixed
 
-- Preserve changed worktree contents in trash before `:DirectGitRestore`; report
-  backup IDs and original paths for manual recovery.
 - Allow saves to proceed after unrelated external entries are added, removed or
   replaced at the root and in expanded directories, while preserving conflicts
   on edited sources and requested destinations. Clarify recovery after text undo
@@ -28,8 +41,6 @@ Notable changes to direct.vim are documented here. Versions follow
   a missing source makes undo/redo fail, explain how to drop that stack entry.
   Link paste/unpaste records to each created destination, including pasted
   directories, so deleting a pasted entry cannot leave its creator undoable.
-- Limit automatic trash retention to one full scan per data directory per
-  Neovim session; `:DirectTrash` still forces a fresh pass.
 - Preserve other windows showing a Direct listing when opening a file or
   navigating directories removes the source buffer.
 
@@ -37,11 +48,6 @@ Notable changes to direct.vim are documented here. Versions follow
 
 - Add `:DirectHistory drop [undo|redo]` to remove one irrecoverable top step,
   with completion for the command and stack direction.
-- Add `:DirectTrash` completion for subcommands and IDs, plus confirmed restore
-  and close mappings in the trash view.
-- Recover original paths and entry types from history, with an estimated
-  deletion time, when listing older trash entries without metadata. These
-  entries can then be restored normally and considered for age-based retention.
 
 ## [0.2.0] - 2026-11-11
 

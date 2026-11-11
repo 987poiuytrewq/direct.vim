@@ -24,6 +24,13 @@ jobs:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Check released changelog sections
+        if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'release')
+        run: |
+          python3 tests/test_changelog_release_gate.py
+          git fetch origin "+refs/heads/${GITHUB_BASE_REF}:refs/remotes/origin/${GITHUB_BASE_REF}" --depth=1
+          python3 scripts/check_changelog_released.py "origin/${GITHUB_BASE_REF}" HEAD
+
       - name: Install Lua and LuaRocks
         run: |
           sudo apt-get update

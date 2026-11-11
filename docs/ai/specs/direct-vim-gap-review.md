@@ -10,9 +10,9 @@ been reproduced in a running Neovim. Each task's first step is to write a
 failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
-**Last checked:** `origin/master` at `9267d57` (11 November 2026). That review
-added A22 and A23. A7–A9 are complete in #113–#115; A10 is addressed in this
-PR. A11–A15 and A22–A23 remain proposed.
+**Last checked:** `origin/master` at `857641f` (11 November 2026). That review
+added A22 and A23. A7–A9 are complete in #113–#115; A10 is complete in #116.
+A22 is addressed in this PR; A23 and A11–A15 remain proposed.
 
 ## Conventions
 
@@ -74,7 +74,7 @@ Checked by reading the code at `d72b7ea`:
 | A19 | P3 | Complete | Don't strand earlier history steps when a step is dropped |
 | A20 | P3 | Complete | Don't close other windows when a listing is removed |
 | A21 | P3 | Complete | Link paste steps to the entries they created when dropping history |
-| A22 | P4 | Proposed | Move unreleased trash changes out of the 0.2.1 changelog section |
+| A22 | P4 | Complete | Move unreleased trash changes out of the 0.2.1 changelog section |
 | A23 | P3 | Proposed | Make trash completion cheap, and date recovered entries sensibly |
 
 ## Safety
@@ -641,19 +641,26 @@ counts both steps, and undo afterwards doesn't fail on the paste.
 
 ### A22 — The changelog lists unreleased changes under 0.2.1 (P4)
 
-**Problem.** `v0.2.1` is tagged at `06063c3`. #113, #114 and #115 landed after
-that, but each added its entry to the `[0.2.1]` section of `CHANGELOG.md` (the
-retention scan limit, recovered trash metadata and the trash view), not to
+**Status: COMPLETE.** Moved post-tag entries from #113–#116 (A7–A10) out of
+`[0.2.1]` and into `[Unreleased]`. A CI check and unit tests now prevent
+pull requests from editing published release sections; the `release` label is
+the explicit exception for release PRs. Verified that the current released
+section matches `git show v0.2.1:CHANGELOG.md`.
+
+**Problem.** `v0.2.1` is tagged at `06063c3`. #113–#116 landed after that, but
+each added its entry to the `[0.2.1]` section of `CHANGELOG.md` (trash
+retention, legacy trash metadata, trash-view usability and Git restore backup), not to
 `[Unreleased]`. Anyone reading the changelog will think `v0.2.1` has them, and
 the next release's notes will leave them out. The README's release checklist
 already says to add entries under Unreleased.
 
-**Change.** Move those three entries to `[Unreleased]`. To catch this next
-time, add a CI check that fails when a change edits a released section of
-`CHANGELOG.md`, with a label to skip it for release PRs.
+**Change.** Move post-tag entries to `[Unreleased]`. Add a CI check that fails
+when a pull request edits a released section of `CHANGELOG.md`, with the
+`release` label as an explicit exception for release PRs.
 
-**Tests.** After the move, `git show v0.2.1:CHANGELOG.md` and the
-`[0.2.1]` section on `master` match.
+**Tests.** Unit tests allow changes under `[Unreleased]` and reject edits to a
+released section. After the move, `git show v0.2.1:CHANGELOG.md` and the
+`[0.2.1]` section on master match.
 
 ### A23 — Trash completion is expensive, and recovered entries get the wrong date (P3)
 
@@ -759,7 +766,6 @@ A1–A4 and A16 were released in `v0.2.0`; A5–A6 and A17–A21 were released i
 
 A7–A10 are complete but not released.
 
-1. A22, before the next release, so its notes are right.
-2. A23, which follows on from A8 and A9.
-3. A11–A15, in any order. A13's formatting-only commit is easiest
+1. A23, which follows on from A8 and A9.
+2. A11–A15, in any order. A13's formatting-only commit is easiest
    when nothing else is changing `lua/`.
