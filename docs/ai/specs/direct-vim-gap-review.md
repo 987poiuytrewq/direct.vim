@@ -1,8 +1,8 @@
 # Spec: direct.vim improvements, second review
 
-**Status:** A1–A3 and A16 are complete; A4 is partly done, and the rest remain
-proposed. This replaces the first gap review, whose tasks (S1–S6, R1–R3, F1–F6,
-M1–M6) have all landed on `master`.
+**Status:** A1–A4 and A16 are complete; A5–A15 and A17–A18 remain proposed.
+This replaces the first gap review, whose tasks (S1–S6, R1–R3, F1–F6, M1–M6)
+have all landed on `master`.
 
 **Source:** a second static review of `origin/master` at `d72b7ea`
 (November 2026). As before, the findings come from reading the code; none has
@@ -10,12 +10,10 @@ been reproduced in a running Neovim. Each task's first step is to write a
 failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
-**Last checked:** `origin/master` at `9266805` (11 November 2026). That check
-read every commit since `d72b7ea`: the directory-targeted Git views
-(`21129b3`), configurable buffer reuse (`197dc7b`), the paste fix (#99) and
-the bounded, cached Git-ignore snapshots (#100). It confirmed A1–A3 in the
-code, found A4 partly done, and added A16–A18. A5–A15 are unchanged by those
-commits.
+**Last checked:** `origin/master` at `f7e77a4` (11 November 2026). The review
+added A16–A18; A16 is now complete in #101. A4's release notes and checklist
+are prepared here, with the `v0.2.0` tag and GitHub release created after this
+PR is merged. A5–A15 and A17–A18 remain to be implemented.
 
 ## Conventions
 
@@ -59,7 +57,7 @@ Checked by reading the code at `d72b7ea`:
 | A1 | P1 | Complete | Stop `p` / `P` from discarding unsaved listing edits |
 | A2 | P2 | Complete | Stop Git-ignore filtering from blocking, and from walking the whole tree |
 | A3 | P2 | Complete | Don't fail the whole listing when one subfolder can't be read |
-| A4 | P2 | Partly done | Release what the README documents |
+| A4 | P2 | Complete | Release what the README documents |
 | A5 | P2 | Proposed | Let a save continue after unrelated changes on disk, without losing edits |
 | A6 | P2 | Proposed | Keep forced trash operations from leaving undo history stuck |
 | A7 | P3 | Proposed | Stop trash retention from walking the whole trash on every save |
@@ -437,12 +435,12 @@ Completion returns the options and a branch name.
 
 ### A4 — The tagged release lags the README (P2)
 
-**Status: PARTLY DONE** (checked at `9266805`). `CHANGELOG.md`'s Unreleased
-section now covers the paste fix, the Git-ignore work and the Git views. Still
-missing: Neovim 0.11.7 support, collapsed directory chains, the
-`vim.fn.confirm` fix, removal of LuaRocks packaging and the `buffers` option.
-There is still no tag after `v0.1.0`, so `version = '*'` users get none of
-this.
+**Status: COMPLETE.** Prepared `v0.2.0` release notes covering 0.11.7 support,
+collapsed chains, configurable buffers, Git diff, the WorkspaceEdit confirmation
+fix, LuaRocks removal, and A1–A3/A16 improvements. Added a release checklist to
+the README. The `v0.2.0` tag and GitHub release are created after this PR is
+merged. No changelog-only CI gate was added; the manual checklist keeps that
+policy lightweight until it proves necessary.
 
 **Problem.** The README tells lazy.nvim users to set `version = '*'`, which
 installs `v0.1.0`. That tag is at `3f1236f`, before Neovim 0.11 support, the
