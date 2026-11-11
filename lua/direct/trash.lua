@@ -9,6 +9,7 @@ local action = require('direct.action.action')
 local log = require('direct.log')
 
 local metadata_suffix = '.direct-trash.json'
+local retention_checked = {}
 
 local function step_word(count)
   return count == 1 and 'step' or 'steps'
@@ -123,7 +124,7 @@ function M.size_bytes()
 end
 
 function M.show()
-  local retained, retention_err = M.apply_retention()
+  local retained, retention_err = M.apply_retention({ force = true })
   if not retained and retention_err then
     ui.notify('direct: trash retention was skipped: ' .. tostring(retention_err),
       vim.log.levels.WARN)
@@ -279,9 +280,19 @@ local function empty_locked(force, references)
   return true, { removed = removed, protected = protected }
 end
 
-function M.apply_retention()
+function M.apply_retention(options)
+  options = options or {}
   local retention = require('direct.config').options.trash_retention
   if retention == false then return true end
+  local directory = trash_dir()
+  local cache_key = paths.canonical(directory)
+  if not options.force and retention_checked[cache_key] then
+    return true, { skipped = true }
+  end
+  -- Automatic retention is expensive because it measures the whole trash and
+  -- reads history references. Limit saves to one pass per data directory in
+  -- this Neovim session. DirectTrash passes force to provide an explicit scan.
+  retention_checked[cache_key] = true
   return history.with_trash_references(function(references)
     local entries, err = M.entries({ include_reserved = true })
     if not entries then return nil, err end

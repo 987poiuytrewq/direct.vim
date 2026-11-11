@@ -306,7 +306,9 @@ the affected paths are outside the current listing's directory.
 both to prune old, unreferenced trash entries; history-referenced entries are
 kept unless explicitly forced through `:DirectTrash! empty`. Forced restore or
 empty asks first when it would discard undo/redo steps that depend on the trash
-payload, and reports the number of affected steps.
+payload, and reports the number of affected steps. Automatic retention runs at
+most once per Neovim session and data directory; opening `:DirectTrash` forces
+a fresh retention pass before showing the entries.
 
 With `show_filetype_icons` enabled, file icons use bufferline.nvim's built-in
 basename-based nvim-web-devicons lookup. The dependency is optional; Direct uses

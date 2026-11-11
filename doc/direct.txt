@@ -722,6 +722,9 @@ trash_retention          `false` or a table (default: `false`)
     Optionally prune old, unreferenced trash entries. Set `max_age_days`,
     `max_size_bytes`, or both to positive integers. Entries referenced by undo
     or redo history are protected, even when a retention limit is exceeded.
+    Automatic retention runs at most once per Neovim session and data directory
+    during saves. Opening |:DirectTrash| forces a fresh retention pass; health
+    diagnostics still scan current trash contents when reporting its size.
 
                                                   *direct-directory_separator*
 directory_separator     `'/'` or `'\'` (default: the platform separator)

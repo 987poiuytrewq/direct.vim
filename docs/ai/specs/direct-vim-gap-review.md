@@ -1,6 +1,6 @@
 # Spec: direct.vim improvements, second review
 
-**Status:** A1–A6 and A16–A21 are complete; A7–A15 remain proposed.
+**Status:** A1–A7 and A16–A21 are complete; A8–A15 remain proposed.
 This replaces the first gap review, whose tasks (S1–S6, R1–R3, F1–F6, M1–M6)
 have all landed on `master`.
 
@@ -10,10 +10,9 @@ been reproduced in a running Neovim. Each task's first step is to write a
 failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
-**Last checked:** `origin/master` at `06063c3` (11 November 2026). That check
-read #110 (the `v0.2.1` release notes), verified the annotated `v0.2.1` tag
-and published GitHub release at this commit, and found no new task IDs. A7–A15
-remain proposed.
+**Last checked:** `origin/master` at `1089849` (11 November 2026). That check
+verified the `v0.2.1` release and found no new task IDs. A7 is addressed in
+this PR; A8–A15 remain proposed.
 
 ## Conventions
 
@@ -60,7 +59,7 @@ Checked by reading the code at `d72b7ea`:
 | A4 | P2 | Complete | Release what the README documents |
 | A5 | P2 | Complete | Let a save continue after unrelated changes on disk, without losing edits |
 | A6 | P2 | Complete | Keep forced trash operations from leaving undo history stuck |
-| A7 | P3 | Proposed | Stop trash retention from walking the whole trash on every save |
+| A7 | P3 | Complete | Stop trash retention from walking the whole trash on every save |
 | A8 | P3 | Proposed | Fill in metadata for trash entries that don't have it |
 | A9 | P3 | Proposed | Make `:DirectTrash` easier to use |
 | A10 | P3 | Proposed | Make Git worktree restore undoable |
@@ -327,6 +326,13 @@ message saying how to continue, and `gi` works. A second timed-out listing in
 the same session is still marked as unfiltered.
 
 ### A7 — Trash retention walks the whole trash after every save (P3)
+
+**Status: COMPLETE.** Automatic retention now scans a data directory at most
+once per Neovim session, rather than recursively sizing every trash entry on
+each successful save. Opening `:DirectTrash` forces a fresh retention pass, and
+health diagnostics continue to report current trash sizes. Regression tests
+count scans for a nested trash tree across repeated saves and verify that
+retention still prunes when it runs.
 
 **Problem.** When `trash_retention` is set, `Buffer:sync` and
 `Buffer:sync_async` (`lua/direct/buffer/sync.lua`, around lines 969 and 1005)
@@ -669,5 +675,5 @@ tests into identity-based ones).
 A1–A4 and A16 were released in `v0.2.0`; A5–A6 and A17–A21 were released in
 `v0.2.1`.
 
-1. Everything else, in any order. A13's formatting-only commit is easiest
+1. A8–A15, in any order. A13's formatting-only commit is easiest
    when nothing else is changing `lua/`.
