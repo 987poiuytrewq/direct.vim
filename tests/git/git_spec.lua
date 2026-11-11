@@ -192,6 +192,25 @@ H.describe('Git status display', function()
       'an initialized gitlink is recorded as a nested repository')
   end)
 
+  H.it('checks missing ignore destinations without hiding tracked entries', function()
+    local sb = H.sandbox()
+    local root = H.mkdir(sb.root, 'ignore-candidate-check')
+    H.mkfile(root, '.gitignore', '*.tmp\n')
+    H.mkfile(root, 'tracked.tmp', 'tracked')
+    init_repo(root)
+    git(root, 'add', '.gitignore')
+    git(root, 'add', '-f', 'tracked.tmp')
+    local snapshot, snapshot_err = git_status.ignore_snapshot(root)
+    H.assert_not_nil(snapshot, 'ignore snapshot is captured: ' .. tostring(snapshot_err))
+
+    local ignored, err = git_status.ignored_candidates(snapshot, {
+      root .. '/new.tmp', root .. '/new.txt', root .. '/tracked.tmp',
+    })
+    H.assert_not_nil(ignored, 'candidate ignore check succeeds: ' .. tostring(err))
+    H.assert_eq(ignored, { root .. '/new.tmp' },
+      'a missing ignored target is detected and a tracked ignored source is allowed')
+  end)
+
   H.it('stops repository-scoped Git operations after the guard outside Git', function()
     local sb = H.sandbox()
     local directory = H.mkdir(sb.root, 'not-a-repository')

@@ -424,11 +424,135 @@ H.describe('hidden and Git-ignore filtering', function()
 
     vim.api.nvim_buf_set_lines(0, -1, -1, false, { 'new.txt' })
     local ok, err = listing:sync()
-    H.assert_nil(ok, 'saving a listing captured without Git-ignore data is refused')
+    H.assert_true(ok, 'sync retries the ignore snapshot after Git is available')
+    H.assert_nil(err, 'the recovered ignore query has no error')
+    H.assert_true(H.exists(root, 'new.txt'), 'the visible edit is saved')
+  end)
+
+  H.it('retries a timed-out ignore snapshot when Git is available again', function()
+    require('direct.config').setup({ map_default_keys = false, respect_gitignore = true,
+      git = { enabled = false, timeout_ms = 40 } })
+    local sb = H.sandbox()
+    local root = H.mkdir(sb.root, 'recovering-ignore-repo')
+    H.mkfile(root, '.gitignore', '*.tmp\n')
+    H.mkfile(root, 'visible.txt', 'visible')
+    init_repo(root)
+
+    local original_system = vim.system
+    local timed_out = false
+    vim.system = function(argv, options, on_exit)
+      if not timed_out and vim.tbl_contains(argv, 'ls-files') then
+        timed_out = true
+        return {
+          wait = function() return { code = 124, signal = 9, stdout = '', stderr = '' } end,
+          kill = function() return true end,
+        }
+      end
+      return original_system(argv, options, on_exit)
+    end
+    local listing = require('direct').list(root)
+    vim.system = original_system
+    H.assert_not_nil(listing, 'initial timeout leaves a listing available')
+    H.assert_true(vim.b.direct_gitignore_timed_out, 'unfiltered state is visibly marked')
+    vim.api.nvim_buf_set_lines(0, -1, -1, false, { 'new.txt' })
+
+    H.assert_true(listing:sync(), 'sync retries the timed-out Git snapshot')
+    H.assert_true(H.exists(root, 'new.txt'), 'a safe, visible edit is saved')
+    H.assert_false(vim.b.direct_gitignore_timed_out, 'the indicator clears after a successful refresh')
+  end)
+
+  H.it('refuses a recovered save when an edited row would be Git-ignored', function()
+    require('direct.config').setup({ map_default_keys = false, respect_gitignore = true,
+      git = { enabled = false, timeout_ms = 40 } })
+    local sb = H.sandbox()
+    local root = H.mkdir(sb.root, 'edited-ignored-timeout-repo')
+    H.mkfile(root, '.gitignore', '*.tmp\n')
+    H.mkfile(root, 'ignored.tmp', 'ignored')
+    H.mkfile(root, 'visible.txt', 'visible')
+    init_repo(root)
+
+    local original_system = vim.system
+    local timed_out = false
+    vim.system = function(argv, options, on_exit)
+      if not timed_out and vim.tbl_contains(argv, 'ls-files') then
+        timed_out = true
+        return {
+          wait = function() return { code = 124, signal = 9, stdout = '', stderr = '' } end,
+          kill = function() return true end,
+        }
+      end
+      return original_system(argv, options, on_exit)
+    end
+    local listing = require('direct').list(root)
+    vim.system = original_system
+    H.assert_true(vim.b.direct_gitignore_timed_out, 'the initial listing is unfiltered')
+
+    local row = row_of(H.buf_lines(), 'ignored.tmp')
+    H.assert_not_nil(row, 'the timed-out listing includes the ignored entry')
+    vim.api.nvim_win_set_cursor(0, { row, 0 })
+    vim.api.nvim_feedkeys('cwrenamed.txt\27', 'xt', false)
+    H.capture_messages()
+    local ok, err = listing:sync()
+
+    H.assert_nil(ok, 'an edit to an entry now known to be ignored is refused')
+    H.assert_true(tostring(err):find('Git-ignored', 1, true) ~= nil,
+      'the refusal identifies the filtered entry')
+    H.assert_true(H.exists(root, 'ignored.tmp'), 'the ignored source stays on disk')
+    H.assert_false(H.exists(root, 'renamed.txt'), 'the rename does not run')
+    H.assert_true(vim.bo.modified, 'the edit stays available')
+  end)
+
+  H.it('keeps a repeated timeout visible, refuses save, and lets gi disable the filter', function()
+    require('direct.config').setup({ map_default_keys = false, respect_gitignore = true,
+      git = { enabled = false, timeout_ms = 40 } })
+    local sb = H.sandbox()
+    local root = H.mkdir(sb.root, 'persistent-timeout-ignore-repo')
+    H.mkfile(root, '.gitignore', '*.tmp\n')
+    H.mkfile(root, 'ignored.tmp', 'ignored')
+    H.mkfile(root, 'visible.txt', 'visible')
+    init_repo(root)
+    local original_system = vim.system
+    local timed_out_queries = 0
+    vim.system = function(argv, options, on_exit)
+      if vim.tbl_contains(argv, 'ls-files') then
+        timed_out_queries = timed_out_queries + 1
+        return {
+          wait = function() return { code = 124, signal = 9, stdout = '', stderr = '' } end,
+          kill = function() return true end,
+        }
+      end
+      return original_system(argv, options, on_exit)
+    end
+    H.capture_messages()
+    local listing = require('direct').list(root)
+    local warning_count = count_message(H.messages(), 'Git-ignore filtering timed out')
+    listing:list({ discard = true })
+    local marked_after_second_list = vim.b.direct_gitignore_timed_out
+    local namespace = vim.api.nvim_get_namespaces()['direct.git-ignore-timeout']
+
+    vim.api.nvim_buf_set_lines(0, -1, -1, false, { 'new.txt' })
+    local ok, err = listing:sync()
+    vim.system = original_system
+    H.assert_true(timed_out_queries >= 9,
+      'initial lists and save retry reach the fake Git timeout; calls=' .. timed_out_queries)
+    H.assert_true(marked_after_second_list, 'a second timed-out listing stays marked')
+    H.assert_true(namespace ~= nil
+      and #vim.api.nvim_buf_get_extmarks(0, namespace, 0, -1, {}) > 0,
+      'the timeout state is visible in the buffer, not only in :messages')
+    H.assert_eq(count_message(H.messages(), 'Git-ignore filtering timed out'), warning_count,
+      'the repeated timeout is still visible after the one-time warning')
+    H.assert_nil(ok, 'sync refuses while the retry also times out')
     H.assert_true(tostring(err):find('timed out', 1, true) ~= nil,
-      'sync explains that the ignore snapshot timed out')
-    H.assert_false(H.exists(root, 'new.txt'), 'a timed-out filter cannot authorize filesystem changes')
-    H.assert_true(vim.bo.modified, "the user's listing edit remains available")
+      'the refusal identifies the repeated timeout')
+    H.assert_notified('gi', vim.log.levels.ERROR)
+
+    local toggled = require('direct').toggle_gitignore()
+    H.assert_true(toggled, 'gi disables the timed-out filter without re-listing')
+    H.assert_true(vim.bo.modified, 'the current unsaved rows are kept')
+    H.assert_false(vim.b.direct_gitignore_timed_out, 'the unfiltered warning clears when filtering is disabled')
+    H.assert_true(contains(H.buf_lines(), 'ignored.tmp'), 'the displayed rows are unchanged')
+    H.assert_true(listing:sync(), 'the user can save after explicitly disabling the filter')
+    H.assert_true(H.exists(root, 'new.txt'), 'the edit is saved after gi')
   end)
 
   H.it('does not scan ignored directory trees while looking for nested repositories', function()

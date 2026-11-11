@@ -397,6 +397,7 @@ local row_state = require('direct.buffer.row_state')({
   row_path = row_path,
   recorded_row_text = recorded_row_text,
   set_directory_snapshot = set_directory_snapshot,
+  set_git_timeout_indicator = listing.set_git_timeout_indicator,
   get_directory_snapshot = get_directory_snapshot,
   list_with_snapshot = list_with_snapshot,
   filter_git_status_lines = filter_git_status_lines,
@@ -652,6 +653,7 @@ require('direct.buffer.list')({
   identity_is_duplicated = identity_is_duplicated,
   count_identity = count_identity,
   set_directory_snapshot = set_directory_snapshot,
+  set_git_timeout_indicator = listing.set_git_timeout_indicator,
   reconcile_undone_materialization = reconcile_undone_materialization,
   refresh_highlights = refresh_highlights,
   refresh_icons = refresh_icons,
@@ -774,12 +776,42 @@ end
 
 function M.toggle_gitignore()
   local bufnr = vim.api.nvim_get_current_buf()
+  local state = states[bufnr]
   if vim.bo[bufnr].modified then
+    local only_unfiltered = state ~= nil and state.view_respect_gitignore == true
+    local saw_timeout = false
+    for _, snapshot in ipairs(state and state.directory_snapshots or {}) do
+      if snapshot.respect_gitignore then
+        if snapshot.git_timeout or snapshot.git_unfiltered then
+          saw_timeout = true
+        elseif snapshot.git_repo ~= false then
+          only_unfiltered = false
+          break
+        end
+      end
+    end
+    if only_unfiltered and saw_timeout then
+      state.view_respect_gitignore = false
+      state.view_respect_gitignore_override = true
+      for _, snapshot in ipairs(state.directory_snapshots or {}) do
+        if snapshot.respect_gitignore then
+          snapshot.respect_gitignore = false
+          snapshot.git_timeout = false
+          snapshot.git_timeout_error = nil
+          snapshot.git_unfiltered = false
+          snapshot.git_retry_snapshot = nil
+          snapshot.git = nil
+        end
+      end
+      listing.set_git_timeout_indicator(bufnr, state)
+      ui.notify('direct: Git-ignore filtering disabled; unsaved listing edits were preserved',
+        vim.log.levels.INFO)
+      return true
+    end
     local reason = 'cannot toggle Git-ignore filtering with unsaved edits; sync or discard them first'
     ui.notify('direct: ' .. reason, vim.log.levels.ERROR)
     return nil, reason
   end
-  local state = states[bufnr]
   if not state then
     local reason = 'direct listing state is unavailable; re-list this directory'
     ui.notify('direct: ' .. reason, vim.log.levels.ERROR)
@@ -950,6 +982,7 @@ require('direct.buffer.sync')({
   current_row_record = current_row_record,
   remove_expanded_subtree = remove_expanded_subtree,
   collapse_single_entry_paths = collapse_single_entry_paths,
+  set_git_timeout_indicator = listing.set_git_timeout_indicator,
 })
 
 -- Opening and row-path operations are kept separate from listing and sync.

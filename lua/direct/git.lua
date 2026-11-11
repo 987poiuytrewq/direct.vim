@@ -678,6 +678,11 @@ local function cache_store(key, entry)
   end
 end
 
+local function cache_invalidate_all()
+  ignore_snapshot_cache = {}
+  ignore_snapshot_cache_order = {}
+end
+
 local function git_environment()
   return {
     HOME = vim.env.HOME,
@@ -1210,7 +1215,9 @@ function M.ignore_snapshot_matches(snapshot, path, checked)
     return false, 'Git repository context changed; re-list this directory'
   end
   checked = checked or {}
-  return matches_snapshot(snapshot, checked)
+  local matches, err = matches_snapshot(snapshot, checked)
+  if M.is_timeout(err) then cache_invalidate_all() end
+  return matches, err
 end
 
 local function inventory_for(snapshot, cache)
@@ -1245,7 +1252,10 @@ end
 function M.ignored_paths(snapshot, paths, cache)
   if not snapshot or #paths == 0 then return {} end
   local ignored, tracked, err = inventory_for(snapshot, cache)
-  if not ignored then return nil, err end
+  if not ignored then
+    if M.is_timeout(err) then cache_invalidate_all() end
+    return nil, err
+  end
   local scope_path = normalize(snapshot.scope_path or snapshot.root)
   local prefix = scope_path:gsub('/+$', '') .. '/'
   local result = {}
@@ -1259,6 +1269,67 @@ function M.ignored_paths(snapshot, paths, cache)
     end
   end
   return result
+end
+
+-- Check new or moved-to paths against the current ignore rules. Unlike
+-- ignored_paths(), this handles destinations that do not exist yet and hence
+-- are absent from `ls-files --ignored` inventories.
+function M.ignored_candidates(snapshot, candidates)
+  if not snapshot or type(candidates) ~= 'table' or #candidates == 0 then return {} end
+  local inventory_matches, inventory_err = M.ignored_paths(snapshot, candidates)
+  if not inventory_matches then return nil, inventory_err end
+  local ignored_by_path, result_paths = {}, {}
+  for _, path in ipairs(inventory_matches) do
+    local key = normalize(path)
+    ignored_by_path[key] = true
+    result_paths[#result_paths + 1] = path
+  end
+
+  local input, absolute_by_relative = {}, {}
+  for _, path in ipairs(candidates) do
+    local relative = relative_to_repo(snapshot.root, path)
+    if relative and relative ~= '' and not ignored_by_path[normalize(path)]
+      and not (snapshot.tracked and snapshot.tracked[relative]) then
+      relative = relative:gsub('\\', '/')
+      if path:sub(-1) == '/' or path:sub(-1) == '\\' then relative = relative .. '/' end
+      if not absolute_by_relative[relative] then
+        input[#input + 1] = relative
+        absolute_by_relative[relative] = normalize(path)
+        absolute_by_relative[relative:gsub('/+$', '')] = normalize(path)
+      end
+    end
+  end
+  if #input == 0 then return result_paths end
+
+  local timeout_ms = ignore_timeout_ms()
+  local process, start_err = start({ 'git', '-C', snapshot.root,
+    'check-ignore', '--no-index', '-z', '--stdin' }, table.concat(input, '\0') .. '\0')
+  if not process then return nil, start_err end
+  local ok, result = pcall(function() return process:wait(timeout_ms) end)
+  if not ok then return nil, tostring(result) end
+  if result.code == 124 then
+    cache_invalidate_all()
+    return nil, 'Git-ignore query timed out after ' .. timeout_ms .. ' ms'
+  end
+  if result.code == 1 then
+    table.sort(result_paths)
+    return result_paths
+  end
+  if result.code ~= 0 then
+    local err = result.stderr and result.stderr:gsub('%s+$', '') or ''
+    return nil, err ~= '' and err or 'git check-ignore failed'
+  end
+
+  local matched, seen = path_set(result.stdout), ignored_by_path
+  for relative in pairs(matched) do
+    local absolute = absolute_by_relative[relative]
+    if absolute and not seen[normalize(absolute)] then
+      result_paths[#result_paths + 1] = absolute
+      seen[normalize(absolute)] = true
+    end
+  end
+  table.sort(result_paths)
+  return result_paths
 end
 
 function M.status_for(snapshot, path)

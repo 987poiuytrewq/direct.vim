@@ -33,6 +33,7 @@ return function(context)
   local refresh_highlights = context.refresh_highlights
   local refresh_icons = context.refresh_icons
   local set_options = context.set_options
+  local set_git_timeout_indicator = context.set_git_timeout_indicator
   local start_git_status = context.start_git_status
   local collapse_single_entry_paths = context.collapse_single_entry_paths
 
@@ -407,6 +408,7 @@ function Buffer:list(options)
     return nil, seterr
   end
   states[bufnr] = state
+  set_git_timeout_indicator(bufnr, state)
   vim.b[bufnr].direct_text_undo_mode = false
   for row, item in ipairs(rendered) do
     set_row_mark(bufnr, row - 1, item.id)

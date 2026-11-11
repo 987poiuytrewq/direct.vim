@@ -8,8 +8,10 @@ Notable changes to direct.vim are documented here. Versions follow
 ### Fixed
 
 - Bound Git-ignore queries by `git.timeout_ms`; on timeout, keep the listing
-  available without filtering and refuse unsafe saves. Prune ignored/untracked
-  subtrees during nested-repository discovery and cache unchanged snapshots.
+  available without filtering, retry before save, and refuse edits to paths that
+  would be hidden. Mark timed-out listings and let `gi` disable the filter
+  without losing edits. Prune ignored/untracked subtrees during nested-repository
+  discovery and cache unchanged snapshots.
 - Refuse `p`, `P`, `:DirectPaste` without a directory, and `:DirectPasteAs` in
   a listing with unsaved edits, rather than pasting to disk and refreshing away
   those edits.
