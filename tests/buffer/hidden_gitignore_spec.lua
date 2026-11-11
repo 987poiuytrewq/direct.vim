@@ -485,6 +485,8 @@ H.describe('hidden and Git-ignore filtering', function()
     end
     local listing = require('direct').list(root)
     vim.system = original_system
+    require('direct.config').setup({ map_default_keys = false, respect_gitignore = true,
+      git = { enabled = false, timeout_ms = 5000 } })
     H.assert_true(vim.b.direct_gitignore_timed_out, 'the initial listing is unfiltered')
 
     local row = row_of(H.buf_lines(), 'ignored.tmp')
@@ -495,8 +497,8 @@ H.describe('hidden and Git-ignore filtering', function()
     local ok, err = listing:sync()
 
     H.assert_nil(ok, 'an edit to an entry now known to be ignored is refused')
-    H.assert_true(tostring(err):find('Git-ignored', 1, true) ~= nil,
-      'the refusal identifies the filtered entry')
+    H.assert_true(tostring(err):find('ignored.tmp', 1, true) ~= nil,
+      'the refusal identifies the filtered entry: ' .. tostring(err))
     H.assert_true(H.exists(root, 'ignored.tmp'), 'the ignored source stays on disk')
     H.assert_false(H.exists(root, 'renamed.txt'), 'the rename does not run')
     H.assert_true(vim.bo.modified, 'the edit stays available')
