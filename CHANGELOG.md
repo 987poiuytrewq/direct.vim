@@ -5,16 +5,18 @@ Notable changes to direct.vim are documented here. Versions follow
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-11
+
 ### Fixed
 
+- Avoid replacing the global `vim.fn.confirm` while applying LSP workspace edits.
+- Refuse `p`, `P`, `:DirectPaste` without a directory, and `:DirectPasteAs` in
+  a modified listing, preserving unsaved edits.
 - Bound Git-ignore queries by `git.timeout_ms`; on timeout, keep the listing
   available without filtering, retry before save, and refuse edits to paths that
   would be hidden. Mark timed-out listings and let `gi` disable the filter
   without losing edits. Prune ignored/untracked subtrees during nested-repository
   discovery and cache unchanged snapshots.
-- Refuse `p`, `P`, `:DirectPaste` without a directory, and `:DirectPasteAs` in
-  a listing with unsaved edits, rather than pasting to disk and refreshing away
-  those edits.
 
 ### Added
 
@@ -22,6 +24,13 @@ Notable changes to direct.vim are documented here. Versions follow
   latter can include staged, unstaged, and non-ignored untracked paths.
 - Add `:DirectGitDiff` filtering for committed changes from a branch's merge
   base to `HEAD`, toggled in the current listing with `gd`.
+- Add collapsed single-child directory chains, configurable buffer reuse and
+  open placement, and support for Neovim 0.11.7.
+
+### Changed
+
+- Remove LuaRocks packaging; install the plugin through Git-based plugin
+  managers or GitHub releases.
 
 ## [0.1.0] - 2026-11-09
 

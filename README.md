@@ -516,6 +516,16 @@ make coverage-summary  # writes coverage/summary.md
 CI runs the suite with coverage on Linux, macOS and Windows against Neovim
 0.11.7, and checks the demo tour, on every pull request.
 
+### Release checklist
+
+1. Add user-visible changes to the `Unreleased` section of
+   [`CHANGELOG.md`](CHANGELOG.md) and keep the README and help docs in sync.
+2. Merge the release PR, then create and push an annotated `vX.Y.Z` tag on the
+   resulting `master` commit.
+3. Publish a GitHub release for that tag using the matching changelog section.
+
+Version tags are the versions installed by lazy.nvim's `version = '*'`.
+
 ### Demo recording
 
 `make demo` records a scripted tour of direct.vim with
