@@ -1,5 +1,8 @@
 # Git-ignore performance benchmark
 
+> Historical pre-implementation baseline. Measurements for the current
+> implementation are in [Ignore snapshot approach comparison](ignore-snapshot-approaches.md).
+
 Date: 2026-11-04
 Worktree: `perf/performance` based on `origin/master` at `84d3261`
 Environment: macOS, Neovim 0.12.5, Apple Git 2.54.0, libgit2 1.9.7
