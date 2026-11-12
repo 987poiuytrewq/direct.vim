@@ -97,6 +97,13 @@ H.describe('Git worktree restore confirmation', function()
     local listing = require('direct').list(root)
     vim.api.nvim_win_set_cursor(0, { row_of('dir/'), 0 })
 
+    local git_post
+    local event_group = vim.api.nvim_create_augroup('direct_git_restore_event_spec', { clear = true })
+    vim.api.nvim_create_autocmd('User', {
+      group = event_group,
+      pattern = 'DirectGitRestorePost',
+      callback = function(args) git_post = vim.deepcopy(args.data) end,
+    })
     local prompts, original_confirm = {}, vim.fn.confirm
     vim.fn.confirm = function(message, buttons, default)
       prompts[#prompts + 1] = { message = message, buttons = buttons, default = default }
@@ -120,6 +127,7 @@ H.describe('Git worktree restore confirmation', function()
       'declining leaves the first file untouched')
     H.assert_eq(vim.fn.readfile(directory .. '/two.txt'), { 'two changed' },
       'declining leaves the second file untouched')
+    H.assert_nil(git_post, 'declining does not emit a restore post event')
     H.assert_eq(#trash.entries(), 0, 'declining does not create backups')
 
     vim.fn.confirm = function() return 1 end
@@ -135,6 +143,8 @@ H.describe('Git worktree restore confirmation', function()
       local ok_two, two = pcall(vim.fn.readfile, directory .. '/two.txt')
       return ok_one and ok_two and one[1] == 'one base' and two[1] == 'two base'
     end)
+    H.assert_true(vim.wait(5000, function() return git_post ~= nil end),
+      'DirectGitRestorePost follows command completion')
     local backups = trash.entries()
     local backup_by_original = {}
     for _, backup in ipairs(backups) do backup_by_original[backup.original] = backup end
@@ -151,9 +161,16 @@ H.describe('Git worktree restore confirmation', function()
     H.assert_true(table.concat(notifications, '\n'):find('pre-restore worktree copies saved', 1, true) ~= nil,
       'the restore notification names the trash backup location: '
         .. table.concat(notifications, '\n'))
+    H.assert_true(git_post and git_post.success, 'Git restore emits one successful post event')
+    H.assert_true(require('direct.fs').same_path(git_post.root, root)
+      and require('direct.fs').same_path(git_post.target, directory),
+      'Git restore event identifies the root and selected directory')
+    H.assert_eq(#git_post.changes, 2, 'Git restore event lists the restored tracked paths')
+    H.assert_eq(#git_post.backups, 2, 'Git restore event lists the trash backups')
     H.assert_eq(vim.fn.readfile(root .. '/outside.txt'), { 'outside changed' },
       'restore stays scoped to the selected directory')
     H.assert_not_nil(listing, 'the original listing object remains valid')
+    pcall(vim.api.nvim_del_augroup_by_id, event_group)
   end)
 
   H.it('does not prompt or discard a staged-only change', function()

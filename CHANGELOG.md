@@ -53,6 +53,8 @@ Notable changes to direct.vim are documented here. Versions follow
 
 ### Added
 
+- Let `DirectSyncPre` cancel a save, and emit post events for trash operations,
+  history reset and Git worktree restore.
 - Add `:DirectHistory drop [undo|redo]` to remove one irrecoverable top step,
   with completion for the command and stack direction.
 

@@ -279,7 +279,7 @@ function M.show()
     end
     local restored, restore_err
     if entry.purpose == 'git-restore-backup' then
-      restored, restore_err = M.put_back_git_backup(id)
+      restored, restore_err = require('direct').trash_restore(id, destination, true)
     else
       local prompt = string.format('Restore trash entry %s to %s?', id, destination)
       if vim.fn.confirm(prompt, '&Restore\n&Cancel', 2) ~= 1 then return end

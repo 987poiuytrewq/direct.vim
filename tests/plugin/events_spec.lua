@@ -173,4 +173,93 @@ H.describe('plugin User events', function()
       'the post event includes the planned actions')
     pcall(vim.api.nvim_del_augroup_by_id, group)
   end)
+
+  H.it('lets DirectSyncPre cancel without changing disk or clearing the listing edit', function()
+    pcall(vim.cmd, '%bwipeout!')
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    H.mkfile(ws, 'old.txt', { 'old' })
+    local api = require('direct')
+    api.list(ws)
+    local bufnr = vim.api.nvim_get_current_buf()
+    H.set_direct_rows(bufnr, { 'new.txt' })
+    local post
+    local group = vim.api.nvim_create_augroup('direct_sync_pre_cancel_spec', { clear = true })
+    vim.api.nvim_create_autocmd('User', {
+      group = group,
+      pattern = 'DirectSyncPre',
+      callback = function(args)
+        require('direct.events').cancel(args.data, 'test veto')
+      end,
+    })
+    vim.api.nvim_create_autocmd('User', {
+      group = group,
+      pattern = 'DirectSyncPost',
+      callback = function(args) post = vim.deepcopy(args.data) end,
+    })
+
+    local synced, sync_err = api.sync()
+
+    H.assert_nil(synced, 'the handler can refuse the save')
+    H.assert_true(tostring(sync_err):find('DirectSyncPre', 1, true) ~= nil,
+      'the refusal identifies the event')
+    H.assert_true(tostring(sync_err):find('test veto', 1, true) ~= nil,
+      'the refusal includes the handler reason')
+    H.assert_true(H.exists(ws, 'old.txt'), 'cancellation preserves the original file')
+    H.assert_false(H.exists(ws, 'new.txt'), 'cancellation applies no filesystem actions')
+    H.assert_buf_eq({ 'new.txt' }, bufnr, 'the listing edit stays visible')
+    H.assert_true(vim.bo[bufnr].modified, 'the listing remains modified')
+    H.assert_true(post ~= nil and not post.success and post.cancelled,
+      'DirectSyncPost reports the cancelled sync')
+    pcall(vim.api.nvim_del_augroup_by_id, group)
+  end)
+
+  H.it('emits DirectTrashPost and DirectHistoryResetPost with operation results', function()
+    pcall(vim.cmd, '%bwipeout!')
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local first = H.mkfile(ws, 'restore.txt', { 'restore' })
+    local second = H.mkfile(ws, 'empty.txt', { 'empty' })
+    local action = require('direct.action.action')
+    H.assert_true(action.Remove(first)['do'](), 'create a restorable trash entry')
+    H.assert_true(action.Remove(second)['do'](), 'create an emptyable trash entry')
+    local entries = require('direct.trash').entries()
+    local by_original = {}
+    for _, entry in ipairs(entries) do by_original[entry.original] = entry end
+    local seen = {}
+    local group = vim.api.nvim_create_augroup('direct_trash_events_spec', { clear = true })
+    for _, pattern in ipairs({ 'DirectTrashPost', 'DirectHistoryResetPost' }) do
+      local event_name = pattern
+      vim.api.nvim_create_autocmd('User', {
+        group = group,
+        pattern = event_name,
+        callback = function(args)
+          seen[#seen + 1] = { name = args.match, data = vim.deepcopy(args.data) }
+        end,
+      })
+    end
+
+    local restored = require('direct').trash_restore(by_original[first].id)
+    local emptied = require('direct').trash_empty()
+    local reset, backups = require('direct').reset_history()
+
+    H.assert_true(restored, 'trash restore succeeds')
+    H.assert_true(emptied, 'trash empty succeeds')
+    H.assert_true(reset, 'history reset succeeds')
+    H.assert_eq(#seen, 3, 'each operation emits one post event')
+    H.assert_eq(seen[1].name, 'DirectTrashPost', 'restore emits the trash post event')
+    H.assert_eq(seen[1].data.operation, 'restore', 'restore event names its operation')
+    H.assert_eq(seen[1].data.id, by_original[first].id, 'restore event carries the ID')
+    H.assert_true(seen[1].data.success, 'restore event reports success')
+    H.assert_nil(seen[1].data.error, 'successful restore has no error')
+    H.assert_eq(seen[2].data.operation, 'empty', 'empty event names its operation')
+    H.assert_true(seen[2].data.success, 'empty event reports success')
+    H.assert_eq(seen[2].data.removed, 1, 'empty event reports the removed count')
+    H.assert_nil(seen[2].data.error, 'successful empty has no error')
+    H.assert_eq(seen[3].name, 'DirectHistoryResetPost', 'history reset emits its post event')
+    H.assert_true(seen[3].data.success, 'history reset event reports success')
+    H.assert_eq(seen[3].data.backups, backups, 'history reset event includes backup files')
+    H.assert_nil(seen[3].data.error, 'successful history reset has no error')
+    pcall(vim.api.nvim_del_augroup_by_id, group)
+  end)
 end)

@@ -1160,20 +1160,30 @@ operations. In callbacks, event data is available as `args.data`:
       end,
     })
 <
-All events include `root` (an absolute path) and `actions` (an array). Action
-records have `name`, `src`, `dst`, and, for grouped actions, nested `actions`.
+Listing, sync, undo, redo and paste events include `root` (an absolute path)
+and `actions` (an array). Trash and history-reset events instead include the
+operation-specific fields listed below. Action records have `name`, `src`,
+`dst`, and, for grouped actions, nested `actions`.
 
     Event               When and additional data ~
     DirectListPost      After a successful list; actions is empty, `bufnr` is set.
     DirectSyncPre       After plan validation and before filesystem effects; includes `yanks` and `bufnr`.
-    DirectSyncPost      After sync and refresh; includes `applied`, `failed`, `yanks`, `success`, `error`, and `bufnr`.
+    DirectSyncPost      After a sync attempt (and refresh if applied); includes `applied`, `failed`, `yanks`, `success`, `error`, and `bufnr`.
     DirectUndoPost      After filesystem undo and listing refresh; includes `success` and `error`.
     DirectRedoPost      After filesystem redo and listing refresh; includes `success` and `error`.
     DirectPastePost     After paste completion; `root` is the destination and data includes `changed`, `entry`, `success`, and `error`.
+    DirectTrashPost     After trash restore/empty; includes `operation`, `success` and `error`, plus operation details.
+    DirectHistoryResetPost  After history reset; includes `success`, `backups` and `error`.
+    DirectGitRestorePost   After the Git restore command; includes `root`, `target`, `changes`, `backups`, `success` and `error`.
 
 Event data is copied before dispatch; editing it does not change Direct's
-operation. Keep `DirectSyncPre` handlers read-only. If one edits the listing,
-the sync is refused and the listing remains modified for review.
+operation. To cancel from `DirectSyncPre`, call
+`require('direct.events').cancel(args.data, 'reason')`. Direct refuses the save
+before yanks or filesystem effects, leaves the listing modified and emits a
+failed `DirectSyncPost`. `DirectSyncPre` and `DirectSyncPost` handlers run
+synchronously while the history lock is held; keep them fast and do not start
+another Direct filesystem or history operation. Editing the listing also
+refuses the sync and leaves it modified for review.
 
 ==============================================================================
 17. Data and safety                                          *direct.vim-data*
