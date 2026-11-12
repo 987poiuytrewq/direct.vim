@@ -47,6 +47,9 @@ require('direct').setup({
   map_default_keys = true,
   show_hidden = true,
   respect_gitignore = true,
+  -- Keep this tour's scripted directory navigation stable. The interactive
+  -- default is on; collapse behavior is covered separately by the specs.
+  collapse_single_entry_directories = false,
   indent_size = 2,
   show_folder_icons = true,
   show_file_icons = true,
