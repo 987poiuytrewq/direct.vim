@@ -182,6 +182,7 @@ Mappings are buffer-local to direct listings, except the global `-`.
 | `p` `P`          | Paste into the directory under the cursor           |
 | `gh`             | Show or hide dotfiles                               |
 | `gi`             | Toggle `.gitignore` filtering                       |
+| `gC`             | Toggle collapsing of single-child directory chains  |
 | `gs`             | Toggle a view of changed files only                 |
 | `gd`             | Toggle committed changes against the default branch |
 | `]c` `[c`        | Next or previous changed entry                      |
@@ -220,6 +221,7 @@ require('direct').setup({
   },
   show_hidden = true,                -- show dotfiles (toggle with `gh`)
   respect_gitignore = true,          -- hide Git-ignored entries (toggle with `gi`)
+  collapse_single_entry_directories = true, -- show `a/b/c/` chains as one row (toggle with `gC`)
   indent_size = 2,                   -- spaces per tree level (integer > 1)
   undo_confirm = 'elsewhere',        -- true, false, or confirm only outside this listing
   trash_retention = false,           -- or { max_age_days = 30, max_size_bytes = 1e9 }
@@ -481,6 +483,7 @@ distinguished from messages from Neovim and other plugins.
 | `:DirectFoldAll` / `:DirectUnfoldAll` | Collapse or expand everything              |
 | `:DirectToggleHidden`      | Show or hide dotfiles                                 |
 | `:DirectToggleGitIgnore`   | Toggle `.gitignore` filtering                         |
+| `:DirectToggleDirectoryCollapse` | Toggle collapsing of single-child directory chains |
 | `:DirectToggleGitStatus` / `:DirectGitStatus` | Toggle, or enter, the changed-only view |
 | `:DirectGitStatus [--dir {dir}]` | Filter the current listing, or target a directory |
 | `:DirectGitDiff [--ref {ref}] [--dir {dir}] [--include-uncommitted]` | Filter the current listing, or target a directory |

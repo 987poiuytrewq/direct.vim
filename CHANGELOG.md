@@ -7,6 +7,10 @@ Notable changes to direct.vim are documented here. Versions follow
 
 ### Changed
 
+- Collapse chains of single-child directories into one row, such as
+  `src/main/java/`, by default. Set `collapse_single_entry_directories = false`
+  to keep one row per directory.
+
 - Remove the legacy positional sync classifier; duplicate-row detection now
   happens in the identity-based sync plan.
 - Correct the CI description, remove an unused LuaRocks rockspec, and point the
@@ -30,6 +34,8 @@ Notable changes to direct.vim are documented here. Versions follow
 
 ### Added
 
+- Add `:DirectToggleDirectoryCollapse`, mapped to `gC`, to switch directory
+  collapsing for the current listing.
 - Let `DirectSyncPre` cancel a save, and emit post events for trash operations,
   history reset and Git worktree restore.
 - Add `:DirectTrash` completion for subcommands and IDs, plus confirmed restore

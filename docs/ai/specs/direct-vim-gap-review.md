@@ -1,6 +1,6 @@
 # Spec: direct.vim improvements, second review
 
-**Status:** A1–A24 are complete; A25 is proposed.
+**Status:** A1–A25 are complete; no proposed tasks remain.
 This replaces the first gap review, whose tasks (S1–S6, R1–R3, F1–F6, M1–M6)
 have all landed on `master`.
 
@@ -13,6 +13,7 @@ reproduced and drop the task.
 **Last checked:** `origin/master` at `e4f5ff4` (12 November 2026). That check
 read #95 (folder-chain collapsing on by default, with a `gC` toggle). The code
 is sound, but the README and changelog weren't updated, so it added A25.
+A25 was then done directly on `master` in the same session.
 
 ## Conventions
 
@@ -77,7 +78,7 @@ Checked by reading the code at `d72b7ea`:
 | A22 | P4 | Complete | Move unreleased trash changes out of the 0.2.1 changelog section |
 | A23 | P3 | Complete | Make trash completion cheap, and date recovered entries sensibly |
 | A24 | P3 | Complete | Let a Git-restore backup be put back safely from the trash view |
-| A25 | P4 | Proposed | Document collapsing being on by default, and the `gC` toggle |
+| A25 | P4 | Complete | Document collapsing being on by default, and the `gC` toggle |
 
 ## Safety
 
@@ -792,6 +793,13 @@ and the restored version is in the trash.
 
 ### A25 — Collapsing is on by default, but the README and changelog don't say so (P4)
 
+**Status: COMPLETE.** `CHANGELOG.md`'s Unreleased section now says, under
+Changed, that single-child directory chains collapse by default and how to turn
+that off, and under Added, that `:DirectToggleDirectoryCollapse` / `gC` switch it
+per listing. `README.md` lists `collapse_single_entry_directories = true` in its
+defaults block, `gC` in the key table and the command in the command table.
+Released changelog sections are unchanged.
+
 **Problem.** #95 changed `collapse_single_entry_directories` to default to
 `true` (`lua/direct/config.lua`), so every listing now shows single-child
 folder chains as one row such as `src/main/java/`. It also added
@@ -933,6 +941,6 @@ filesystem or history changes.
 A1–A4 and A16 were released in `v0.2.0`; A5–A6 and A17–A21 were released in
 `v0.2.1`.
 
-A7–A15 and A22–A24 are complete but not released.
-
-1. A25, before the next release, so its notes mention the new default.
+A7–A15 and A22–A25 are complete but not released. No proposed tasks remain;
+the next step is a release (`v0.2.2` or `v0.3.0`, since the collapsing default
+changes how listings look).
