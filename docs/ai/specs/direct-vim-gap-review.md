@@ -10,10 +10,9 @@ been reproduced in a running Neovim. Each task's first step is to write a
 failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
-**Last checked:** `origin/master` at `5cca23f` (12 November 2026). That check
-read #122 (cancelling saves from `DirectSyncPre`, and new events) and #124
-(default keymap clashes), and confirmed A11 and A12. It found no new tasks.
-A13–A15 are unchanged.
+**Last checked:** `origin/master` at `aa39535` (12 November 2026). That hourly
+review checked #122 and #124, confirmed A11 and A12, and found no new task IDs.
+A13–A15 remain proposed.
 
 ## Conventions
 
@@ -478,7 +477,7 @@ data.
 
 ### A12 — Some default keys shadow common user mappings (P3)
 
-**Status: COMPLETE.** Kept the key defaults and documented that `gd`,
+**Status: COMPLETE in #124.** Kept the key defaults and documented that `gd`,
 `<leader>gr`, and `<leader>gu` override existing mappings inside Direct
 listings. Added a per-action `mappings` example to move them and clarified that
 `map_default_keys = false` disables defaults while retaining explicit and
