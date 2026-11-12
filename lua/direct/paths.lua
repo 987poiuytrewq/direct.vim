@@ -20,39 +20,28 @@ M.separator = platform.separator
 
 function M.directory_separator()
   local config = package.loaded['direct.config']
-  return config and config.options.directory_separator
-    or M.separator
+  return config and config.options.directory_separator or M.separator
 end
 
-function M.is_directory_name(name)
-  return type(name) == 'string' and name:sub(-1) == M.directory_separator()
-end
+function M.is_directory_name(name) return type(name) == 'string' and name:sub(-1) == M.directory_separator() end
 
 function M.strip_directory_marker(name)
-  if M.is_directory_name(name) then
-    return name:sub(1, -2)
-  end
+  if M.is_directory_name(name) then return name:sub(1, -2) end
   return name
 end
 
-function M.mark_directory(name)
-  return tostring(name) .. M.directory_separator()
-end
+function M.mark_directory(name) return tostring(name) .. M.directory_separator() end
 
 function M.join_entry(root, name)
   local directory = M.is_directory_name(name)
   local component = M.strip_directory_marker(name)
   component = platform.path_component(component, M.directory_separator())
   local path = vim.fs.joinpath(root, component)
-  if directory and path:sub(-1) ~= M.separator then
-    path = path .. M.separator
-  end
+  if directory and path:sub(-1) ~= M.separator then path = path .. M.separator end
   return path
 end
 
-function M.strip_trailing_separator(path)
-  return platform.strip_trailing_separator(path)
-end
+function M.strip_trailing_separator(path) return platform.strip_trailing_separator(path) end
 
 -- A slash-normalized spelling for comparisons and URI-relative paths only.
 -- Filesystem calls should retain their native spelling.
@@ -89,10 +78,7 @@ function M.valid_utf8(value)
       i = i + 3
     elseif a >= 0xF0 and a <= 0xF4 then
       local b, c, d = value:byte(i + 1, i + 3)
-      if not b or not c or not d or c < 0x80 or c > 0xBF
-        or d < 0x80 or d > 0xBF then
-        return false
-      end
+      if not b or not c or not d or c < 0x80 or c > 0xBF or d < 0x80 or d > 0xBF then return false end
       if a == 0xF0 then
         if b < 0x90 or b > 0xBF then return false end
       elseif a == 0xF4 then
@@ -136,34 +122,27 @@ end
 function M.record_path(value)
   local is_directory = type(value) == 'string' and value:match('[/\\]$') ~= nil
   local result = M.canonical(M.root(value))
-  if is_directory and result ~= '/' and not result:match('^%a:/$') then
-    result = result .. '/'
-  end
+  if is_directory and result ~= '/' and not result:match('^%a:/$') then result = result .. '/' end
   return result
 end
 
 -- normalize does not absolutise, so abspath follows it; the result is not symlink-resolved (fs.same_path covers that).
 function M.root(input)
-  if input == nil or input == '' then
-    input = '.'
-  end
+  if input == nil or input == '' then input = '.' end
   return vim.fs.abspath(vim.fs.normalize(input))
 end
 
 function M.data_home()
   local xdg = vim.env.XDG_DATA_HOME
-  if xdg ~= nil and xdg ~= '' then
-    return vim.fs.normalize(xdg)
-  end
+  if xdg ~= nil and xdg ~= '' then return vim.fs.normalize(xdg) end
   local home = vim.env.HOME
   home = platform.home_directory(home)
-  if home ~= nil and home ~= '' then
-    return M.join(home, '.local', 'share')
-  end
+  if home ~= nil and home ~= '' then return M.join(home, '.local', 'share') end
   local fallback = vim.fn.stdpath('data')
   require('direct.ui').notify(
     'direct: neither $XDG_DATA_HOME nor $HOME is set; using ' .. fallback,
-    vim.log.levels.WARN)
+    vim.log.levels.WARN
+  )
   return fallback
 end
 
@@ -177,9 +156,7 @@ end
 function M.ensure_data_dir(name)
   local dir = M.data_dir_path(name)
   local ok, err = fs.mkdirp(dir)
-  if not ok then
-    return nil, err
-  end
+  if not ok then return nil, err end
   return dir
 end
 
@@ -190,27 +167,19 @@ M.data_dir = M.ensure_data_dir
 -- sha256 takes exactly one argument, hence the NUL join; accepts varargs or a single list.
 function M.digest(...)
   local paths = { ... }
-  if #paths == 1 and type(paths[1]) == 'table' then
-    paths = paths[1]
-  end
+  if #paths == 1 and type(paths[1]) == 'table' then paths = paths[1] end
   return sha256(table.concat(paths, '\0'))
 end
 
-function M.dirname(path)
-  return vim.fs.dirname(path)
-end
+function M.dirname(path) return vim.fs.dirname(path) end
 
 -- `vim.fs.basename('/a/b/')` is '' so a trailing slash is stripped first (a directory yank stores `dir1`, never '').
 function M.basename(path)
-  if path == nil then
-    return nil
-  end
+  if path == nil then return nil end
   local trimmed = M.strip_trailing_separator(path)
   return vim.fs.basename(trimmed)
 end
 
-function M.join(...)
-  return vim.fs.joinpath(...)
-end
+function M.join(...) return vim.fs.joinpath(...) end
 
 return M

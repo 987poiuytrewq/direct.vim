@@ -48,8 +48,7 @@ local function current_listing_root()
 end
 
 local function is_absolute(path)
-  return path:sub(1, 1) == '/' or path:match('^%a:[/\\]') ~= nil
-    or path:match('^[/\\][/\\]') ~= nil
+  return path:sub(1, 1) == '/' or path:match('^%a:[/\\]') ~= nil or path:match('^[/\\][/\\]') ~= nil
 end
 
 local function command_root(directory)
@@ -92,9 +91,7 @@ end
 local function completion_tokens(arg_lead, cmdline, cursor_pos)
   local line = tostring(cmdline or '')
   local before = line:sub(1, cursor_pos or #line)
-  if arg_lead ~= '' and before:sub(-#arg_lead) == arg_lead then
-    before = before:sub(1, #before - #arg_lead)
-  end
+  if arg_lead ~= '' and before:sub(-#arg_lead) == arg_lead then before = before:sub(1, #before - #arg_lead) end
   local previous = before:match('(%S+)%s*$')
   return previous
 end
@@ -119,8 +116,7 @@ local function directory_completions(arg_lead, cmdline, cursor_pos)
   local directory_part = normalized_lead:match('^(.*)/[^/]*$') or ''
   local name_prefix = normalized_lead:match('([^/]*)$') or ''
   local parent = directory_part == '' and base
-    or (is_absolute(directory_part) and paths.root(directory_part)
-      or paths.root(vim.fs.joinpath(base, directory_part)))
+    or (is_absolute(directory_part) and paths.root(directory_part) or paths.root(vim.fs.joinpath(base, directory_part)))
   local scan = vim.uv.fs_scandir(parent)
   if not scan then return {} end
 
@@ -149,8 +145,11 @@ local function ref_completions(arg_lead, cmdline, cursor_pos)
   local args = vim.split(line, '%s+', { trimempty = true })
   local root = command_root(option_value(args, 'dir'))
   local timeout = require('direct.config').options.git.timeout_ms
-  local ok, process = pcall(vim.system, { 'git', '-C', root, 'for-each-ref',
-    '--format=%(refname:short)', 'refs/heads', 'refs/remotes', 'refs/tags' }, { text = true })
+  local ok, process = pcall(
+    vim.system,
+    { 'git', '-C', root, 'for-each-ref', '--format=%(refname:short)', 'refs/heads', 'refs/remotes', 'refs/tags' },
+    { text = true }
+  )
   if not ok or not process then return {} end
   local waited, result = pcall(function() return process:wait(timeout) end)
   if not waited or not result or result.code ~= 0 then return {} end
@@ -171,8 +170,7 @@ local function complete(arg_lead, cmdline, cursor_pos, allowed)
   if lead:match('^%-%-dir=') or completion_tokens(lead, cmdline, cursor_pos) == '--dir' then
     return directory_completions(lead, cmdline, cursor_pos)
   end
-  if allowed.ref and (lead:match('^%-%-ref=')
-      or completion_tokens(lead, cmdline, cursor_pos) == '--ref') then
+  if allowed.ref and (lead:match('^%-%-ref=') or completion_tokens(lead, cmdline, cursor_pos) == '--ref') then
     return ref_completions(lead, cmdline, cursor_pos)
   end
   if lead:sub(1, 2) == '--' or lead == '' then
@@ -185,13 +183,13 @@ local function complete(arg_lead, cmdline, cursor_pos, allowed)
   return {}
 end
 
-function M.complete_status(arg_lead, cmdline, cursor_pos)
-  return complete(arg_lead, cmdline, cursor_pos, { dir = true })
-end
+function M.complete_status(arg_lead, cmdline, cursor_pos) return complete(arg_lead, cmdline, cursor_pos, { dir = true }) end
 
 function M.complete_diff(arg_lead, cmdline, cursor_pos)
   return complete(arg_lead, cmdline, cursor_pos, {
-    ref = true, dir = true, include_uncommitted = true,
+    ref = true,
+    dir = true,
+    include_uncommitted = true,
   })
 end
 

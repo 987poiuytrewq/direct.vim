@@ -4,9 +4,7 @@ return function(M)
   -- Serialization
   -- ---------------------------------------------------------------------------
 
-  local function encode_string(value)
-    return vim.json.encode(value)
-  end
+  local function encode_string(value) return vim.json.encode(value) end
 
   local function encode_array(values)
     local encoded = {}
@@ -32,9 +30,7 @@ return function(M)
   local function group_is_connected(moves)
     if type(moves) ~= 'table' or #moves < 2 then return false end
     local endpoints, visited = {}, { [1] = true }
-    local function key(path)
-      return M.paths.canonical(path)
-    end
+    local function key(path) return M.paths.canonical(path) end
     for i, move in ipairs(moves) do
       endpoints[i] = { key(move.src), key(move.dst) }
     end
@@ -44,8 +40,12 @@ return function(M)
       for i, candidate in ipairs(endpoints) do
         if not visited[i] then
           for j in pairs(visited) do
-            if candidate[1] == endpoints[j][1] or candidate[1] == endpoints[j][2]
-              or candidate[2] == endpoints[j][1] or candidate[2] == endpoints[j][2] then
+            if
+              candidate[1] == endpoints[j][1]
+              or candidate[1] == endpoints[j][2]
+              or candidate[2] == endpoints[j][1]
+              or candidate[2] == endpoints[j][2]
+            then
               visited[i] = true
               changed = true
               break
@@ -66,9 +66,7 @@ return function(M)
       local valid, path_err = M.paths.validate_canonical_path(value)
       if not valid then reason = path_err end
     end
-    if reason then
-      return nil, 'cannot serialize action: ' .. reason .. ': ' .. tostring(value)
-    end
+    if reason then return nil, 'cannot serialize action: ' .. reason .. ': ' .. tostring(value) end
     return encode_string(M.paths.record_path(value))
   end
 
@@ -91,17 +89,19 @@ return function(M)
     end
     local moves = {}
     for _, member in ipairs(members) do
-      if type(member) ~= 'table' or member.name ~= 'mv'
-        or type(member.src) ~= 'string' or type(member.dst) ~= 'string' then
+      if
+        type(member) ~= 'table'
+        or member.name ~= 'mv'
+        or type(member.src) ~= 'string'
+        or type(member.dst) ~= 'string'
+      then
         return nil, 'cannot serialize group: only move actions can be grouped'
       end
       local move, err = encoded_move(member.src, member.dst)
       if not move then return nil, err end
       moves[#moves + 1] = move
     end
-    if not group_is_connected(members) then
-      return nil, 'cannot serialize group: moves are not interlinked'
-    end
+    if not group_is_connected(members) then return nil, 'cannot serialize group: moves are not interlinked' end
     return encode_object({
       { 'op', encode_string('g') },
       { 'moves', '[' .. table.concat(moves, ',') .. ']' },
@@ -199,9 +199,7 @@ return function(M)
       fields = { 'src', 'dst' },
       name_lists = true,
       record_fields = { 'op', 'src', 'dst', 'src_names', 'dst_names' },
-      deserialize = function(record)
-        return M.Paste(record.src, record.dst, record.src_names, record.dst_names)
-      end,
+      deserialize = function(record) return M.Paste(record.src, record.dst, record.src_names, record.dst_names) end,
       reverse = function(action)
         local src_names, dst_names = M.split_pairs(action.renames)
         return M.Unpaste(action.dst, action.src, dst_names, src_names)
@@ -211,9 +209,7 @@ return function(M)
       fields = { 'src', 'dst' },
       name_lists = true,
       record_fields = { 'op', 'src', 'dst', 'src_names', 'dst_names' },
-      deserialize = function(record)
-        return M.Unpaste(record.src, record.dst, record.src_names, record.dst_names)
-      end,
+      deserialize = function(record) return M.Unpaste(record.src, record.dst, record.src_names, record.dst_names) end,
       reverse = function(action)
         local src_names, dst_names = M.split_pairs(action.renames)
         return M.Paste(action.dst, action.src, dst_names, src_names)
@@ -229,8 +225,11 @@ return function(M)
         end
         local members = {}
         for _, move in ipairs(record.moves) do
-          if not object_has_exact_fields(move, { src = true, dst = true })
-            or type(move.src) ~= 'string' or type(move.dst) ~= 'string' then
+          if
+            not object_has_exact_fields(move, { src = true, dst = true })
+            or type(move.src) ~= 'string'
+            or type(move.dst) ~= 'string'
+          then
             return nil, 'invalid group record: each move needs src and dst strings'
           end
           members[#members + 1] = M.Move(move.src, move.dst)
@@ -241,14 +240,10 @@ return function(M)
         local members = {}
         for i = #(action.actions or {}), 1, -1 do
           local rev, err = M.reverse_action(action.actions[i])
-          if not rev then
-            return nil, err
-          end
+          if not rev then return nil, err end
           members[#members + 1] = rev
         end
-        if #members < 2 then
-          return nil, 'no reversal for group: fewer than two actions'
-        end
+        if #members < 2 then return nil, 'no reversal for group: fewer than two actions' end
         return M.Group(members)
       end,
     },
@@ -281,24 +276,17 @@ return function(M)
     local expected = name
     kind.execute = function(action)
       if action._kind ~= expected then
-        return nil, 'action kind mismatch: expected ' .. expected
-          .. ', got ' .. tostring(action._kind)
+        return nil, 'action kind mismatch: expected ' .. expected .. ', got ' .. tostring(action._kind)
       end
-      if type(action._execute) ~= 'function' then
-        return nil, 'action has no executor: ' .. expected
-      end
+      if type(action._execute) ~= 'function' then return nil, 'action has no executor: ' .. expected end
       return action._execute()
     end
   end
 
   function M.execute(action)
-    if type(action) ~= 'table' then
-      return nil, 'invalid action'
-    end
+    if type(action) ~= 'table' then return nil, 'invalid action' end
     local kind = KINDS[action.name]
-    if kind == nil then
-      return nil, 'no executor for action: ' .. tostring(action.name)
-    end
+    if kind == nil then return nil, 'no executor for action: ' .. tostring(action.name) end
     return kind.execute(action)
   end
 
@@ -306,17 +294,13 @@ return function(M)
   -- changing their factory contract. Non-prompt actions execute immediately, so
   -- grouped moves retain their existing synchronous staging behavior.
   function M.execute_async(action, callback)
-    if type(callback) ~= 'function' then
-      return nil, 'execute_async requires a completion callback'
-    end
+    if type(callback) ~= 'function' then return nil, 'execute_async requires a completion callback' end
     local completed = false
     local function finish(ok, result, err)
       if completed then return end
       completed = true
       local called, callback_err = pcall(callback, ok, result, err)
-      if not called then
-        M.ui.report_error('finish the filesystem action', callback_err)
-      end
+      if not called then M.ui.report_error('finish the filesystem action', callback_err) end
     end
     if type(action) == 'table' and type(action._execute_async) == 'function' then
       local ok, err = pcall(action._execute_async, finish)
@@ -343,11 +327,13 @@ return function(M)
           for index = #completed, 1, -1 do
             local inverse, reverse_err = M.reverse_action(completed[index])
             local rolled, rollback_result, rollback_err
-            if inverse then rolled, rollback_result, rollback_err = pcall(M.execute, inverse) end
+            if inverse then
+              rolled, rollback_result, rollback_err = pcall(M.execute, inverse)
+            end
             if not inverse or not rolled or rollback_result == nil then
-              failure = failure .. '; batch rollback failed: '
-                .. tostring(reverse_err or (not rolled and rollback_result)
-                  or rollback_err or 'action failed')
+              failure = failure
+                .. '; batch rollback failed: '
+                .. tostring(reverse_err or (not rolled and rollback_result) or rollback_err or 'action failed')
             end
           end
           return nil, failure
@@ -369,8 +355,11 @@ return function(M)
         for index = #completed, 1, -1 do
           local inverse, reverse_err = M.reverse_action(completed[index])
           if not inverse then
-            finish(false, nil, tostring(original_err) .. '; batch rollback could not be planned: '
-              .. tostring(reverse_err))
+            finish(
+              false,
+              nil,
+              tostring(original_err) .. '; batch rollback could not be planned: ' .. tostring(reverse_err)
+            )
             return
           end
           inverses[#inverses + 1] = inverse
@@ -383,18 +372,19 @@ return function(M)
           end
           local inverse = inverses[index]
           index = index + 1
-          local started, start_err = M.execute_async(inverse,
-            function(ok, result, rollback_err)
-              if not ok or result == nil then
-                finish(false, nil, tostring(original_err) .. '; batch rollback failed: '
-                  .. tostring(rollback_err or 'action failed'))
-                return
-              end
-              next_inverse()
-            end)
+          local started, start_err = M.execute_async(inverse, function(ok, result, rollback_err)
+            if not ok or result == nil then
+              finish(
+                false,
+                nil,
+                tostring(original_err) .. '; batch rollback failed: ' .. tostring(rollback_err or 'action failed')
+              )
+              return
+            end
+            next_inverse()
+          end)
           if not started then
-            finish(false, nil, tostring(original_err) .. '; batch rollback failed: '
-              .. tostring(start_err))
+            finish(false, nil, tostring(original_err) .. '; batch rollback failed: ' .. tostring(start_err))
           end
         end
         next_inverse()
@@ -433,19 +423,11 @@ return function(M)
 
   -- serialize(action) -> a canonical JSON record with fixed key order | nil, err.
   function M.serialize(action)
-    if type(action) ~= 'table' or type(action.name) ~= 'string' then
-      return nil, 'cannot serialize action'
-    end
+    if type(action) ~= 'table' or type(action.name) ~= 'string' then return nil, 'cannot serialize action' end
     local kind = KINDS[action.name]
-    if kind == nil then
-      return nil, 'cannot serialize action'
-    end
-    if action._kind ~= action.name then
-      return nil, 'cannot serialize action: action kind mismatch'
-    end
-    if kind.serialize ~= nil then
-      return kind.serialize(action)
-    end
+    if kind == nil then return nil, 'cannot serialize action' end
+    if action._kind ~= action.name then return nil, 'cannot serialize action: action kind mismatch' end
+    if kind.serialize ~= nil then return kind.serialize(action) end
     local fields = { { 'op', encode_string(action.name) } }
     for _, field in ipairs(kind.fields) do
       local encoded, err = checked_string(action[field], field)
@@ -454,20 +436,14 @@ return function(M)
     end
     if kind.name_lists then
       local src_names, dst_names = M.split_pairs(action.renames)
-      if #src_names ~= #dst_names then
-        return nil, 'cannot serialize action: name arrays must have equal lengths'
-      end
+      if #src_names ~= #dst_names then return nil, 'cannot serialize action: name arrays must have equal lengths' end
       for _, name in ipairs(src_names) do
         local reason = M.entry_name_reason(name)
-        if reason then
-          return nil, 'cannot serialize action: ' .. reason .. ': ' .. tostring(name)
-        end
+        if reason then return nil, 'cannot serialize action: ' .. reason .. ': ' .. tostring(name) end
       end
       for _, name in ipairs(dst_names) do
         local reason = M.entry_name_reason(name)
-        if reason then
-          return nil, 'cannot serialize action: ' .. reason .. ': ' .. tostring(name)
-        end
+        if reason then return nil, 'cannot serialize action: ' .. reason .. ': ' .. tostring(name) end
       end
       fields[#fields + 1] = { 'src_names', encode_array(src_names) }
       fields[#fields + 1] = { 'dst_names', encode_array(dst_names) }
@@ -478,7 +454,9 @@ return function(M)
   local function duplicate_object_keys(json)
     local at = 1
     local function whitespace()
-      while json:sub(at, at):match('%s') do at = at + 1 end
+      while json:sub(at, at):match('%s') do
+        at = at + 1
+      end
     end
     local function string_token()
       local start = at
@@ -503,7 +481,10 @@ return function(M)
     local function parse_object()
       at = at + 1
       whitespace()
-      if json:sub(at, at) == '}' then at = at + 1; return true end
+      if json:sub(at, at) == '}' then
+        at = at + 1
+        return true
+      end
       local seen = {}
       while at <= #json do
         local key = string_token()
@@ -517,7 +498,10 @@ return function(M)
         if not ok then return nil, err end
         whitespace()
         local separator = json:sub(at, at)
-        if separator == '}' then at = at + 1; return true end
+        if separator == '}' then
+          at = at + 1
+          return true
+        end
         if separator ~= ',' then return nil, 'malformed object separator' end
         at = at + 1
         whitespace()
@@ -527,13 +511,19 @@ return function(M)
     local function parse_array()
       at = at + 1
       whitespace()
-      if json:sub(at, at) == ']' then at = at + 1; return true end
+      if json:sub(at, at) == ']' then
+        at = at + 1
+        return true
+      end
       while at <= #json do
         local ok, err = parse_value()
         if not ok then return nil, err end
         whitespace()
         local separator = json:sub(at, at)
-        if separator == ']' then at = at + 1; return true end
+        if separator == ']' then
+          at = at + 1
+          return true
+        end
         if separator ~= ',' then return nil, 'malformed array separator' end
         at = at + 1
         whitespace()
@@ -552,9 +542,7 @@ return function(M)
       local start = at
       while at <= #json do
         local char = json:sub(at, at)
-        if char == ',' or char == ']' or char == '}' or char:match('%s') then
-          break
-        end
+        if char == ',' or char == ']' or char == '}' or char:match('%s') then break end
         at = at + 1
       end
       if at == start then return nil, 'malformed JSON value' end
@@ -569,14 +557,14 @@ return function(M)
 
   local function exact_fields(record, keys)
     local expected = {}
-    for _, key in ipairs(keys) do expected[key] = true end
+    for _, key in ipairs(keys) do
+      expected[key] = true
+    end
     return object_has_exact_fields(record, expected)
   end
 
   local function validate_json_action(record, kind)
-    if not exact_fields(record, kind.record_fields) then
-      return nil, 'action record has unknown or missing keys'
-    end
+    if not exact_fields(record, kind.record_fields) then return nil, 'action record has unknown or missing keys' end
     if record.op ~= 'g' then
       for _, field in ipairs(kind.fields) do
         local valid, reason = M.paths.validate_canonical_path(record[field])
@@ -587,8 +575,7 @@ return function(M)
       end
     end
     if kind.name_lists then
-      if not is_array(record.src_names) or not is_array(record.dst_names)
-        or #record.src_names ~= #record.dst_names then
+      if not is_array(record.src_names) or not is_array(record.dst_names) or #record.src_names ~= #record.dst_names then
         return nil, 'name arrays must be arrays of equal length'
       end
       for _, names in ipairs({ record.src_names, record.dst_names }) do
@@ -598,13 +585,9 @@ return function(M)
         end
       end
     elseif record.op == 'g' then
-      if not is_array(record.moves) or #record.moves < 2 then
-        return nil, 'a group requires at least two move pairs'
-      end
+      if not is_array(record.moves) or #record.moves < 2 then return nil, 'a group requires at least two move pairs' end
       for _, move in ipairs(record.moves) do
-        if not exact_fields(move, { 'src', 'dst' }) then
-          return nil, 'a group move requires exactly src and dst'
-        end
+        if not exact_fields(move, { 'src', 'dst' }) then return nil, 'a group move requires exactly src and dst' end
         for _, field in ipairs({ 'src', 'dst' }) do
           local valid, reason = M.paths.validate_canonical_path(move[field])
           if valid and M.paths.record_path(move[field]) ~= move[field] then
@@ -613,21 +596,15 @@ return function(M)
           if reason then return nil, reason .. ': ' .. tostring(move[field]) end
         end
       end
-      if not group_is_connected(record.moves) then
-        return nil, 'group moves are not interlinked'
-      end
+      if not group_is_connected(record.moves) then return nil, 'group moves are not interlinked' end
     elseif record.op == 'batch' then
       if not is_array(record.actions) or #record.actions < 2 then
         return nil, 'a batch requires at least two actions'
       end
       for _, nested in ipairs(record.actions) do
-        if type(nested) ~= 'string' then
-          return nil, 'a batch action must be a serialized action record'
-        end
+        if type(nested) ~= 'string' then return nil, 'a batch action must be a serialized action record' end
         local decoded, decode_err = M.deserialize(nested)
-        if not decoded then
-          return nil, 'invalid batch action: ' .. tostring(decode_err)
-        end
+        if not decoded then return nil, 'invalid batch action: ' .. tostring(decode_err) end
       end
     end
     return true
@@ -636,42 +613,22 @@ return function(M)
   -- deserialize(line) -> action, or nil, err. Re-encoding the parsed record and
   -- comparing bytes enforces canonical key order, escaping, and whitespace.
   function M.deserialize(line)
-    if type(line) ~= 'string' or line == '' then
-      return nil, 'invalid action line'
-    end
-    if not M.paths.valid_utf8(line) then
-      return nil, 'invalid action line: invalid UTF-8'
-    end
+    if type(line) ~= 'string' or line == '' then return nil, 'invalid action line' end
+    if not M.paths.valid_utf8(line) then return nil, 'invalid action line: invalid UTF-8' end
     local scan_ok, scan_err = duplicate_object_keys(line)
-    if not scan_ok then
-      return nil, 'invalid action line: ' .. tostring(scan_err)
-    end
+    if not scan_ok then return nil, 'invalid action line: ' .. tostring(scan_err) end
     local decoded_ok, record = pcall(vim.json.decode, line)
-    if not decoded_ok or type(record) ~= 'table' then
-      return nil, 'invalid action line: malformed JSON'
-    end
-    if type(record.op) ~= 'string' then
-      return nil, 'invalid action line: op must be a string'
-    end
+    if not decoded_ok or type(record) ~= 'table' then return nil, 'invalid action line: malformed JSON' end
+    if type(record.op) ~= 'string' then return nil, 'invalid action line: op must be a string' end
     local kind = KINDS[record.op]
-    if kind == nil then
-      return nil, 'unknown action name: ' .. tostring(record.op)
-    end
+    if kind == nil then return nil, 'unknown action name: ' .. tostring(record.op) end
     local valid, validation_err = validate_json_action(record, kind)
-    if not valid then
-      return nil, 'invalid action line: ' .. tostring(validation_err)
-    end
+    if not valid then return nil, 'invalid action line: ' .. tostring(validation_err) end
     local action, build_err = kind.deserialize(record)
-    if not action then
-      return nil, build_err or 'invalid action line'
-    end
+    if not action then return nil, build_err or 'invalid action line' end
     local canonical, encode_err = M.serialize(action)
-    if not canonical then
-      return nil, encode_err
-    end
-    if canonical ~= line then
-      return nil, 'invalid action line: non-canonical JSON'
-    end
+    if not canonical then return nil, encode_err end
+    if canonical ~= line then return nil, 'invalid action line: non-canonical JSON' end
     return action
   end
 
@@ -692,13 +649,9 @@ return function(M)
   -- keeps the pair a true involution (undo -> redo -> undo reproduces the original
   -- record), which is what makes the redo log entry byte-identical for a swap.
   function M.reverse_action(action)
-    if type(action) ~= 'table' then
-      return nil, 'invalid action'
-    end
+    if type(action) ~= 'table' then return nil, 'invalid action' end
     local kind = KINDS[action.name]
-    if kind ~= nil then
-      return kind.reverse(action)
-    end
+    if kind ~= nil then return kind.reverse(action) end
     return nil, 'no reversal for action: ' .. tostring(action.name)
   end
 
@@ -709,9 +662,7 @@ return function(M)
     if type(action) ~= 'table' then
       local err
       action, err = M.deserialize(line)
-      if not action then
-        return nil, err or 'invalid action line'
-      end
+      if not action then return nil, err or 'invalid action line' end
     end
     return M.reverse_action(action)
   end

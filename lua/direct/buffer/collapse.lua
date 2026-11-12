@@ -36,9 +36,7 @@ return function(deps)
         end
       end
       if options.status_only then children = filter_git_status_lines(directory, children, options.git_status) end
-      if options.git_diff_only then
-        children = filter_git_diff_lines(directory, children, options.git_diff)
-      end
+      if options.git_diff_only then children = filter_git_diff_lines(directory, children, options.git_diff) end
       return children
     end
 

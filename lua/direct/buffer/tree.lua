@@ -37,34 +37,25 @@ return function(deps)
       -- restored by :redo become an untracked root action after its snapshot was
       -- rejected or its records were discarded.
       for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1, {})) do
-        if not state.rows[mark[1]] then
-          return nil, 'child identity marks are invalid or duplicated'
-        end
+        if not state.rows[mark[1]] then return nil, 'child identity marks are invalid or duplicated' end
       end
       local visible_roots = {}
       local row_ids = row_ids_by_row(bufnr)
       for row, line in ipairs(lines) do
         local id = row_ids[row - 1]
         local rec = id and state.rows[id]
-        if not (rec and rec.deleted_kind) then
-          visible_roots[#visible_roots + 1] = line
-        end
+        if not (rec and rec.deleted_kind) then visible_roots[#visible_roots + 1] = line end
       end
       return visible_roots
     end
     local mark_rows, seen_id, seen_row, invalid_child_ids = {}, {}, {}, {}
-    for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1,
-        { details = true })) do
+    for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1, { details = true })) do
       local id, row, details = mark[1], mark[2], mark[4] or {}
       local rec = state.rows[id]
-      if not rec then
-        return nil, 'child identity marks are invalid or duplicated'
-      end
+      if not rec then return nil, 'child identity marks are invalid or duplicated' end
       if details.invalid then
         if rec.kind == 'child' then
-          if invalid_child_ids[id] then
-            return nil, 'child identity marks are invalid or duplicated'
-          end
+          if invalid_child_ids[id] then return nil, 'child identity marks are invalid or duplicated' end
           invalid_child_ids[id] = true
         end
         -- Root identities may be invalidated by deletion or rename. Preserve that
@@ -72,8 +63,7 @@ return function(deps)
       else
         local other_id = seen_row[row]
         local other = other_id and state.rows[other_id]
-        if seen_id[id] or (other_id and (rec.kind == 'child'
-            or other and other.kind == 'child')) then
+        if seen_id[id] or (other_id and (rec.kind == 'child' or other and other.kind == 'child')) then
           return nil, 'child identity marks are invalid or duplicated'
         end
         seen_id[id], seen_row[row] = true, id
@@ -85,9 +75,7 @@ return function(deps)
     local missing_children = 0
     for _, rec in ipairs(expected_order) do
       if mark_rows[rec.id] == nil then
-        if not invalid_child_ids[rec.id] then
-          return nil, 'child identity marks are invalid or duplicated'
-        end
+        if not invalid_child_ids[rec.id] then return nil, 'child identity marks are invalid or duplicated' end
         missing_children = missing_children + 1
       end
     end
@@ -117,10 +105,14 @@ return function(deps)
         if not expansion then return true end
         local previous_order = 0
         for _, child in ipairs(expansion.children) do
-          if child.kind ~= 'child' or child.parent ~= parent_id
-            or state.rows[child.id] ~= child or child.order <= previous_order
+          if
+            child.kind ~= 'child'
+            or child.parent ~= parent_id
+            or state.rows[child.id] ~= child
+            or child.order <= previous_order
             or child.depth ~= parent_depth + 1
-            or child.text ~= string.rep(' ', indent_size() * child.depth) .. child.name then
+            or child.text ~= string.rep(' ', indent_size() * child.depth) .. child.name
+          then
             return false
           end
           previous_order = child.order
@@ -152,9 +144,7 @@ return function(deps)
                 break
               end
             end
-            if occupied_by_root then
-              return nil, 'child order no longer follows its owning root row'
-            end
+            if occupied_by_root then return nil, 'child order no longer follows its owning root row' end
             local existing_row = mark_rows[child.id]
             if existing_row ~= nil and existing_row ~= row then
               return nil, 'child row identity moved from its materialization baseline'
@@ -168,14 +158,10 @@ return function(deps)
         end
       end
       for id in pairs(invalid_child_ids) do
-        if not expected_child_ids[id] then
-          return nil, 'child identity marks are invalid or duplicated'
-        end
+        if not expected_child_ids[id] then return nil, 'child identity marks are invalid or duplicated' end
       end
       for _, rec in ipairs(expected_order) do
-        if mark_rows[rec.id] == nil then
-          return nil, 'child rows were added, deleted, reordered, or lost identity'
-        end
+        if mark_rows[rec.id] == nil then return nil, 'child rows were added, deleted, reordered, or lost identity' end
       end
     end
 
@@ -185,9 +171,7 @@ return function(deps)
       if row == nil or row <= previous_row then
         return nil, 'child rows were added, deleted, reordered, or lost identity'
       end
-      if lines[row + 1] ~= rec.text then
-        return nil, 'child row text differs from its materialization baseline'
-      end
+      if lines[row + 1] ~= rec.text then return nil, 'child row text differs from its materialization baseline' end
       previous_row = row
     end
 
@@ -217,16 +201,16 @@ return function(deps)
               ancestor = ancestor_rec and ancestor_rec.parent or nil
             end
           end
-          for row = parent_row + 1, last do protected[row] = true end
+          for row = parent_row + 1, last do
+            protected[row] = true
+          end
         end
       end
     end
 
     local row_ids = {}
     for id, row in pairs(mark_rows) do
-      if row_ids[row] ~= nil then
-        return nil, 'child identity marks are invalid or duplicated'
-      end
+      if row_ids[row] ~= nil then return nil, 'child identity marks are invalid or duplicated' end
       row_ids[row] = id
     end
     local actual_children = 0
@@ -239,23 +223,17 @@ return function(deps)
         return nil, 'unidentified child row is present'
       end
     end
-    if actual_children ~= child_count then
-      return nil, 'child row count differs from its materialization baseline'
-    end
+    if actual_children ~= child_count then return nil, 'child row count differs from its materialization baseline' end
 
     local root_lines = {}
     for row, line in ipairs(lines) do
       local id = row_ids[row - 1]
       local rec = id and state.rows[id]
-      if (not rec or rec.kind ~= 'child') and not (rec and rec.deleted_kind) then
-        root_lines[#root_lines + 1] = line
-      end
+      if (not rec or rec.kind ~= 'child') and not (rec and rec.deleted_kind) then root_lines[#root_lines + 1] = line end
     end
     for id, row in pairs(recovered_rows) do
       local ok = pcall(set_row_mark, bufnr, row, id)
-      if not ok then
-        return nil, 'child identity marks could not be restored safely'
-      end
+      if not ok then return nil, 'child identity marks could not be restored safely' end
     end
     return root_lines
   end
@@ -280,9 +258,10 @@ return function(deps)
       end
     end
     for _, materialization in ipairs(state.materialization_undos or {}) do
-      if not active[materialization.seq]
-        and (materialization.base_seq == 0 or active[materialization.base_seq]) then
-        for _, id in ipairs(materialization.child_ids or {}) do undone_ids[id] = true end
+      if not active[materialization.seq] and (materialization.base_seq == 0 or active[materialization.base_seq]) then
+        for _, id in ipairs(materialization.child_ids or {}) do
+          undone_ids[id] = true
+        end
       end
     end
     local function expansion_is_live(parent_id)
@@ -296,8 +275,7 @@ return function(deps)
     end
 
     local marks_by_row, valid_ids, invalid_ids, invalid_rows = {}, {}, {}, {}
-    for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1,
-        { details = true })) do
+    for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1, { details = true })) do
       local id, row, details = mark[1], mark[2], mark[4] or {}
       if not state.rows[id] or valid_ids[id] or invalid_ids[id] then
         return nil, 'child identity marks are invalid or duplicated'
@@ -305,9 +283,7 @@ return function(deps)
       if details.invalid then
         invalid_ids[id], invalid_rows[id] = true, row
       else
-        if marks_by_row[row] then
-          return nil, 'child identity marks are invalid or duplicated'
-        end
+        if marks_by_row[row] then return nil, 'child identity marks are invalid or duplicated' end
         marks_by_row[row], valid_ids[id] = id, true
       end
     end
@@ -320,9 +296,7 @@ return function(deps)
     -- A modified listing may use Neovim's one-empty-line representation for an
     -- intentionally emptied tree. A clean empty listing is handled by sync's
     -- existing root-listing special case.
-    if #lines == 1 and lines[1] == '' and vim.bo[bufnr].modified then
-      lines = {}
-    end
+    if #lines == 1 and lines[1] == '' and vim.bo[bufnr].modified then lines = {} end
 
     local spaces_per_level = indent_size()
     local roots, nodes, nodes_by_id, nodes_by_key, children_by_parent = {}, {}, {}, {}, {}
@@ -333,23 +307,16 @@ return function(deps)
         if not stack[1] or not is_dir_line(stack[1].name) then
           return nil, 'root names may not begin with whitespace'
         end
-        return nil, 'child row indentation must use groups of '
-          .. spaces_per_level .. ' spaces'
+        return nil, 'child row indentation must use groups of ' .. spaces_per_level .. ' spaces'
       end
       local depth = #prefix / spaces_per_level
-      if depth > previous_depth + 1 then
-        return nil, 'a child row skips a directory level'
-      end
+      if depth > previous_depth + 1 then return nil, 'a child row skips a directory level' end
       local name = line:sub(#prefix + 1)
       if name == '' then return nil, 'empty child row' end
 
       local parent = depth > 0 and stack[depth] or nil
-      if depth > 0 and not parent then
-        return nil, 'child row has no parent directory'
-      end
-      if parent and not is_dir_line(parent.name) then
-        return nil, 'child row parent is not a directory'
-      end
+      if depth > 0 and not parent then return nil, 'child row has no parent directory' end
+      if parent and not is_dir_line(parent.name) then return nil, 'child row parent is not a directory' end
       if parent and parent.id and not expansion_is_live(parent.id) then
         return nil, 'cannot edit child rows under a collapsed directory'
       end
@@ -385,7 +352,9 @@ return function(deps)
         children_by_parent[parent_key][#children_by_parent[parent_key] + 1] = node
       end
       stack[depth + 1] = node
-      for level = depth + 2, #stack do stack[level] = nil end
+      for level = depth + 2, #stack do
+        stack[level] = nil
+      end
       previous_depth = depth
     end
 
@@ -413,19 +382,18 @@ return function(deps)
       local seen_names = {}
       for _, node in ipairs(siblings) do
         local basename = strip_directory_marker(node.name)
-        if seen_names[basename] then
-          return nil, 'duplicate child entry: ' .. basename
-        end
+        if seen_names[basename] then return nil, 'duplicate child entry: ' .. basename end
         seen_names[basename] = true
       end
     end
 
     local nodes_by_row = {}
-    for _, node in ipairs(nodes) do nodes_by_row[node.row] = node end
+    for _, node in ipairs(nodes) do
+      nodes_by_row[node.row] = node
+    end
     for id in pairs(invalid_ids) do
       local rec = state.rows[id]
-      local replacement = rec and rec.kind == 'child'
-        and nodes_by_row[invalid_rows[id]] or nil
+      local replacement = rec and rec.kind == 'child' and nodes_by_row[invalid_rows[id]] or nil
       if replacement and not replacement.id then
         if replacement.depth ~= rec.depth or replacement.parent_id ~= rec.parent then
           return nil, 'child identity was replaced outside its original directory row'
@@ -457,7 +425,9 @@ return function(deps)
         for index, node in ipairs(current) do
           if node.id then current_index[node.id] = index end
         end
-        for index, child in ipairs(old_children) do old_index[child.id] = index end
+        for index, child in ipairs(old_children) do
+          old_index[child.id] = index
+        end
         local anchors = {}
         for id, oi in pairs(old_index) do
           local ni = current_index[id]
@@ -481,7 +451,10 @@ return function(deps)
           end
           if not has_unidentified_change then
             for _, node in ipairs(current) do
-              if not node.id then has_unidentified_change = true; break end
+              if not node.id then
+                has_unidentified_change = true
+                break
+              end
             end
           end
           if has_unidentified_change then
@@ -493,9 +466,7 @@ return function(deps)
           local removed, inserted = {}, {}
           for oi = old_after + 1, old_before - 1 do
             local child = old_children[oi]
-            if invalid_ids[child.id] and not nodes_by_id[child.id] then
-              removed[#removed + 1] = child
-            end
+            if invalid_ids[child.id] and not nodes_by_id[child.id] then removed[#removed + 1] = child end
           end
           for ni = new_after + 1, new_before - 1 do
             local node = current[ni]
@@ -550,8 +521,7 @@ return function(deps)
     local changed_parents = {}
     for parent_id, expansion in pairs(state.expanded or {}) do
       local parent = state.rows[parent_id]
-      if parent and not parent.deleted_kind and nodes_by_id[parent_id]
-        and expansion_is_live(parent_id) then
+      if parent and not parent.deleted_kind and nodes_by_id[parent_id] and expansion_is_live(parent_id) then
         local current = children_by_parent[parent_id] or {}
         local old_child_ids, old_children = {}, {}
         for _, child in ipairs(expansion.children or {}) do
@@ -582,11 +552,15 @@ return function(deps)
             local edited = not now or now.name ~= child.name or now.parent_key ~= parent_id
             if edited and not child.deleted_kind then
               local disk_identity = fs.path_identity(child.path, fs.stat(child.path))
-              if not child.identity or not disk_identity
-                or not fs.path_identities_match(child.identity, disk_identity) then
-                return nil, 'expanded directory entry changed on disk since it was read: '
-                  .. tostring(child.path)
-                  .. '; restore it or use :DirectList! to discard the edit and redo it'
+              if
+                not child.identity
+                or not disk_identity
+                or not fs.path_identities_match(child.identity, disk_identity)
+              then
+                return nil,
+                  'expanded directory entry changed on disk since it was read: '
+                    .. tostring(child.path)
+                    .. '; restore it or use :DirectList! to discard the edit and redo it'
               end
             end
           end
@@ -615,9 +589,14 @@ return function(deps)
     local deleted_ids, moving_ids = {}, {}
     for id in pairs(root_ids) do
       local rec, node = state.rows[id], nodes_by_id[id]
-      if rec and not rec.deleted_kind and node
-        and is_dir_line(rec.name) and node.depth == 0
-        and rec.name ~= node.name then
+      if
+        rec
+        and not rec.deleted_kind
+        and node
+        and is_dir_line(rec.name)
+        and node.depth == 0
+        and rec.name ~= node.name
+      then
         -- Root-directory moves are emitted by the root classifier. Mark them
         -- here so separate descendant edits cannot be staged against stale paths.
         moving_ids[id] = true
@@ -625,8 +604,7 @@ return function(deps)
     end
     for _, id in ipairs(state.display_ids or {}) do
       local rec = state.rows[id]
-      if rec and rec.kind == 'child' and not rec.deleted_kind
-        and not undone_ids[id] and not nodes_by_id[id] then
+      if rec and rec.kind == 'child' and not rec.deleted_kind and not undone_ids[id] and not nodes_by_id[id] then
         deleted_ids[id] = true
       end
     end
@@ -635,7 +613,10 @@ return function(deps)
       local ancestor = rec.parent
       local covered = false
       while ancestor do
-        if deleted_ids[ancestor] then covered = true; break end
+        if deleted_ids[ancestor] then
+          covered = true
+          break
+        end
         local parent_rec = state.rows[ancestor]
         ancestor = parent_rec and parent_rec.parent or nil
       end
@@ -677,8 +658,7 @@ return function(deps)
         local child_changed = rec.kind == 'child'
           and (rec.parent ~= node.parent_key or rec.name ~= node.name or rec.depth ~= node.depth)
         if moved_from_root or child_changed then
-          if is_dir_line(rec.name) ~= is_dir_line(node.name)
-            and state.expanded[node.id] then
+          if is_dir_line(rec.name) ~= is_dir_line(node.name) and state.expanded[node.id] then
             return nil, 'cannot change the type of an expanded directory'
           end
           moving_ids[node.id] = true
@@ -694,9 +674,7 @@ return function(deps)
       if node.id and moving_ids[node.id] then
         local ancestor = node.parent_key
         while ancestor do
-          if moving_ids[ancestor] then
-            return nil, 'edit moved directories and their descendants in separate syncs'
-          end
+          if moving_ids[ancestor] then return nil, 'edit moved directories and their descendants in separate syncs' end
           local parent = nodes_by_key[ancestor]
           ancestor = parent and parent.parent_key or nil
         end
@@ -720,9 +698,7 @@ return function(deps)
       local rec = state.rows[id]
       local ancestor = rec.parent
       while ancestor do
-        if moving_ids[ancestor] then
-          return nil, 'edit a moved directory and its removed children in separate syncs'
-        end
+        if moving_ids[ancestor] then return nil, 'edit a moved directory and its removed children in separate syncs' end
         local parent_rec = state.rows[ancestor]
         ancestor = parent_rec and parent_rec.parent or nil
       end
@@ -734,13 +710,10 @@ return function(deps)
     end
     local source_index = fs.path_identity_index(source_paths)
     for _, item in ipairs(creates) do
-      if fs.taken(item.action.dst) then
-        return nil, 'destination already exists: ' .. item.action.dst
-      end
+      if fs.taken(item.action.dst) then return nil, 'destination already exists: ' .. item.action.dst end
     end
     for _, item in ipairs(moves) do
-      local source_target = fs.path_identity_index_contains(source_index,
-        item.action.dst)
+      local source_target = fs.path_identity_index_contains(source_index, item.action.dst)
       if fs.taken(item.action.dst) and not source_target then
         return nil, 'move destination already exists: ' .. item.action.dst
       end
@@ -748,15 +721,23 @@ return function(deps)
 
     table.sort(creates, function(a, b) return a.depth < b.depth end)
     local actions = {}
-    for _, item in ipairs(creates) do actions[#actions + 1] = item.action end
-    for _, item in ipairs(moves) do actions[#actions + 1] = item.action end
-    for _, action in ipairs(removals) do actions[#actions + 1] = action end
+    for _, item in ipairs(creates) do
+      actions[#actions + 1] = item.action
+    end
+    for _, item in ipairs(moves) do
+      actions[#actions + 1] = item.action
+    end
+    for _, action in ipairs(removals) do
+      actions[#actions + 1] = action
+    end
     local expanded_targets = {}
     for parent_id in pairs(state.expanded or {}) do
       local node = nodes_by_id[parent_id]
       if node and is_dir_line(node.name) then
         expanded_targets[#expanded_targets + 1] = {
-          id = parent_id, path = target_path(node), depth = node.depth or 0,
+          id = parent_id,
+          path = target_path(node),
+          depth = node.depth or 0,
         }
       end
     end

@@ -16,9 +16,7 @@ local git = require('direct.git')
 local highlight = require('direct.highlight')
 local paths = require('direct.paths')
 
-local function path_identity(path)
-  return fs.path_identity(path, fs.stat(path))
-end
+local function path_identity(path) return fs.path_identity(path, fs.stat(path)) end
 
 local function set_row_mark(bufnr, row, id)
   vim.api.nvim_buf_set_extmark(bufnr, namespace, row, 0, {
@@ -32,11 +30,8 @@ end
 local function row_id_at(bufnr, row)
   local state = states[bufnr]
   if not state then return nil end
-  for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, namespace,
-      { row, 0 }, { row, -1 }, { details = true })) do
-    if mark[2] == row and not (mark[4] and mark[4].invalid) then
-      return mark[1]
-    end
+  for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, namespace, { row, 0 }, { row, -1 }, { details = true })) do
+    if mark[2] == row and not (mark[4] and mark[4].invalid) then return mark[1] end
   end
   return nil
 end
@@ -47,12 +42,9 @@ end
 local function row_ids_by_row(bufnr)
   local ids = {}
   if not states[bufnr] then return ids end
-  for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, namespace,
-      0, -1, { details = true })) do
+  for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1, { details = true })) do
     local row, details = mark[2], mark[4] or {}
-    if not details.invalid and ids[row] == nil then
-      ids[row] = mark[1]
-    end
+    if not details.invalid and ids[row] == nil then ids[row] = mark[1] end
   end
   return ids
 end
@@ -70,9 +62,7 @@ end
 
 local function row_path(root, record, line)
   if not record then return nil end
-  if record.kind == 'root' then
-    return listing.entry_path(root, line)
-  end
+  if record.kind == 'root' then return listing.entry_path(root, line) end
   return record.path
 end
 
@@ -85,20 +75,15 @@ end
 -- is_dir_line(line) -> true for a directory entry. The configured trailing
 -- marker is the convention: a directory is never distinguished from a file by
 -- a filesystem stat here.
-local function is_dir_line(line)
-  return paths.is_directory_name(line)
-end
+local function is_dir_line(line) return paths.is_directory_name(line) end
 
 -- Match bufferline.nvim's built-in icon lookup: resolve the basename against
 -- nvim-web-devicons' filename and extension tables, including its default icon.
 -- The provider stays optional; without it callers use Direct's generic glyph.
 local function file_icon(name, devicons)
-  if not devicons or type(devicons.get_icon) ~= 'function' then
-    return nil
-  end
+  if not devicons or type(devicons.get_icon) ~= 'function' then return nil end
   local filename = paths.strip_directory_marker(name)
-  local icon_ok, glyph = pcall(devicons.get_icon,
-    filename, nil, { default = true })
+  local icon_ok, glyph = pcall(devicons.get_icon, filename, nil, { default = true })
   if not icon_ok or type(glyph) ~= 'string' or glyph == '' then return nil end
   return glyph
 end
@@ -120,14 +105,11 @@ local function refresh_icons(bufnr, state, row_ids)
   state.icon_line_count = line_count
   state.decorations_dirty = nil
   if not show_folders and not show_files then
-    local existing = icon_namespace
-      or vim.api.nvim_get_namespaces()[ICON_NAMESPACE]
+    local existing = icon_namespace or vim.api.nvim_get_namespaces()[ICON_NAMESPACE]
     if existing then vim.api.nvim_buf_clear_namespace(bufnr, existing, 0, -1) end
     return
   end
-  if not icon_namespace then
-    icon_namespace = vim.api.nvim_create_namespace(ICON_NAMESPACE)
-  end
+  if not icon_namespace then icon_namespace = vim.api.nvim_create_namespace(ICON_NAMESPACE) end
   vim.api.nvim_buf_clear_namespace(bufnr, icon_namespace, 0, -1)
   row_ids = row_ids or row_ids_by_row(bufnr)
   for row = 0, line_count - 1 do
@@ -145,8 +127,7 @@ local function refresh_icons(bufnr, state, row_ids)
         base_glyph = options.icons.deleted_file
         base_group = hidden and 'DirectHiddenFileIcon' or 'DirectFileIcon'
       elseif enabled and rec.deleted_kind == 'directory' then
-        base_glyph = state.expanded[id]
-          and options.icons.deleted_folder_open or options.icons.deleted_folder
+        base_glyph = state.expanded[id] and options.icons.deleted_folder_open or options.icons.deleted_folder
         base_group = hidden and 'DirectHiddenFolderIcon' or 'DirectFolderIcon'
       elseif enabled and is_folder then
         base_glyph = state.expanded[id] and options.icons.folder_open or options.icons.folder
@@ -158,9 +139,7 @@ local function refresh_icons(bufnr, state, row_ids)
         -- files use bufferline's filename-based devicon lookup.
         if rec.deleted_kind ~= 'file' and options.show_filetype_icons == true then
           local glyph = file_icon(rec.name, devicons)
-          if glyph then
-            base_glyph = glyph
-          end
+          if glyph then base_glyph = glyph end
         end
       end
       if enabled then
@@ -169,18 +148,15 @@ local function refresh_icons(bufnr, state, row_ids)
           local status = git.first_status_for(git_snapshot, rec.path)
           -- File icons always use DirectFileIcon; Git status colors their names
           -- but only overrides folder icon groups.
-          if is_folder then
-            group = highlight.git_status_highlight(status) or group
-          end
+          if is_folder then group = highlight.git_status_highlight(status) or group end
         end
       end
-      vim.api.nvim_buf_set_extmark(bufnr, icon_namespace, row,
-        (rec.depth or 0) * options.indent_size, {
-          virt_text = { { glyph .. (enabled and ' ' or ''), group } },
-          virt_text_pos = 'inline',
-          right_gravity = false,
-          hl_mode = 'combine',
-        })
+      vim.api.nvim_buf_set_extmark(bufnr, icon_namespace, row, (rec.depth or 0) * options.indent_size, {
+        virt_text = { { glyph .. (enabled and ' ' or ''), group } },
+        virt_text_pos = 'inline',
+        right_gravity = false,
+        hl_mode = 'combine',
+      })
     end
   end
 end

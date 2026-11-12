@@ -17,9 +17,7 @@ return function(deps)
 
     local seen = {}
     for _, line in ipairs(actual) do
-      if seen[line] then
-        return { kind = 'AMBIGUOUS', reason = 'duplicate' }
-      end
+      if seen[line] then return { kind = 'AMBIGUOUS', reason = 'duplicate' } end
       seen[line] = true
     end
 
@@ -32,9 +30,7 @@ return function(deps)
     end
     local function subset(x, y)
       for key in pairs(x) do
-        if not y[key] then
-          return false
-        end
+        if not y[key] then return false end
       end
       return true
     end
@@ -42,9 +38,7 @@ return function(deps)
     if #actual > #expected and subset(expected_set, actual_set) then
       local added = {}
       for _, line in ipairs(actual) do
-        if not expected_set[line] then
-          added[#added + 1] = line
-        end
+        if not expected_set[line] then added[#added + 1] = line end
       end
       return { kind = 'ADD', added = dirs_then_name(added) }
     end
@@ -52,9 +46,7 @@ return function(deps)
     if #actual < #expected and subset(actual_set, expected_set) then
       local removed = {}
       for _, line in ipairs(expected) do
-        if not actual_set[line] then
-          removed[#removed + 1] = line
-        end
+        if not actual_set[line] then removed[#removed + 1] = line end
       end
       return { kind = 'DELETE', removed = dirs_then_name(removed) }
     end
@@ -62,9 +54,7 @@ return function(deps)
     if #actual == #expected then
       local moves = {}
       for i = 1, #actual do
-        if actual[i] ~= expected[i] then
-          moves[#moves + 1] = { src = expected[i], dst = actual[i] }
-        end
+        if actual[i] ~= expected[i] then moves[#moves + 1] = { src = expected[i], dst = actual[i] } end
       end
       return { kind = 'RENAME', moves = moves }
     end
@@ -75,23 +65,16 @@ return function(deps)
   -- Use extmark identities, not row position or set cardinality, to classify a
   -- root-level edit. `original_rows` are the rows captured at listing time;
   -- `current_rows` contains their surviving marks plus unmarked creates.
-  local function classify_identity(root, original_rows, current_rows, expected,
-      text_undo_mode)
+  local function classify_identity(root, original_rows, current_rows, expected, text_undo_mode)
     local expected_by_path, original_by_path, original_by_id = {}, {}, {}
     local expected_by_basename = {}
     local original_by_basename = {}
-    local function basename(path)
-      return paths.basename(path)
-    end
-    local function same_listing_path(a, b)
-      return paths.canonical(a) == paths.canonical(b) or fs.same_path(a, b) == true
-    end
+    local function basename(path) return paths.basename(path) end
+    local function same_listing_path(a, b) return paths.canonical(a) == paths.canonical(b) or fs.same_path(a, b) == true end
     for _, line in ipairs(expected or {}) do
       local path = entry_path(root, line)
       local key = paths.canonical(path)
-      if expected_by_path[key] then
-        return nil, 'directory changed on disk since it was listed'
-      end
+      if expected_by_path[key] then return nil, 'directory changed on disk since it was listed' end
       local entry = {
         path = path,
         line = line,
@@ -127,30 +110,23 @@ return function(deps)
       if directory_separator() == '\\' then relative = relative:gsub('\\', '/') end
       local names = {}
       for part in (relative .. '/'):gmatch('(.-)/') do
-        if part == '' then
-          return nil, 'collapsed paths must keep the same path components'
-        end
+        if part == '' then return nil, 'collapsed paths must keep the same path components' end
         names[#names + 1] = part
       end
-      if #names ~= #original_components
-        or directory ~= original_components[#original_components].directory then
+      if #names ~= #original_components or directory ~= original_components[#original_components].directory then
         return nil, 'collapsed paths must keep the same path components and entry type'
       end
       local moves, parent = {}, root
       for index, component in ipairs(original_components) do
         local target_name = names[index]
-        if target_name == '.' or target_name == '..' or target_name == '' then
-          return nil, 'invalid path component'
-        end
+        if target_name == '.' or target_name == '..' or target_name == '' then return nil, 'invalid path component' end
         local source = fs.join(parent, component.name)
         local destination = fs.join(parent, target_name)
         if component.directory then
           source = source .. platform.separator
           destination = destination .. platform.separator
         end
-        if target_name ~= component.name then
-          moves[#moves + 1] = { src_path = source, dst_path = destination }
-        end
+        if target_name ~= component.name then moves[#moves + 1] = { src_path = source, dst_path = destination } end
         parent = fs.join(parent, target_name)
       end
       return moves
@@ -163,13 +139,9 @@ return function(deps)
 
     for _, row in ipairs(original_rows or {}) do
       if not row.deleted_kind then
-        if row.id == nil or original_by_id[row.id] then
-          return nil, 'root row identities are invalid or duplicated'
-        end
+        if row.id == nil or original_by_id[row.id] then return nil, 'root row identities are invalid or duplicated' end
         local key = paths.canonical(row.path)
-        if original_at(row.path) then
-          return nil, 'root row paths are ambiguous'
-        end
+        if original_at(row.path) then return nil, 'root row paths are ambiguous' end
         original_by_id[row.id] = row
         original_by_path[key] = row
         local name = basename(row.path)
@@ -185,9 +157,13 @@ return function(deps)
           for _, candidate in ipairs(current_rows or {}) do
             if candidate.id == nil and candidate.line == original.name then
               local on_disk = expected_at(original.path)
-              if on_disk and on_disk.line == original.name and original.identity
+              if
+                on_disk
+                and on_disk.line == original.name
+                and original.identity
                 and on_disk.identity
-                and fs.path_identities_match(original.identity, on_disk.identity) then
+                and fs.path_identities_match(original.identity, on_disk.identity)
+              then
                 edited = false
                 break
               end
@@ -196,12 +172,17 @@ return function(deps)
         end
         if edited then
           local on_disk = expected_at(original.path)
-          if not on_disk or on_disk.line ~= original.name or not original.identity
+          if
+            not on_disk
+            or on_disk.line ~= original.name
+            or not original.identity
             or not on_disk.identity
-            or not fs.path_identities_match(original.identity, on_disk.identity) then
-            return nil, 'directory changed on disk since it was listed: '
-              .. tostring(original.path)
-              .. '; restore the entry or use :DirectList! to discard the edit and redo it'
+            or not fs.path_identities_match(original.identity, on_disk.identity)
+          then
+            return nil,
+              'directory changed on disk since it was listed: '
+                .. tostring(original.path)
+                .. '; restore the entry or use :DirectList! to discard the edit and redo it'
           end
         end
       end
@@ -215,18 +196,16 @@ return function(deps)
       seen_lines[line] = true
       if row.id ~= nil then
         local original = original_by_id[row.id]
-        if not original then
-          return nil, 'root row identity is unavailable; re-list this directory'
-        end
-        if seen_ids[row.id] then
-          return nil, 'root row identities are invalid or duplicated'
-        end
+        if not original then return nil, 'root row identity is unavailable; re-list this directory' end
+        if seen_ids[row.id] then return nil, 'root row identities are invalid or duplicated' end
         seen_ids[row.id] = true
         if line ~= original.name then
           local component_moves, component_err = collapsed_component_moves(original, line)
           if component_err then return nil, component_err end
           if component_moves then
-            for _, move in ipairs(component_moves) do moves[#moves + 1] = move end
+            for _, move in ipairs(component_moves) do
+              moves[#moves + 1] = move
+            end
           else
             moves[#moves + 1] = { src = original.name, dst = line }
           end
@@ -236,9 +215,10 @@ return function(deps)
         local original, on_disk = original_at(path), expected_at(path)
         if original and on_disk and on_disk.line == line then
           if text_undo_mode then
-            return nil, 'root row identity is unavailable after text undo or redo; '
-              .. 'Direct cannot safely identify this edit; restore the marked listing state '
-              .. 'or use :DirectList! to discard it and redo the change'
+            return nil,
+              'root row identity is unavailable after text undo or redo; '
+                .. 'Direct cannot safely identify this edit; restore the marked listing state '
+                .. 'or use :DirectList! to discard it and redo the change'
           end
           -- A same-text replacement can invalidate a root extmark. When the
           -- exact original path is still present, this is a no-op, not a
@@ -247,8 +227,11 @@ return function(deps)
         else
           local alias
           for id, candidate in pairs(original_by_id) do
-            if not seen_ids[id] and is_dir_line(candidate.name) == is_dir_line(line)
-              and fs.same_entry(path, candidate.path) then
+            if
+              not seen_ids[id]
+              and is_dir_line(candidate.name) == is_dir_line(line)
+              and fs.same_entry(path, candidate.path)
+            then
               if alias then return nil, 'root row identity is ambiguous' end
               alias = candidate
             end
@@ -265,16 +248,15 @@ return function(deps)
     if text_undo_mode and #added > 0 then
       for _, original in ipairs(original_rows or {}) do
         if not original.deleted_kind and not seen_ids[original.id] then
-          return nil, 'root row identity is unavailable after text undo or redo; '
-            .. 'Direct cannot safely identify this edit; restore the marked listing state '
-            .. 'or use :DirectList! to discard it and redo the change'
+          return nil,
+            'root row identity is unavailable after text undo or redo; '
+              .. 'Direct cannot safely identify this edit; restore the marked listing state '
+              .. 'or use :DirectList! to discard it and redo the change'
         end
       end
     end
     for _, row in ipairs(original_rows or {}) do
-      if not row.deleted_kind and not seen_ids[row.id] then
-        removed[#removed + 1] = row.name
-      end
+      if not row.deleted_kind and not seen_ids[row.id] then removed[#removed + 1] = row.name end
     end
     return {
       kind = 'IDENTITY',
@@ -284,9 +266,7 @@ return function(deps)
     }
   end
 
-  local function unsafe_path_reason(path)
-    return action_mod.path_reason(path)
-  end
+  local function unsafe_path_reason(path) return action_mod.path_reason(path) end
 
   local function component_reason(line, path_style)
     if type(line) ~= 'string' then return 'invalid component' end
@@ -298,8 +278,13 @@ return function(deps)
     if is_dir_line(component) then component = component:sub(1, -2) end
     local selected_separator = (path_style == nil or path_style == platform.path_style)
       and component:find(directory_separator(), 1, true) ~= nil
-    if component == '' or component == '.' or component == '..'
-      or component:find('/', 1, true) or selected_separator then
+    if
+      component == ''
+      or component == '.'
+      or component == '..'
+      or component:find('/', 1, true)
+      or selected_separator
+    then
       return 'invalid path component'
     end
     return platform.component_path_reason(component, path_style)
@@ -341,14 +326,10 @@ return function(deps)
       else
         component_error = component_reason(line)
       end
-      if component_error then
-        return { path = line, reason = component_error }
-      end
+      if component_error then return { path = line, reason = component_error } end
       local path = entry_path(root, line)
       local reason = unsafe_path_reason(path)
-      if reason ~= nil then
-        return { path = path, reason = reason }
-      end
+      if reason ~= nil then return { path = path, reason = reason } end
     end
     return nil
   end
@@ -357,14 +338,15 @@ return function(deps)
       'Ambiguous buffer content (%s). '
         .. 'You must only add, remove or rename in each edit.'
         .. '\nactual:   %s\nexpected: %s',
-      plan.reason, table.concat(actual, ', '), table.concat(expected, ', '))
+      plan.reason,
+      table.concat(actual, ', '),
+      table.concat(expected, ', ')
+    )
   end
   -- Return the destination left by a successful create/move, or nil for removals.
   -- Use the original action so a staging temp can never become current_entry.
   local function result_entry(act)
-    if act.name == 'mv' or act.name == 'touch' or act.name == 'mkdir' then
-      return act.dst
-    end
+    if act.name == 'mv' or act.name == 'touch' or act.name == 'mkdir' then return act.dst end
     return nil
   end
   -- build_actions returns actions and yanks. ADD/DELETE follow dirs-then-name
@@ -373,9 +355,7 @@ return function(deps)
     local actions, yanks = {}, {}
     if plan.kind == 'ADD' then
       local planned, create_dirs, touches = {}, {}, {}
-      local function normalized(path)
-        return paths.canonical(path)
-      end
+      local function normalized(path) return paths.canonical(path) end
       local function components(line)
         local path = paths.strip_directory_marker(line)
         if directory_separator() == '\\' then path = path:gsub('\\', '/') end
@@ -409,9 +389,7 @@ return function(deps)
         for i = 1, parent_count do
           parent = fs.join(parent, parts[i])
           local key = normalized(parent)
-          if planned[key] == 'file' then
-            return nil, nil, 'path parent is not a directory: ' .. parent
-          end
+          if planned[key] == 'file' then return nil, nil, 'path parent is not a directory: ' .. parent end
           if fs.taken(parent) then
             if not fs.is_dir(parent) then
               if plan.vacated and plan.vacated[key] then
@@ -428,8 +406,11 @@ return function(deps)
         end
         local target_key = normalized(path)
         if fs.taken(path) and not (plan.vacated and plan.vacated[target_key]) then
-          return nil, nil, 'destination already exists: ' .. path
-            .. '; choose another name or use :DirectList! to discard and redo the edit'
+          return nil,
+            nil,
+            'destination already exists: '
+              .. path
+              .. '; choose another name or use :DirectList! to discard and redo the edit'
         end
         if is_directory then
           create_dirs[target_key] = path
@@ -450,7 +431,9 @@ return function(deps)
       for _, path in ipairs(directories) do
         actions[#actions + 1] = action_mod.MakeDirectory(path)
       end
-      for _, action in ipairs(touches) do actions[#actions + 1] = action end
+      for _, action in ipairs(touches) do
+        actions[#actions + 1] = action
+      end
     elseif plan.kind == 'DELETE' then
       for _, line in ipairs(plan.removed) do
         local path = entry_path(root, line)
@@ -476,11 +459,13 @@ return function(deps)
       end
     elseif plan.kind == 'IDENTITY' then
       local removals, deleted_paths, remove_err = build_actions(root, {
-        kind = 'DELETE', removed = plan.removed or {},
+        kind = 'DELETE',
+        removed = plan.removed or {},
       })
       if not removals then return nil, nil, remove_err end
       local moves, _, move_err = build_actions(root, {
-        kind = 'RENAME', moves = plan.moves or {},
+        kind = 'RENAME',
+        moves = plan.moves or {},
       })
       if not moves then return nil, nil, move_err end
       local vacated = {}
@@ -491,7 +476,9 @@ return function(deps)
         if act.src then vacated[paths.canonical(act.src)] = true end
       end
       local creates, _, create_err = build_actions(root, {
-        kind = 'ADD', added = plan.added or {}, vacated = vacated,
+        kind = 'ADD',
+        added = plan.added or {},
+        vacated = vacated,
       })
       if not creates then return nil, nil, create_err end
       vim.list_extend(actions, removals)

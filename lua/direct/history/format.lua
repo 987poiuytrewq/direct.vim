@@ -32,13 +32,16 @@ local function split_tabs(line)
 end
 
 local function valid_path_field(value)
-  return type(value) == 'string' and value ~= ''
-    and paths.valid_utf8(value) and not value:find('%c')
+  return type(value) == 'string' and value ~= '' and paths.valid_utf8(value) and not value:find('%c')
 end
 
 local function valid_component(value)
-  return type(value) == 'string' and value ~= '' and value ~= '.' and value ~= '..'
-    and not value:find('/', 1, true) and paths.valid_utf8(value)
+  return type(value) == 'string'
+    and value ~= ''
+    and value ~= '.'
+    and value ~= '..'
+    and not value:find('/', 1, true)
+    and paths.valid_utf8(value)
     and not value:find('%c')
 end
 
@@ -46,42 +49,38 @@ local function equal_legacy_names(src, dst)
   if src == '' or dst == '' then return src == '' and dst == '' end
   -- Spaces are ambiguous in the old separator format; only recognize one
   -- unambiguous basename per side.
-  return not src:find(' ', 1, true) and not dst:find(' ', 1, true)
-    and valid_component(src) and valid_component(dst)
+  return not src:find(' ', 1, true) and not dst:find(' ', 1, true) and valid_component(src) and valid_component(dst)
 end
 
 local arity = {
-  mv = 3, rm = 3, rmdir = 3, rs = 3, rsdir = 3,
-  touch = 2, mkdir = 2, p = 5, up = 5,
+  mv = 3,
+  rm = 3,
+  rmdir = 3,
+  rs = 3,
+  rsdir = 3,
+  touch = 2,
+  mkdir = 2,
+  p = 5,
+  up = 5,
 }
 
 local function valid_legacy_record(line, version, python)
   local fields = split_tabs(line)
   local verb = fields[1]
   if verb == 'g' then
-    if python or version ~= 3 or #fields < 2
-      or not fields[2]:match('^%d+$') then
-      return false
-    end
+    if python or version ~= 3 or #fields < 2 or not fields[2]:match('^%d+$') then return false end
     local count = tonumber(fields[2])
     if not count or count < 2 or #fields ~= 2 + count * 2 then return false end
     for i = 1, count do
-      if not valid_path_field(fields[1 + i * 2])
-        or not valid_path_field(fields[2 + i * 2]) then
-        return false
-      end
+      if not valid_path_field(fields[1 + i * 2]) or not valid_path_field(fields[2 + i * 2]) then return false end
     end
     return true
   end
 
   local expected = arity[verb]
   if not expected or #fields ~= expected then return false end
-  if verb == 'touch' or verb == 'mkdir' then
-    return valid_path_field(fields[2])
-  end
-  if not valid_path_field(fields[2]) or not valid_path_field(fields[3]) then
-    return false
-  end
+  if verb == 'touch' or verb == 'mkdir' then return valid_path_field(fields[2]) end
+  if not valid_path_field(fields[2]) or not valid_path_field(fields[3]) then return false end
   if verb == 'p' or verb == 'up' then
     if python then return true end -- old Python names remain opaque
     return equal_legacy_names(fields[4], fields[5])
@@ -91,24 +90,18 @@ end
 
 local function valid_legacy_body(lines, start, version, python)
   for i = start, #lines do
-    if lines[i] == '' or not valid_legacy_record(lines[i], version, python) then
-      return false
-    end
+    if lines[i] == '' or not valid_legacy_record(lines[i], version, python) then return false end
   end
   return true
 end
 
-local function preserve(reason)
-  return { state = 'preserve', reason = reason }
-end
+local function preserve(reason) return { state = 'preserve', reason = reason } end
 
 -- classify(bytes, exists) -> fresh, current, legacy, or preserve. Only absent
 -- and empty files are ordinary fresh starts; recognized legacy files can be
 -- reset after backup, while all unrecognized or damaged bytes fail closed.
 function M.classify(bytes, exists)
-  if not exists or bytes == nil or bytes == '' then
-    return { state = 'fresh', lines = {} }
-  end
+  if not exists or bytes == nil or bytes == '' then return { state = 'fresh', lines = {} } end
   if type(bytes) ~= 'string' then return preserve('history read did not return bytes') end
   if not paths.valid_utf8(bytes) then return preserve('history is not valid UTF-8') end
   if bytes:find('\0', 1, true) then return preserve('history contains NUL') end
@@ -121,26 +114,19 @@ function M.classify(bytes, exists)
   if lines[1] == M.HEADER then
     for i = 2, #lines do
       local ok, parsed = pcall(action.deserialize, lines[i])
-      if lines[i] == '' or not ok or not parsed then
-        return preserve('current JSONL history has a malformed record')
-      end
+      if lines[i] == '' or not ok or not parsed then return preserve('current JSONL history has a malformed record') end
     end
     return { state = 'current', lines = lines }
   end
 
-  local version = lines[1] == '#direct-history-v2' and 2
-    or lines[1] == '#direct-history-v3' and 3
+  local version = lines[1] == '#direct-history-v2' and 2 or lines[1] == '#direct-history-v3' and 3
   if version then
-    if valid_legacy_body(lines, 2, version, false) then
-      return { state = 'legacy', lines = {}, legacy = true }
-    end
+    if valid_legacy_body(lines, 2, version, false) then return { state = 'legacy', lines = {}, legacy = true } end
     return preserve('known legacy history is malformed')
   end
 
   -- Markerless tab-framed Python history is recognized by its verb and arity.
-  if valid_legacy_body(lines, 1, nil, true) then
-    return { state = 'legacy', lines = {}, legacy = true }
-  end
+  if valid_legacy_body(lines, 1, nil, true) then return { state = 'legacy', lines = {}, legacy = true } end
   return preserve('unknown or malformed history format')
 end
 

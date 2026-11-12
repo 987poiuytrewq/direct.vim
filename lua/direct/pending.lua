@@ -6,18 +6,12 @@ local label
 local generation = 0
 local current_token
 
-function M.is_pending()
-  return active
-end
+function M.is_pending() return active end
 
-function M.is_active(token)
-  return active and (token == nil or token == current_token)
-end
+function M.is_active(token) return active and (token == nil or token == current_token) end
 
 function M.begin(operation)
-  if active then
-    return nil, 'another direct operation is pending'
-  end
+  if active then return nil, 'another direct operation is pending' end
   active = true
   label = operation or 'operation'
   generation = generation + 1
@@ -35,14 +29,18 @@ end
 
 function M.refuse(operation, only_label)
   if not active then return false end
-  if only_label ~= nil and label ~= only_label
-    and not (only_label == 'willRenameFiles' and label == 'sync') then
+  if only_label ~= nil and label ~= only_label and not (only_label == 'willRenameFiles' and label == 'sync') then
     return false
   end
   local ui = require('direct.ui')
-  ui.notify('direct: cannot ' .. tostring(operation or 'start operation')
-    .. ' while ' .. tostring(label or 'another operation') .. ' is pending',
-    vim.log.levels.WARN)
+  ui.notify(
+    'direct: cannot '
+      .. tostring(operation or 'start operation')
+      .. ' while '
+      .. tostring(label or 'another operation')
+      .. ' is pending',
+    vim.log.levels.WARN
+  )
   return true
 end
 

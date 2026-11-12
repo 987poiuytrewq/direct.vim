@@ -12,11 +12,9 @@ local function windows_api()
   ffi = module
   if not ffi_declared then
     local source = debug.getinfo(1, 'S').source
-    local declared, declaration_err = require('direct.platform.ffi_declarations')
-      .load(ffi, source, 'windows.h', 'direct_windows_ffi_declarations')
-    if not declared then
-      return nil, tostring(declaration_err)
-    end
+    local declared, declaration_err =
+      require('direct.platform.ffi_declarations').load(ffi, source, 'windows.h', 'direct_windows_ffi_declarations')
+    if not declared then return nil, tostring(declaration_err) end
     ffi_declared = true
   end
   local loaded_kernel, library = pcall(ffi.load, 'kernel32')
@@ -36,17 +34,11 @@ local function wide_path(path, lib, api)
   return output
 end
 
-function M.canonical_path(path)
-  return vim.fs.normalize(tostring(path)):gsub('\\', '/')
-end
+function M.canonical_path(path) return vim.fs.normalize(tostring(path)):gsub('\\', '/') end
 
-function M.identity_path(path)
-  return M.canonical_path(path):lower()
-end
+function M.identity_path(path) return M.canonical_path(path):lower() end
 
-function M.validation_path(path)
-  return path:gsub('\\', '/')
-end
+function M.validation_path(path) return path:gsub('\\', '/') end
 
 function M.strip_trailing_separator(path)
   if type(path) ~= 'string' then return path end
@@ -56,15 +48,11 @@ function M.strip_trailing_separator(path)
   return trimmed
 end
 
-function M.path_component(component, _display_separator)
-  return component:gsub('/', '\\')
-end
+function M.path_component(component, _display_separator) return component:gsub('/', '\\') end
 
 function M.home_directory(home)
   local profile = vim.env.USERPROFILE
-  if profile == nil or profile == '' then
-    profile = (vim.env.HOMEDRIVE or '') .. (vim.env.HOMEPATH or '')
-  end
+  if profile == nil or profile == '' then profile = (vim.env.HOMEDRIVE or '') .. (vim.env.HOMEPATH or '') end
   if home ~= nil and home ~= '' and home == profile then return nil end
   return home
 end
@@ -90,8 +78,7 @@ function M.file_identity(path, nofollow)
     api.CloseHandle(handle)
     if not read then return nil end
     local info = information[0]
-    return table.concat({ 'win', tonumber(info.volume), tonumber(info.index_high),
-      tonumber(info.index_low) }, ':')
+    return table.concat({ 'win', tonumber(info.volume), tonumber(info.index_high), tonumber(info.index_low) }, ':')
   end)
   return ok and identity or nil
 end
@@ -129,8 +116,7 @@ function M.shellescape_path(path, shell)
   shell = (shell or ''):lower():gsub('\\', '/')
   if shell:find('powershell', 1, true) or shell:find('pwsh', 1, true) then
     return "'" .. path:gsub("'", "''") .. "'"
-  elseif shell:find('bash', 1, true) or shell:find('zsh', 1, true)
-    or shell:find('fish', 1, true) then
+  elseif shell:find('bash', 1, true) or shell:find('zsh', 1, true) or shell:find('fish', 1, true) then
     return "'" .. path:gsub("'", "'\\''") .. "'"
   end
   -- cmd.exe passes quoted arguments through the Windows CRT, where a trailing
@@ -179,8 +165,7 @@ function M.acquire_file_lock(path)
   vim.uv.fs_close(fd)
   local wide, wide_err = wide_path(path, lib, api)
   if not wide then return nil, wide_err end
-  local handle = api.CreateFileW(wide, 0x80000000 + 0x40000000,
-    0x1 + 0x2, nil, 3, 0x80, nil)
+  local handle = api.CreateFileW(wide, 0x80000000 + 0x40000000, 0x1 + 0x2, nil, 3, 0x80, nil)
   if handle == lib.cast('direct_platform_HANDLE', -1) then
     return nil, 'CreateFileW failed (error ' .. tostring(api.GetLastError()) .. ')'
   end
@@ -195,13 +180,10 @@ end
 
 function M.release_file_lock(token)
   local unlocked = kernel32.UnlockFileEx(token.handle, 0, 1, 0, token.overlapped) ~= 0
-  local unlock_err = not unlocked and ('UnlockFileEx failed (error '
-    .. tostring(kernel32.GetLastError()) .. ')') or nil
+  local unlock_err = not unlocked and ('UnlockFileEx failed (error ' .. tostring(kernel32.GetLastError()) .. ')') or nil
   local closed = kernel32.CloseHandle(token.handle) ~= 0
   if not unlocked then return nil, unlock_err end
-  if not closed then
-    return nil, 'CloseHandle failed (error ' .. tostring(kernel32.GetLastError()) .. ')'
-  end
+  if not closed then return nil, 'CloseHandle failed (error ' .. tostring(kernel32.GetLastError()) .. ')' end
   return true
 end
 

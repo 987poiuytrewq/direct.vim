@@ -3,35 +3,33 @@
 local M = {}
 
 M.KEY_MAPS = {
-  { action = 'expand', lhs = 'zo',
-    desc = 'direct: Expand one direct directory level' },
-  { action = 'toggle', lhs = 'za',
-    desc = 'direct: Toggle direct directory expansion' },
-  { action = 'collapse', lhs = 'zc',
-    desc = 'direct: Collapse direct directory rows' },
-  { action = 'expand_recursive', lhs = 'zO',
-    desc = 'direct: Recursively expand direct directories' },
-  { action = 'toggle_recursive', lhs = 'zA',
-    desc = 'direct: Recursively toggle direct directories' },
-  { action = 'collapse_recursive', lhs = 'zC',
-    desc = 'direct: Recursively collapse direct directories' },
-  { action = 'unfold_all', lhs = 'zR',
-    desc = 'direct: Expand all direct directories' },
-  { action = 'fold_all', lhs = 'zM',
-    desc = 'direct: Collapse all direct directories' },
-  { action = 'previous_directory', lhs = '[d',
-    desc = 'direct: Jump to the previous visible direct directory' },
-  { action = 'next_directory', lhs = ']d',
-    desc = 'direct: Jump to the next visible direct directory' },
+  { action = 'expand', lhs = 'zo', desc = 'direct: Expand one direct directory level' },
+  { action = 'toggle', lhs = 'za', desc = 'direct: Toggle direct directory expansion' },
+  { action = 'collapse', lhs = 'zc', desc = 'direct: Collapse direct directory rows' },
+  { action = 'expand_recursive', lhs = 'zO', desc = 'direct: Recursively expand direct directories' },
+  { action = 'toggle_recursive', lhs = 'zA', desc = 'direct: Recursively toggle direct directories' },
+  { action = 'collapse_recursive', lhs = 'zC', desc = 'direct: Recursively collapse direct directories' },
+  { action = 'unfold_all', lhs = 'zR', desc = 'direct: Expand all direct directories' },
+  { action = 'fold_all', lhs = 'zM', desc = 'direct: Collapse all direct directories' },
+  { action = 'previous_directory', lhs = '[d', desc = 'direct: Jump to the previous visible direct directory' },
+  { action = 'next_directory', lhs = ']d', desc = 'direct: Jump to the next visible direct directory' },
 }
 
 M.MOUSE_MAPS = {
-  { lhs = '<LeftMouse>', callback = function(buffer)
-    return function() return M._handle_mouse_click(buffer) end
-  end, desc = 'direct: Toggle a direct directory from its folder icon' },
-  { lhs = '<2-LeftMouse>', callback = function(buffer)
-    return function() return M._handle_double_click(buffer) end
-  end, desc = 'direct: Open the direct entry under the double-click' },
+  {
+    lhs = '<LeftMouse>',
+    callback = function(buffer)
+      return function() return M._handle_mouse_click(buffer) end
+    end,
+    desc = 'direct: Toggle a direct directory from its folder icon',
+  },
+  {
+    lhs = '<2-LeftMouse>',
+    callback = function(buffer)
+      return function() return M._handle_double_click(buffer) end
+    end,
+    desc = 'direct: Open the direct entry under the double-click',
+  },
 }
 
 function M.install_mappings(bufnr, _buffer)
@@ -42,14 +40,20 @@ function M.install_mappings(bufnr, _buffer)
     local lhs = config.mapping_lhs(map.action, map.lhs)
     if lhs then
       vim.keymap.set('n', lhs, M.action_callback(map.action, buffer), {
-        buffer = bufnr, silent = true, noremap = true, desc = map.desc,
+        buffer = bufnr,
+        silent = true,
+        noremap = true,
+        desc = map.desc,
       })
     end
   end
   if config.options.map_default_keys then
     for _, map in ipairs(M.MOUSE_MAPS) do
       vim.keymap.set('n', map.lhs, map.callback(buffer), {
-        buffer = bufnr, silent = true, noremap = true, desc = map.desc,
+        buffer = bufnr,
+        silent = true,
+        noremap = true,
+        desc = map.desc,
       })
     end
   end
@@ -80,14 +84,14 @@ function M.clear_mappings(bufnr)
     descriptions[map.desc] = true
     descriptions['direct: Plug ' .. map.action] = true
   end
-  for _, map in ipairs(M.MOUSE_MAPS) do descriptions[map.desc] = true end
+  for _, map in ipairs(M.MOUSE_MAPS) do
+    descriptions[map.desc] = true
+  end
   for _, target in ipairs(buffers) do
     if vim.api.nvim_buf_is_valid(target) then
       pcall(vim.api.nvim_buf_call, target, function()
         for _, map in ipairs(vim.api.nvim_buf_get_keymap(target, 'n')) do
-          if descriptions[map.desc] then
-            pcall(vim.keymap.del, 'n', map.lhs, { buffer = target })
-          end
+          if descriptions[map.desc] then pcall(vim.keymap.del, 'n', map.lhs, { buffer = target }) end
         end
       end)
     end
@@ -122,21 +126,16 @@ end
 function M._handle_mouse_click(buffer, mouse)
   mouse = mouse or vim.fn.getmousepos()
   local winid = mouse.winid
-  if not winid or winid == 0 or not vim.api.nvim_win_is_valid(winid) then
-    return
-  end
+  if not winid or winid == 0 or not vim.api.nvim_win_is_valid(winid) then return end
 
   local target_buf = vim.api.nvim_win_get_buf(winid)
   local context = buffer._folding_context(target_buf)
-  local rec = context and mouse.line and mouse.line > 0
-    and context.get_row_record(mouse.line) or nil
+  local rec = context and mouse.line and mouse.line > 0 and context.get_row_record(mouse.line) or nil
   local is_icon_click = false
-  if rec and context.is_directory(rec)
-    and require('direct.config').options.show_folder_icons == true then
+  if rec and context.is_directory(rec) and require('direct.config').options.show_folder_icons == true then
     local text_col = (rec.depth or 0) * require('direct.config').options.indent_size + 1
     local ok, icon_pos = pcall(vim.fn.screenpos, winid, mouse.line, text_col)
-    if ok and icon_pos and icon_pos.row == mouse.screenrow
-      and icon_pos.col and icon_pos.curscol then
+    if ok and icon_pos and icon_pos.row == mouse.screenrow and icon_pos.col and icon_pos.curscol then
       -- The icon slot appends one alignment space after the glyph.
       local glyph_width = icon_pos.curscol - icon_pos.col - 1
       is_icon_click = glyph_width > 0
@@ -147,9 +146,7 @@ function M._handle_mouse_click(buffer, mouse)
 
   -- A buffer-local mouse mapping replaces Neovim's default click action, so
   -- retain its normal-mode cursor placement for clicks that are not on an icon.
-  if vim.api.nvim_get_current_win() ~= winid then
-    vim.api.nvim_set_current_win(winid)
-  end
+  if vim.api.nvim_get_current_win() ~= winid then vim.api.nvim_set_current_win(winid) end
   if mouse.line and mouse.line > 0 then
     local line = vim.api.nvim_buf_get_lines(target_buf, mouse.line - 1, mouse.line, false)[1]
     if line then
@@ -162,9 +159,7 @@ function M._handle_mouse_click(buffer, mouse)
   if not is_icon_click then return end
   return vim.api.nvim_win_call(winid, function()
     local attached = buffer.restore()
-    if context.is_expanded(rec.id) then
-      return attached:collapse(mouse.line)
-    end
+    if context.is_expanded(rec.id) then return attached:collapse(mouse.line) end
     return attached:expand(mouse.line)
   end)
 end
@@ -174,27 +169,18 @@ end
 function M._handle_double_click(buffer, mouse)
   mouse = mouse or vim.fn.getmousepos()
   local winid = mouse.winid
-  if not winid or winid == 0 or not vim.api.nvim_win_is_valid(winid) then
-    return
-  end
+  if not winid or winid == 0 or not vim.api.nvim_win_is_valid(winid) then return end
 
   local target_buf = vim.api.nvim_win_get_buf(winid)
   local context = buffer._folding_context(target_buf)
-  if not context or not mouse.line or mouse.line < 1
-    or not context.get_row_record(mouse.line) then
-    return
-  end
+  if not context or not mouse.line or mouse.line < 1 or not context.get_row_record(mouse.line) then return end
 
-  if vim.api.nvim_get_current_win() ~= winid then
-    vim.api.nvim_set_current_win(winid)
-  end
+  if vim.api.nvim_get_current_win() ~= winid then vim.api.nvim_set_current_win(winid) end
   local line = vim.api.nvim_buf_get_lines(target_buf, mouse.line - 1, mouse.line, false)[1]
   if not line then return end
   local col = math.max(0, math.min((mouse.column or 1) - 1, #line))
   vim.api.nvim_win_set_cursor(winid, { mouse.line, col })
-  return vim.api.nvim_win_call(winid, function()
-    return require('direct').open()
-  end)
+  return vim.api.nvim_win_call(winid, function() return require('direct').open() end)
 end
 
 local function expand_tree(buffer, context, start_ids)
@@ -213,8 +199,8 @@ local function expand_tree(buffer, context, start_ids)
       local rec = context.get_record(task.id)
       if rec and context.is_directory(rec) then
         local identity = context.identity_for_record(rec)
-        local key = identity and (identity.inode and ('inode:' .. identity.inode)
-          or ('path:' .. identity.path)) or ('id:' .. tostring(rec.id))
+        local key = identity and (identity.inode and ('inode:' .. identity.inode) or ('path:' .. identity.path))
+          or ('id:' .. tostring(rec.id))
         if not ancestors[key] then
           ancestors[key] = true
           local row = context.visible_row_for_id(task.id)
@@ -226,9 +212,7 @@ local function expand_tree(buffer, context, start_ids)
               local children = context.get_expanded_children(task.id)
               for index = #children, 1, -1 do
                 local child = children[index]
-                if context.is_directory(child) then
-                  stack[#stack + 1] = { id = child.id, depth = task.depth + 1 }
-                end
+                if context.is_directory(child) then stack[#stack + 1] = { id = child.id, depth = task.depth + 1 } end
               end
             else
               ancestors[key] = nil
@@ -245,9 +229,7 @@ end
 
 local function get_context(buffer, bufnr)
   local context = buffer._folding_context(bufnr)
-  if not context then
-    return nil, 'directory state is unavailable'
-  end
+  if not context then return nil, 'directory state is unavailable' end
   return context
 end
 
@@ -271,9 +253,7 @@ function M.toggle_recursive(buffer)
   if not context then return nil, err end
   local row = vim.api.nvim_win_get_cursor(0)[1]
   local rec = context.get_row_record(row)
-  if rec and context.is_expanded(rec.id) then
-    return buffer.collapse()
-  end
+  if rec and context.is_expanded(rec.id) then return buffer.collapse() end
   return M.expand_at(buffer.restore(), row, context)
 end
 

@@ -20,24 +20,22 @@ function M.new(deps)
   end
 
   local function reverse_operation_status(transaction)
-    if transaction.direction == 'apply'
-      and (transaction.source == vim.NIL or transaction.source == nil) then
+    if transaction.direction == 'apply' and (transaction.source == vim.NIL or transaction.source == nil) then
       local _, destination_stat = action.fs.entry_identity(transaction.destination)
-      if not destination_stat and transaction.destination_identity == vim.NIL then
-        return 'not-started'
-      end
+      if not destination_stat and transaction.destination_identity == vim.NIL then return 'not-started' end
       return 'ambiguous'
     end
     local source_now, source_stat = action.fs.entry_identity(transaction.source)
     local destination_now, destination_stat = action.fs.entry_identity(transaction.destination)
     if not source_stat then source_now = nil end
     if not destination_stat then destination_now = nil end
-    if identities_equal(transaction.source_identity, source_now)
-      and identities_equal(transaction.destination_identity, destination_now) then
+    if
+      identities_equal(transaction.source_identity, source_now)
+      and identities_equal(transaction.destination_identity, destination_now)
+    then
       return 'not-started'
     end
-    if source_now == nil and destination_now ~= nil
-      and destination_now.inode == transaction.source_identity.inode then
+    if source_now == nil and destination_now ~= nil and destination_now.inode == transaction.source_identity.inode then
       return 'completed'
     end
     return 'ambiguous'
@@ -48,11 +46,11 @@ function M.new(deps)
     local destination_now, destination_stat = action.fs.entry_identity(step.dst)
     if not source_stat then source_now = nil end
     if not destination_stat then destination_now = nil end
-    if identities_equal(step.identity, source_now) and destination_now == nil then
-      return 'not-started'
-    end
-    if identities_equal(step.identity, destination_now)
-      and (source_now == nil or not identities_equal(step.identity, source_now)) then
+    if identities_equal(step.identity, source_now) and destination_now == nil then return 'not-started' end
+    if
+      identities_equal(step.identity, destination_now)
+      and (source_now == nil or not identities_equal(step.identity, source_now))
+    then
       return 'completed'
     end
     return 'ambiguous'
@@ -61,14 +59,15 @@ function M.new(deps)
   local function rollback_staging_steps(transaction, transaction_path, last_completed)
     for index = last_completed, 1, -1 do
       local step = transaction.steps[index]
-      if move_step_status(step) ~= 'completed' then
-        return nil, 'staged move changed; preserved at ' .. step.dst
-      end
-      local restored, restore_err = action.fs.rename_noreplace(
-        step.dst, step.src, step.identity)
+      if move_step_status(step) ~= 'completed' then return nil, 'staged move changed; preserved at ' .. step.dst end
+      local restored, restore_err = action.fs.rename_noreplace(step.dst, step.src, step.identity)
       if not restored then
-        local message = 'could not restore staged entry ' .. step.dst .. ' to '
-          .. step.src .. ' (' .. tostring(restore_err)
+        local message = 'could not restore staged entry '
+          .. step.dst
+          .. ' to '
+          .. step.src
+          .. ' ('
+          .. tostring(restore_err)
           .. '); temp preserved; manual recovery required before retry'
         ui.notify('direct: ' .. message, vim.log.levels.ERROR)
         return nil, message
@@ -86,8 +85,12 @@ function M.new(deps)
       local step = transaction.steps[index]
       local status = move_step_status(step)
       if status == 'ambiguous' then
-        return nil, 'grouped move step identity is ambiguous (source identity changed '
-          .. 'or destination is occupied): ' .. step.src .. ' -> ' .. step.dst
+        return nil,
+          'grouped move step identity is ambiguous (source identity changed '
+            .. 'or destination is occupied): '
+            .. step.src
+            .. ' -> '
+            .. step.dst
       end
       if status == 'not-started' then
         local move = action.Move(step.src, step.dst)
@@ -96,26 +99,25 @@ function M.new(deps)
           status = move_step_status(step)
           if status ~= 'completed' then
             if index <= transaction.staging_count then
-              local rolled_back, rollback_err = rollback_staging_steps(
-                transaction, transaction_path, index - 1)
+              local rolled_back, rollback_err = rollback_staging_steps(transaction, transaction_path, index - 1)
               if not rolled_back then
-                return nil, tostring(execute_err or result or 'action failed')
-                  .. '; ' .. tostring(rollback_err)
+                return nil, tostring(execute_err or result or 'action failed') .. '; ' .. tostring(rollback_err)
               end
               local failure = tostring(execute_err or result or 'action failed')
-              if transaction.kind == 'reverse' then
-                failure = 'could not stage renames: ' .. failure
-              end
+              if transaction.kind == 'reverse' then failure = 'could not stage renames: ' .. failure end
               return nil, failure
             end
-            return nil, 'grouped move step failed: '
-              .. tostring(called and execute_err or result)
+            return nil, 'grouped move step failed: ' .. tostring(called and execute_err or result)
           end
         end
         status = move_step_status(step)
         if status ~= 'completed' then
-          return nil, 'grouped move step identity is ambiguous (source identity changed '
-            .. 'or destination is occupied): ' .. step.src .. ' -> ' .. step.dst
+          return nil,
+            'grouped move step identity is ambiguous (source identity changed '
+              .. 'or destination is occupied): '
+              .. step.src
+              .. ' -> '
+              .. step.dst
         end
       end
       transaction.next_step = transaction.next_step + 1
@@ -136,8 +138,14 @@ function M.new(deps)
       local step = transaction.steps[index]
       local status = move_step_status(step)
       if status == 'ambiguous' then
-        return finish(nil, 'grouped move step identity is ambiguous (source identity changed '
-          .. 'or destination is occupied): ' .. step.src .. ' -> ' .. step.dst)
+        return finish(
+          nil,
+          'grouped move step identity is ambiguous (source identity changed '
+            .. 'or destination is occupied): '
+            .. step.src
+            .. ' -> '
+            .. step.dst
+        )
       end
       local function checkpoint()
         transaction.next_step = index + 1
@@ -150,8 +158,14 @@ function M.new(deps)
       action.execute_async(move, function(ok, result, execute_err)
         if ok and result ~= nil then
           if move_step_status(step) ~= 'completed' then
-            return finish(nil, 'grouped move step identity is ambiguous (source identity changed '
-              .. 'or destination is occupied): ' .. step.src .. ' -> ' .. step.dst)
+            return finish(
+              nil,
+              'grouped move step identity is ambiguous (source identity changed '
+                .. 'or destination is occupied): '
+                .. step.src
+                .. ' -> '
+                .. step.dst
+            )
           end
           return checkpoint()
         end
@@ -159,11 +173,8 @@ function M.new(deps)
         if status == 'completed' then return checkpoint() end
         local failure = tostring(execute_err or result or 'action failed')
         if index <= transaction.staging_count then
-          local rolled_back, rollback_err = rollback_staging_steps(
-            transaction, transaction_path, index - 1)
-          if not rolled_back then
-            return finish(nil, failure .. '; ' .. tostring(rollback_err))
-          end
+          local rolled_back, rollback_err = rollback_staging_steps(transaction, transaction_path, index - 1)
+          if not rolled_back then return finish(nil, failure .. '; ' .. tostring(rollback_err)) end
           if transaction.kind == 'reverse' then failure = 'could not stage renames: ' .. failure end
         else
           failure = 'grouped move step failed: ' .. failure
@@ -185,8 +196,12 @@ function M.new(deps)
 
   local function paste_stack_snapshot(transaction, completed)
     local undo, redo = {}, {}
-    for index, line in ipairs(transaction.base_undo) do undo[index] = line end
-    for index, line in ipairs(transaction.base_redo) do redo[index] = line end
+    for index, line in ipairs(transaction.base_undo) do
+      undo[index] = line
+    end
+    for index, line in ipairs(transaction.base_redo) do
+      redo[index] = line
+    end
     if #completed == 0 then return undo, redo end
     local paste_action = action.deserialize(transaction.action)
     local record, err = action.serialize(paste_action_for_pairs(paste_action, completed))
@@ -220,22 +235,24 @@ function M.new(deps)
     end
     if not destination_stat then return completed end
 
-    local matches, compare_err = action.fs.same_contents(
-      pending.source, pending.destination)
+    local matches, compare_err = action.fs.same_contents(pending.source, pending.destination)
     if matches ~= true then
-      return nil, 'interrupted paste destination is ambiguous: '
-        .. pending.destination .. (compare_err and (' (' .. tostring(compare_err) .. ')') or '')
+      return nil,
+        'interrupted paste destination is ambiguous: ' .. pending.destination .. (compare_err and (' (' .. tostring(
+          compare_err
+        ) .. ')') or '')
     end
     completed[#completed + 1] = { src = pending.src, dst = pending.dst }
     return completed
   end
 
-  local function recover_paste_transaction(transaction, undo_path, redo_path,
-      transaction_path)
+  local function recover_paste_transaction(transaction, undo_path, redo_path, transaction_path)
     local completed, settle_err = settle_paste_pending(transaction)
     if not completed then
-      local message = tostring(settle_err) .. '; recovery journal preserved at '
-        .. transaction_path .. '; inspect the affected paths before retrying'
+      local message = tostring(settle_err)
+        .. '; recovery journal preserved at '
+        .. transaction_path
+        .. '; inspect the affected paths before retrying'
       ui.notify('direct: ' .. message, vim.log.levels.ERROR)
       return nil, message
     end
@@ -250,32 +267,26 @@ function M.new(deps)
     local quarantine_now, quarantine_stat = action.fs.entry_identity(item.quarantine)
     if not source_stat then source_now = nil end
     if not quarantine_stat then quarantine_now = nil end
-    if identities_equal(item.identity, quarantine_now)
-      and (source_now == nil or not identities_equal(item.identity, source_now)) then
+    if
+      identities_equal(item.identity, quarantine_now)
+      and (source_now == nil or not identities_equal(item.identity, source_now))
+    then
       return 'completed'
     end
-    if identities_equal(item.identity, source_now) and quarantine_now == nil then
-      return 'not-started'
-    end
+    if identities_equal(item.identity, source_now) and quarantine_now == nil then return 'not-started' end
     return 'ambiguous'
   end
 
-  local function finish_unpaste_transaction(transaction, undo_path, redo_path,
-      transaction_path)
-    while transaction.phase == 'capture'
-      and transaction.next_item <= #transaction.items do
+  local function finish_unpaste_transaction(transaction, undo_path, redo_path, transaction_path)
+    while transaction.phase == 'capture' and transaction.next_item <= #transaction.items do
       local item = transaction.items[transaction.next_item]
       local status = unpaste_capture_status(item)
-      if status == 'ambiguous' then
-        return nil, 'Unpaste capture is ambiguous: ' .. item.path
-      end
+      if status == 'ambiguous' then return nil, 'Unpaste capture is ambiguous: ' .. item.path end
       if status == 'not-started' then
-        local _, capture_err = action.fs.rename_noreplace(
-          item.path, item.quarantine, item.identity)
+        local _, capture_err = action.fs.rename_noreplace(item.path, item.quarantine, item.identity)
         status = unpaste_capture_status(item)
         if status ~= 'completed' then
-          return nil, 'could not capture Unpaste entry '
-            .. item.path .. ' (' .. tostring(capture_err) .. ')'
+          return nil, 'could not capture Unpaste entry ' .. item.path .. ' (' .. tostring(capture_err) .. ')'
         end
       end
       transaction.next_item = transaction.next_item + 1
@@ -298,8 +309,10 @@ function M.new(deps)
         end
         local matches, compare_err = action.fs.same_contents(item.quarantine, item.reference)
         if matches ~= true then
-          return nil, 'Unpaste quarantine no longer matches register content: '
-            .. item.quarantine .. (compare_err and (' (' .. tostring(compare_err) .. ')') or '')
+          return nil,
+            'Unpaste quarantine no longer matches register content: '
+              .. item.quarantine
+              .. (compare_err and (' (' .. tostring(compare_err) .. ')') or '')
         end
         local removed, remove_err
         if item.kind == 'directory' then
@@ -308,16 +321,14 @@ function M.new(deps)
           removed, remove_err = action.fs.rm_file(item.quarantine)
         end
         if not removed or action.fs.taken(item.quarantine) then
-          return nil, 'could not remove Unpaste quarantine '
-            .. item.quarantine .. ' (' .. tostring(remove_err) .. ')'
+          return nil, 'could not remove Unpaste quarantine ' .. item.quarantine .. ' (' .. tostring(remove_err) .. ')'
         end
       end
       transaction.next_item = transaction.next_item + 1
       local saved, save_err = write_transaction(transaction_path, transaction)
       if not saved then return nil, save_err end
     end
-    return commit_stacks(undo_path, redo_path, transaction_path,
-      transaction.undo, transaction.redo)
+    return commit_stacks(undo_path, redo_path, transaction_path, transaction.undo, transaction.redo)
   end
 
   return {

@@ -51,9 +51,7 @@ end
 local function filter_git_status_lines(root, lines, snapshot)
   local filtered = {}
   for _, line in ipairs(lines or {}) do
-    if git.status_for(snapshot, M.entry_path(root, line)) then
-      filtered[#filtered + 1] = line
-    end
+    if git.status_for(snapshot, M.entry_path(root, line)) then filtered[#filtered + 1] = line end
   end
   return filtered
 end
@@ -61,9 +59,7 @@ end
 local function filter_git_diff_lines(root, lines, snapshot)
   local filtered = {}
   for _, line in ipairs(lines or {}) do
-    if git.status_for(snapshot, M.entry_path(root, line)) then
-      filtered[#filtered + 1] = line
-    end
+    if git.status_for(snapshot, M.entry_path(root, line)) then filtered[#filtered + 1] = line end
   end
   return filtered
 end
@@ -76,9 +72,7 @@ local lstat = listing.lstat
 local is_real_directory = listing.is_real_directory
 local hidden_descendant = listing.hidden_descendant
 
-local function ensure_git_snapshot(state)
-  return state.git_status
-end
+local function ensure_git_snapshot(state) return state.git_status end
 
 local refresh_highlights
 
@@ -88,8 +82,7 @@ local function start_git_status(bufnr, state, timeout_ms)
   state.git_status_request = request
   state.git_status_pending = true
   local cancel = git.read_async(state.root, timeout_ms, function(snapshot, err)
-    if not vim.api.nvim_buf_is_valid(bufnr) or states[bufnr] ~= state
-      or state.git_status_request ~= request then
+    if not vim.api.nvim_buf_is_valid(bufnr) or states[bufnr] ~= state or state.git_status_request ~= request then
       return
     end
     if not fs.stat(state.root) then return end
@@ -102,8 +95,7 @@ local function start_git_status(bufnr, state, timeout_ms)
       local key = paths.canonical(state.root)
       if not git_status_timeout_notified[key] then
         git_status_timeout_notified[key] = true
-        ui.notify('direct: Git status unavailable for ' .. state.root .. ': '
-          .. tostring(err), vim.log.levels.WARN)
+        ui.notify('direct: Git status unavailable for ' .. state.root .. ': ' .. tostring(err), vim.log.levels.WARN)
       end
     end
 
@@ -147,7 +139,9 @@ refresh_highlights = function(bufnr, state, row_ids)
     local rec = id and state.rows[id]
     if rec then
       local status, conflict
-      if snapshot then status, conflict = git.status_for(snapshot, rec.path) end
+      if snapshot then
+        status, conflict = git.status_for(snapshot, rec.path)
+      end
       display_rows[#display_rows + 1] = {
         row = row,
         depth = rec.depth or 0,
@@ -165,10 +159,7 @@ end
 -- text or list-time filesystem snapshot.
 function M.refresh_git_status(bufnr, root)
   bufnr = bufnr or vim.api.nvim_get_current_buf()
-  if not vim.api.nvim_buf_is_loaded(bufnr)
-    or vim.bo[bufnr].filetype ~= constants.FILETYPE then
-    return false
-  end
+  if not vim.api.nvim_buf_is_loaded(bufnr) or vim.bo[bufnr].filetype ~= constants.FILETYPE then return false end
   local state = states[bufnr]
   if not state or (root and state.root ~= root) then return false end
   state.git_status = nil
@@ -220,9 +211,7 @@ Buffer.__index = Buffer
 
 -- Display rows are identified by extmarks rather than their spelling.  In
 -- particular, child rows are never interpreted as root-relative filenames.
-local function path_identity(path)
-  return fs.path_identity(path, fs.stat(path))
-end
+local function path_identity(path) return fs.path_identity(path, fs.stat(path)) end
 
 local function add_identity(index, identity, value)
   if not identity then return end
@@ -261,8 +250,7 @@ end
 local function identity_is_duplicated(identity, counts)
   if not identity then return false end
   if identity.inode then
-    return (counts.by_inode[identity.inode] or 0) > 1
-      or (counts.unknown_by_path[identity.path] or 0) > 0
+    return (counts.by_inode[identity.inode] or 0) > 1 or (counts.unknown_by_path[identity.path] or 0) > 0
   end
   return (counts.by_path[identity.path] or 0) > 1
 end
@@ -273,8 +261,7 @@ local function count_identity(counts, identity)
   if identity.inode then
     counts.by_inode[identity.inode] = (counts.by_inode[identity.inode] or 0) + 1
   else
-    counts.unknown_by_path[identity.path] =
-      (counts.unknown_by_path[identity.path] or 0) + 1
+    counts.unknown_by_path[identity.path] = (counts.unknown_by_path[identity.path] or 0) + 1
   end
 end
 
@@ -287,15 +274,9 @@ end
 -- `nvim_buf_get_name` returns (the resolved spelling). `same_path` makes the
 -- spelling irrelevant, so no `bufname('%')` accessor is needed.
 function M.current_entry(name)
-  if name == nil then
-    name = vim.api.nvim_buf_get_name(vim.api.nvim_get_current_buf())
-  end
-  if type(name) ~= 'string' or name == '' then
-    return nil
-  end
-  if fs.stat(name) then
-    return name
-  end
+  if name == nil then name = vim.api.nvim_buf_get_name(vim.api.nvim_get_current_buf()) end
+  if type(name) ~= 'string' or name == '' then return nil end
+  if fs.stat(name) then return name end
   return nil
 end
 
@@ -327,9 +308,7 @@ local function same_lines(actual, expected)
   return true
 end
 
-local function indent_size()
-  return require('direct.config').options.indent_size
-end
+local function indent_size() return require('direct.config').options.indent_size end
 
 local tree_planner = require('direct.buffer.tree')({
   fs = fs,
@@ -407,12 +386,12 @@ local row_state = require('direct.buffer.row_state')({
 is_deleted_record = row_state.is_deleted_record
 local merge_status_deleted_entries = row_state.merge_deleted_entries
 merge_deleted_entries = function(directory, lines, git_snapshot, show_hidden, diff_snapshot)
-  local result, deleted = merge_status_deleted_entries(
-    directory, lines, git_snapshot, show_hidden)
+  local result, deleted = merge_status_deleted_entries(directory, lines, git_snapshot, show_hidden)
   if not diff_snapshot then return result, deleted end
-  local with_diff, diff_deleted = merge_status_deleted_entries(
-    directory, result, diff_snapshot, show_hidden)
-  for path, kind in pairs(diff_deleted) do deleted[path] = kind end
+  local with_diff, diff_deleted = merge_status_deleted_entries(directory, result, diff_snapshot, show_hidden)
+  for path, kind in pairs(diff_deleted) do
+    deleted[path] = kind
+  end
   return with_diff, deleted
 end
 hide_deleted_expansions = row_state.hide_deleted_expansions
@@ -426,17 +405,13 @@ attach_deleted_guard = row_state.attach_deleted_guard
 local function ensure_direct_syntax(bufnr)
   vim.api.nvim_buf_call(bufnr, function()
     if vim.b.current_syntax ~= 'direct' then
-      if vim.b.current_syntax ~= nil then
-        vim.cmd('syntax clear')
-      end
+      if vim.b.current_syntax ~= nil then vim.cmd('syntax clear') end
       vim.b.current_syntax = nil
       vim.bo.syntax = 'direct'
       -- `syntax=direct` does not source a syntax file when the user's global
       -- syntax loader is off. Source this small buffer-local syntax explicitly
       -- so direct listings still get their filename highlights in that setup.
-      if vim.b.current_syntax ~= 'direct' then
-        vim.cmd('runtime! syntax/direct.vim')
-      end
+      if vim.b.current_syntax ~= 'direct' then vim.cmd('runtime! syntax/direct.vim') end
     else
       vim.bo.syntax = 'direct'
     end
@@ -526,8 +501,7 @@ local function set_options(bufnr)
       local state = states[bufnr]
       if state then restore_deleted_rows(bufnr, state) end
       state = states[bufnr]
-      if state and (state.decorations_dirty
-          or state.icon_line_count ~= vim.api.nvim_buf_line_count(bufnr)) then
+      if state and (state.decorations_dirty or state.icon_line_count ~= vim.api.nvim_buf_line_count(bufnr)) then
         local row_ids = row_ids_by_row(bufnr)
         refresh_highlights(bufnr, state, row_ids)
         refresh_icons(bufnr, state, row_ids)
@@ -592,8 +566,7 @@ function M.Buffer(path, options)
     -- unique URI.
     bufnr = vim.api.nvim_create_buf(true, false)
     vim.api.nvim_set_current_buf(bufnr)
-    vim.api.nvim_buf_set_name(bufnr,
-      string.format('direct://%s#%d', root, bufnr))
+    vim.api.nvim_buf_set_name(bufnr, string.format('direct://%s#%d', root, bufnr))
   elseif open_in == 'new' then
     bufnr = vim.api.nvim_create_buf(true, false)
     vim.api.nvim_set_current_buf(bufnr)
@@ -674,9 +647,7 @@ function M.toggle()
   if pending.refuse('toggle', 'willRenameFiles') then return nil end
   local bufnr = vim.api.nvim_get_current_buf()
   local rec = current_row_record(bufnr, vim.api.nvim_win_get_cursor(0)[1] - 1)
-  if rec and states[bufnr] and states[bufnr].expanded[rec.id] then
-    return M.collapse()
-  end
+  if rec and states[bufnr] and states[bufnr].expanded[rec.id] then return M.collapse() end
   return M.expand()
 end
 
@@ -715,7 +686,9 @@ function M.toggle_hidden()
   state.collapse_undos = {}
   local listed, err = M.restore():list({ reset_undo = true })
   if not listed then
-    for key, value in pairs(previous) do state[key] = value end
+    for key, value in pairs(previous) do
+      state[key] = value
+    end
     return nil, err
   end
   return listed
@@ -735,9 +708,7 @@ local function set_git_status_only(enabled)
     return nil, reason
   end
   if state.view_git_status_only == enabled then
-    if enabled then
-      return require('direct.folding').expand_all(M)
-    end
+    if enabled then return require('direct.folding').expand_all(M) end
     return true
   end
   local previous = {
@@ -761,12 +732,12 @@ local function set_git_status_only(enabled)
   state.collapse_undos = {}
   local listed, err = M.restore():list({ reset_undo = true })
   if not listed then
-    for key, value in pairs(previous) do state[key] = value end
+    for key, value in pairs(previous) do
+      state[key] = value
+    end
     return nil, err
   end
-  if enabled then
-    return require('direct.folding').expand_all(M)
-  end
+  if enabled then return require('direct.folding').expand_all(M) end
   return listed
 end
 
@@ -800,8 +771,7 @@ function M.toggle_gitignore()
         end
       end
       listing.set_git_timeout_indicator(bufnr, state)
-      ui.notify('direct: Git-ignore filtering disabled; unsaved listing edits were preserved',
-        vim.log.levels.INFO)
+      ui.notify('direct: Git-ignore filtering disabled; unsaved listing edits were preserved', vim.log.levels.INFO)
       return true
     end
     local reason = 'cannot toggle Git-ignore filtering with unsaved edits; sync or discard them first'
@@ -834,7 +804,9 @@ function M.toggle_gitignore()
   state.collapse_undos = {}
   local listed, err = M.restore():list({ reset_undo = true })
   if not listed then
-    for key, value in pairs(previous) do state[key] = value end
+    for key, value in pairs(previous) do
+      state[key] = value
+    end
     return nil, err
   end
   return listed
@@ -842,15 +814,11 @@ end
 
 function M.toggle_git_status()
   local state = states[vim.api.nvim_get_current_buf()]
-  if not state then
-    return set_git_status_only(true)
-  end
+  if not state then return set_git_status_only(true) end
   return set_git_status_only(not state.view_git_status_only)
 end
 
-function M.show_git_status()
-  return set_git_status_only(true)
-end
+function M.show_git_status() return set_git_status_only(true) end
 
 local function set_git_diff_only(ref, include_uncommitted)
   local bufnr = vim.api.nvim_get_current_buf()
@@ -871,10 +839,8 @@ local function set_git_diff_only(ref, include_uncommitted)
     return nil, reason
   end
 
-  local active_snapshot = type(state.git_diff_snapshot) == 'table'
-    and state.git_diff_snapshot or nil
-  local same_ref = ref == nil
-    or (active_snapshot and vim.trim(ref) == active_snapshot.ref)
+  local active_snapshot = type(state.git_diff_snapshot) == 'table' and state.git_diff_snapshot or nil
+  local same_ref = ref == nil or (active_snapshot and vim.trim(ref) == active_snapshot.ref)
   local same_uncommitted = include_uncommitted == nil
     or (active_snapshot and include_uncommitted == active_snapshot.include_uncommitted)
   local turning_off = state.view_git_diff_only and same_ref and same_uncommitted
@@ -915,16 +881,16 @@ local function set_git_diff_only(ref, include_uncommitted)
     git_diff_snapshot = snapshot,
   })
   if not listed then
-    for key, value in pairs(previous) do state[key] = value end
+    for key, value in pairs(previous) do
+      state[key] = value
+    end
     return nil, err
   end
   if not turning_off then return folding.expand_all(M) end
   return listed
 end
 
-function M.toggle_git_diff(ref, include_uncommitted)
-  return set_git_diff_only(ref, include_uncommitted)
-end
+function M.toggle_git_diff(ref, include_uncommitted) return set_git_diff_only(ref, include_uncommitted) end
 
 -- Visible file/Git navigation and folding accessors live in navigation.lua.
 require('direct.buffer.navigation')({

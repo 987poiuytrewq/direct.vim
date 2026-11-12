@@ -12,21 +12,18 @@ end
 
 function M.notify(msg, level, options)
   local message = tostring(msg or '')
-  if message ~= '' and not message:match('^direct:') then
-    message = 'direct: ' .. message
-  end
+  if message ~= '' and not message:match('^direct:') then message = 'direct: ' .. message end
   if options and options.ephemeral then
     local highlight = level == vim.log.levels.ERROR and 'ErrorMsg'
-      or level == vim.log.levels.WARN and 'WarningMsg' or 'MoreMsg'
+      or level == vim.log.levels.WARN and 'WarningMsg'
+      or 'MoreMsg'
     return pcall(vim.api.nvim_echo, { { message, highlight } }, false, {})
   end
   local ok = pcall(vim.notify, message, level)
   if not ok then
     local highlight = level == vim.log.levels.ERROR and 'ErrorMsg' or 'WarningMsg'
     local echoed = pcall(vim.api.nvim_echo, { { message, highlight } }, true, {})
-    if not echoed then
-      pcall(vim.api.nvim_err_writeln, message)
-    end
+    if not echoed then pcall(vim.api.nvim_err_writeln, message) end
   end
 end
 
@@ -57,9 +54,7 @@ function M.prompt(prompt, text, completion)
   vim.fn.inputsave()
   local ok, answer = pcall(vim.fn.input, prompt, text or '', completion or '')
   vim.fn.inputrestore()
-  if not ok then
-    error(answer, 0)
-  end
+  if not ok then error(answer, 0) end
   return answer
 end
 
@@ -67,9 +62,7 @@ end
 -- through its callback API. It is intentionally separate from prompt():
 -- callers cannot fall back to vim.fn.input if a UI backend is missing or fails.
 function M.input(prompt, default, completion, on_confirm, on_error)
-  if type(on_confirm) ~= 'function' then
-    return nil, 'vim.ui.input requires a completion callback'
-  end
+  if type(on_confirm) ~= 'function' then return nil, 'vim.ui.input requires a completion callback' end
   local completed = false
   local function settle(value)
     if completed then return end
@@ -78,9 +71,7 @@ function M.input(prompt, default, completion, on_confirm, on_error)
     if not ok then
       if type(on_error) == 'function' then
         local reported, report_err = pcall(on_error, err)
-        if not reported then
-          M.report_error('handle the input error', report_err)
-        end
+        if not reported then M.report_error('handle the input error', report_err) end
       else
         M.report_error('complete the input', err)
       end
@@ -91,9 +82,7 @@ function M.input(prompt, default, completion, on_confirm, on_error)
     default = default or '',
     completion = completion or '',
   }, settle)
-  if not ok then
-    return nil, tostring(err)
-  end
+  if not ok then return nil, tostring(err) end
   return true
 end
 

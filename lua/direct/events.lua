@@ -27,8 +27,7 @@ function M.emit(name, data)
     modeline = false,
   })
   if not ok then
-    require('direct.ui').notify('User event ' .. name .. ' failed: ' .. tostring(err),
-      vim.log.levels.WARN)
+    require('direct.ui').notify('User event ' .. name .. ' failed: ' .. tostring(err), vim.log.levels.WARN)
   end
   return ok, payload
 end
@@ -55,9 +54,7 @@ function M.emit_cancellable(name, data)
   local reason = cancellations[token]
   cancellations[token] = nil
   active_cancellations[token] = nil
-  if dispatched and dispatched.cancel == true then
-    reason = dispatched.reason or true
-  end
+  if dispatched and dispatched.cancel == true then reason = dispatched.reason or true end
   if reason then
     payload.cancel = true
     if type(reason) == 'string' then payload.reason = reason end

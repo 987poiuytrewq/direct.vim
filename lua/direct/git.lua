@@ -17,9 +17,7 @@ local status_priority = {
   U = 5,
 }
 
-local function normalize(path)
-  return paths.canonical(path)
-end
+local function normalize(path) return paths.canonical(path) end
 
 local function start(args, stdin)
   local ok, process = pcall(vim.system, args, { text = false, stdin = stdin })
@@ -30,9 +28,7 @@ end
 local function finish(process, timeout_ms)
   local ok, result = pcall(function() return process:wait(timeout_ms) end)
   if not ok then return nil, tostring(result), -1 end
-  if timeout_ms and result.code == 124 then
-    return nil, 'git command timed out after ' .. timeout_ms .. ' ms', 124
-  end
+  if timeout_ms and result.code == 124 then return nil, 'git command timed out after ' .. timeout_ms .. ' ms', 124 end
   if result.code ~= 0 then
     local stderr = result.stderr and result.stderr:gsub('%s+$', '') or ''
     return nil, stderr ~= '' and stderr or 'git command failed', result.code, stderr
@@ -76,9 +72,7 @@ local function run_parallel(commands, timeout_ms)
   return outputs
 end
 
-local function command(args, stdin, timeout_ms)
-  return run(vim.list_extend({ 'git' }, args), stdin, timeout_ms)
-end
+local function command(args, stdin, timeout_ms) return run(vim.list_extend({ 'git' }, args), stdin, timeout_ms) end
 
 local function commands_parallel(args_list, timeout_ms)
   local commands = {}
@@ -95,8 +89,7 @@ local function discover_repo(path, timeout_ms)
   local output, err = command({ '-C', path, 'rev-parse', '--show-toplevel' }, nil, timeout_ms)
   if not output then
     local lower = tostring(err):lower()
-    if lower:find('not a git repository', 1, true)
-      or lower:find('must be run in a work tree', 1, true) then
+    if lower:find('not a git repository', 1, true) or lower:find('must be run in a work tree', 1, true) then
       return false
     end
     return nil, err
@@ -115,31 +108,33 @@ local function nul_fields(output)
   return fields
 end
 
-local function trimmed_output(output)
-  return (output or ''):gsub('[\r\n]+$', '')
-end
+local function trimmed_output(output) return (output or ''):gsub('[\r\n]+$', '') end
 
 local function default_compare_ref(repo_root)
-  local remote_head = command({ '-C', repo_root, 'symbolic-ref', '--quiet', '--short',
-    'refs/remotes/origin/HEAD' })
+  local remote_head = command({ '-C', repo_root, 'symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD' })
   local remote_ref = remote_head and trimmed_output(remote_head) or nil
   if remote_ref and remote_ref ~= '' then
-    local _, _, code = command({ '-C', repo_root, 'rev-parse', '--verify', '--quiet',
-      '--end-of-options', remote_ref .. '^{commit}' })
+    local _, _, code = command({
+      '-C',
+      repo_root,
+      'rev-parse',
+      '--verify',
+      '--quiet',
+      '--end-of-options',
+      remote_ref .. '^{commit}',
+    })
     if code == 0 then return remote_ref end
   end
 
   for _, branch in ipairs({ 'main', 'master' }) do
-    local _, _, code = command({ '-C', repo_root, 'show-ref', '--verify', '--quiet',
-      'refs/heads/' .. branch })
+    local _, _, code = command({ '-C', repo_root, 'show-ref', '--verify', '--quiet', 'refs/heads/' .. branch })
     if code == 0 then return branch end
   end
   return nil, 'cannot determine the default branch (origin/HEAD, main, or master)'
 end
 
 local function resolve_commit(repo_root, ref)
-  local output, err = command({ '-C', repo_root, 'rev-parse', '--verify',
-    '--end-of-options', ref .. '^{commit}' })
+  local output, err = command({ '-C', repo_root, 'rev-parse', '--verify', '--end-of-options', ref .. '^{commit}' })
   if not output then return nil, err end
   return trimmed_output(output)
 end
@@ -150,9 +145,7 @@ end
 function M.compare_snapshot(root, ref, options)
   if type(root) ~= 'string' or root == '' then return nil, 'repository path is required' end
   if vim.fn.executable('git') ~= 1 then return nil, 'Git executable is unavailable' end
-  if options ~= nil and type(options) ~= 'table' then
-    return nil, 'Git diff options must be a table'
-  end
+  if options ~= nil and type(options) ~= 'table' then return nil, 'Git diff options must be a table' end
   options = options or {}
   local include_uncommitted = options.include_uncommitted == true
   if ref ~= nil and (type(ref) ~= 'string' or ref:find('\0', 1, true)) then
@@ -174,12 +167,10 @@ function M.compare_snapshot(root, ref, options)
   if not head then return nil, 'cannot resolve HEAD: ' .. tostring(head_err) end
 
   local base_output, base_err = command({ '-C', repo_root, 'merge-base', target, head })
-  if not base_output then
-    return nil, 'Git ref ' .. ref .. ' has no merge base with HEAD: ' .. tostring(base_err)
-  end
+  if not base_output then return nil, 'Git ref ' .. ref .. ' has no merge base with HEAD: ' .. tostring(base_err) end
   local base = trimmed_output(base_output)
-  local output, diff_err = command({ '-C', repo_root, 'diff', '--no-ext-diff',
-    '--name-status', '-z', '-M', base, head, '--' })
+  local output, diff_err =
+    command({ '-C', repo_root, 'diff', '--no-ext-diff', '--name-status', '-z', '-M', base, head, '--' })
   if not output then return nil, 'cannot diff against ' .. ref .. ': ' .. tostring(diff_err) end
 
   local fields, entries, index = nul_fields(output), {}, 1
@@ -206,13 +197,13 @@ function M.compare_snapshot(root, ref, options)
 
   local uncommitted_deleted = {}
   if include_uncommitted then
-    local status_output, status_err = command({ '--no-optional-locks', '-C', repo_root,
-      'status', '--porcelain=v1', '-z', '--untracked-files=all' })
-    if not status_output then
-      return nil, 'cannot read uncommitted Git changes: ' .. tostring(status_err)
-    end
+    local status_output, status_err =
+      command({ '--no-optional-locks', '-C', repo_root, 'status', '--porcelain=v1', '-z', '--untracked-files=all' })
+    if not status_output then return nil, 'cannot read uncommitted Git changes: ' .. tostring(status_err) end
     local committed_paths = {}
-    for _, entry in ipairs(entries) do committed_paths[entry.path] = true end
+    for _, entry in ipairs(entries) do
+      committed_paths[entry.path] = true
+    end
     local function add_uncommitted_deleted(relative)
       local path = normalize(vim.fs.joinpath(repo_root, relative))
       uncommitted_deleted[path] = { kind = 'file' }
@@ -294,7 +285,9 @@ function M.compare_snapshot(root, ref, options)
       parent = parent:match('^(.*)/[^/]+$')
     end
   end
-  for path, entry in pairs(uncommitted_deleted) do deleted[path] = entry end
+  for path, entry in pairs(uncommitted_deleted) do
+    deleted[path] = entry
+  end
   return {
     root = repo_root,
     ref = ref,
@@ -314,13 +307,9 @@ local function normalize_status(xy)
   return (xy:gsub('T', 'M'))
 end
 
-local function status_priority_for(code)
-  return status_priority[code] or 0
-end
+local function status_priority_for(code) return status_priority[code] or 0 end
 
-local function is_unmerged(xy)
-  return xy:find('U', 1, true) ~= nil or xy == 'AA' or xy == 'DD'
-end
+local function is_unmerged(xy) return xy:find('U', 1, true) ~= nil or xy == 'AA' or xy == 'DD' end
 
 local function merge_status(previous, incoming)
   if not previous then return incoming end
@@ -384,16 +373,11 @@ local function parse_status(repo_root, output, include_ignored)
       if status ~= '  ' and relative ~= '' then
         -- In -z output, a rename record is followed by the original path; the
         -- first path is the destination and is the one present in the listing.
-        if xy:find('R', 1, true) or xy:find('C', 1, true) then
-          index = index + 1
-        end
+        if xy:find('R', 1, true) or xy:find('C', 1, true) then index = index + 1 end
         if include_ignored or status ~= '!!' then
-          add_with_parent_directories(statuses, conflicts, repo_root, relative, status,
-            is_unmerged(xy))
+          add_with_parent_directories(statuses, conflicts, repo_root, relative, status, is_unmerged(xy))
         end
-        if xy:find('D', 1, true) then
-          add_deleted(deleted, repo_root, relative)
-        end
+        if xy:find('D', 1, true) then add_deleted(deleted, repo_root, relative) end
       end
     end
   end
@@ -407,8 +391,8 @@ function M.read(root)
   if type(root) ~= 'string' or root == '' then return nil end
   local repo_root = discover_repo(root)
   if not repo_root or repo_root == false then return nil end
-  local output = run({ 'git', '-C', repo_root, 'status', '--porcelain=v1', '-z',
-    '--untracked-files=all', '--ignored=matching' })
+  local output =
+    run({ 'git', '-C', repo_root, 'status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignored=matching' })
   if not output then return nil end
 
   return parse_status(repo_root, output, true)
@@ -480,8 +464,7 @@ function M.read_async(root, timeout_ms, callback)
     if result.code ~= 0 then
       local err = result.stderr and result.stderr:gsub('%s+$', '') or 'git command failed'
       local lower = err:lower()
-      if lower:find('not a git repository', 1, true)
-        or lower:find('must be run in a work tree', 1, true) then
+      if lower:find('not a git repository', 1, true) or lower:find('must be run in a work tree', 1, true) then
         finish(false, nil, false)
       else
         finish(false, err, false)
@@ -490,11 +473,19 @@ function M.read_async(root, timeout_ms, callback)
     end
     local repo_root = normalize((result.stdout or ''):gsub('[\r\n]+$', ''))
     process = nil
-    spawn({ 'git', '--no-optional-locks', '-C', repo_root, 'status', '--porcelain=v1', '-z',
-      '--untracked-files=all', '--ignored=matching' }, function(status_result)
+    spawn({
+      'git',
+      '--no-optional-locks',
+      '-C',
+      repo_root,
+      'status',
+      '--porcelain=v1',
+      '-z',
+      '--untracked-files=all',
+      '--ignored=matching',
+    }, function(status_result)
       if status_result.code ~= 0 then
-        local err = status_result.stderr and status_result.stderr:gsub('%s+$', '')
-          or 'git status failed'
+        local err = status_result.stderr and status_result.stderr:gsub('%s+$', '') or 'git status failed'
         finish(false, err, false)
         return
       end
@@ -513,13 +504,10 @@ function M.deleted_children(snapshot, directory)
   local prefix = directory == '/' and '/' or (directory .. '/')
   local result = {}
   for path, entry in pairs(snapshot.deleted) do
-    if path:sub(1, #prefix) == prefix
-      and (snapshot.force_deleted == true or path_is_missing(path)) then
+    if path:sub(1, #prefix) == prefix and (snapshot.force_deleted == true or path_is_missing(path)) then
       local name = path:sub(#prefix + 1)
       if name ~= '' and not name:find('/', 1, true) then
-        if entry.kind == 'directory' then
-          name = name .. require('direct.paths').directory_separator()
-        end
+        if entry.kind == 'directory' then name = name .. require('direct.paths').directory_separator() end
         result[#result + 1] = {
           name = name,
           path = path,
@@ -542,15 +530,12 @@ function M.worktree_changes(root, path, directory)
   local repo_root, repo_err = discover_repo(root)
   if repo_root == false then return nil, 'path is not in a Git repository' end
   if not repo_root then return nil, repo_err end
-  local output, status_err = command({ '-C', repo_root, 'status', '--porcelain=v1', '-z',
-    '--untracked-files=all' })
+  local output, status_err = command({ '-C', repo_root, 'status', '--porcelain=v1', '-z', '--untracked-files=all' })
   if not output then return nil, status_err end
 
   path = normalize(path)
   local prefix = path == '/' and '/' or (path .. '/')
-  local function covers(candidate)
-    return candidate == path or (directory and candidate:sub(1, #prefix) == prefix)
-  end
+  local function covers(candidate) return candidate == path or (directory and candidate:sub(1, #prefix) == prefix) end
 
   local fields, changes, seen = nul_fields(output), {}, {}
   local index = 1
@@ -626,14 +611,18 @@ local function stat_signature(path)
   local mtime = stat.mtime or {}
   local ctime = stat.ctime or {}
   return table.concat({
-    tostring(stat.dev), tostring(stat.ino), tostring(stat.mode), tostring(stat.size),
-    tostring(mtime.sec), tostring(mtime.nsec), tostring(ctime.sec), tostring(ctime.nsec),
+    tostring(stat.dev),
+    tostring(stat.ino),
+    tostring(stat.mode),
+    tostring(stat.size),
+    tostring(mtime.sec),
+    tostring(mtime.nsec),
+    tostring(ctime.sec),
+    tostring(ctime.nsec),
   }, ':')
 end
 
-local function is_absolute(path)
-  return path:sub(1, 1) == '/' or path:match('^%a:[/\\]') ~= nil
-end
+local function is_absolute(path) return path:sub(1, 1) == '/' or path:match('^%a:[/\\]') ~= nil end
 
 local function fingerprint_path(context, path)
   if context and type(path) == 'string' and path ~= '' then
@@ -712,8 +701,7 @@ local function repo_git_dirs(repo_root)
   local common_ok, common_lines = pcall(vim.fn.readfile, common_path)
   local common_target = common_ok and common_lines[1]
   if common_target and common_target ~= '' then
-    common_dir = normalize(is_absolute(common_target) and common_target
-      or vim.fs.joinpath(git_dir, common_target))
+    common_dir = normalize(is_absolute(common_target) and common_target or vim.fs.joinpath(git_dir, common_target))
   end
   return git_dir, common_dir
 end
@@ -762,8 +750,8 @@ local function fingerprint_scope_ancestors(repo_root, scope_path, context)
 end
 
 local function fingerprint_configured_excludes(repo_root, context, timeout_ms)
-  local output, err, code = command({ '-C', repo_root, 'config', '--path', '--get',
-    'core.excludesfile' }, nil, timeout_ms)
+  local output, err, code =
+    command({ '-C', repo_root, 'config', '--path', '--get', 'core.excludesfile' }, nil, timeout_ms)
   if not output then
     if code == 1 then return true end
     return nil, err
@@ -788,9 +776,7 @@ local function timeout_message(err, timeout_ms)
   return err
 end
 
-function M.is_timeout(err)
-  return type(err) == 'string' and err:find('timed out', 1, true) ~= nil
-end
+function M.is_timeout(err) return type(err) == 'string' and err:find('timed out', 1, true) ~= nil end
 
 function M.warn_ignore_timeout(path, err)
   if not M.is_timeout(err) then return end
@@ -809,7 +795,12 @@ function M.warn_ignore_timeout(path, err)
   ignore_timeout_warnings[warning_key] = true
   require('direct.ui').notify(
     'direct: Git-ignore filtering timed out; listing without Git-ignore filtering: '
-      .. path .. ' (' .. tostring(err) .. ')', vim.log.levels.WARN)
+      .. path
+      .. ' ('
+      .. tostring(err)
+      .. ')',
+    vim.log.levels.WARN
+  )
 end
 
 local function ls_files_args(scope_path, options)
@@ -834,7 +825,9 @@ end
 local function ignore_state_from_outputs(index_output, ignored_output, untracked_output)
   local tracked_exact, gitlinks = parse_index(index_output)
   local tracked = {}
-  for relative in pairs(tracked_exact) do add_tracked_path(tracked, relative) end
+  for relative in pairs(tracked_exact) do
+    add_tracked_path(tracked, relative)
+  end
   return {
     tracked = tracked,
     tracked_exact = tracked_exact,
@@ -849,8 +842,7 @@ local function read_ignore_state(repo_root, prefix, scope_path, timeout_ms)
   scope_path = scope_path or vim.fs.joinpath(repo_root, prefix or '')
   local outputs, err = commands_parallel({
     ls_files_args(scope_path, { '--stage', '-z' }),
-    ls_files_args(scope_path,
-      { '--others', '--ignored', '--exclude-standard', '--directory', '-z' }),
+    ls_files_args(scope_path, { '--others', '--ignored', '--exclude-standard', '--directory', '-z' }),
     ls_files_args(scope_path, { '--others', '--exclude-standard', '--directory', '-z' }),
   }, timeout_ms)
   if not outputs then return nil, err end
@@ -869,7 +861,10 @@ local function nested_repo_roots(repo_root, scope_path, state, context)
   local roots, pending = {}, { scope_path or repo_root }
   if next(state.untracked_dirs or {}) then context.cacheable = false end
   for relative in pairs(state.untracked or {}) do
-    if relative:find('/', 1, true) then context.cacheable = false; break end
+    if relative:find('/', 1, true) then
+      context.cacheable = false
+      break
+    end
   end
   local root_set = {}
   local unreadable = context.unreadable
@@ -923,11 +918,8 @@ local function nested_repo_roots(repo_root, scope_path, state, context)
   return roots, unreadable
 end
 
-local function capture_repo_snapshot(repo_root, scope_path, prefix, seen, initial_state,
-    context, timeout_ms)
-  if seen[repo_root] then
-    return nil, 'nested Git repository cycle detected'
-  end
+local function capture_repo_snapshot(repo_root, scope_path, prefix, seen, initial_state, context, timeout_ms)
+  if seen[repo_root] then return nil, 'nested Git repository cycle detected' end
   scope_path = normalize(scope_path or repo_root)
   seen[repo_root] = true
   local state, state_err = initial_state, nil
@@ -937,8 +929,7 @@ local function capture_repo_snapshot(repo_root, scope_path, prefix, seen, initia
   if not state then return nil, state_err end
   fingerprint_repo(repo_root, context)
   fingerprint_scope_ancestors(repo_root, scope_path, context)
-  local excludes_ok, excludes_err = fingerprint_configured_excludes(
-    repo_root, context, timeout_ms)
+  local excludes_ok, excludes_err = fingerprint_configured_excludes(repo_root, context, timeout_ms)
   if not excludes_ok then return nil, excludes_err end
   local snapshot = {
     root = repo_root,
@@ -955,21 +946,16 @@ local function capture_repo_snapshot(repo_root, scope_path, prefix, seen, initia
   snapshot.nested_roots = roots
   for _, nested_root in ipairs(roots) do
     local nested_repo, nested_repo_err = discover_repo(nested_root, timeout_ms)
-    if nested_repo == false then
-      return nil, 'nested Git repository context changed; re-list this directory'
-    end
+    if nested_repo == false then return nil, 'nested Git repository context changed; re-list this directory' end
     if not nested_repo then return nil, nested_repo_err end
     if nested_repo ~= repo_root then
-      if nested_repo ~= nested_root then
-        return nil, 'nested Git repository root changed; re-list this directory'
-      end
-      local nested_prefix, prefix_err = command({ '-C', nested_root,
-        'rev-parse', '--show-prefix' }, nil, timeout_ms)
+      if nested_repo ~= nested_root then return nil, 'nested Git repository root changed; re-list this directory' end
+      local nested_prefix, prefix_err = command({ '-C', nested_root, 'rev-parse', '--show-prefix' }, nil, timeout_ms)
       if not nested_prefix then return nil, prefix_err end
       nested_prefix = nested_prefix:gsub('[\r\n]+$', ''):gsub('/+$', '')
       if nested_prefix ~= '' then nested_prefix = nested_prefix .. '/' end
-      local nested, nested_err = capture_repo_snapshot(nested_root, nested_root,
-        nested_prefix, seen, nil, context, timeout_ms)
+      local nested, nested_err =
+        capture_repo_snapshot(nested_root, nested_root, nested_prefix, seen, nil, context, timeout_ms)
       if not nested then return nil, nested_err end
       snapshot.nested[nested_root] = nested
     end
@@ -987,8 +973,7 @@ function M.ignore_snapshot(path)
   local timeout_ms = ignore_timeout_ms()
   local cache_key = normalize(path)
   local cached = ignore_snapshot_cache[cache_key]
-  if cached and vim.deep_equal(cached.environment, git_environment())
-    and fingerprint_matches(cached.fingerprint) then
+  if cached and vim.deep_equal(cached.environment, git_environment()) and fingerprint_matches(cached.fingerprint) then
     cache_touch(cache_key)
     return vim.deepcopy(cached.snapshot)
   end
@@ -1005,8 +990,7 @@ function M.ignore_snapshot(path)
   local outputs, snapshot_err = commands_parallel({
     { '-C', path, 'rev-parse', '--show-prefix' },
     ls_files_args(path, { '--stage', '-z' }),
-    ls_files_args(path,
-      { '--others', '--ignored', '--exclude-standard', '--directory', '-z' }),
+    ls_files_args(path, { '--others', '--ignored', '--exclude-standard', '--directory', '-z' }),
     ls_files_args(path, { '--others', '--exclude-standard', '--directory', '-z' }),
   }, timeout_ms)
   if not outputs then return nil, timeout_message(snapshot_err, timeout_ms) end
@@ -1014,14 +998,15 @@ function M.ignore_snapshot(path)
   if prefix ~= '' then prefix = prefix .. '/' end
   local state = ignore_state_from_outputs(outputs[2], outputs[3], outputs[4])
   local context = { fingerprint = {}, unreadable = {}, cacheable = true }
-  local snapshot, capture_err = capture_repo_snapshot(repo_root, path, prefix, {}, state,
-    context, timeout_ms)
+  local snapshot, capture_err = capture_repo_snapshot(repo_root, path, prefix, {}, state, context, timeout_ms)
   if not snapshot then return nil, timeout_message(capture_err, timeout_ms) end
   snapshot.unreadable = context.unreadable
   local function set_cacheable(item)
     item.cacheable = context.cacheable
     item._environment = git_environment()
-    for _, nested in pairs(item.nested or {}) do set_cacheable(nested) end
+    for _, nested in pairs(item.nested or {}) do
+      set_cacheable(nested)
+    end
   end
   set_cacheable(snapshot)
   if context.cacheable then
@@ -1031,7 +1016,9 @@ function M.ignore_snapshot(path)
         fingerprint = context.fingerprint,
         environment = git_environment(),
       })
-      for _, nested in pairs(item.nested or {}) do cache_tree(nested) end
+      for _, nested in pairs(item.nested or {}) do
+        cache_tree(nested)
+      end
     end
     cache_tree(snapshot)
   end
@@ -1044,9 +1031,7 @@ function M.record_ignore_candidates(snapshot, scope_path, names)
   local candidates = {}
   for _, name in ipairs(names or {}) do
     local path = normalize(vim.fs.joinpath(scope_path, name))
-    if path:sub(1, #scope) == scope then
-      candidates[(snapshot.repo_prefix or '') .. path:sub(#scope + 1)] = true
-    end
+    if path:sub(1, #scope) == scope then candidates[(snapshot.repo_prefix or '') .. path:sub(#scope + 1)] = true end
   end
   snapshot.candidates = candidates
 end
@@ -1090,8 +1075,11 @@ local function current_repo_state(repo_root, prefix, scope_path, checked)
   local current = checked[key]
   if current then return current end
   local cached_snapshot = ignore_snapshot_cache[normalize(scope_path)]
-  if cached_snapshot and vim.deep_equal(cached_snapshot.environment, git_environment())
-    and fingerprint_matches(cached_snapshot.fingerprint) then
+  if
+    cached_snapshot
+    and vim.deep_equal(cached_snapshot.environment, git_environment())
+    and fingerprint_matches(cached_snapshot.fingerprint)
+  then
     cache_touch(normalize(scope_path))
     local snapshot = cached_snapshot.snapshot
     if snapshot.root == repo_root and (snapshot.repo_prefix or '') == (prefix or '') then
@@ -1108,13 +1096,9 @@ local function current_repo_state(repo_root, prefix, scope_path, checked)
 
   local timeout_ms = ignore_timeout_ms()
   local live_root, repo_err = discover_repo(scope_path, timeout_ms)
-  if live_root == false then
-    return nil, 'Git repository context changed; re-list this directory'
-  end
+  if live_root == false then return nil, 'Git repository context changed; re-list this directory' end
   if not live_root then return nil, timeout_message(repo_err, timeout_ms) end
-  if live_root ~= repo_root then
-    return nil, 'Git repository context changed; re-list this directory'
-  end
+  if live_root ~= repo_root then return nil, 'Git repository context changed; re-list this directory' end
   local state, err = read_ignore_state(repo_root, prefix, scope_path, timeout_ms)
   if not state then return nil, timeout_message(err, timeout_ms) end
   local context = { fingerprint = {}, unreadable = {} }
@@ -1127,9 +1111,12 @@ end
 local function matches_snapshot(snapshot, checked)
   local prefix = snapshot.repo_prefix or ''
   local current, err
-  if snapshot.cacheable and snapshot._fingerprint
+  if
+    snapshot.cacheable
+    and snapshot._fingerprint
     and vim.deep_equal(snapshot._environment, git_environment())
-    and fingerprint_matches(snapshot._fingerprint) then
+    and fingerprint_matches(snapshot._fingerprint)
+  then
     current = {
       tracked = snapshot.tracked,
       tracked_exact = snapshot.tracked_exact,
@@ -1151,24 +1138,23 @@ local function matches_snapshot(snapshot, checked)
   else
     ignored_changed = not same_scoped_paths(snapshot.ignored, current.ignored, prefix)
   end
-  if not same_scoped_paths(snapshot.tracked_exact, current.tracked_exact, prefix)
-    or ignored_changed then
+  if not same_scoped_paths(snapshot.tracked_exact, current.tracked_exact, prefix) or ignored_changed then
     return false, 'Git ignore rules changed or tracked paths changed; re-list this directory'
   end
 
   local previous_roots = {}
-  for root in pairs(snapshot.nested or {}) do previous_roots[root] = true end
+  for root in pairs(snapshot.nested or {}) do
+    previous_roots[root] = true
+  end
   local current_roots = {}
-  for _, root in ipairs(current.nested_roots or {}) do current_roots[root] = true end
+  for _, root in ipairs(current.nested_roots or {}) do
+    current_roots[root] = true
+  end
   for root in pairs(previous_roots) do
-    if not current_roots[root] then
-      return false, 'Git repository context changed; re-list this directory'
-    end
+    if not current_roots[root] then return false, 'Git repository context changed; re-list this directory' end
   end
   for root in pairs(current_roots) do
-    if not previous_roots[root] then
-      return false, 'Git repository context changed; re-list this directory'
-    end
+    if not previous_roots[root] then return false, 'Git repository context changed; re-list this directory' end
   end
   for root, nested_snapshot in pairs(snapshot.nested or {}) do
     local matches, nested_err = matches_snapshot(nested_snapshot, checked)
@@ -1183,9 +1169,13 @@ function M.ignore_snapshot_matches(snapshot, path, checked)
   -- directory so a newly-created (or newly-removed) repository is detected.
   path = path or (snapshot and snapshot.scope_path)
   if not path then return nil, 'Git ignore snapshot path is unavailable' end
-  if snapshot and snapshot.cacheable and snapshot._fingerprint
+  if
+    snapshot
+    and snapshot.cacheable
+    and snapshot._fingerprint
     and vim.deep_equal(snapshot._environment, git_environment())
-    and fingerprint_matches(snapshot._fingerprint) then
+    and fingerprint_matches(snapshot._fingerprint)
+  then
     return matches_snapshot(snapshot, checked or {})
   end
   -- Expanded directories can be moved or removed by a successful sync while
@@ -1195,25 +1185,18 @@ function M.ignore_snapshot_matches(snapshot, path, checked)
   -- closed as usual.
   if not snapshot then
     local stat, stat_err = vim.uv.fs_stat(path)
-    if not stat and stat_err and (stat_err:find('ENOENT', 1, true)
-      or stat_err:find('ENOTDIR', 1, true)) then
+    if not stat and stat_err and (stat_err:find('ENOENT', 1, true) or stat_err:find('ENOTDIR', 1, true)) then
       return true
     end
   end
   local repo_root, discover_err = discover_repo(path)
   if repo_root == false then
-    if snapshot then
-      return false, 'Git repository context changed; re-list this directory'
-    end
+    if snapshot then return false, 'Git repository context changed; re-list this directory' end
     return true
   end
   if not repo_root then return nil, discover_err end
-  if not snapshot then
-    return false, 'Git repository context changed; re-list this directory'
-  end
-  if repo_root ~= snapshot.root then
-    return false, 'Git repository context changed; re-list this directory'
-  end
+  if not snapshot then return false, 'Git repository context changed; re-list this directory' end
+  if repo_root ~= snapshot.root then return false, 'Git repository context changed; re-list this directory' end
   checked = checked or {}
   local matches, err = matches_snapshot(snapshot, checked)
   if M.is_timeout(err) then cache_invalidate_all() end
@@ -1229,15 +1212,14 @@ local function inventory_for(snapshot, cache)
     local scope_path = snapshot.scope_path or snapshot.root
     local timeout_ms = ignore_timeout_ms()
     local repo_root, repo_err = discover_repo(scope_path, timeout_ms)
-    if repo_root == false then
-      return nil, nil, 'Git repository context changed; re-list this directory'
-    end
+    if repo_root == false then return nil, nil, 'Git repository context changed; re-list this directory' end
     if not repo_root then return nil, nil, timeout_message(repo_err, timeout_ms) end
-    if repo_root ~= snapshot.root then
-      return nil, nil, 'Git repository context changed; re-list this directory'
-    end
-    local output, err = command(ls_files_args(scope_path,
-      { '--others', '--ignored', '--exclude-standard', '--directory', '-z' }), nil, timeout_ms)
+    if repo_root ~= snapshot.root then return nil, nil, 'Git repository context changed; re-list this directory' end
+    local output, err = command(
+      ls_files_args(scope_path, { '--others', '--ignored', '--exclude-standard', '--directory', '-z' }),
+      nil,
+      timeout_ms
+    )
     if not output then return nil, nil, timeout_message(err, timeout_ms) end
     state = { ignored = path_set(output) }
     cache[key] = state
@@ -1263,9 +1245,7 @@ function M.ignored_paths(snapshot, paths, cache)
     local normalized = normalize(path)
     if normalized:sub(1, #prefix) == prefix then
       local relative = (snapshot.repo_prefix or '') .. normalized:sub(#prefix + 1)
-      if ignored[relative] and not (tracked and tracked[relative]) then
-        result[#result + 1] = normalized
-      end
+      if ignored[relative] and not (tracked and tracked[relative]) then result[#result + 1] = normalized end
     end
   end
   return result
@@ -1288,8 +1268,12 @@ function M.ignored_candidates(snapshot, candidates)
   local input, absolute_by_relative = {}, {}
   for _, path in ipairs(candidates) do
     local relative = relative_to_repo(snapshot.root, path)
-    if relative and relative ~= '' and not ignored_by_path[normalize(path)]
-      and not (snapshot.tracked and snapshot.tracked[relative]) then
+    if
+      relative
+      and relative ~= ''
+      and not ignored_by_path[normalize(path)]
+      and not (snapshot.tracked and snapshot.tracked[relative])
+    then
       relative = relative:gsub('\\', '/')
       if path:sub(-1) == '/' or path:sub(-1) == '\\' then relative = relative .. '/' end
       if not absolute_by_relative[relative] then
@@ -1302,8 +1286,10 @@ function M.ignored_candidates(snapshot, candidates)
   if #input == 0 then return result_paths end
 
   local timeout_ms = ignore_timeout_ms()
-  local process, start_err = start({ 'git', '-C', snapshot.root,
-    'check-ignore', '--no-index', '-z', '--stdin' }, table.concat(input, '\0') .. '\0')
+  local process, start_err = start(
+    { 'git', '-C', snapshot.root, 'check-ignore', '--no-index', '-z', '--stdin' },
+    table.concat(input, '\0') .. '\0'
+  )
   if not process then return nil, start_err end
   local ok, result = pcall(function() return process:wait(timeout_ms) end)
   if not ok then return nil, tostring(result) end
