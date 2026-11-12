@@ -789,12 +789,33 @@ local function sync_locked(self, options)
     end
   end
 
-  require('direct.events').emit('DirectSyncPre', {
+  local _, pre_event = require('direct.events').emit_cancellable('DirectSyncPre', {
     root = self.root,
     actions = actions,
     yanks = yanks,
     bufnr = bufnr,
   })
+  if pre_event.cancel == true then
+    local reason = 'DirectSyncPre cancelled the save'
+    if type(pre_event.reason) == 'string' and pre_event.reason ~= '' then
+      reason = reason .. ': ' .. pre_event.reason
+    end
+    if vim.api.nvim_buf_is_valid(bufnr) then vim.bo[bufnr].modified = true end
+    ui.notify('direct: Refusing to sync: ' .. reason .. '; nothing was changed.',
+      vim.log.levels.WARN)
+    require('direct.events').emit('DirectSyncPost', {
+      root = self.root,
+      actions = actions,
+      applied = {},
+      failed = {},
+      yanks = yanks,
+      success = false,
+      cancelled = true,
+      error = reason,
+      bufnr = bufnr,
+    })
+    return nil, reason
+  end
   if not vim.api.nvim_buf_is_valid(bufnr)
     or not vim.deep_equal(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), visible) then
     local reason = 'listing changed during DirectSyncPre; review and save again'

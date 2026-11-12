@@ -349,7 +349,14 @@ function M.redo() return reverse('redo') end
 
 function M.reset_history()
   if pending.refuse('reset history') then return nil end
-  return history.reset_history()
+  local reset, backups = history.reset_history()
+  local reset_err = not reset and backups or nil
+  events.emit('DirectHistoryResetPost', {
+    success = reset == true,
+    backups = reset and backups or {},
+    error = reset_err,
+  })
+  return reset, backups
 end
 
 function M.trash_list()
@@ -366,17 +373,34 @@ function M.trash_restore(id, destination, force)
   if not restored and err and not is_cancelled(err) then
     ui.notify('direct: cannot restore trash entry: ' .. tostring(err), vim.log.levels.ERROR)
   end
+  events.emit('DirectTrashPost', {
+    operation = 'restore',
+    id = id,
+    destination = destination,
+    force = force == true,
+    success = restored == true,
+    error = err,
+  })
   return restored, err
 end
 
 ---@param force boolean|nil
 function M.trash_empty(force)
   if pending.refuse('empty trash') then return nil end
-  local emptied, err = trash.empty(force)
-  if not emptied and err and not is_cancelled(err) then
-    ui.notify('direct: cannot empty trash: ' .. tostring(err), vim.log.levels.ERROR)
+  local emptied, result = trash.empty(force)
+  if not emptied and result and not is_cancelled(result) then
+    ui.notify('direct: cannot empty trash: ' .. tostring(result), vim.log.levels.ERROR)
   end
-  return emptied, err
+  local empty_err = not emptied and result or nil
+  events.emit('DirectTrashPost', {
+    operation = 'empty',
+    force = force == true,
+    success = emptied == true,
+    removed = emptied and result.removed or nil,
+    protected = emptied and result.protected or nil,
+    error = empty_err,
+  })
+  return emptied, result
 end
 
 -- The range is normalised so an upward visual selection works; a nil range means the current line.
@@ -528,11 +552,34 @@ function M.restore_git()
   end
 
   buffer.cancel_git_status()
-  return run.current_entry(
-    restore_command,
-    function(_, bufnr, root) buffer.refresh_git_status(bufnr, root) end,
-    { quiet_success = true }
-  )
+  local process, run_err = run.current_entry(restore_command, function(result, bufnr, root)
+    buffer.refresh_git_status(bufnr, root)
+    local success = result.code == 0
+    local restore_err
+    if not success then
+      local stderr = type(result.stderr) == 'string' and result.stderr or ''
+      restore_err = stderr ~= '' and stderr or ('Git restore exited with status ' .. tostring(result.code))
+    end
+    events.emit('DirectGitRestorePost', {
+      root = root,
+      target = target,
+      changes = changes,
+      backups = backups,
+      success = success,
+      error = restore_err,
+    })
+  end, { quiet_success = true })
+  if not process then
+    events.emit('DirectGitRestorePost', {
+      root = listing.root,
+      target = target,
+      changes = changes,
+      backups = backups,
+      success = false,
+      error = run_err,
+    })
+  end
+  return process, run_err
 end
 
 -- Public API functions are a final error boundary for both Lua callers and the

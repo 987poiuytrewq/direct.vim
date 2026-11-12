@@ -21,6 +21,8 @@ Notable changes to direct.vim are documented here. Versions follow
 
 ### Added
 
+- Let `DirectSyncPre` cancel a save, and emit post events for trash operations,
+  history reset and Git worktree restore.
 - Add `:DirectTrash` completion for subcommands and IDs, plus confirmed restore
   and close mappings in the trash view.
 - Recover original paths and entry types from history, with an estimated

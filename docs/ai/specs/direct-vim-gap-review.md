@@ -1,6 +1,6 @@
 # Spec: direct.vim improvements, second review
 
-**Status:** A1–A10, A16–A24 are complete; A11–A15 remain proposed.
+**Status:** A1–A11, A16–A24 are complete; A12–A15 remain proposed.
 This replaces the first gap review, whose tasks (S1–S6, R1–R3, F1–F6, M1–M6)
 have all landed on `master`.
 
@@ -10,9 +10,9 @@ been reproduced in a running Neovim. Each task's first step is to write a
 failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
-**Last checked:** `origin/master` at `a082045` (12 November 2026). That hourly
-review read #120, confirmed A24, and found no new task IDs. A11–A15 remain
-proposed.
+**Last checked:** `origin/master` at `73642f9` (12 November 2026). That review
+recorded A24's completion and found no new task IDs. A11 is addressed in this
+PR; A12–A15 remain proposed.
 
 ## Conventions
 
@@ -63,7 +63,7 @@ Checked by reading the code at `d72b7ea`:
 | A8 | P3 | Complete | Fill in metadata for trash entries that don't have it |
 | A9 | P3 | Complete | Make `:DirectTrash` easier to use |
 | A10 | P3 | Complete | Preserve worktree contents before Git restore |
-| A11 | P3 | Proposed | Let `DirectSyncPre` cancel a save, and add the missing events |
+| A11 | P3 | Complete | Let `DirectSyncPre` cancel a save, and add the missing events |
 | A12 | P3 | Proposed | Review default keys that shadow common user mappings |
 | A13 | P4 | Proposed | Widen lint, formatting and type-check coverage |
 | A14 | P4 | Proposed | Fix stale docs and remove stray files |
@@ -440,14 +440,23 @@ content again, and the history shows one step.
 
 ### A11 — `DirectSyncPre` can't cancel, and some operations send no events (P3)
 
+**Status: COMPLETE.** A `DirectSyncPre` handler can call
+`require('direct.events').cancel(args.data, reason)` to refuse a sync before
+yanks or filesystem effects; the listing stays modified and `DirectSyncPost`
+reports the refusal. Added `DirectTrashPost`, `DirectHistoryResetPost`, and
+`DirectGitRestorePost` with documented result data. Sync callbacks run while
+the history lock is held; docs say they must stay fast and not start nested
+Direct operations. Tests cover cancellation and each new post event.
+
 **Problem.** `DirectSyncPre` fires while the history lock is held, after the
 plan is checked (`lua/direct/buffer/sync.lua`, around line 711). Handlers
 can't stop the save; the docs only ask them to stay read-only. `:DirectTrash`
 restore and empty, `:DirectHistoryReset` and Git restore send no events.
 
-**Change.** Let a handler cancel the save, for example by setting
-`data.cancel = true` on a table that is checked afterwards. Refuse the save
-with a message naming the event. Add `DirectTrashPost`,
+**Change.** User event data is copied by Neovim, so a handler cannot cancel by
+mutating `args.data`. Provide `require('direct.events').cancel(args.data,
+reason)` for `DirectSyncPre`; refuse the save with a message naming the event.
+Add `DirectTrashPost`,
 `DirectHistoryResetPost` and `DirectGitRestorePost`. Document whether handlers
 run while the lock is held.
 
@@ -832,5 +841,5 @@ A1–A4 and A16 were released in `v0.2.0`; A5–A6 and A17–A21 were released i
 
 A7–A10, A23 and A24 are complete but not released.
 
-1. A11–A15, in any order. A13's formatting-only commit is easiest
+1. A12–A15, in any order. A13's formatting-only commit is easiest
    when nothing else is changing `lua/`.

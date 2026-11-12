@@ -407,9 +407,10 @@ through `willRenameFiles`, so they can update imports before the file moves.
 ## Events for plugins
 
 direct.vim emits Neovim `User` autocmds after a listing, before and after a
-filesystem sync, and after filesystem undo, redo, and paste. Event callbacks
-receive a `data` table with an absolute `root` and an `actions` array. For
-example:
+filesystem sync, after filesystem undo, redo and paste, after trash restore or
+empty, after history reset, and after Git worktree restore. Event callbacks
+receive copied `data`. Sync data includes the absolute `root` and planned
+`actions`. For example:
 
 ```lua
 vim.api.nvim_create_autocmd('User', {
@@ -423,15 +424,26 @@ vim.api.nvim_create_autocmd('User', {
 ```
 
 Supported patterns are `DirectListPost`, `DirectSyncPre`, `DirectSyncPost`,
-`DirectUndoPost`, `DirectRedoPost`, and `DirectPastePost`. `DirectListPost` has
-an empty `actions` array. Sync post data also includes `applied`, `failed`,
-`yanks`, `success`, and `error`; paste post includes `changed`, `entry`,
-`success`, and `error`. Undo/redo post actions describe the reversal. Action
+`DirectUndoPost`, `DirectRedoPost`, `DirectPastePost`, `DirectTrashPost`,
+`DirectHistoryResetPost`, and `DirectGitRestorePost`. `DirectListPost` has an
+empty `actions` array. Sync post data also includes `applied`, `failed`, `yanks`,
+`success`, and `error`; paste post includes `changed`, `entry`, `success`, and
+`error`; undo/redo post actions describe the reversal. `DirectTrashPost` includes
+`operation` (`restore` or `empty`), `success`, and `error`, plus the applicable
+ID, destination, force, removed, or protected fields. `DirectHistoryResetPost`
+includes `success`, `backups`, and `error`. `DirectGitRestorePost` includes
+`root`, `target`, changed paths, trash backups, `success`, and `error`. Action
 records use the same `name`, `src`, `dst`, and nested `actions` fields as the
-Direct history model. Event data is copied before dispatch, so changing it in a
-callback does not modify Direct's operation. Keep `DirectSyncPre` handlers
-read-only; if one edits the listing, that sync is safely refused and must be
-reviewed and saved again.
+Direct history model.
+
+Event data is copied before dispatch, so editing it does not mutate Direct's
+operation. A `DirectSyncPre` handler can cancel by calling
+`require('direct.events').cancel(event.data, 'reason')`. The sync is refused
+before yanks or filesystem effects, remains modified, and emits a failed
+`DirectSyncPost`. Both sync events run synchronously while the history lock is
+held; handlers should be fast and must not start another Direct filesystem or
+history operation. If a handler edits the listing instead, the sync is also
+refused and the listing remains modified for review.
 
 ## Commands
 
