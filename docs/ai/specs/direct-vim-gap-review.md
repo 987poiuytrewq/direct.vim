@@ -10,9 +10,9 @@ been reproduced in a running Neovim. Each task's first step is to write a
 failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
-**Last checked:** `origin/master` at `6538ac9` (12 November 2026). That check
-read #118 (cheap trash completion and estimated dates) and confirmed A23 in the
-code. It found no new tasks. A11–A15 and A24 are unchanged.
+**Last checked:** `origin/master` at `d084963` (12 November 2026). That hourly
+review read #118, confirmed A23, and found no new task IDs. A24 remains next;
+A11–A15 and A24 are proposed.
 
 ## Conventions
 
@@ -677,7 +677,7 @@ released section. After the move, `git show v0.2.1:CHANGELOG.md` and the
 
 ### A23 — Trash completion is expensive, and recovered entries get the wrong date (P3)
 
-**Status: COMPLETE.** Restore-ID completion now lists trash-directory names
+**Status: COMPLETE in #118.** Restore-ID completion now lists trash-directory names
 without measuring entries, taking the history lock or writing metadata.
 Recovered timestamps use the trash entry's `ctime`, falling back to `mtime`,
 and are marked as estimates in metadata and the view. Tests verify completion
