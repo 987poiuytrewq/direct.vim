@@ -15,6 +15,22 @@ task.
 
 **Last checked:** `origin/master` at `ad25866` (12 November 2026).
 
+## Decisions
+
+These were settled with the maintainer on 12 November 2026 and are written
+into each task below:
+
+- **A26:** `history_limit` defaults to 1000 steps per stack, and trash
+  retention is on by default, removing unreferenced entries after 90 days.
+- **A27:** after a delete, the register points at the deleted entries in the
+  trash instead of copying them.
+- **A28:** deleting a collapsed row removes the whole chain it shows, but never
+  anything that wasn't visible.
+- **A29:** an asynchronous paste releases the history lock while its prompt
+  is open.
+- **A30:** the next release is `v0.3.0`, tagged now with A7–A25. A26–A29 go in
+  a later release.
+
 ## Conventions
 
 - One task per branch and pull request, tests first, run with `make test` and
@@ -63,14 +79,16 @@ task.
 
 **Change.**
 
-- Add a history limit, for example `history_limit = 1000` steps per stack.
-  When a commit would go over it, drop the oldest records. That's safe for the
+- Add a `history_limit` option, defaulting to 1000 steps per stack. When a
+  commit would go over it, drop the oldest records. That's safe for the
   A19 dependency rules, because nothing older depends on the oldest record.
   Say once, the first time steps are dropped, that older undo steps were
   removed.
 - Once records are dropped, their trash entries are unreferenced, so retention
-  can remove them. Decide whether to turn retention on by default (for example
-  90 days), and say so in the changelog if it changes.
+  can remove them. Turn retention on by default:
+  `trash_retention = { max_age_days = 90 }`. `false` still turns it off.
+  Record both new defaults under Changed in the changelog, and update the
+  README's defaults block and `doc/direct.txt`.
 - Remove register copies that no history record refers to and that aren't the
   current register. A paste's redo copies from its register folder, so keep
   any folder a paste record names.
@@ -80,7 +98,9 @@ task.
   the files' size or modification time changes, so each operation doesn't
   re-validate every record.
 
-**Tests.** With `history_limit = 3`, five saves leave three undo steps and
+**Tests.** With the defaults, `require('direct.config').options` has
+`history_limit = 1000` and `trash_retention.max_age_days = 90`. With
+`history_limit = 3`, five saves leave three undo steps and
 the oldest trash entries unreferenced. Retention then removes them. An old,
 unreferenced register copy is removed; the current one and one named by a
 paste record are kept. `:checkhealth` shows the step counts and register size.
@@ -106,8 +126,9 @@ deleting a 5 GB `build/` folder:
   paths instead, and copy from there on `p`. If a trash entry is restored by
   undo or removed by retention, fall back to its restored path or drop it from
   the register, and say so on `p`.
-- Run explicit yank copies in the background, under the existing pending
-  guard, so `yy` on a large folder doesn't freeze the editor.
+- Explicit yanks (`yy`, visual `y`) still copy, since the source stays in
+  place and may change. Run that copy in the background, under the existing
+  pending guard, so `yy` on a large folder doesn't freeze the editor.
 - Update `doc/direct.txt` (`direct.vim-yank`) to describe what the register
   holds after a delete.
 
@@ -139,11 +160,16 @@ first is waiting for the user to type a name.
   using direct.vim's history, it may be waiting on a prompt, and the operation
   can be retried. Write the holder's process ID into the lock file, if that
   can be done safely, so the message can name it.
-- Consider releasing the lock while waiting on a paste prompt and checking the
-  destination again after the answer, so other instances aren't blocked by
-  an open prompt.
+- Release the lock while an asynchronous paste waits on its prompt. After the
+  answer, take the lock again, re-run the history preflight, and check that
+  the destination is still free before copying. If anything changed, ask
+  again or stop, without overwriting. Other instances can then save and undo
+  while the prompt is open.
 
-**Tests.** With the lock held by a second process, an operation in the first
+**Tests.** While a paste prompt is open, another process can take and
+release the lock. If that process creates the chosen destination meanwhile,
+the paste asks again rather than overwriting. With the lock held by a second
+process, an operation in the first
 retries, then fails with the new message. If the second process releases it
 within the retry window, the operation succeeds.
 
@@ -168,16 +194,23 @@ show rows like `a/b/c/`. Only renaming one is tested
 
 **Change.**
 
-- Decide what deleting a collapsed row means: the deepest folder (as now) or
-  the whole chain up to the first folder that has other entries. Document the
-  choice under `direct-collapse_single_entry_directories` and in the README's
-  "Rules for edits".
+- Deleting a collapsed row removes the whole chain it shows. Remove the
+  deepest folder (with its contents, as a normal folder delete), then each
+  parent in the chain, deepest first, but only if it is now completely empty
+  on disk. A parent that still holds hidden or Git-ignored entries is kept, so
+  nothing that wasn't shown is deleted. Record all of it as one history step,
+  so one `u` restores everything.
+- Document this under `direct-collapse_single_entry_directories` and in the
+  README's "Rules for edits", and note it in the changelog.
 - Add sync tests for deleting, yanking, pasting onto and moving collapsed
   rows, and for undoing each.
 - Use one separator in collapsed rows on Windows, the same one new nested
   paths use.
 
-**Tests.** The cases above, each followed by `u`. On Windows, a collapsed row
+**Tests.** Deleting `a/b/c/` removes `a/`, `b/` and `c/` when they hold
+nothing else. With a hidden file in `a/`, only `b/` and `c/` go and `a/` stays.
+One `u` restores the whole chain. Plus the yank, paste and move cases above,
+each followed by `u`. On Windows, a collapsed row
 uses a single separator and still renames correctly.
 
 ## Project maturity
@@ -199,8 +232,9 @@ uses a single separator and still renames correctly.
 
 **Change.**
 
-- Tag `v0.3.0` (a minor bump, for the new default) using the README's release
-  checklist, and publish its GitHub release.
+- Tag `v0.3.0` now, with A7–A25, using the README's release checklist, and
+  publish its GitHub release. It's a minor bump because collapsing is now on
+  by default. A26–A29, which change more defaults, go in a later release.
 - Add a coverage floor near the current figure to `make ci`.
 - Add macOS and Windows to the stable-Neovim job, or run the full matrix on
   stable weekly.
@@ -211,7 +245,7 @@ uses a single separator and still renames correctly.
 
 ## Suggested order
 
-1. A30's release first. It's quick and gets A7–A25 to users.
+1. A30's `v0.3.0` release first. It's quick and gets A7–A25 to users.
 2. A27, then A26. A27 stops the biggest copies, and A26's register clean-up
    builds on it.
 3. A29 and A28, in either order.
