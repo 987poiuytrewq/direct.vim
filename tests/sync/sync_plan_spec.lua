@@ -1,4 +1,4 @@
--- sync_plan_spec.lua -- sync: classification, sync: ambiguous.
+-- sync_plan_spec.lua -- identity-based sync planning and ambiguous edits.
 -- Exercises the sync facade and filesystem effects.
 
 local sync = require('tests.support.sync_helpers').new()
@@ -16,24 +16,9 @@ local route_write_to_test_buffer = sync.route_write_to_test_buffer
 local history_lines = sync.history_lines
 local list_edit_and_sync = sync.list_edit_and_sync
 
-H.describe('sync: classification', function()
-  H.it('duplicate wins over every class; then ADD/DELETE/RENAME; else mixed', function()
-    H.assert_eq(buffer.classify({ 'a', 'a' }, { 'a' }),
-      { kind = 'AMBIGUOUS', reason = 'duplicate' }, 'duplicate is checked first')
-
-    H.assert_eq(buffer.classify({ 'a', 'b' }, { 'a' }), { kind = 'ADD', added = { 'b' } })
-    H.assert_eq(buffer.classify({ 'b', 'a/' }, {}), { kind = 'ADD', added = { 'a/', 'b' } },
-      'ADD is emitted dirs-then-name')
-
-    H.assert_eq(buffer.classify({ 'a' }, { 'a', 'b' }), { kind = 'DELETE', removed = { 'b' } })
-    H.assert_eq(buffer.classify({}, { 'b', 'a/' }),
-      { kind = 'DELETE', removed = { 'a/', 'b' } }, 'DELETE is emitted dirs-then-name')
-
-    H.assert_eq(buffer.classify({ 'b' }, { 'a' }),
-      { kind = 'RENAME', moves = { { src = 'a', dst = 'b' } } })
-
-    H.assert_eq(buffer.classify({ 'a', 'x', 'y' }, { 'a', 'b' }),
-      { kind = 'AMBIGUOUS', reason = 'mixed' }, 'neither subset nor equal length -> mixed')
+H.describe('sync: identity planning', function()
+  H.it('does not expose the obsolete positional root classifier', function()
+    H.assert_nil(buffer.classify, 'sync plans are derived from row identities')
   end)
 
   H.it('delete a first root row and add at the end without pairing by position', function()

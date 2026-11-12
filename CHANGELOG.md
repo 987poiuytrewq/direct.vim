@@ -7,6 +7,8 @@ Notable changes to direct.vim are documented here. Versions follow
 
 ### Changed
 
+- Remove the legacy positional sync classifier; duplicate-row detection now
+  happens in the identity-based sync plan.
 - Correct the CI description, remove an unused LuaRocks rockspec, and point the
   historical Git-ignore benchmark to the current comparison.
 - Run StyLua over all Lua modules, require zero Luacheck warnings, and expand

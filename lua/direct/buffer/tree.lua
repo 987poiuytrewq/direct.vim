@@ -59,7 +59,7 @@ return function(deps)
           invalid_child_ids[id] = true
         end
         -- Root identities may be invalidated by deletion or rename. Preserve that
-        -- intent for the root classifier below.
+        -- intent for identity-based sync planning below.
       else
         local other_id = seen_row[row]
         local other = other_id and state.rows[other_id]
@@ -177,13 +177,13 @@ return function(deps)
 
     -- Every expanded parent with children must retain its identity.  For each
     -- subtree, unmarked inserted lines between the parent and its last child are
-    -- not root entries and may never reach the positional classifier.
+    -- not root entries and may never be mistaken for root edits.
     local protected = {}
     for parent_id, expansion in pairs(state.expanded or {}) do
       if #expansion.children > 0 then
         local parent_row = mark_rows[parent_id]
         -- A missing expanded parent can be a deleted or renamed root directory;
-        -- its independently marked descendants stay excluded from classification.
+        -- its independently marked descendants stay excluded from root edits.
         if parent_row ~= nil then
           local last = parent_row
           for _, rec in ipairs(expected_order) do
@@ -595,7 +595,7 @@ return function(deps)
         and node.depth == 0
         and rec.name ~= node.name
       then
-        -- Root-directory moves are emitted by the root classifier. Mark them
+        -- Root-directory moves are emitted by the root identity plan. Mark them
         -- here so separate descendant edits cannot be staged against stale paths.
         moving_ids[id] = true
       end
