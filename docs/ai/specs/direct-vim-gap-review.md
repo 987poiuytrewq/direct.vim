@@ -10,9 +10,9 @@ been reproduced in a running Neovim. Each task's first step is to write a
 failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
-**Last checked:** `origin/master` at `284a93e` (12 November 2026). That review
-recorded A12's completion and found no new task IDs. A13 is addressed in this
-PR; A14–A15 remain proposed.
+**Last checked:** `origin/master` at `79631d8` (12 November 2026). That check
+read #127 (lint and type checks for all modules) and confirmed A13. It found
+no new tasks. A14–A15 are unchanged.
 
 ## Conventions
 
@@ -827,6 +827,19 @@ and adds warning-level checks for fully annotated modules. Removed the global
 `undefined-field` suppression and annotated the folder-record shape where
 needed. Formatting is a separate first commit in this PR.
 
+*Checked at `79631d8`:* the `Makefile` matches: `LUACHECK_MAX_WARNINGS` is 0,
+`stylua --check lua/direct` covers every file, LuaLS checks all of
+`lua/direct` at error level plus `init.lua`, `config.lua`, `folding.lua` and
+`events.lua` at warning level, and `.luarc.json` no longer disables
+`undefined-field`. The PR was squashed into one commit, so the formatting
+isn't separate in history. Comparing tokens before and after, the
+non-formatting changes are lint clean-ups (renamed shadowed variables, unused
+values removed, `Buffer:f(x)` written as `Buffer.f(_, x)`, name checks turned
+into lookup tables, one extra nil guard in `folding.lua`). The ones I read
+closely (`tree.lua`, `open.lua`, `sync_plan.lua`, `transaction.lua`) behave the
+same. The remaining modules are only checked at LuaLS's error level; moving
+more of them to warning level is a possible follow-up, not a gap.
+
 **Problem.** `make lint` lets luacheck pass with up to 48 warnings
 (`LUACHECK_MAX_WARNINGS`). StyLua and LuaLS only check `init.lua` and
 `config.lua`, and `.luarc.json` turns off `undefined-field` everywhere.
@@ -869,7 +882,6 @@ tests into identity-based ones).
 A1–A4 and A16 were released in `v0.2.0`; A5–A6 and A17–A21 were released in
 `v0.2.1`.
 
-A7–A12, A23 and A24 are complete but not released.
+A7–A13, A23 and A24 are complete but not released.
 
 1. A14–A15, in any order.
-   when nothing else is changing `lua/`.
