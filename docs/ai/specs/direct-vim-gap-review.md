@@ -10,9 +10,9 @@ been reproduced in a running Neovim. Each task's first step is to write a
 failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
-**Last checked:** `origin/master` at `73642f9` (12 November 2026). That review
-recorded A24's completion and found no new task IDs. A11 is addressed in this
-PR; A12–A15 remain proposed.
+**Last checked:** `origin/master` at `72784b4` (12 November 2026). That check
+read #122 (sync cancellation and operation lifecycle events) and found no new
+task IDs. A11 is complete; A12–A15 remain proposed.
 
 ## Conventions
 
@@ -440,7 +440,7 @@ content again, and the history shows one step.
 
 ### A11 — `DirectSyncPre` can't cancel, and some operations send no events (P3)
 
-**Status: COMPLETE.** A `DirectSyncPre` handler can call
+**Status: COMPLETE in #122.** A `DirectSyncPre` handler can call
 `require('direct.events').cancel(args.data, reason)` to refuse a sync before
 yanks or filesystem effects; the listing stays modified and `DirectSyncPost`
 reports the refusal. Added `DirectTrashPost`, `DirectHistoryResetPost`, and
