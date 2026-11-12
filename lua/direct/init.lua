@@ -581,7 +581,8 @@ local protected_actions = {
 }
 
 local pack = function(...) return { n = select('#', ...), ... } end
-local unpack_values = table.unpack or unpack
+-- Neovim embeds LuaJIT, where `unpack` is the Lua 5.1 global.
+local unpack_values = unpack
 for name, description in pairs(protected_actions) do
   local implementation = M[name]
   M[name] = function(...)
