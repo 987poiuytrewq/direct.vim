@@ -38,10 +38,10 @@ local function workspace_roots(client)
   return roots
 end
 
-local function workspace_paths(client, paths)
+local function workspace_paths(client, candidate_paths)
   local roots = workspace_roots(client)
   local result = {}
-  for _, path in ipairs(paths) do
+  for _, path in ipairs(candidate_paths) do
     for _, root in ipairs(roots) do
       if under(path, root) then
         result[#result + 1] = path
@@ -139,11 +139,11 @@ local function filters_for(client, method)
   return nil
 end
 
-local function filter_paths(client, method, paths, kinds)
+local function filter_paths(client, method, candidate_paths, kinds)
   local roots = workspace_roots(client)
   local filters = filters_for(client, method)
   local result = {}
-  for _, path in ipairs(paths) do
+  for _, path in ipairs(candidate_paths) do
     local matches = filters == nil
     for _, filter in ipairs(filters or {}) do
       if filter_matches(filter, path, roots, kinds) then
@@ -164,9 +164,9 @@ local function client_list()
   return {}
 end
 
-function M.clients(method, paths, kinds)
+function M.clients(method, candidate_paths, kinds)
   local full_paths = {}
-  for _, path in ipairs(paths or {}) do
+  for _, path in ipairs(candidate_paths or {}) do
     local full = canonical(path)
     if full then full_paths[#full_paths + 1] = full end
   end
@@ -190,15 +190,15 @@ function M.clients(method, paths, kinds)
   return selected
 end
 
-function M.notify(kind, paths, pairs, kinds)
+function M.notify(kind, candidate_paths, pairs, kinds)
   local method = methods[kind]
   if not method then return end
   local entries = {}
-  for _, path in ipairs(paths or {}) do
+  for _, path in ipairs(candidate_paths or {}) do
     entries[#entries + 1] = canonical(path)
   end
   local involved = {}
-  for _, path in ipairs(paths or {}) do
+  for _, path in ipairs(candidate_paths or {}) do
     involved[#involved + 1] = path
   end
   for _, pair in ipairs(pairs or {}) do
@@ -335,10 +335,10 @@ local function resource_expectations(edit)
               end
               if sizes[path] == 0 then
                 return nil,
-                  ('documentChanges[%d] CreateFile overwrite of an already-empty file cannot be verified with Neovim apply_workspace_edit: %s'):format(
-                    index,
-                    path
-                  )
+                  (
+                    'documentChanges[%d] CreateFile overwrite of an already-empty file '
+                    .. 'cannot be verified with Neovim apply_workspace_edit: %s'
+                  ):format(index, path)
               end
               states[path] = 'file'
               sizes[path], verify_sizes[path] = 0, true
@@ -472,12 +472,12 @@ local function confirm_workspace_edit(edit)
 end
 
 function M.will_rename(files, callback, warn, is_active)
-  local paths = {}
+  local rename_paths = {}
   for _, file in ipairs(files or {}) do
-    paths[#paths + 1] = vim.uri_to_fname(file.oldUri)
-    paths[#paths + 1] = vim.uri_to_fname(file.newUri)
+    rename_paths[#rename_paths + 1] = vim.uri_to_fname(file.oldUri)
+    rename_paths[#rename_paths + 1] = vim.uri_to_fname(file.newUri)
   end
-  local selected_clients = M.clients(methods.willRenameFiles, paths)
+  local selected_clients = M.clients(methods.willRenameFiles, rename_paths)
   local clients = {}
   for _, selected in ipairs(selected_clients) do
     local filterset, workspace_set, client_files = {}, {}, {}

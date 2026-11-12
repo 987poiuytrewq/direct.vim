@@ -32,9 +32,9 @@ M.MOUSE_MAPS = {
   },
 }
 
-function M.install_mappings(bufnr, _buffer)
+function M.install_mappings(bufnr, buffer_override)
   local config = require('direct.config')
-  local buffer = _buffer or require('direct.buffer.buffer')
+  local buffer = buffer_override or require('direct.buffer.buffer')
   M.clear_mappings(bufnr)
   for _, map in ipairs(M.KEY_MAPS) do
     local lhs = config.mapping_lhs(map.action, map.lhs)
@@ -130,6 +130,7 @@ function M._handle_mouse_click(buffer, mouse)
 
   local target_buf = vim.api.nvim_win_get_buf(winid)
   local context = buffer._folding_context(target_buf)
+  ---@type { id: string, name: string, depth?: number, deleted_kind?: string }|nil
   local rec = context and mouse.line and mouse.line > 0 and context.get_row_record(mouse.line) or nil
   local is_icon_click = false
   if rec and context.is_directory(rec) and require('direct.config').options.show_folder_icons == true then
@@ -157,6 +158,7 @@ function M._handle_mouse_click(buffer, mouse)
 
   if rec and rec.deleted_kind then return end
   if not is_icon_click then return end
+  if not rec then return end
   return vim.api.nvim_win_call(winid, function()
     local attached = buffer.restore()
     if context.is_expanded(rec.id) then return attached:collapse(mouse.line) end

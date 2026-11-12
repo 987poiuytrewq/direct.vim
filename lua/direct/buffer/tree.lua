@@ -299,7 +299,7 @@ return function(deps)
     if #lines == 1 and lines[1] == '' and vim.bo[bufnr].modified then lines = {} end
 
     local spaces_per_level = indent_size()
-    local roots, nodes, nodes_by_id, nodes_by_key, children_by_parent = {}, {}, {}, {}, {}
+    local nodes, nodes_by_id, nodes_by_key, children_by_parent = {}, {}, {}, {}
     local stack, previous_depth = {}, 0
     for row, line in ipairs(lines) do
       local prefix = line:match('^( *)') or ''
@@ -345,9 +345,7 @@ return function(deps)
       nodes[#nodes + 1] = node
       if id then nodes_by_id[id] = node end
       nodes_by_key[node.key] = node
-      if depth == 0 then
-        roots[#roots + 1] = name
-      else
+      if depth > 0 then
         children_by_parent[parent_key] = children_by_parent[parent_key] or {}
         children_by_parent[parent_key][#children_by_parent[parent_key] + 1] = node
       end
@@ -361,7 +359,7 @@ return function(deps)
     -- Root classifier input excludes identity-preserving moves across the root
     -- boundary. A root moved into a child remains in its original virtual slot;
     -- a child moved to the root is handled by the tree Move action, not ADD.
-    roots = {}
+    local roots = {}
     local root_rows, root_ids = {}, {}
     for _, id in ipairs(state.root_ids or {}) do
       root_ids[id] = true
@@ -641,28 +639,28 @@ return function(deps)
     end
 
     for _, node in ipairs(nodes) do
-      if under_deleted_parent(node) or (node.rec and node.rec.deleted_kind) then
-        -- Virtual Git rows and anything nested beneath them are view-only.
-      elseif not node.id then
-        if node.depth > 0 then
-          local destination = node.path
-          if is_dir_line(node.name) then
-            creates[#creates + 1] = { depth = node.depth, action = action_mod.MakeDirectory(destination) }
-          else
-            creates[#creates + 1] = { depth = node.depth, action = action_mod.Touch(destination) }
+      if not under_deleted_parent(node) and not (node.rec and node.rec.deleted_kind) then
+        if not node.id then
+          if node.depth > 0 then
+            local destination = node.path
+            if is_dir_line(node.name) then
+              creates[#creates + 1] = { depth = node.depth, action = action_mod.MakeDirectory(destination) }
+            else
+              creates[#creates + 1] = { depth = node.depth, action = action_mod.Touch(destination) }
+            end
           end
-        end
-      else
-        local rec = node.rec
-        local moved_from_root = rec.kind == 'root' and node.depth > 0
-        local child_changed = rec.kind == 'child'
-          and (rec.parent ~= node.parent_key or rec.name ~= node.name or rec.depth ~= node.depth)
-        if moved_from_root or child_changed then
-          if is_dir_line(rec.name) ~= is_dir_line(node.name) and state.expanded[node.id] then
-            return nil, 'cannot change the type of an expanded directory'
+        else
+          local rec = node.rec
+          local moved_from_root = rec.kind == 'root' and node.depth > 0
+          local child_changed = rec.kind == 'child'
+            and (rec.parent ~= node.parent_key or rec.name ~= node.name or rec.depth ~= node.depth)
+          if moved_from_root or child_changed then
+            if is_dir_line(rec.name) ~= is_dir_line(node.name) and state.expanded[node.id] then
+              return nil, 'cannot change the type of an expanded directory'
+            end
+            moving_ids[node.id] = true
+            moves[#moves + 1] = { depth = node.depth, action = action_mod.Move(rec.path, node.path) }
           end
-          moving_ids[node.id] = true
-          moves[#moves + 1] = { depth = node.depth, action = action_mod.Move(rec.path, node.path) }
         end
       end
     end

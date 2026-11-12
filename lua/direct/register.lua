@@ -166,12 +166,12 @@ function M.paste(dst, name, callback)
   -- The persisted register is untrusted. Validate each entry as one basename
   -- component before building the JSONL record or copying it.
   local pasteable = {}
-  for _, name in ipairs(names) do
-    local reason = M.action.entry_name_reason(name)
+  for _, entry_name in ipairs(names) do
+    local reason = M.action.entry_name_reason(entry_name)
     if reason ~= nil then
-      M.ui.notify('direct: skipping register entry (' .. reason .. '): ' .. tostring(name), vim.log.levels.ERROR)
+      M.ui.notify('direct: skipping register entry (' .. reason .. '): ' .. tostring(entry_name), vim.log.levels.ERROR)
     else
-      pasteable[#pasteable + 1] = name
+      pasteable[#pasteable + 1] = entry_name
     end
   end
   if #pasteable == 0 then

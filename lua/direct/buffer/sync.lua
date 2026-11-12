@@ -215,13 +215,14 @@ return function(context)
       end
     end
     local visible = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-    local actual, child_err = children_integrity(bufnr, visible)
+    local actual = children_integrity(bufnr, visible)
+    local child_err
     local subtree_edit
     if actual then
       local has_materialized_children = false
-      local state = states[bufnr]
-      for _, id in ipairs(state and state.display_ids or {}) do
-        local rec = state.rows[id]
+      local visible_state = states[bufnr]
+      for _, id in ipairs(visible_state and visible_state.display_ids or {}) do
+        local rec = visible_state.rows[id]
         if rec and rec.kind == 'child' then
           has_materialized_children = true
           break
@@ -268,9 +269,7 @@ return function(context)
           stack[level] = nil
         end
       end
-      if has_tree_edit or (not has_materialized_children and has_indented) then
-        actual, child_err = nil, 'row parentage changed in the expanded tree'
-      end
+      if has_tree_edit or (not has_materialized_children and has_indented) then actual = nil end
     end
     if not actual then
       subtree_edit, child_err = edited_subtrees(bufnr, visible)
@@ -330,9 +329,7 @@ return function(context)
         local id = row_ids[row - 1]
         local rec = id and state.rows[id]
         local prefix = line:match('^( *)') or ''
-        if #prefix > 0 or (rec and rec.kind == 'child') then
-        -- Root-only sync input excludes unchanged materialized descendants.
-        elseif not (rec and rec.deleted_kind) then
+        if #prefix == 0 and not (rec and rec.kind == 'child') and not (rec and rec.deleted_kind) then
           current_root_rows[#current_root_rows + 1] = { id = id, line = line }
         end
       end
@@ -904,15 +901,15 @@ return function(context)
         end
       end
       if subtree_edit then
-        local state = states[bufnr]
+        local current_state = states[bufnr]
         reopen = vim.deepcopy(subtree_edit.expanded_targets or {})
         for id in pairs(subtree_edit.changed_parents) do
-          local rec = state and state.rows[id]
-          if rec then remove_expanded_subtree(bufnr, state, id) end
+          local rec = current_state and current_state.rows[id]
+          if rec then remove_expanded_subtree(bufnr, current_state, id) end
         end
         if #reopen == 0 then
           for id in pairs(subtree_edit.changed_parents) do
-            local rec = state and state.rows[id]
+            local rec = current_state and current_state.rows[id]
             if rec then reopen[#reopen + 1] = { path = rec.path, depth = rec.depth or 0 } end
           end
           table.sort(reopen, function(a, b) return a.depth < b.depth end)
@@ -1072,7 +1069,6 @@ return function(context)
 
   function Buffer:sync_async(callback)
     callback = callback or function() end
-    local bufnr = vim.api.nvim_get_current_buf()
     if pending.refuse('sync') then return nil, 'another direct operation is pending' end
     local began, token = pending.begin('sync')
     if not began then

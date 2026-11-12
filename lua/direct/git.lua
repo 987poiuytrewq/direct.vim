@@ -98,12 +98,12 @@ local function discover_repo(path, timeout_ms)
 end
 
 local function nul_fields(output)
-  local fields, start = {}, 1
-  while start <= #output do
-    local stop = output:find('\0', start, true)
+  local fields, field_start = {}, 1
+  while field_start <= #output do
+    local stop = output:find('\0', field_start, true)
     if not stop then break end
-    fields[#fields + 1] = output:sub(start, stop - 1)
-    start = stop + 1
+    fields[#fields + 1] = output:sub(field_start, stop - 1)
+    field_start = stop + 1
   end
   return fields
 end
@@ -328,9 +328,9 @@ end
 
 local function add_deleted(deleted, root, relative)
   local path = normalize(root .. '/' .. relative)
-  local function add(path, kind)
-    if not path_is_missing(path) then return end
-    if not deleted[path] then deleted[path] = { kind = kind } end
+  local function add(candidate, kind)
+    if not path_is_missing(candidate) then return end
+    if not deleted[candidate] then deleted[candidate] = { kind = kind } end
   end
 
   add(path, 'file')
@@ -342,18 +342,18 @@ local function add_deleted(deleted, root, relative)
   end
 end
 
-local function add_path(paths, conflicts, path, status, conflicted)
+local function add_path(path_statuses, conflicts, path, status, conflicted)
   local key = normalize(path)
-  paths[key] = merge_status(paths[key], status)
+  path_statuses[key] = merge_status(path_statuses[key], status)
   if conflicted then conflicts[key] = true end
 end
 
-local function add_with_parent_directories(paths, conflicts, root, relative, status, conflicted)
+local function add_with_parent_directories(path_statuses, conflicts, root, relative, status, conflicted)
   local path = normalize(root .. '/' .. relative)
-  add_path(paths, conflicts, path, status, conflicted)
+  add_path(path_statuses, conflicts, path, status, conflicted)
   local parent = path:match('^(.*)/[^/]+$')
   while parent do
-    add_path(paths, conflicts, parent, status, conflicted)
+    add_path(path_statuses, conflicts, parent, status, conflicted)
     if parent == root or parent == '/' then break end
     parent = parent:match('^(.*)/[^/]+$')
   end
@@ -411,7 +411,7 @@ function M.read_async(root, timeout_ms, callback)
   timeout_ms = math.max(1, math.floor(timeout_ms))
 
   local finished, process, timer = false, nil, nil
-  local function finish(snapshot, err, timed_out)
+  local function complete_read(snapshot, err, timed_out)
     if finished then return end
     finished = true
     if timer then
@@ -441,7 +441,7 @@ function M.read_async(root, timeout_ms, callback)
       if finished then return end
       local running = process
       if running then pcall(running.kill, running, 15) end
-      finish(false, 'Git status timed out after ' .. timeout_ms .. ' ms', true)
+      complete_read(false, 'Git status timed out after ' .. timeout_ms .. ' ms', true)
     end)
   end)
 
@@ -453,7 +453,7 @@ function M.read_async(root, timeout_ms, callback)
       end)
     end)
     if not ok or not child then
-      finish(false, tostring(child or 'could not start Git'), false)
+      complete_read(false, tostring(child or 'could not start Git'), false)
       return false
     end
     process = child
@@ -465,9 +465,9 @@ function M.read_async(root, timeout_ms, callback)
       local err = result.stderr and result.stderr:gsub('%s+$', '') or 'git command failed'
       local lower = err:lower()
       if lower:find('not a git repository', 1, true) or lower:find('must be run in a work tree', 1, true) then
-        finish(false, nil, false)
+        complete_read(false, nil, false)
       else
-        finish(false, err, false)
+        complete_read(false, err, false)
       end
       return
     end
@@ -486,10 +486,10 @@ function M.read_async(root, timeout_ms, callback)
     }, function(status_result)
       if status_result.code ~= 0 then
         local err = status_result.stderr and status_result.stderr:gsub('%s+$', '') or 'git status failed'
-        finish(false, err, false)
+        complete_read(false, err, false)
         return
       end
-      finish(parse_status(repo_root, status_result.stdout or '', true), nil, false)
+      complete_read(parse_status(repo_root, status_result.stdout or '', true), nil, false)
     end)
   end)
   return cancel
@@ -1156,7 +1156,7 @@ local function matches_snapshot(snapshot, checked)
   for root in pairs(current_roots) do
     if not previous_roots[root] then return false, 'Git repository context changed; re-list this directory' end
   end
-  for root, nested_snapshot in pairs(snapshot.nested or {}) do
+  for _, nested_snapshot in pairs(snapshot.nested or {}) do
     local matches, nested_err = matches_snapshot(nested_snapshot, checked)
     if matches ~= true then return matches, nested_err end
   end
@@ -1231,8 +1231,8 @@ end
 -- ignored_paths(snapshot, absolute_paths[, cache]) matches candidates against
 -- Git's native ignored-path inventory. A supplied cache is fresh and shared by
 -- a live descendant walk; otherwise the list-time inventory is used.
-function M.ignored_paths(snapshot, paths, cache)
-  if not snapshot or #paths == 0 then return {} end
+function M.ignored_paths(snapshot, candidate_paths, cache)
+  if not snapshot or #candidate_paths == 0 then return {} end
   local ignored, tracked, err = inventory_for(snapshot, cache)
   if not ignored then
     if M.is_timeout(err) then cache_invalidate_all() end
@@ -1241,7 +1241,7 @@ function M.ignored_paths(snapshot, paths, cache)
   local scope_path = normalize(snapshot.scope_path or snapshot.root)
   local prefix = scope_path:gsub('/+$', '') .. '/'
   local result = {}
-  for _, path in ipairs(paths) do
+  for _, path in ipairs(candidate_paths) do
     local normalized = normalize(path)
     if normalized:sub(1, #prefix) == prefix then
       local relative = (snapshot.repo_prefix or '') .. normalized:sub(#prefix + 1)

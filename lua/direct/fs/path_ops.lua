@@ -115,7 +115,6 @@ return function(context)
   -- deliberately treated as unknown and use the normalized-name fallback.
   function M.path_identity(path, st)
     if type(path) ~= 'string' then return nil end
-    local paths = require('direct.paths')
     local identity = { path = platform.identity_path(path) }
     identity.inode = platform.file_identity(path, st and st.type == 'link')
     if not identity.inode and st and st.dev ~= nil and st.ino ~= nil and st.dev ~= 0 and st.ino ~= 0 then

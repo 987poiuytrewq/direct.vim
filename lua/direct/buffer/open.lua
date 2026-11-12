@@ -115,16 +115,16 @@ return function(context)
     for offset, line in ipairs(lines) do
       local row = firstline + offset - 2
       local record = current_row_record(bufnr, row)
-      if is_deleted_record(record) then
-      -- Deleted Git rows are view-only and never enter the register.
-      elseif record and record.kind == 'child' then
-        out[#out + 1] = record.path
-      elseif record and record.kind == 'root' then
-        out[#out + 1] = M.entry_path(self.root, line)
-      elseif line:match('^%s') then
-        return nil, 'row has no valid identity'
-      else
-        out[#out + 1] = M.entry_path(self.root, line)
+      if not is_deleted_record(record) then
+        if record and record.kind == 'child' then
+          out[#out + 1] = record.path
+        elseif record and record.kind == 'root' then
+          out[#out + 1] = M.entry_path(self.root, line)
+        elseif line:match('^%s') then
+          return nil, 'row has no valid identity'
+        else
+          out[#out + 1] = M.entry_path(self.root, line)
+        end
       end
     end
     return out
@@ -133,7 +133,7 @@ return function(context)
   -- Buffer:get_entry_path(row) -> the existing row identity at one display row.
   -- Unlike get_paths(), this is for actions that must target the entry that was
   -- actually listed: it refuses blank rows and rows with unsaved name edits.
-  function Buffer:get_entry_path(row)
+  function Buffer.get_entry_path(_, row)
     local bufnr = vim.api.nvim_get_current_buf()
     restore_deleted_rows(bufnr)
     local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
@@ -146,7 +146,7 @@ return function(context)
     return record.path
   end
 
-  function Buffer:get_entry_record(row)
+  function Buffer.get_entry_record(_, row)
     local bufnr = vim.api.nvim_get_current_buf()
     restore_deleted_rows(bufnr)
     local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)

@@ -70,7 +70,10 @@ return function(deps)
     local expected_by_basename = {}
     local original_by_basename = {}
     local function basename(path) return paths.basename(path) end
-    local function same_listing_path(a, b) return paths.canonical(a) == paths.canonical(b) or fs.same_path(a, b) == true end
+    local function same_listing_path(a, b)
+      if paths.canonical(a) == paths.canonical(b) then return true end
+      return fs.same_path(a, b) == true
+    end
     for _, line in ipairs(expected or {}) do
       local path = entry_path(root, line)
       local key = paths.canonical(path)

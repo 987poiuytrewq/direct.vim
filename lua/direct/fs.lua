@@ -963,7 +963,7 @@ local function restore_after_async_move(quarantine_dir, dir_identity, quarantine
   async_callback(callback, true, true)
 end
 
-local function remove_async_move_source(src, dst, kind, original_identity, callback)
+local function remove_async_move_source(src, dst, original_identity, callback)
   local quarantine_dir, dir_identity, dir_err = allocate_private_dir(src, 'exdev-source')
   if not quarantine_dir then
     report_partial_move(src, dst, 'could not allocate source quarantine: ' .. tostring(dir_identity or dir_err))
@@ -1090,7 +1090,6 @@ local function async_copy_tree_exclusive(src, dst, callback, progress)
           return remove_async_move_source(
             src,
             dst,
-            'directory',
             original_identity,
             function(ok, partial, err) callback(ok, partial, err) end
           )
@@ -1216,7 +1215,6 @@ function M.rename_async(src, dst, callback, progress)
         remove_async_move_source(
           src,
           dst,
-          'file',
           source_identity,
           function(ok, _, err2) async_callback(callback, ok, ok and true or nil, err2) end
         )
@@ -1284,12 +1282,12 @@ function M.touch(path)
   end
   local closed, close_err = M.uv.fs_close(fd)
   if closed == nil or closed == false then
-    local err = tostring(close_err or 'close failed')
+    local close_err_text = tostring(close_err or 'close failed')
     require('direct.ui').notify(
-      'direct: created file preserved at ' .. path .. ' but close failed: ' .. err,
+      'direct: created file preserved at ' .. path .. ' but close failed: ' .. close_err_text,
       vim.log.levels.ERROR
     )
-    return nil, 'close failed; created file preserved at ' .. path .. ': ' .. err
+    return nil, 'close failed; created file preserved at ' .. path .. ': ' .. close_err_text
   end
   return true
 end

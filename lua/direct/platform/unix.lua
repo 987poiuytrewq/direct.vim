@@ -46,7 +46,7 @@ function M.file_identity(_path, _nofollow) return nil end
 function M.create_symlink(target, link, _source_link) return vim.uv.fs_symlink(target, link) end
 
 function M.rename_noreplace(src, dst, sysname)
-  local ffi_lib, ffi_err = get_ffi()
+  local ffi_lib = get_ffi()
   if not ffi_lib then return nil, 'atomic no-replace rename is unavailable (LuaJIT FFI unavailable)' end
 
   sysname = sysname or vim.uv.os_uname().sysname

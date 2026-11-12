@@ -66,7 +66,9 @@ return function(M)
       local valid, path_err = M.paths.validate_canonical_path(value)
       if not valid then reason = path_err end
     end
-    if reason then return nil, 'cannot serialize action: ' .. reason .. ': ' .. tostring(value) end
+    if reason then
+      return nil, 'cannot serialize action ' .. tostring(what) .. ': ' .. reason .. ': ' .. tostring(value)
+    end
     return encode_string(M.paths.record_path(value))
   end
 
@@ -541,8 +543,8 @@ return function(M)
       end
       local start = at
       while at <= #json do
-        local char = json:sub(at, at)
-        if char == ',' or char == ']' or char == '}' or char:match('%s') then break end
+        local token_char = json:sub(at, at)
+        if token_char == ',' or token_char == ']' or token_char == '}' or token_char:match('%s') then break end
         at = at + 1
       end
       if at == start then return nil, 'malformed JSON value' end

@@ -253,8 +253,8 @@ function M.Move(src, dst)
     if M.fs.taken(self.dst) and not M.fs.same_entry(self.src, self.dst) then
       return nil, 'destination exists: ' .. tostring(self.dst)
     end
-    local ok, err = M.close_src_buffer(self.src)
-    if not ok then return nil, err end
+    local ok, close_err = M.close_src_buffer(self.src)
+    if not ok then return nil, close_err end
     return M.fs.rename(self.src, self.dst)
   end
   self._execute_async = function(callback)
@@ -300,8 +300,8 @@ function M.Remove(src, dst)
     end
     local trash, err = M.paths.ensure_data_dir('trash')
     if not trash then return nil, err end
-    local ok, err = M.close_src_buffer(self.src)
-    if not ok then return nil, err end
+    local ok, close_err = M.close_src_buffer(self.src)
+    if not ok then return nil, close_err end
     if M.fs.taken(self.dst) then return nil, 'destination exists: ' .. tostring(self.dst) end
     local recorded, record_err = M.write_trash_metadata(self.dst, self.src)
     if not recorded then return nil, 'could not record trash metadata: ' .. tostring(record_err) end
@@ -405,8 +405,8 @@ function M.RemoveDirectory(src, dst)
     end
     local trash, err = M.paths.ensure_data_dir('trash')
     if not trash then return nil, err end
-    local ok, err = M.close_src_buffer(self.src)
-    if not ok then return nil, err end
+    local ok, close_err = M.close_src_buffer(self.src)
+    if not ok then return nil, close_err end
     warn_cross_device_trash(self.src, trash)
     if M.fs.taken(self.dst) then return nil, 'destination exists: ' .. tostring(self.dst) end
     local recorded, record_err = M.write_trash_metadata(self.dst, self.src)

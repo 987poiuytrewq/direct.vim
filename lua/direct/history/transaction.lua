@@ -11,6 +11,17 @@ M.FORMAT = 'direct-operation-journal'
 M.VERSION = 1
 M.HEADER = history_format.HEADER
 
+local reversible_rename_kinds = { mv = true, rm = true, rmdir = true, rs = true, rsdir = true }
+local recoverable_apply_kinds = {
+  mv = true,
+  rm = true,
+  rmdir = true,
+  rs = true,
+  rsdir = true,
+  touch = true,
+  mkdir = true,
+}
+
 local function exact_keys(value, expected)
   if type(value) ~= 'table' then return false end
   for key in pairs(value) do
@@ -276,7 +287,7 @@ function M.parse(bytes)
         source_identity = true,
         destination_identity = true,
       })
-      or (reversal.name ~= 'mv' and reversal.name ~= 'rm' and reversal.name ~= 'rmdir' and reversal.name ~= 'rs' and reversal.name ~= 'rsdir')
+      or not reversible_rename_kinds[reversal.name]
       or type(value.source) ~= 'string'
       or type(value.destination) ~= 'string'
       or not valid_identity(value.source_identity)
@@ -328,7 +339,7 @@ function M.parse(bytes)
           source_identity = true,
           destination_identity = true,
         })
-        or (filesystem_action.name ~= 'mv' and filesystem_action.name ~= 'rm' and filesystem_action.name ~= 'rmdir' and filesystem_action.name ~= 'rs' and filesystem_action.name ~= 'rsdir' and filesystem_action.name ~= 'touch' and filesystem_action.name ~= 'mkdir')
+        or not recoverable_apply_kinds[filesystem_action.name]
         or (value.source ~= vim.NIL and type(value.source) ~= 'string')
         or type(value.destination) ~= 'string'
         or not valid_identity(value.source_identity)

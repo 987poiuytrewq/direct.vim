@@ -44,12 +44,10 @@ return function(context)
     if M.pending.refuse(which) then return nil, 'another direct operation is pending' end
     local state, preflight_err = M.preflight()
     if not state then return nil, preflight_err end
-    local src_path, dst_path, src_lines, dst_lines
+    local src_lines, dst_lines
     if which == 'undo' then
-      src_path, dst_path = state.undo_path, state.redo_path
       src_lines, dst_lines = state.undo_lines, state.redo_lines
     elseif which == 'redo' then
-      src_path, dst_path = state.redo_path, state.undo_path
       src_lines, dst_lines = state.redo_lines, state.undo_lines
     else
       return nil, 'history._reverse: expected undo or redo'
@@ -67,10 +65,10 @@ return function(context)
         end
         local compacted, compact_err = M.combine_recent(reversed, which == 'undo' and 'redo' or 'undo')
         if not compacted then
-          M.ui.notify(
-            'direct: history operation completed, but its entries could not ' .. 'be grouped: ' .. tostring(compact_err),
-            vim.log.levels.WARN
-          )
+          local message = 'direct: history operation completed, but its entries could not '
+            .. 'be grouped: '
+            .. tostring(compact_err)
+          M.ui.notify(message, vim.log.levels.WARN)
         end
         return M.action.Batch(reversed)
       end
@@ -218,13 +216,11 @@ return function(context)
       finish_callback(callback, nil, preflight_err)
       return nil, preflight_err
     end
-    local src_path, dst_path, src_lines, dst_lines
+    local src_lines
     if which == 'undo' then
-      src_path, dst_path = state.undo_path, state.redo_path
-      src_lines, dst_lines = state.undo_lines, state.redo_lines
+      src_lines = state.undo_lines
     elseif which == 'redo' then
-      src_path, dst_path = state.redo_path, state.undo_path
-      src_lines, dst_lines = state.redo_lines, state.undo_lines
+      src_lines = state.redo_lines
     else
       if token then M.pending.finish(token) end
       return nil, 'history._reverse_async: expected undo or redo'
@@ -429,11 +425,10 @@ return function(context)
       return nil, why
     end
     state = latest
+    local dst_lines
     if which == 'undo' then
-      src_path, dst_path = state.undo_path, state.redo_path
       src_lines, dst_lines = state.undo_lines, state.redo_lines
     else
-      src_path, dst_path = state.redo_path, state.undo_path
       src_lines, dst_lines = state.redo_lines, state.undo_lines
     end
 

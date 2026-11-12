@@ -7,6 +7,8 @@ Notable changes to direct.vim are documented here. Versions follow
 
 ### Changed
 
+- Run StyLua over all Lua modules, require zero Luacheck warnings, and expand
+  LuaLS checking to the full module tree with `undefined-field` diagnostics on.
 - Document that the default `gd`, `<leader>gr`, and `<leader>gu` mappings can
   shadow LSP or Git plugin keys inside Direct listings, with per-action examples
   for remapping them.

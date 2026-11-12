@@ -138,8 +138,8 @@ local function refresh_icons(bufnr, state, row_ids)
         -- Keep the dedicated deleted-file glyph for Git tombstones. Regular
         -- files use bufferline's filename-based devicon lookup.
         if rec.deleted_kind ~= 'file' and options.show_filetype_icons == true then
-          local glyph = file_icon(rec.name, devicons)
-          if glyph then base_glyph = glyph end
+          local file_glyph = file_icon(rec.name, devicons)
+          if file_glyph then base_glyph = file_glyph end
         end
       end
       if enabled then

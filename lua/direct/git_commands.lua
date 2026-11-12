@@ -183,7 +183,10 @@ local function complete(arg_lead, cmdline, cursor_pos, allowed)
   return {}
 end
 
-function M.complete_status(arg_lead, cmdline, cursor_pos) return complete(arg_lead, cmdline, cursor_pos, { dir = true }) end
+function M.complete_status(arg_lead, cmdline, cursor_pos)
+  local allowed = { dir = true }
+  return complete(arg_lead, cmdline, cursor_pos, allowed)
+end
 
 function M.complete_diff(arg_lead, cmdline, cursor_pos)
   return complete(arg_lead, cmdline, cursor_pos, {

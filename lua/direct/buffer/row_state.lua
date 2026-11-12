@@ -411,7 +411,7 @@ return function(context)
           identity = identity,
         }
       end
-      local directory_snapshots = {}
+      local complete_directory_snapshots = {}
       if complete then
         for id, expanded in pairs(state.expanded) do
           local rec = visible_records[id]
@@ -420,7 +420,7 @@ return function(context)
             break
           end
           if not expanded.deleted_parent then
-            directory_snapshots[id] = {
+            complete_directory_snapshots[id] = {
               listing_lines = vim.deepcopy(expanded.listing_lines or {}),
               wildignore = expanded.wildignore or vim.o.wildignore or '',
               filter_snapshot = vim.deepcopy(expanded.filter_snapshot),
@@ -435,7 +435,7 @@ return function(context)
           rows_by_id = visible_records,
           root_ids = vim.deepcopy(state.root_ids),
           expansions = vim.deepcopy(state.expanded),
-          directory_snapshots = directory_snapshots,
+          directory_snapshots = complete_directory_snapshots,
         }
       end
     end
@@ -458,7 +458,7 @@ return function(context)
     }
   end
 
-  function Buffer:collapse(row)
+  function Buffer.collapse(_, row)
     local bufnr = vim.api.nvim_get_current_buf()
     reconcile_undone_materialization(bufnr)
     row = row or vim.api.nvim_win_get_cursor(0)[1]

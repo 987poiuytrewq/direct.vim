@@ -129,19 +129,19 @@ local function capture_filter(root, show_hidden_override, respect_gitignore_over
   return snapshot
 end
 
-local function filtered_paths(root, paths, snapshot, git_inventory_cache)
+local function filtered_paths(root, candidates, snapshot, git_inventory_cache)
   local matches = {}
   for _, path in ipairs(M.ignore_set(root, snapshot.wildignore or '') or {}) do
     matches[#matches + 1] = path
   end
   if snapshot.show_hidden == false then
-    for _, path in ipairs(paths) do
+    for _, path in ipairs(candidates) do
       local name = path:match('([^/]+)$') or path
       if name:sub(1, 1) == '.' then matches[#matches + 1] = path end
     end
   end
   if snapshot.respect_gitignore and snapshot.git then
-    local ignored, err = git.ignored_paths(snapshot.git, paths, git_inventory_cache)
+    local ignored, err = git.ignored_paths(snapshot.git, candidates, git_inventory_cache)
     if not ignored then
       if not git.is_timeout(err) then return nil, err end
       snapshot.git_timeout = true
@@ -215,10 +215,10 @@ end
 -- Build the same device/inode and normalized-name index used by the directory
 -- listing. The list-time snapshot can contain many ignored entries, so sync
 -- must not compare every visible row against every ignored path.
-local function ignored_identity_index(paths)
-  if not paths or #paths == 0 then return nil end
+local function ignored_identity_index(candidates)
+  if not candidates or #candidates == 0 then return nil end
   local index = { by_path = {}, unknown_by_path = {}, by_inode = {} }
-  for _, path in ipairs(paths) do
+  for _, path in ipairs(candidates) do
     local identity = fs.path_identity(path, fs.stat(path))
     if identity then
       index.by_path[identity.path] = true
@@ -410,9 +410,8 @@ local function hidden_descendant(directory, root_snapshot, state)
       }
       if snapshot_filters then snapshot_filters[context_key] = filter end
     end
-    local names, scan_err = {}, nil
-    local scan
-    scan, scan_err = vim.uv.fs_scandir(path_without_marker(path))
+    local names = {}
+    local scan, scan_err = vim.uv.fs_scandir(path_without_marker(path))
     if not scan then return nil, scan_err end
     while true do
       local name = vim.uv.fs_scandir_next(scan)

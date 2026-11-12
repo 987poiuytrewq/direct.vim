@@ -319,7 +319,8 @@ M.BUFFER_MAPS = {
     action = 'list_buffer',
     mode = 'n',
     lhs = '-',
-    rhs = '<Cmd>lua require("direct").list(vim.fn.fnamemodify(vim.b.direct_root or vim.api.nvim_buf_get_name(0), ":h"))<CR>',
+    rhs = '<Cmd>lua require("direct").list(vim.fn.fnamemodify('
+      .. 'vim.b.direct_root or vim.api.nvim_buf_get_name(0), ":h"))<CR>',
   },
   {
     action = 'open_parent_expanded',
