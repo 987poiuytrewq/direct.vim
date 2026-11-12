@@ -582,8 +582,10 @@ make coverage          # writes coverage/index.html and coverage/summary.out
 make coverage-summary  # writes coverage/summary.md
 ```
 
-CI runs the suite with coverage on Linux, macOS and Windows against Neovim
-0.11.7, and checks the demo tour, on every pull request.
+On pull requests and pushes to `master`, CI runs the suite with coverage on
+Linux, macOS and Windows against Neovim 0.11.7, checks the full Lua tree with
+Luacheck, StyLua and LuaLS, tests latest stable and nightly Neovim, and checks
+the demo tour.
 
 ### Release checklist
 

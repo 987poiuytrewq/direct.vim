@@ -1,6 +1,6 @@
 # Spec: direct.vim improvements, second review
 
-**Status:** A1–A13, A16–A24 are complete; A14–A15 remain proposed.
+**Status:** A1–A14, A16–A24 are complete; A15 remains proposed.
 This replaces the first gap review, whose tasks (S1–S6, R1–R3, F1–F6, M1–M6)
 have all landed on `master`.
 
@@ -10,9 +10,9 @@ been reproduced in a running Neovim. Each task's first step is to write a
 failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
-**Last checked:** `origin/master` at `52458ec` (12 November 2026). That hourly
-review read #127, confirmed A13, and found no new task IDs. A14–A15 remain
-proposed.
+**Last checked:** `origin/master` at `10b6b2f` (12 November 2026). That check
+read #128 (A13 status), found no new task IDs, and confirmed A13. A14 is
+addressed in this PR; A15 remains proposed.
 
 ## Conventions
 
@@ -66,7 +66,7 @@ Checked by reading the code at `d72b7ea`:
 | A11 | P3 | Complete | Let `DirectSyncPre` cancel a save, and add the missing events |
 | A12 | P3 | Complete | Document default keys that shadow common user mappings |
 | A13 | P4 | Complete | Widen lint, formatting and type-check coverage |
-| A14 | P4 | Proposed | Fix stale docs and remove stray files |
+| A14 | P4 | Complete | Fix stale docs and remove stray files |
 | A15 | P4 | Proposed | Retire the positional root classifier |
 | A16 | P2 | Complete | Let a listing made during a Git timeout be saved once Git recovers |
 | A17 | P3 | Complete | Make listings opened with `buffers.reuse = false` readable and tidy |
@@ -849,6 +849,12 @@ over all of `lua/` (one formatting-only commit). Extend LuaLS checks module by
 module, and turn `undefined-field` back on where the annotations allow.
 
 ### A14 — Stale docs and stray files (P4)
+
+**Status: COMPLETE.** Updated the README's CI paragraph to describe the
+Linux/macOS/Windows minimum-version suite, full-tree lint and type checks,
+stable/nightly jobs and demo verification. Deleted the unused root-level
+LuaCov reporters rockspec (coverage dependencies are cloned by the script), and
+linked the pre-implementation Git-ignore benchmark to its current successor.
 
 **Problem.**
 
