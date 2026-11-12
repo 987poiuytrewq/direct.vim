@@ -10,10 +10,10 @@ been reproduced in a running Neovim. Each task's first step is to write a
 failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
-**Last checked:** `origin/master` at `72784b4` (12 November 2026). That check
-read #122 (sync cancellation and operation lifecycle events) and found no new
-task IDs. A11 is complete in #122; A12 is addressed in this PR. A13–A15 remain
-proposed.
+**Last checked:** `origin/master` at `5cca23f` (12 November 2026). That check
+read #122 (cancelling saves from `DirectSyncPre`, and new events) and #124
+(default keymap clashes), and confirmed A11 and A12. It found no new tasks.
+A13–A15 are unchanged.
 
 ## Conventions
 
@@ -449,6 +449,17 @@ reports the refusal. Added `DirectTrashPost`, `DirectHistoryResetPost`, and
 the history lock is held; docs say they must stay fast and not start nested
 Direct operations. Tests cover cancellation and each new post event.
 
+*Checked at `5cca23f`:* the code matches. A handler cancels with
+`require('direct.events').cancel(args.data, reason)`, using a token that's
+only valid during that dispatch (`lua/direct/events.lua`), and a cancelled save
+leaves the buffer modified and sends `DirectSyncPost` with `cancelled = true`.
+`DirectTrashPost`, `DirectHistoryResetPost` and `DirectGitRestorePost` are
+sent from `lua/direct/init.lua`. One thing to be aware of: if a
+`DirectSyncPre` handler raises an error before calling `cancel`, `events.emit`
+catches it, warns, and the save goes ahead. That's reasonable for a
+notification hook, but a handler used as a guard should not rely on erroring
+to block a save.
+
 **Problem.** `DirectSyncPre` fires while the history lock is held, after the
 plan is checked (`lua/direct/buffer/sync.lua`, around line 711). Handlers
 can't stop the save; the docs only ask them to stay read-only. `:DirectTrash`
@@ -472,6 +483,12 @@ data.
 listings. Added a per-action `mappings` example to move them and clarified that
 `map_default_keys = false` disables defaults while retaining explicit and
 `<Plug>` mappings. No runtime behavior changed.
+
+*Checked at `5cca23f`:* README and `doc/direct.txt` now explain that
+`gd`, `<leader>gr` and `<leader>gu` replace existing keys inside listings,
+with a `mappings` example. The action names used (`git_diff`, `git_restore`,
+`git_unstage`) match `BUFFER_MAPS` in `lua/direct/config.lua`. The defaults
+themselves are unchanged.
 
 **Problem.** The buffer-local defaults `<leader>gr`, `<leader>gu` and `gd`
 (`BUFFER_MAPS` in `lua/direct/config.lua`) override mappings many users
@@ -846,7 +863,7 @@ tests into identity-based ones).
 A1–A4 and A16 were released in `v0.2.0`; A5–A6 and A17–A21 were released in
 `v0.2.1`.
 
-A7–A10, A23 and A24 are complete but not released.
+A7–A12, A23 and A24 are complete but not released.
 
-1. A12–A15, in any order. A13's formatting-only commit is easiest
+1. A13–A15, in any order. A13's formatting-only commit is easiest
    when nothing else is changing `lua/`.
