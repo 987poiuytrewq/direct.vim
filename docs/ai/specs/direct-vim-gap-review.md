@@ -1,6 +1,6 @@
 # Spec: direct.vim improvements, second review
 
-**Status:** A1–A14, A16–A24 are complete; A15 remains proposed.
+**Status:** A1–A24 are complete; no proposed tasks remain.
 This replaces the first gap review, whose tasks (S1–S6, R1–R3, F1–F6, M1–M6)
 have all landed on `master`.
 
@@ -10,9 +10,9 @@ been reproduced in a running Neovim. Each task's first step is to write a
 failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
-**Last checked:** `origin/master` at `ff34980` (12 November 2026). That check
-read #129 (CI documentation and stale-file cleanup), confirmed A14, and found
-no new task IDs. A15 remains proposed.
+**Last checked:** `origin/master` at `e958475` (12 November 2026). That check
+read #130 (A14 completion status), confirmed A14, and found no new task IDs.
+A15 is addressed in this PR; no other proposed task IDs remain.
 
 ## Conventions
 
@@ -67,7 +67,7 @@ Checked by reading the code at `d72b7ea`:
 | A12 | P3 | Complete | Document default keys that shadow common user mappings |
 | A13 | P4 | Complete | Widen lint, formatting and type-check coverage |
 | A14 | P4 | Complete | Fix stale docs and remove stray files |
-| A15 | P4 | Proposed | Retire the positional root classifier |
+| A15 | P4 | Complete | Retire the positional root classifier |
 | A16 | P2 | Complete | Let a listing made during a Git timeout be saved once Git recovers |
 | A17 | P3 | Complete | Make listings opened with `buffers.reuse = false` readable and tidy |
 | A18 | P3 | Complete | Make `:DirectGitStatus` and `:DirectGitDiff` use the current listing |
@@ -873,21 +873,26 @@ needs it. Remove the old benchmark, or point it at the new one.
 
 ### A15 — The positional root classifier is still used (P4)
 
+**Status: COMPLETE.** Removed the positional `sync_plan.classify` function and
+its `buffer.classify` export. Duplicate root rows are detected by the
+identity-based plan before actions or history are written. Replaced
+classifier-specific test hooks and unit expectations with checks of the public
+surface, refusal behavior, and preserved filesystem/history state.
+
 **Problem.** `sync_plan.classify` still pairs rows by position. It's kept
 "observable for compatibility" and is only used to detect duplicate lines
 before `classify_identity` runs (`lua/direct/buffer/sync.lua`, around line
 333). It's exported as `M.classify` from `lua/direct/buffer/buffer.lua`, so a
 future change could rely on it again by mistake.
 
-**Change.** Move the duplicate check into `classify_identity`, stop exporting
-the positional classifier, and delete it along with its tests (or turn the
-tests into identity-based ones).
+**Change.** Removed the positional classifier and its public buffer export.
+Duplicate detection is handled by `classify_identity`; regression tests now
+verify identity-based outcomes and confirm duplicate rows fail closed without
+filesystem or history changes.
 
 ## Suggested order
 
 A1–A4 and A16 were released in `v0.2.0`; A5–A6 and A17–A21 were released in
 `v0.2.1`.
 
-A7–A13, A23 and A24 are complete but not released.
-
-1. A14–A15, in any order.
+A7–A15 and A22–A24 are complete but not released. No proposed tasks remain.

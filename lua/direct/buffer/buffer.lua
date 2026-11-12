@@ -189,7 +189,6 @@ local sync_plan = require('direct.buffer.sync_plan')({
   path_without_marker = path_without_marker,
   fs = fs,
 })
-M.classify = sync_plan.classify
 local classify_identity = sync_plan.classify_identity
 M._component_reason = sync_plan.component_reason
 M._nested_path_reason = sync_plan.nested_path_reason
@@ -281,19 +280,7 @@ function M.current_entry(name)
 end
 
 -- ---------------------------------------------------------------------------
--- classification
--- ---------------------------------------------------------------------------
-
--- classify(actual, expected) -> a plan
--- { kind = 'ADD', added = <lines, dirs-then-name> }
--- { kind = 'DELETE', removed = <lines, dirs-then-name> }
--- { kind = 'RENAME', moves = { { src = <expected line>, dst = <actual line> } } }
--- { kind = 'AMBIGUOUS', reason = 'duplicate' | 'mixed' }
--- The duplicate check is FIRST: the Python version collapsed
--- duplicates through set diffs, and a duplicated line in a RENAME-shaped edit
--- produced a self-move.
--- ---------------------------------------------------------------------------
--- the sync-boundary framing guard
+-- sync-boundary framing guard
 -- ---------------------------------------------------------------------------
 
 -- unsafe_path_reason(path) -> the shared `action.path_reason`, which rejects

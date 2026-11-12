@@ -343,18 +343,16 @@ H.describe('sync: editable expanded subtrees', function()
     listing:expand(1)
     H.mkfile(sub, 'external.txt', { 'external' })
     vim.api.nvim_buf_set_text(0, 1, 2, 1, 2 + #'old.txt', { 'renamed.txt' })
-    local yanked, classified = 0, 0
-    local classify, yank = buffer.classify, register.yank
-    buffer.classify = function(...) classified = classified + 1; return classify(...) end
+    local yanked = 0
+    local yank = register.yank
     register.yank = function(...) yanked = yanked + 1; return yank(...) end
 
     H.capture_messages()
     local ok, reason = listing:sync()
 
-    buffer.classify, register.yank = classify, yank
+    register.yank = yank
     H.assert_true(ok, 'unrelated external additions do not block an expanded rename: '
       .. tostring(reason) .. '\n' .. H.messages())
-    H.assert_eq(classified, 1, 'root identity classification still runs')
     H.assert_eq(yanked, 0, 'a rename does not auto-yank the unchanged source')
     H.assert_eq(H.fs_snapshot(ws), { 'sub/', 'sub/external.txt', 'sub/renamed.txt' },
       'both the external addition and requested rename remain on disk')

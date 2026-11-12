@@ -359,16 +359,6 @@ return function(context)
       return nil, unsafe.reason
     end
 
-    -- Keep the public legacy classifier observable for compatibility, but plan
-    -- filesystem actions exclusively from row identity, never from line order.
-    local classified = M.classify(actual, expected)
-    if classified.kind == 'AMBIGUOUS' and classified.reason == 'duplicate' then
-      -- notify, change nothing, write no history, do NOT re-list, and
-      -- leave the buffer modified so the unsaved intent is not discarded.
-      ui.notify(ambiguous_message(classified, actual, expected), vim.log.levels.ERROR)
-      return nil, classified.reason
-    end
-
     local original_root_rows = {}
     for _, id in ipairs(state.root_ids or {}) do
       local rec = state.rows[id]

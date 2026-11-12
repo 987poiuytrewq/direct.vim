@@ -11,57 +11,6 @@ return function(deps)
   local path_without_marker = deps.path_without_marker
   local fs = deps.fs
 
-  local function classify(actual, expected)
-    actual = actual or {}
-    expected = expected or {}
-
-    local seen = {}
-    for _, line in ipairs(actual) do
-      if seen[line] then return { kind = 'AMBIGUOUS', reason = 'duplicate' } end
-      seen[line] = true
-    end
-
-    local actual_set, expected_set = {}, {}
-    for _, line in ipairs(actual) do
-      actual_set[line] = true
-    end
-    for _, line in ipairs(expected) do
-      expected_set[line] = true
-    end
-    local function subset(x, y)
-      for key in pairs(x) do
-        if not y[key] then return false end
-      end
-      return true
-    end
-
-    if #actual > #expected and subset(expected_set, actual_set) then
-      local added = {}
-      for _, line in ipairs(actual) do
-        if not expected_set[line] then added[#added + 1] = line end
-      end
-      return { kind = 'ADD', added = dirs_then_name(added) }
-    end
-
-    if #actual < #expected and subset(actual_set, expected_set) then
-      local removed = {}
-      for _, line in ipairs(expected) do
-        if not actual_set[line] then removed[#removed + 1] = line end
-      end
-      return { kind = 'DELETE', removed = dirs_then_name(removed) }
-    end
-
-    if #actual == #expected then
-      local moves = {}
-      for i = 1, #actual do
-        if actual[i] ~= expected[i] then moves[#moves + 1] = { src = expected[i], dst = actual[i] } end
-      end
-      return { kind = 'RENAME', moves = moves }
-    end
-
-    return { kind = 'AMBIGUOUS', reason = 'mixed' }
-  end
-
   -- Use extmark identities, not row position or set cardinality, to classify a
   -- root-level edit. `original_rows` are the rows captured at listing time;
   -- `current_rows` contains their surviving marks plus unmarked creates.
@@ -492,7 +441,6 @@ return function(deps)
     return actions, yanks
   end
   return {
-    classify = classify,
     classify_identity = classify_identity,
     component_reason = component_reason,
     first_unsafe = first_unsafe,

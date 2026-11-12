@@ -46,20 +46,8 @@ H.describe('sync: safety guards', function()
     H.with_option('wildignore', '*.log', function()
       vim.bo.modified = true
       H.capture_messages()
-      local classified, classify = nil, buffer.classify
-      buffer.classify = function(actual, expected)
-        local plan = classify(actual, expected)
-        classified = { actual = vim.deepcopy(actual), expected = vim.deepcopy(expected),
-          plan = vim.deepcopy(plan) }
-        return plan
-      end
       local ok, reason = listing:sync()
-      buffer.classify = classify
       H.assert_true(ok == true, tostring(reason))
-      H.assert_eq(classified, {
-        actual = { 'x.log' }, expected = { 'x.log' },
-        plan = { kind = 'RENAME', moves = {} },
-      }, 'list-time filtering produces no add/delete/move action')
       H.assert_eq(vim.fn.readfile(ws .. '/x.log', 'b'), before,
         'changing the option does not delete or rewrite a listed file')
       H.assert_eq(history_lines('undo.log'), {}, 'no filesystem action is recorded')
@@ -67,7 +55,7 @@ H.describe('sync: safety guards', function()
     end)
   end)
 
-  H.it('excludes matching entries created after the list from sync classification', function()
+  H.it('excludes matching entries created after the list from sync edits', function()
     clean_buffers()
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
@@ -79,21 +67,9 @@ H.describe('sync: safety guards', function()
 
     local created = H.mkfile(ws, 'created-after-list.log', { 'preserve these bytes' })
     local before = vim.fn.readfile(created, 'b')
-    local classified, classify = nil, buffer.classify
-    buffer.classify = function(actual, expected)
-      local plan = classify(actual, expected)
-      classified = { actual = vim.deepcopy(actual), expected = vim.deepcopy(expected),
-        plan = vim.deepcopy(plan) }
-      return plan
-    end
-
     local ok, reason = listing:sync()
-    buffer.classify = classify
 
     H.assert_true(ok == true, tostring(reason))
-    H.assert_eq(classified, {
-      actual = {}, expected = {}, plan = { kind = 'RENAME', moves = {} },
-    }, 'the list-time filter excludes new matching names from classification')
     H.assert_eq(vim.fn.readfile(created, 'b'), before,
       'the newly appearing ignored file is not moved to trash')
     H.assert_eq(history_lines('undo.log'), {}, 'no filesystem action is recorded')
@@ -135,21 +111,10 @@ H.describe('sync: safety guards', function()
       listing = buffer.list(ws)
     end)
     vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'keep.txt' })
-    local classified, classify = nil, buffer.classify
-    buffer.classify = function(actual, expected)
-      local plan = classify(actual, expected)
-      classified = { actual = vim.deepcopy(actual), expected = vim.deepcopy(expected),
-        plan = vim.deepcopy(plan) }
-      return plan
-    end
     local ok = listing:sync()
-    buffer.classify = classify
 
     H.assert_true(ok == true, 'the visible delete applies normally')
-    H.assert_eq(classified, {
-      actual = { 'keep.txt' }, expected = { 'keep.txt', 'visible.txt' },
-      plan = { kind = 'DELETE', removed = { 'visible.txt' } },
-    }, 'the filtered entry is excluded from DELETE/MOVE sources')
+    H.assert_false(fs.exists(ws .. '/visible.txt'), 'the visible row was deleted')
     H.assert_eq(vim.fn.readfile(ws .. '/hidden.log', 'b'), hidden_before,
       'the hidden entry remains byte-identical')
   end)
@@ -169,22 +134,9 @@ H.describe('sync: safety guards', function()
     local inside = H.mkfile(hidden, 'inside.txt', { 'preserve directory contents' })
     local before = H.fs_snapshot(ws)
     local contents_before = vim.fn.readfile(inside, 'b')
-    local classified, classify = nil, buffer.classify
-    buffer.classify = function(actual, expected)
-      local plan = classify(actual, expected)
-      classified = { actual = vim.deepcopy(actual), expected = vim.deepcopy(expected),
-        plan = vim.deepcopy(plan) }
-      return plan
-    end
-
     local ok, reason = listing:sync()
-    buffer.classify = classify
 
     H.assert_true(ok == true, tostring(reason))
-    H.assert_eq(classified.actual, {}, 'the unchanged listing remains empty')
-    H.assert_eq(classified.expected, {}, 'the type-changed hidden path stays excluded')
-    H.assert_eq(classified.plan.kind, 'RENAME', 'the plan is a no-op, not a delete')
-    H.assert_eq(classified.plan.moves, {}, 'the plan contains no destructive move')
     H.assert_eq(H.fs_snapshot(ws), before, 'the hidden directory and its contents are untouched')
     H.assert_eq(vim.fn.readfile(inside, 'b'), contents_before,
       'the hidden directory file contents remain intact')
@@ -208,22 +160,9 @@ H.describe('sync: safety guards', function()
     local file = H.mkfile(ws, 'x.log', { 'preserve file contents' })
     local before = H.fs_snapshot(ws)
     local contents_before = vim.fn.readfile(file, 'b')
-    local classified, classify = nil, buffer.classify
-    buffer.classify = function(actual, expected)
-      local plan = classify(actual, expected)
-      classified = { actual = vim.deepcopy(actual), expected = vim.deepcopy(expected),
-        plan = vim.deepcopy(plan) }
-      return plan
-    end
-
     local ok, reason = listing:sync()
-    buffer.classify = classify
 
     H.assert_true(ok == true, tostring(reason))
-    H.assert_eq(classified.actual, {}, 'the unchanged listing remains empty')
-    H.assert_eq(classified.expected, {}, 'the type-changed hidden path stays excluded')
-    H.assert_eq(classified.plan.kind, 'RENAME', 'the plan is a no-op, not a delete')
-    H.assert_eq(classified.plan.moves, {}, 'the plan contains no destructive move')
     H.assert_eq(H.fs_snapshot(ws), before, 'the hidden file and its contents are untouched')
     H.assert_eq(vim.fn.readfile(file, 'b'), contents_before,
       'the hidden file contents remain intact')
