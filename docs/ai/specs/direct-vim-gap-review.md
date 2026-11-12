@@ -10,9 +10,9 @@ been reproduced in a running Neovim. Each task's first step is to write a
 failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
-**Last checked:** `origin/master` at `10b6b2f` (12 November 2026). That check
-read #128 (A13 status), found no new task IDs, and confirmed A13. A14 is
-addressed in this PR; A15 remains proposed.
+**Last checked:** `origin/master` at `ff34980` (12 November 2026). That check
+read #129 (CI documentation and stale-file cleanup), confirmed A14, and found
+no new task IDs. A15 remains proposed.
 
 ## Conventions
 
@@ -850,7 +850,7 @@ module, and turn `undefined-field` back on where the annotations allow.
 
 ### A14 — Stale docs and stray files (P4)
 
-**Status: COMPLETE.** Updated the README's CI paragraph to describe the
+**Status: COMPLETE in #129.** Updated the README's CI paragraph to describe the
 Linux/macOS/Windows minimum-version suite, full-tree lint and type checks,
 stable/nightly jobs and demo verification. Deleted the unused root-level
 LuaCov reporters rockspec (coverage dependencies are cloned by the script), and
