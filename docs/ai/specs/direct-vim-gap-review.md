@@ -10,9 +10,9 @@ been reproduced in a running Neovim. Each task's first step is to write a
 failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
-**Last checked:** `origin/master` at `749b9df` (12 November 2026). That check
-read #119 (A23 completion status), found no new task IDs, and confirmed A23.
-A24 is addressed in this PR; A11–A15 remain proposed.
+**Last checked:** `origin/master` at `bd337c3` (12 November 2026). That check
+read #120 (putting Git-restore backups back from the trash) and confirmed A24
+in the code. It found no new tasks. A11–A15 are unchanged.
 
 ## Conventions
 
@@ -725,6 +725,13 @@ restore state without losing either version. This implements the task's
 explicit fallback; `:DirectGitRestore` itself is still not reversed by `u`.
 Tests cover cancellation, preserving the displaced version, put-back, and undo.
 
+*Checked at `bd337c3`:* the code matches. `put_back_git_backup` in
+`lua/direct/trash.lua` asks first, then records "move the current file to the
+trash" and "restore the backup" as one history step, so nothing is
+overwritten and `u` reverses the put-back. `:DirectTrash restore <id>` takes
+the same path when no other destination is given. `:DirectGitRestore` itself
+still isn't in the undo history, as the PR notes.
+
 **Problem.** #116 copies changed files into the trash before
 `:DirectGitRestore`, and the message says to restore them manually. But
 `trash.restore` (`lua/direct/trash.lua`) refuses when the destination exists,
@@ -823,7 +830,7 @@ tests into identity-based ones).
 A1–A4 and A16 were released in `v0.2.0`; A5–A6 and A17–A21 were released in
 `v0.2.1`.
 
-A7–A10 and A23 are complete but not released.
+A7–A10, A23 and A24 are complete but not released.
 
 1. A11–A15, in any order. A13's formatting-only commit is easiest
    when nothing else is changing `lua/`.
