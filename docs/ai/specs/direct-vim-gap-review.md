@@ -10,9 +10,9 @@ been reproduced in a running Neovim. Each task's first step is to write a
 failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
-**Last checked:** `origin/master` at `1cd082d` (12 November 2026). That check
-read #131 (removal of the positional sync classifier), confirmed A15, and found
-no new task IDs. All tasks in this review are complete.
+**Last checked:** `origin/master` at `b35cc6b` (12 November 2026). The hourly
+review read #131 (removal of the positional sync classifier) in the code and
+confirmed A15. It found no new tasks. All tasks in this review are complete.
 
 ## Conventions
 
@@ -878,6 +878,13 @@ its `buffer.classify` export. Duplicate root rows are detected by the
 identity-based plan before actions or history are written. Replaced
 classifier-specific test hooks and unit expectations with checks of the public
 surface, refusal behavior, and preserved filesystem/history state.
+
+*Checked at `b35cc6b`:* the code matches. `classify` is gone from
+`lua/direct/buffer/sync_plan.lua` and no longer exported from
+`lua/direct/buffer/buffer.lua`, and nothing in `lua/` calls it. Duplicate rows
+are still refused: `classify_identity` returns `AMBIGUOUS` with reason
+`duplicate`, `sync.lua` reports it with the same message, and the test in
+`tests/sync/sync_plan_spec.lua` still covers it.
 
 **Problem.** `sync_plan.classify` still pairs rows by position. It's kept
 "observable for compatibility" and is only used to detect duplicate lines
