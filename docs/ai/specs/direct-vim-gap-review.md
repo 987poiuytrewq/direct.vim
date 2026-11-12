@@ -10,9 +10,9 @@ been reproduced in a running Neovim. Each task's first step is to write a
 failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
-**Last checked:** `origin/master` at `e958475` (12 November 2026). That check
-read #130 (A14 completion status), confirmed A14, and found no new task IDs.
-A15 is addressed in this PR; no other proposed task IDs remain.
+**Last checked:** `origin/master` at `1cd082d` (12 November 2026). That check
+read #131 (removal of the positional sync classifier), confirmed A15, and found
+no new task IDs. All tasks in this review are complete.
 
 ## Conventions
 
@@ -873,7 +873,7 @@ needs it. Remove the old benchmark, or point it at the new one.
 
 ### A15 — The positional root classifier is still used (P4)
 
-**Status: COMPLETE.** Removed the positional `sync_plan.classify` function and
+**Status: COMPLETE in #131.** Removed the positional `sync_plan.classify` function and
 its `buffer.classify` export. Duplicate root rows are detected by the
 identity-based plan before actions or history are written. Replaced
 classifier-specific test hooks and unit expectations with checks of the public
