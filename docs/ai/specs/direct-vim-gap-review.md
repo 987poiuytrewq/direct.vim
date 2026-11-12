@@ -10,10 +10,9 @@ been reproduced in a running Neovim. Each task's first step is to write a
 failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
-**Last checked:** `origin/master` at `51b6d95` (11 November 2026). That review
-added A24: a Git-restore backup can't be put back with `:DirectTrash restore`.
-A7–A10 and A22 are complete; A23 is addressed in this PR. A11–A15 and A24
-remain proposed.
+**Last checked:** `origin/master` at `6538ac9` (12 November 2026). That check
+read #118 (cheap trash completion and estimated dates) and confirmed A23 in the
+code. It found no new tasks. A11–A15 and A24 are unchanged.
 
 ## Conventions
 
@@ -685,6 +684,12 @@ and are marked as estimates in metadata and the view. Tests verify completion
 does not call the full entry scan or write metadata, and an old `mtime` is used
 and displayed as estimated when `ctime` is unavailable.
 
+*Checked at `6538ac9`:* the code matches (`lua/direct/trash.lua`,
+`lua/direct/action/action.lua`). Completion now reads only the trash folder's
+names. One small leftover: those names include history reservations, which
+`M.entries()` used to hide and `:DirectTrash restore` refuses, so completion
+can offer an ID that won't restore.
+
 **Problem.**
 
 - `:DirectTrash restore <Tab>` calls `trash.complete`, which calls
@@ -810,7 +815,7 @@ tests into identity-based ones).
 A1–A4 and A16 were released in `v0.2.0`; A5–A6 and A17–A21 were released in
 `v0.2.1`.
 
-A7–A10 are complete but not released.
+A7–A10 and A23 are complete but not released.
 
 1. A24, which finishes A10.
 2. A11–A15, in any order. A13's formatting-only commit is easiest
