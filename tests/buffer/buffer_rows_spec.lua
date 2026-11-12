@@ -97,7 +97,9 @@ H.describe('buffer: row identity and filtered rendering', function()
     H.mkfile(bat, 'one.txt', { 'one' })
     H.mkfile(bat, 'two.txt', { 'two' })
 
-    config.setup({ collapse_single_entry_directories = true })
+    config.setup({})
+    H.assert_true(config.defaults.collapse_single_entry_directories,
+      'directory chain collapsing is enabled by default')
     local listing = buffer.list(ws)
     H.assert_buf_eq({ 'baz/bat/', 'branch/', 'foo/bar/' }, 0,
       'only chains with one visible entry collapse')
@@ -107,6 +109,19 @@ H.describe('buffer: row identity and filtered rendering', function()
     H.assert_buf_eq({ 'baz/bat/', '  one.txt', '  two.txt', 'branch/',
       'foo/bar/' }, 0,
     'a collapsed directory row can still be expanded at its deepest directory')
+    H.assert_false(vim.bo.modified, 'expansion keeps the listing unmodified')
+    H.assert_not_nil(buffer._state_for_test(vim.api.nvim_get_current_buf()),
+      'the current buffer retains its listing state')
+    local toggled, toggle_err = buffer.toggle_collapse_single_entry_directories()
+    H.assert_true(toggled ~= nil, tostring(toggle_err))
+    H.assert_false(buffer._state_for_test(vim.api.nvim_get_current_buf()).collapse_single_entry_directories,
+      'the toggle updates collapse state')
+    H.assert_buf_eq({ 'baz/', 'branch/', 'foo/' }, 0,
+      'gC disables directory chain collapsing in the current listing')
+    toggled, toggle_err = buffer.toggle_collapse_single_entry_directories()
+    H.assert_true(toggled ~= nil, tostring(toggle_err))
+    H.assert_buf_eq({ 'baz/bat/', 'branch/', 'foo/bar/' }, 0,
+      'gC enables directory chain collapsing again')
     config.setup({})
   end)
 

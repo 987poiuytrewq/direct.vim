@@ -93,6 +93,10 @@ vim.api.nvim_create_user_command('DirectToggleHidden', function()
   require('direct').toggle_hidden()
 end, { nargs = 0, desc = 'direct: toggle hidden entries in this listing' })
 
+vim.api.nvim_create_user_command('DirectToggleDirectoryCollapse', function()
+  require('direct').toggle_collapse_single_entry_directories()
+end, { nargs = 0, desc = 'direct: toggle single-entry directory collapsing' })
+
 vim.api.nvim_create_user_command('DirectToggleGitStatus', function()
   require('direct').toggle_git_status()
 end, { nargs = 0, desc = 'direct: show only entries with Git status' })

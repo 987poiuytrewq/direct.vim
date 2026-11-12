@@ -684,6 +684,9 @@ function M._begin_test()
   local config = require('direct.config')
   config.defaults.directory_separator = '/'
   config.options.directory_separator = '/'
+  -- Keep existing specs focused on their feature by opting out of the new
+  -- default presentation. Collapse-specific specs opt in explicitly.
+  config.options.collapse_single_entry_directories = false
   -- Within-file isolation: clear foreign autocmds but keep the plugin's own
   -- (re-registered at the file boundary), so re-sourcing is not needed here.
   clear_foreign_autocmds()

@@ -217,6 +217,12 @@ function M.toggle_hidden()
   return buffer.toggle_hidden()
 end
 
+function M.toggle_collapse_single_entry_directories()
+  if not guard('DirectToggleDirectoryCollapse') then return nil end
+  if pending.refuse('toggle directory collapsing') then return nil end
+  return buffer.toggle_collapse_single_entry_directories()
+end
+
 function M.toggle_git_status()
   if not guard('DirectToggleGitStatus') then return nil end
   if pending.refuse('toggle Git-status filter') then return nil end
@@ -606,6 +612,7 @@ local protected_actions = {
   fold_all = 'collapse the expanded directories',
   unfold_all = 'expand the directories',
   toggle_hidden = 'toggle hidden entries',
+  toggle_collapse_single_entry_directories = 'toggle single-entry directory collapsing',
   toggle_git_status = 'toggle the Git-status filter',
   toggle_gitignore = 'toggle Git-ignore filtering',
   show_git_status = 'show the Git-status view',

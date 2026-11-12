@@ -20,7 +20,11 @@ end
 H.describe('buffer navigation', function()
   H.it('moves through changed rows in either direction without wrapping', function()
     clean_buffers()
-    require('direct.config').setup({ show_hidden = false, respect_gitignore = false })
+    require('direct.config').setup({
+      show_hidden = false,
+      respect_gitignore = false,
+      collapse_single_entry_directories = false,
+    })
     local sb = H.sandbox()
     local root = H.mkdir(sb.root, 'repo')
     H.mkfile(root, 'a.txt', 'baseline a')
@@ -77,7 +81,11 @@ H.describe('buffer navigation', function()
 
   H.it('moves between visible files, skips directories, and does not wrap', function()
     clean_buffers()
-    require('direct.config').setup({ show_hidden = false, respect_gitignore = false })
+    require('direct.config').setup({
+      show_hidden = false,
+      respect_gitignore = false,
+      collapse_single_entry_directories = false,
+    })
     local sb = H.sandbox()
     local root = H.mkdir(sb.root, 'files')
     local adir = H.mkdir(root, 'adir')

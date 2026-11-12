@@ -35,29 +35,92 @@ proc wait_for {pattern} {
   }
 }
 
+proc wait_for_sync {} {
+  global nvim socket
+  after 200
+  for {set attempt 0} {$attempt < 200} {incr attempt} {
+    set pending [exec $nvim --server $socket --remote-expr \
+      {luaeval("require('direct.pending').is_pending() and 1 or 0")} 2>@1]
+    if {[string trim $pending] eq "0"} { return }
+    after 100
+  }
+  puts stderr "demo: timed out waiting for the filesystem operation to finish"
+  exit 1
+}
+
+proc wait_for_file {path should_exist} {
+  for {set attempt 0} {$attempt < 200} {incr attempt} {
+    if {[file exists $path] == $should_exist} { return }
+    after 100
+  }
+  puts stderr "demo: timed out waiting for file state: $path"
+  exit 1
+}
+
+proc wait_for_listing_write {} {
+  global nvim socket
+  for {set attempt 0} {$attempt < 200} {incr attempt} {
+    set modified [exec $nvim --server $socket --remote-expr {&modified} 2>@1]
+    if {[string trim $modified] eq "0"} { return }
+    after 100
+  }
+  puts stderr "demo: timed out waiting for the listing write to finish"
+  exit 1
+}
+
+proc wait_for_listing_modified {} {
+  global nvim socket
+  for {set attempt 0} {$attempt < 200} {incr attempt} {
+    set modified [exec $nvim --server $socket --remote-expr {&modified} 2>@1]
+    if {[string trim $modified] eq "1"} { return }
+    after 100
+  }
+  puts stderr "demo: timed out waiting for the listing edit: [exec $nvim --server $socket --remote-expr {string([mode(), line('.'), getline('.'), &modified])} 2>@1]"
+  exit 1
+}
+
 proc key {keys {delay 350}} {
-  send -- $keys
+  send_input $keys
   after $delay
+}
+
+proc send_input {keys} {
+  global asciinema nvim socket
+  if {$asciinema eq ""} {
+    exec $nvim --server $socket --remote-send $keys 2>@1
+  } else {
+    send -- $keys
+  }
 }
 
 proc type_text {text} {
   foreach character [split $text ""] {
-    send -- $character
+    send_input $character
     after 90
   }
 }
 
 proc find_row {text} {
+  global nvim socket
   key "/" 150
   type_text $text
   key "\r" 400
+  for {set attempt 0} {$attempt < 200} {incr attempt} {
+    set line [exec $nvim --server $socket --remote-expr {getline('.')} 2>@1]
+    if {[string first [string tolower $text] [string tolower $line]] >= 0} { return }
+    after 100
+  }
+  puts stderr "demo: timed out searching for listing row: $text"
+  exit 1
 }
 
 proc write_listing {} {
+  global nvim socket
+  wait_for_listing_modified
   key ":" 150
   key "w" 150
   key "\r" 450
-  after 450
+  wait_for_listing_write
 }
 
 # Show a caption without typing anything: it is set over Neovim's socket, so
@@ -130,9 +193,13 @@ after 400
 caption "Undo and redo work on the filesystem" "u  Ctrl-r"
 after 400
 key "u"
+wait_for_file notes.txt 1
 wait_for {notes\.txt}
+wait_for_sync
 after 600
 key "\022"
+wait_for_file notes.txt 0
+wait_for_sync
 after 700
 key "zM" 800
 
@@ -207,7 +274,9 @@ key "\025" 300
 type_text "advanced"
 after 300
 key "\r"
+wait_for_file examples/advanced/init.lua 1
 wait_for {advanced/}
+wait_for_sync
 after 800
 
 # 8. Git: show only what changed, then stage a file.

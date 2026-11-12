@@ -64,6 +64,7 @@ local EXPECTED_N = {
   ['p'] = '<Cmd>DirectPaste<CR>',
   ['P'] = '<Cmd>DirectPaste<CR>',
   ['gh'] = '<Cmd>DirectToggleHidden<CR>',
+  ['gC'] = '<Cmd>DirectToggleDirectoryCollapse<CR>',
   ['ga'] = '<Cmd>DirectGit git add -- {}<CR>',
   ['\\gu'] = '<Cmd>DirectGit git reset -- {}<CR>',
   ['\\gr'] = '<Cmd>DirectGitRestore<CR>',
@@ -87,6 +88,7 @@ local EXPECTED_CMDS = {
   DirectFoldAll = { nargs = '0' },
   DirectUnfoldAll = { nargs = '0' },
   DirectToggleHidden = { nargs = '0' },
+  DirectToggleDirectoryCollapse = { nargs = '0' },
   DirectToggleGitStatus = { nargs = '0' },
   DirectGitStatus = { nargs = '*', complete = 'custom' },
   DirectGitDiff = { nargs = '*', complete = 'custom' },
@@ -296,6 +298,7 @@ H.describe('entry: direct-buffer guard', function()
       'expand', 'collapse', 'toggle', 'expand_recursive', 'collapse_recursive',
       'toggle_recursive', 'next_directory', 'previous_directory',
       'toggle_hidden',
+      'toggle_collapse_single_entry_directories',
       'toggle_gitignore',
       'toggle_git_status',
       'show_git_status',
@@ -318,6 +321,7 @@ H.describe('entry: direct-buffer guard', function()
 
   H.it('the public folder API expands, collapses, toggles, and navigates', function()
     clean_buffers()
+    require('direct.config').setup({ collapse_single_entry_directories = false })
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
     local sub = H.mkdir(ws, 'sub/nested')
@@ -345,6 +349,25 @@ H.describe('entry: direct-buffer guard', function()
     H.assert_eq(vim.api.nvim_win_get_cursor(0)[1], 2)
     H.assert_true(api.previous_directory(), 'previous_directory returns to the prior directory')
     H.assert_eq(vim.api.nvim_win_get_cursor(0)[1], 1)
+    require('direct.config').setup({})
+  end)
+
+  H.it('gC and :DirectToggleDirectoryCollapse toggle collapsed directory chains', function()
+    clean_buffers()
+    local config = require('direct.config')
+    config.setup({})
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local nested = H.mkdir(ws, 'foo/bar')
+    H.mkfile(nested, 'baz.txt', { 'baz' })
+    require('direct').list(ws)
+    H.assert_buf_eq({ 'foo/bar/' }, 0, 'the default view collapses directory chains')
+
+    vim.cmd('DirectToggleDirectoryCollapse')
+    H.assert_buf_eq({ 'foo/' }, 0, 'the command switches collapsing off for this listing')
+    vim.api.nvim_feedkeys('gC', 'mx', false)
+    H.assert_buf_eq({ 'foo/bar/' }, 0, 'gC switches collapsing back on')
+    config.setup({})
   end)
 
   H.it('guarded commands notify and change nothing outside a direct buffer', function()
@@ -356,6 +379,8 @@ H.describe('entry: direct-buffer guard', function()
       { name = 'DirectUnfoldAll', call = function(api) return api.unfold_all() end },
       { name = 'DirectYank', call = function(api) return api.yank(1, 1) end },
       { name = 'DirectToggleHidden', call = function(api) return api.toggle_hidden() end },
+      { name = 'DirectToggleDirectoryCollapse',
+        call = function(api) return api.toggle_collapse_single_entry_directories() end },
       { name = 'DirectToggleGitStatus',
         call = function(api) return api.toggle_git_status() end },
       { name = 'DirectToggleGitIgnore',
@@ -394,6 +419,7 @@ H.describe('entry: direct-buffer guard', function()
 
   H.it(':DirectUnfoldAll and :DirectFoldAll expand and collapse the full tree', function()
     clean_buffers()
+    require('direct.config').setup({ collapse_single_entry_directories = false })
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
     local deepest = H.mkdir(ws, 'a/b')
@@ -405,6 +431,7 @@ H.describe('entry: direct-buffer guard', function()
 
     vim.cmd('DirectFoldAll')
     H.assert_buf_eq({ 'a/' })
+    require('direct.config').setup({})
   end)
 
   H.it(':DirectSync is rejected in a named normal buffer without changing it', function()
@@ -505,6 +532,7 @@ H.describe('entry: direct-buffer guard', function()
 
   H.it(':DirectPaste targets the selected directory and refreshes its open folds', function()
     clean_buffers()
+    require('direct.config').setup({ collapse_single_entry_directories = false })
     local sb = H.sandbox()
     local ws = H.mkdir(sb.root, 'ws')
     local parent = H.mkdir(ws, 'parent')
@@ -538,6 +566,7 @@ H.describe('entry: direct-buffer guard', function()
     }, 0, 'the refreshed listing retains both open directory folds')
     H.assert_eq(vim.api.nvim_win_get_cursor(0), { 6, 4 },
       'the cursor lands on the pasted entry name')
+    require('direct.config').setup({})
   end)
 
   H.it(':DirectPaste opens the selected collapsed directory and selects the pasted entry', function()

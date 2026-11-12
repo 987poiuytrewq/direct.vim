@@ -46,16 +46,16 @@ H.describe('config', function()
     config.clear_mappings()
   end)
 
-  H.it('validates the optional single-entry directory collapse setting', function()
+  H.it('defaults single-entry directory collapsing on and validates the option', function()
     local config = fresh_config()
     config.clear_mappings()
-    H.assert_false(config.defaults.collapse_single_entry_directories,
-      'single-entry paths stay expanded by default')
-    H.assert_true(config.setup({
-      collapse_single_entry_directories = true,
-    }).collapse_single_entry_directories, 'the option can be enabled')
-    H.capture_messages()
+    H.assert_true(config.defaults.collapse_single_entry_directories,
+      'single-entry directory chains collapse by default')
     H.assert_false(config.setup({
+      collapse_single_entry_directories = false,
+    }).collapse_single_entry_directories, 'the option can be disabled')
+    H.capture_messages()
+    H.assert_true(config.setup({
       collapse_single_entry_directories = 'true',
     }).collapse_single_entry_directories, 'invalid values keep the default')
     H.assert_notified('collapse_single_entry_directories must be a boolean',
@@ -472,6 +472,8 @@ H.describe('config', function()
 
     H.assert_eq(buf_map_rhs('ga', 'n'), '<Cmd>DirectGit git add -- {}<CR>',
       'ga stages the current entry through DirectGit')
+    H.assert_eq(buf_map_rhs('gC', 'n'), '<Cmd>DirectToggleDirectoryCollapse<CR>',
+      'gC toggles collapsed directory chains')
     H.assert_eq(buf_map_rhs(unstage, 'n'), '<Cmd>DirectGit git reset -- {}<CR>',
       'leader-gu unstages through DirectGit without prefixing LSP gr mappings')
     H.assert_eq(buf_map_rhs(restore, 'n'), '<Cmd>DirectGitRestore<CR>',
@@ -489,6 +491,7 @@ H.describe('config', function()
 
     config.setup({ map_default_keys = false })
     H.assert_nil(buf_map_rhs('ga', 'n'), 'ga is removed when default mappings are disabled')
+    H.assert_nil(buf_map_rhs('gC', 'n'), 'gC is removed when default mappings are disabled')
     H.assert_nil(buf_map_rhs(unstage, 'n'), 'leader-gu is removed when mappings are disabled')
     H.assert_nil(buf_map_rhs(restore, 'n'), 'leader-gr is removed when mappings are disabled')
     H.assert_nil(buf_map_rhs(']c', 'n'), ']c is removed when default mappings are disabled')
@@ -509,6 +512,7 @@ H.describe('config', function()
         expand = 'e',
         open_vertical = '<F7>',
         toggle_hidden = false,
+        toggle_directory_collapse = 'C',
       },
     })
     local sb = H.sandbox()
@@ -536,6 +540,8 @@ H.describe('config', function()
     H.assert_nil(buf_map_rhs('u', 'n'), 'the default undo key is not installed')
     H.assert_nil(buf_map_rhs('zo', 'n'), 'the default expand key is not installed')
     H.assert_nil(buf_map_rhs('gh', 'n'), 'false disables the hidden-toggle key')
+    H.assert_eq(buf_map_rhs('C', 'n'), '<Cmd>DirectToggleDirectoryCollapse<CR>',
+      'the directory-collapse toggle can be remapped')
 
     H.assert_eq(vim.fn.maparg('<Plug>(direct-undo)', 'n', false, true).rhs,
       '<Cmd>DirectUndo<CR>', 'the Plug mapping is globally available')
@@ -546,6 +552,9 @@ H.describe('config', function()
       'folder actions have Plug mappings')
     H.assert_eq(vim.fn.maparg('<Plug>(direct-toggle-hidden)', 'n', false, true).rhs,
       '<Cmd>DirectToggleHidden<CR>', 'Plug entry points remain available when a default is disabled')
+    H.assert_eq(vim.fn.maparg('<Plug>(direct-toggle-directory-collapse)',
+      'n', false, true).rhs, '<Cmd>DirectToggleDirectoryCollapse<CR>',
+    'the directory-collapse toggle has a Plug entry point')
 
     vim.api.nvim_feedkeys('e', 'mx', false)
     H.assert_buf_eq({ 'sub/', '  inside.txt' }, bufnr,

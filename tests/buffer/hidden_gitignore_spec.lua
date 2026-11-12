@@ -563,7 +563,11 @@ H.describe('hidden and Git-ignore filtering', function()
   end)
 
   H.it('does not scan ignored directory trees while looking for nested repositories', function()
-    require('direct.config').setup({ map_default_keys = false, respect_gitignore = true })
+    require('direct.config').setup({
+      map_default_keys = false,
+      respect_gitignore = true,
+      collapse_single_entry_directories = false,
+    })
     local sb = H.sandbox()
     local root = H.mkdir(sb.root, 'pruned-ignore-repo')
     H.mkfile(root, '.gitignore', 'ignored-heavy/\n')
@@ -593,7 +597,11 @@ H.describe('hidden and Git-ignore filtering', function()
   end)
 
   H.it('skips unreadable nested-repository scan directories and warns once', function()
-    require('direct.config').setup({ map_default_keys = false, respect_gitignore = true })
+    require('direct.config').setup({
+      map_default_keys = false,
+      respect_gitignore = true,
+      collapse_single_entry_directories = false,
+    })
     local sb = H.sandbox()
     local root = H.mkdir(sb.root, 'unreadable-scan-repo')
     local unreadable = H.mkdir(root, 'unreadable')
@@ -804,7 +812,11 @@ H.describe('hidden and Git-ignore filtering', function()
   end)
 
   H.it('reuses one live ignored-path inventory per repo during descendant walks', function()
-    require('direct.config').setup({ map_default_keys = false, respect_gitignore = true })
+    require('direct.config').setup({
+      map_default_keys = false,
+      respect_gitignore = true,
+      collapse_single_entry_directories = false,
+    })
     local sb = H.sandbox()
     local root = H.mkdir(sb.root, 'repo')
     local outer = H.mkdir(root, 'outer')
