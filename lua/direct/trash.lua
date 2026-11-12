@@ -49,6 +49,13 @@ local function path_size(path)
   return total
 end
 
+local function stat_time_epoch(stat, field)
+  local value = stat and stat[field]
+  if type(value) == 'table' then value = value.sec or value.tv_sec end
+  value = tonumber(value)
+  if value and value > 0 then return value end
+end
+
 local function decode_metadata(path)
   local raw, err, exists = log.read_raw(action.trash_metadata_path(path))
   if err then return nil, err end
@@ -59,6 +66,7 @@ local function decode_metadata(path)
     or type(value.original) ~= 'string'
     or type(value.deleted_at) ~= 'string'
     or type(value.deleted_at_epoch) ~= 'number'
+    or (value.deleted_at_estimated ~= nil and type(value.deleted_at_estimated) ~= 'boolean')
     or type(value.reserved) ~= 'boolean'
     or (value.kind ~= 'file' and value.kind ~= 'directory'
       and value.kind ~= 'link' and value.kind ~= 'unknown') then
@@ -79,7 +87,7 @@ function M.entries(options)
   if not iter_ok then return nil, tostring(iter) end
   if not iter then return nil, tostring(iter_err or 'cannot read trash directory') end
 
-  local entries, missing_metadata = {}, false
+  local entries, missing_metadata, recovery_times = {}, false, {}
   for name in iter do
     if not name:match('%.direct%-trash%.json$') then
       local path = fs.join(directory, name)
@@ -96,13 +104,18 @@ function M.entries(options)
             original = metadata and metadata.original or nil,
             deleted_at = metadata and metadata.deleted_at or nil,
             deleted_at_epoch = metadata and metadata.deleted_at_epoch or nil,
+            deleted_at_estimated = metadata and metadata.deleted_at_estimated == true or false,
             kind = metadata and metadata.kind or stat.type,
             reserved = reserved,
             metadata_error = metadata_err,
             size = size,
             storage_size = size + (sidecar and sidecar.size or 0),
           }
-          if metadata_err == 'metadata is unavailable' then missing_metadata = true end
+          if metadata_err == 'metadata is unavailable' then
+            missing_metadata = true
+            recovery_times[paths.canonical(path)] = stat_time_epoch(stat, 'ctime')
+              or stat_time_epoch(stat, 'mtime')
+          end
         end
       end
     end
@@ -134,12 +147,14 @@ function M.entries(options)
           local original = by_trash_path[paths.canonical(entry.path)]
           if original then
             local _, record_err = action.recover_trash_metadata(
-              entry.path, original, entry.kind)
+              entry.path, original, entry.kind,
+              recovery_times[paths.canonical(entry.path)])
             local metadata, metadata_err = decode_metadata(entry.path)
             if metadata then
               entry.original = metadata.original
               entry.deleted_at = metadata.deleted_at
               entry.deleted_at_epoch = metadata.deleted_at_epoch
+              entry.deleted_at_estimated = metadata.deleted_at_estimated == true
               entry.kind = metadata.kind
               entry.reserved = metadata.reserved
               entry.metadata_error = nil
@@ -210,7 +225,8 @@ function M.show()
   for _, entry in ipairs(entries) do
     local row = {
       cell(entry.id),
-      cell(entry.deleted_at or 'unknown'),
+      cell((entry.deleted_at or 'unknown')
+        .. (entry.deleted_at_estimated and ' (estimated)' or '')),
       cell(format_size(entry.size)),
       cell(entry.original or ('(unknown: ' .. tostring(entry.metadata_error) .. ')')),
       entry.reserved and 'reserved' or 'deleted',
@@ -288,8 +304,16 @@ function M.complete(arg_lead, cmdline, cursor_pos)
   previous = previous and previous:gsub('^:', '') or nil
   local candidates = {}
   if previous == 'restore' then
-    local entries = M.entries()
-    for _, entry in ipairs(entries or {}) do candidates[#candidates + 1] = entry.id end
+    local directory = trash_dir()
+    local ok, iter = pcall(vim.fs.dir, directory)
+    if ok and iter then
+      for name in iter do
+        if not name:match('%.direct%-trash%.json$') then
+          candidates[#candidates + 1] = name
+        end
+      end
+    end
+    table.sort(candidates)
   elseif previous == 'DirectTrash' or previous == nil then
     candidates = { 'empty', 'restore' }
   end
@@ -317,7 +341,7 @@ end
 function M.restore(id, destination, force)
   local path, lookup_err = lookup(id)
   if not path then return nil, lookup_err end
-  local metadata, metadata_err = decode_metadata(path)
+  local metadata = decode_metadata(path)
   if metadata and metadata.reserved then
     return nil, 'trash entry is a history reservation, not a deleted item'
   end

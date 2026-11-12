@@ -170,6 +170,7 @@ H.describe('trash management', function()
     local recovered = trash.entries()[1]
     H.assert_eq(recovered.original, source, 'recovery writes canonical metadata')
     H.assert_eq(recovered.kind, 'file', 'recovery records the trashed entry kind')
+    H.assert_true(recovered.deleted_at_estimated, 'the recovered deletion time is marked estimated')
     H.assert_true(recovered.deleted_at_epoch ~= nil,
       'recovery estimates a deletion time for retention')
 
@@ -203,6 +204,72 @@ H.describe('trash management', function()
     H.assert_not_nil(recovered.deleted_at_epoch, 'the deletion time is estimated')
     H.assert_not_nil(vim.uv.fs_stat(action.trash_metadata_path(entry.path)),
       'recovery writes a metadata sidecar')
+  end)
+
+  H.it('trash restore completion lists IDs without measuring or recovering entries', function()
+    clean_buffers()
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local source = H.mkfile(ws, 'complete.txt', { 'payload' })
+    local remove = action.Remove(source)
+    H.assert_true(remove['do'](), 'create a trash entry')
+    local entry = trash.entries()[1]
+    H.assert_true(vim.uv.fs_unlink(action.trash_metadata_path(entry.path)),
+      'simulate an older entry that completion must not recover')
+    local calls = 0
+    local restore_entries = H.stub(trash, 'entries', function()
+      calls = calls + 1
+      error('completion must not call entries')
+    end)
+
+    local completed, completions = pcall(trash.complete, '', 'DirectTrash restore ',
+      #'DirectTrash restore ')
+
+    restore_entries()
+    H.assert_true(completed, 'completion avoids the expensive entry scan')
+    H.assert_eq(calls, 0, 'completion does not walk trash entries, measure sizes, or recover metadata')
+    H.assert_eq(completions, { entry.id }, 'completion returns the current trash entry ID')
+    H.assert_nil(vim.uv.fs_stat(action.trash_metadata_path(entry.path)),
+      'completion does not write recovered metadata')
+  end)
+
+  H.it('estimates recovered deletion time from the trash entry filesystem time', function()
+    clean_buffers()
+    require('direct.config').setup({ trash_retention = false })
+    local sb = H.sandbox()
+    local ws = H.mkdir(sb.root, 'ws')
+    local source = H.mkfile(ws, 'old-entry.txt', { 'older payload' })
+    local remove = action.Remove(source)
+    H.assert_true(remove['do'](), 'create a trash entry')
+    H.assert_true(history.log(remove), 'history identifies the trash payload')
+    local entry = trash.entries()[1]
+    H.assert_true(vim.uv.fs_unlink(action.trash_metadata_path(entry.path)),
+      'remove metadata to simulate an older entry')
+    local expected_epoch = os.time() - 2 * 24 * 60 * 60
+    local original_lstat = vim.uv.fs_lstat
+    local restore_lstat = H.stub(vim.uv, 'fs_lstat', function(path)
+      local stat, err, code = original_lstat(path)
+      if path == entry.path and stat then
+        stat = vim.deepcopy(stat)
+        stat.ctime = nil
+        stat.mtime = { sec = expected_epoch, nsec = 0 }
+      end
+      return stat, err, code
+    end)
+
+    local recovered = trash.entries()[1]
+
+    restore_lstat()
+    H.assert_not_nil(recovered.deleted_at_epoch,
+      'history recovery writes a timestamp: ' .. tostring(recovered.metadata_error))
+    H.assert_true(math.abs(recovered.deleted_at_epoch - expected_epoch) < 2,
+      'mtime supplies the estimated deletion timestamp')
+    H.assert_true(recovered.deleted_at_estimated,
+      'the recovered timestamp is marked as estimated')
+    local view = trash.show()
+    H.assert_true(table.concat(H.buf_lines(view), '\n'):find('(estimated)', 1, true) ~= nil,
+      'the trash view identifies the recovered timestamp as an estimate')
+    require('direct.config').setup({})
   end)
 
   H.it('refuses a history-referenced restore unless forced and never overwrites', function()

@@ -924,9 +924,10 @@ Viewing history ~
     records plus earlier steps that overlap their paths, including paste steps
     that created a later-trashed entry. When an older trash entry lacks metadata,
     Direct tries to recover its original path and entry type from history, and
-    estimates the deletion time. If no matching delete action remains, supply
-    an explicit [path] to restore it. The command completes its subcommands and
-    trash IDs. In the read-only view, `r` or <CR> restores the selected entry
+    estimates the deletion time; the view marks that estimate. If no matching
+    delete action remains, supply an explicit [path] to restore it. The command
+    completes its subcommands and trash IDs without sizing entries or writing
+    metadata. In the read-only view, `r` or <CR> restores the selected entry
     after confirmation; `q` closes the view.
 
                                                                  *:DirectUndo*
