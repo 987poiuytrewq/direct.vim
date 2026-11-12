@@ -61,9 +61,7 @@ return function(deps)
 
       local identity = path_identity(path)
       local identity_key = identity and (identity.inode or identity.path)
-      if identity_key and seen_directories[identity_key] then
-        return append_current()
-      end
+      if identity_key and seen_directories[identity_key] then return append_current() end
       if identity_key then seen_directories[identity_key] = true end
 
       local directory = paths.strip_trailing_separator(path)
@@ -74,8 +72,7 @@ return function(deps)
       end
       if #children == 1 and is_dir_line(children[1]) then
         local child = children[1]
-        return render_chain(entry_path(directory, child), child, next_components, false,
-          seen_directories)
+        return render_chain(entry_path(directory, child), child, next_components, false, seen_directories)
       end
       return append_current()
     end

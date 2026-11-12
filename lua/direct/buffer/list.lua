@@ -334,7 +334,8 @@ return function(context)
       view_respect_gitignore = snapshot.respect_gitignore,
       view_collapse_single_entry_directories = collapse_enabled,
       view_collapse_single_entry_directories_override = old_state
-        and old_state.view_collapse_single_entry_directories_override or false,
+          and old_state.view_collapse_single_entry_directories_override
+        or false,
       view_show_deleted = show_deleted,
       view_show_hidden_override = old_state and old_state.view_show_hidden_override or false,
       view_respect_gitignore_override = old_state and old_state.view_respect_gitignore_override or false,

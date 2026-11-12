@@ -728,7 +728,9 @@ function M.toggle_collapse_single_entry_directories()
   state.collapse_undos = {}
   local listed, err = M.restore():list({ reset_undo = true })
   if not listed then
-    for key, value in pairs(previous) do state[key] = value end
+    for key, value in pairs(previous) do
+      state[key] = value
+    end
     return nil, err
   end
   return listed
