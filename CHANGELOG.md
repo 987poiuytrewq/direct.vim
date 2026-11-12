@@ -5,6 +5,11 @@ Notable changes to direct.vim are documented here. Versions follow
 
 ## [Unreleased]
 
+### Changed
+
+- Make trash restore completion list IDs without sizing entries or recovering
+  metadata; mark filesystem-estimated deletion dates in the trash view.
+
 ### Fixed
 
 - Preserve changed worktree contents in trash before `:DirectGitRestore`; report

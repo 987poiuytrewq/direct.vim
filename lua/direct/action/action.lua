@@ -28,6 +28,7 @@ local function trash_metadata(original_path, reserved)
     original = M.paths.canonical(M.paths.root(original_path)),
     deleted_at = os.date('!%Y-%m-%dT%H:%M:%SZ'),
     deleted_at_epoch = os.time(),
+    deleted_at_estimated = false,
     kind = stat and stat.type or 'unknown',
     reserved = reserved == true,
   }
@@ -52,11 +53,14 @@ function M.write_trash_metadata(trash_path, original_path)
   return M.log.write_raw_exclusive(metadata_path, bytes)
 end
 
-function M.recover_trash_metadata(trash_path, original_path, kind)
+function M.recover_trash_metadata(trash_path, original_path, kind, deleted_at_epoch)
   if not M.fs.taken(trash_path) then return nil, 'trash entry is no longer present' end
   local original = M.paths.canonical(M.paths.root(original_path))
   local valid, valid_err = M.paths.validate_canonical_path(original)
   if not valid then return nil, 'invalid recovered trash path: ' .. tostring(valid_err) end
+  if type(deleted_at_epoch) ~= 'number' or deleted_at_epoch <= 0 then
+    deleted_at_epoch = os.time()
+  end
   if kind ~= 'file' and kind ~= 'directory' and kind ~= 'link' and kind ~= 'unknown' then
     kind = 'unknown'
   end
@@ -64,8 +68,9 @@ function M.recover_trash_metadata(trash_path, original_path, kind)
     format = 'direct-trash',
     version = 1,
     original = original,
-    deleted_at = os.date('!%Y-%m-%dT%H:%M:%SZ'),
-    deleted_at_epoch = os.time(),
+    deleted_at = os.date('!%Y-%m-%dT%H:%M:%SZ', deleted_at_epoch),
+    deleted_at_epoch = deleted_at_epoch,
+    deleted_at_estimated = true,
     kind = kind,
     reserved = false,
   }

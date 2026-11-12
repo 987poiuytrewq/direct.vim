@@ -312,8 +312,10 @@ a fresh retention pass before showing the entries.
 
 When an older trash entry has no metadata sidecar, `:DirectTrash` looks for its
 delete action in history and reconstructs the original path and entry type,
-with an estimated deletion time. If no matching history remains, the entry
-stays marked unknown and needs an explicit restore path.
+with an estimated deletion time marked in the view. Restore-ID completion only
+lists trash names; it does not size entries or write metadata. If no matching
+history remains, the entry stays marked unknown and needs an explicit restore
+path.
 
 With `show_filetype_icons` enabled, file icons use bufferline.nvim's built-in
 basename-based nvim-web-devicons lookup. The dependency is optional; Direct uses

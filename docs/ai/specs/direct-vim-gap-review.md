@@ -1,6 +1,6 @@
 # Spec: direct.vim improvements, second review
 
-**Status:** A1–A10, A16–A22 are complete; A11–A15, A23 and A24 are proposed.
+**Status:** A1–A10, A16–A22 and A23 are complete; A11–A15 and A24 remain proposed.
 This replaces the first gap review, whose tasks (S1–S6, R1–R3, F1–F6, M1–M6)
 have all landed on `master`.
 
@@ -10,10 +10,10 @@ been reproduced in a running Neovim. Each task's first step is to write a
 failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
-**Last checked:** `origin/master` at `5cc0377` (11 November 2026). That check
-read #116 (Git restore backups) and #117 (changelog correction and CI check),
-and confirmed A10 and A22 in the code. It added A24: a Git-restore backup can't
-be put back with `:DirectTrash restore`. A11–A15 and A23 are unchanged.
+**Last checked:** `origin/master` at `51b6d95` (11 November 2026). That review
+added A24: a Git-restore backup can't be put back with `:DirectTrash restore`.
+A7–A10 and A22 are complete; A23 is addressed in this PR. A11–A15 and A24
+remain proposed.
 
 ## Conventions
 
@@ -76,7 +76,7 @@ Checked by reading the code at `d72b7ea`:
 | A20 | P3 | Complete | Don't close other windows when a listing is removed |
 | A21 | P3 | Complete | Link paste steps to the entries they created when dropping history |
 | A22 | P4 | Complete | Move unreleased trash changes out of the 0.2.1 changelog section |
-| A23 | P3 | Proposed | Make trash completion cheap, and date recovered entries sensibly |
+| A23 | P3 | Complete | Make trash completion cheap, and date recovered entries sensibly |
 | A24 | P3 | Proposed | Let a Git-restore backup be put back in one step |
 
 ## Safety
@@ -678,6 +678,13 @@ released section. After the move, `git show v0.2.1:CHANGELOG.md` and the
 
 ### A23 — Trash completion is expensive, and recovered entries get the wrong date (P3)
 
+**Status: COMPLETE.** Restore-ID completion now lists trash-directory names
+without measuring entries, taking the history lock or writing metadata.
+Recovered timestamps use the trash entry's `ctime`, falling back to `mtime`,
+and are marked as estimates in metadata and the view. Tests verify completion
+does not call the full entry scan or write metadata, and an old `mtime` is used
+and displayed as estimated when `ctime` is unavailable.
+
 **Problem.**
 
 - `:DirectTrash restore <Tab>` calls `trash.complete`, which calls
@@ -805,7 +812,6 @@ A1–A4 and A16 were released in `v0.2.0`; A5–A6 and A17–A21 were released i
 
 A7–A10 are complete but not released.
 
-1. A23, which follows on from A8 and A9.
-2. A24, which finishes A10.
-3. A11–A15, in any order. A13's formatting-only commit is easiest
+1. A24, which finishes A10.
+2. A11–A15, in any order. A13's formatting-only commit is easiest
    when nothing else is changing `lua/`.
