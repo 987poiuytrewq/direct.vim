@@ -10,9 +10,9 @@ been reproduced in a running Neovim. Each task's first step is to write a
 failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
-**Last checked:** `origin/master` at `bd337c3` (12 November 2026). That check
-read #120 (putting Git-restore backups back from the trash) and confirmed A24
-in the code. It found no new tasks. A11–A15 are unchanged.
+**Last checked:** `origin/master` at `a082045` (12 November 2026). That hourly
+review read #120, confirmed A24, and found no new task IDs. A11–A15 remain
+proposed.
 
 ## Conventions
 
@@ -717,7 +717,7 @@ two days old gets a deletion time about two days ago, marked as estimated.
 
 ### A24 — A Git-restore backup can't be put back in one step (P3)
 
-**Status: COMPLETE (safe put-back fallback).** Git-restore backups are marked
+**Status: COMPLETE in #120 (safe put-back fallback).** Git-restore backups are marked
 in their metadata. In the trash view, `r` / `<CR>` on one asks before moving
 the current occupant into trash and restoring the backup. The two filesystem
 actions are recorded as one undoable batch, so undo returns to the post-Git-
