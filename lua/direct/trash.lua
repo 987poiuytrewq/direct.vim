@@ -67,6 +67,7 @@ local function decode_metadata(path)
     or type(value.deleted_at) ~= 'string'
     or type(value.deleted_at_epoch) ~= 'number'
     or (value.deleted_at_estimated ~= nil and type(value.deleted_at_estimated) ~= 'boolean')
+    or (value.purpose ~= nil and value.purpose ~= 'git-restore-backup')
     or type(value.reserved) ~= 'boolean'
     or (value.kind ~= 'file' and value.kind ~= 'directory'
       and value.kind ~= 'link' and value.kind ~= 'unknown') then
@@ -105,6 +106,7 @@ function M.entries(options)
             deleted_at = metadata and metadata.deleted_at or nil,
             deleted_at_epoch = metadata and metadata.deleted_at_epoch or nil,
             deleted_at_estimated = metadata and metadata.deleted_at_estimated == true or false,
+            purpose = metadata and metadata.purpose or nil,
             kind = metadata and metadata.kind or stat.type,
             reserved = reserved,
             metadata_error = metadata_err,
@@ -229,7 +231,8 @@ function M.show()
         .. (entry.deleted_at_estimated and ' (estimated)' or '')),
       cell(format_size(entry.size)),
       cell(entry.original or ('(unknown: ' .. tostring(entry.metadata_error) .. ')')),
-      entry.reserved and 'reserved' or 'deleted',
+      entry.purpose == 'git-restore-backup' and 'Git backup'
+        or entry.reserved and 'reserved' or 'deleted',
     }
     rows[#rows + 1] = row
     for index, value in ipairs(row) do
@@ -274,10 +277,18 @@ function M.show()
       destination = vim.fn.input('Restore to path: ')
       if destination == '' then return end
     end
-    local prompt = string.format('Restore trash entry %s to %s?', id, destination)
-    if vim.fn.confirm(prompt, '&Restore\n&Cancel', 2) ~= 1 then return end
-    local restored = require('direct').trash_restore(id, destination, true)
+    local restored, restore_err
+    if entry.purpose == 'git-restore-backup' then
+      restored, restore_err = M.put_back_git_backup(id)
+    else
+      local prompt = string.format('Restore trash entry %s to %s?', id, destination)
+      if vim.fn.confirm(prompt, '&Restore\n&Cancel', 2) ~= 1 then return end
+      restored, restore_err = require('direct').trash_restore(id, destination, true)
+    end
     if restored then M.show() end
+    if not restored and restore_err then
+      ui.notify('direct: ' .. tostring(restore_err), vim.log.levels.ERROR)
+    end
   end
   vim.keymap.set('n', 'r', restore_under_cursor, {
     buffer = bufnr, silent = true, desc = 'direct: restore this trash entry',
@@ -333,6 +344,48 @@ local function lookup(id)
   return path
 end
 
+function M.put_back_git_backup(id)
+  local path, lookup_err = lookup(id)
+  if not path then return nil, lookup_err end
+  local metadata, metadata_err = decode_metadata(path)
+  if not metadata then return nil, metadata_err or 'backup metadata is unavailable' end
+  if metadata.reserved or metadata.purpose ~= 'git-restore-backup' then
+    return nil, 'trash entry is not a Git-restore backup'
+  end
+  local destination = metadata.original
+  local stat = lstat(destination)
+  local actions
+  if stat then
+    local prompt = string.format(
+      'Put back Git-restore backup %s and move the current file to trash?', id)
+    if vim.fn.confirm(prompt, '&Put back\n&Cancel', 2) ~= 1 then
+      return nil, 'backup put-back cancelled; both files were preserved'
+    end
+    actions = {
+      action.Remove(destination),
+      action.Restore(path, destination),
+    }
+  else
+    local restore_action = action.Restore(path, destination)
+    local restored, restore_err = history.apply(restore_action, function()
+      return restore_action['do']()
+    end)
+    if restored then
+      ui.notify('direct: Git-restore backup restored at ' .. destination, vim.log.levels.INFO)
+    end
+    return restored, restore_err
+  end
+  local batch = action.Batch(actions)
+  local restored, restore_err = history.apply(batch, function()
+    return action.execute(batch)
+  end)
+  if restored then
+    ui.notify('direct: Git-restore backup put back at ' .. destination
+      .. '; the displaced file is in trash and this step can be undone', vim.log.levels.INFO)
+  end
+  return restored, restore_err
+end
+
 local function referenced_message(path)
   return 'trash entry is still referenced by undo/redo history: ' .. path
     .. '; use :DirectTrash! restore to force it'
@@ -344,6 +397,12 @@ function M.restore(id, destination, force)
   local metadata = decode_metadata(path)
   if metadata and metadata.reserved then
     return nil, 'trash entry is a history reservation, not a deleted item'
+  end
+  if metadata and metadata.purpose == 'git-restore-backup'
+    and (destination == nil or destination == ''
+      or (type(destination) == 'string'
+        and paths.canonical(paths.root(destination)) == metadata.original)) then
+    return M.put_back_git_backup(id)
   end
   destination = destination or (metadata and metadata.original)
   if type(destination) ~= 'string' or destination == '' then

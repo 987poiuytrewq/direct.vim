@@ -20,9 +20,9 @@ function M.trash_metadata_path(trash_path)
   return trash_path .. TRASH_METADATA_SUFFIX
 end
 
-local function trash_metadata(original_path, reserved)
+local function trash_metadata(original_path, reserved, purpose)
   local stat = lstat(original_path)
-  return {
+  local value = {
     format = 'direct-trash',
     version = 1,
     original = M.paths.canonical(M.paths.root(original_path)),
@@ -32,13 +32,15 @@ local function trash_metadata(original_path, reserved)
     kind = stat and stat.type or 'unknown',
     reserved = reserved == true,
   }
+  if purpose ~= nil then value.purpose = purpose end
+  return value
 end
 
-function M.write_trash_metadata(trash_path, original_path)
+function M.write_trash_metadata(trash_path, original_path, purpose)
   local metadata_path = M.trash_metadata_path(trash_path)
   local parent, parent_err = M.fs.mkdirp(M.fs.dirname(metadata_path))
   if not parent then return nil, parent_err end
-  local bytes = vim.json.encode(trash_metadata(original_path, false)) .. '\n'
+  local bytes = vim.json.encode(trash_metadata(original_path, false, purpose)) .. '\n'
   local existing, read_err, exists = M.log.read_raw(metadata_path)
   if read_err then return nil, read_err end
   if exists then

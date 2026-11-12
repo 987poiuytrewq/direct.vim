@@ -1,6 +1,6 @@
 # Spec: direct.vim improvements, second review
 
-**Status:** A1–A10, A16–A22 and A23 are complete; A11–A15 and A24 remain proposed.
+**Status:** A1–A10, A16–A24 are complete; A11–A15 remain proposed.
 This replaces the first gap review, whose tasks (S1–S6, R1–R3, F1–F6, M1–M6)
 have all landed on `master`.
 
@@ -10,9 +10,9 @@ been reproduced in a running Neovim. Each task's first step is to write a
 failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
-**Last checked:** `origin/master` at `d084963` (12 November 2026). That hourly
-review read #118, confirmed A23, and found no new task IDs. A24 remains next;
-A11–A15 and A24 are proposed.
+**Last checked:** `origin/master` at `749b9df` (12 November 2026). That check
+read #119 (A23 completion status), found no new task IDs, and confirmed A23.
+A24 is addressed in this PR; A11–A15 remain proposed.
 
 ## Conventions
 
@@ -76,7 +76,7 @@ Checked by reading the code at `d72b7ea`:
 | A21 | P3 | Complete | Link paste steps to the entries they created when dropping history |
 | A22 | P4 | Complete | Move unreleased trash changes out of the 0.2.1 changelog section |
 | A23 | P3 | Complete | Make trash completion cheap, and date recovered entries sensibly |
-| A24 | P3 | Proposed | Let a Git-restore backup be put back in one step |
+| A24 | P3 | Complete | Let a Git-restore backup be put back safely from the trash view |
 
 ## Safety
 
@@ -717,6 +717,14 @@ two days old gets a deletion time about two days ago, marked as estimated.
 
 ### A24 — A Git-restore backup can't be put back in one step (P3)
 
+**Status: COMPLETE (safe put-back fallback).** Git-restore backups are marked
+in their metadata. In the trash view, `r` / `<CR>` on one asks before moving
+the current occupant into trash and restoring the backup. The two filesystem
+actions are recorded as one undoable batch, so undo returns to the post-Git-
+restore state without losing either version. This implements the task's
+explicit fallback; `:DirectGitRestore` itself is still not reversed by `u`.
+Tests cover cancellation, preserving the displaced version, put-back, and undo.
+
 **Problem.** #116 copies changed files into the trash before
 `:DirectGitRestore`, and the message says to restore them manually. But
 `trash.restore` (`lua/direct/trash.lua`) refuses when the destination exists,
@@ -817,6 +825,5 @@ A1–A4 and A16 were released in `v0.2.0`; A5–A6 and A17–A21 were released i
 
 A7–A10 and A23 are complete but not released.
 
-1. A24, which finishes A10.
-2. A11–A15, in any order. A13's formatting-only commit is easiest
+1. A11–A15, in any order. A13's formatting-only commit is easiest
    when nothing else is changing `lua/`.

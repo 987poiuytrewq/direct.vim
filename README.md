@@ -372,8 +372,10 @@ restore them.
 - `<leader>gr` asks before discarding tracked worktree changes under the entry.
   The prompt names the path and counts changed files. It leaves untracked and
   staged-only changes alone. Before restoring, it copies existing changed
-  entries to `:DirectTrash` and reports their IDs and original paths for manual
-  recovery. This backup is not an undo-history step.
+  entries to `:DirectTrash` and reports their IDs and original paths. In the
+  trash view, `r` or `<CR>` on a Git-restore backup asks before moving the current
+  file into trash and putting the backup back. That put-back is one undoable
+  history step; the Git restore itself is not.
 - `gi` toggles ignore filtering. Filtering uses Git itself, so nested
   `.gitignore` files, `.git/info/exclude` and your global excludes file all
   apply. Tracked files are never hidden. Ignore queries use `git.timeout_ms`;

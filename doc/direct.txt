@@ -495,8 +495,10 @@ discarding tracked worktree changes, naming the selected path and number of
 changed files it covers. It leaves staged-only and untracked files alone, then
 copies existing changed entries to `:DirectTrash` before using
 `git restore --worktree` (falling back to `git checkout` on older Git). The
-notification names the backup IDs and original paths. This is a manual recovery
-copy, not a filesystem undo step. The status display refreshes when the command
+notification names the backup IDs and original paths. In the trash view, `r`
+or <CR> on a marked Git-restore backup asks before moving the current file into
+trash and putting the backup back. The put-back is one undoable history step;
+the Git restore itself is not. The status display refreshes when the command
 finishes.
 
 Ignore filtering ~
@@ -1041,8 +1043,10 @@ Running commands ~
     Ask before restoring the tracked worktree changes under the entry. A
     directory row covers its changed tracked descendants. Staged-only and
     untracked files are left alone. Existing changed entries are copied to the
-    trash first; the notification gives the backup IDs and original paths for
-    manual recovery. The backup is not an undo-history step.
+    trash first; the notification gives the backup IDs and original paths. In
+    the trash view, `r` or <CR> on a Git-restore backup asks before moving the
+    current file into trash and putting the backup back. The put-back is
+    undoable; the Git restore itself is not.
 
 ==============================================================================
 14. Mappings                                             *direct.vim-mappings*

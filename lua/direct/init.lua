@@ -70,7 +70,7 @@ local function worktree_backups(changes)
         path = backup_path,
         original = path,
       }
-      local metadata, metadata_err = action.write_trash_metadata(backup_path, path)
+      local metadata, metadata_err = action.write_trash_metadata(backup_path, path, 'git-restore-backup')
       if not metadata then
         return nil, 'backup exists at ' .. backup_path .. ' but metadata failed: ' .. tostring(metadata_err), backups
       end
@@ -581,7 +581,8 @@ local protected_actions = {
 }
 
 local pack = function(...) return { n = select('#', ...), ... } end
-local unpack_values = table.unpack or unpack
+-- Neovim embeds LuaJIT, where `unpack` is the Lua 5.1 global.
+local unpack_values = unpack
 for name, description in pairs(protected_actions) do
   local implementation = M[name]
   M[name] = function(...)
