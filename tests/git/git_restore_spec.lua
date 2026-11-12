@@ -180,4 +180,82 @@ H.describe('Git worktree restore confirmation', function()
     H.assert_eq(vim.fn.readfile(root .. '/staged.txt'), { 'staged version' },
       'staged content is not discarded')
   end)
+
+  H.it('puts a Git-restore backup back from the trash view without overwriting', function()
+    clean_buffers()
+    require('direct.config').setup({ map_default_keys = true })
+    local sb = H.sandbox()
+    local root = H.mkdir(sb.root, 'repo')
+    local source = H.mkfile(root, 'file.txt', { 'committed version' })
+    init_repo(root)
+    commit_all(root)
+    H.mkfile(root, 'file.txt', { 'worktree changes' })
+    local listing = require('direct').list(root)
+    vim.api.nvim_win_set_cursor(0, { row_of('file.txt'), 0 })
+    local prompts, confirmations, original_confirm = {}, 0, vim.fn.confirm
+    vim.fn.confirm = function(message)
+      prompts[#prompts + 1] = tostring(message)
+      confirmations = confirmations + 1
+      return confirmations == 2 and 2 or 1
+    end
+
+    vim.cmd('DirectGitRestore')
+    local git_restored = vim.wait(5000, function()
+      local contents = vim.fn.readfile(source)
+      return contents[1] == 'committed version'
+    end)
+    local backups = trash.entries()
+    local backup = backups[1]
+    H.assert_not_nil(backup, 'Git restore made a backup entry')
+    H.assert_eq(backup.purpose, 'git-restore-backup',
+      'the backup is identified for the trash view')
+    H.assert_true(git_restored, 'Git restore resets the file before it is put back')
+
+    local view = trash.show()
+    H.assert_true(table.concat(H.buf_lines(view), '\n'):find('Git backup', 1, true) ~= nil,
+      'the trash view labels Git-restore backups')
+    vim.api.nvim_win_set_cursor(0, { 3, 0 })
+    H.capture_messages()
+    vim.api.nvim_feedkeys('r', 'x', false)
+    H.assert_eq(vim.fn.readfile(source), { 'committed version' },
+      'cancelling put-back leaves the current file untouched')
+    H.assert_eq(#trash.entries(), 1, 'cancelling preserves the Git-restore backup')
+
+    vim.api.nvim_feedkeys('r', 'x', false)
+    local put_back = vim.wait(5000, function()
+      local contents = vim.fn.readfile(source)
+      return contents[1] == 'worktree changes'
+    end)
+    local after_put_back = trash.entries()
+    local committed_in_trash = false
+    for _, entry in ipairs(after_put_back) do
+      if entry.original == source and vim.fn.readfile(entry.path)[1] == 'committed version' then
+        committed_in_trash = true
+      end
+    end
+
+    vim.fn.confirm = original_confirm
+    H.assert_true(put_back, 'the trash-view mapping restores the selected worktree backup: '
+      .. H.messages())
+    H.assert_true(committed_in_trash,
+      'the preexisting committed file was moved into trash before the backup was restored')
+    H.assert_true(prompts[2]:find('move the current file to trash', 1, true) ~= nil,
+      'put-back confirmation explains that the current file will be preserved')
+    H.assert_eq(confirmations, 3, 'Git restore prompts once and put-back prompts for cancel and accept')
+    H.assert_not_nil(view, 'trash view opened for the backup')
+
+    require('direct').list(root)
+    vim.cmd('DirectUndo')
+    H.wait_for_direct()
+    H.assert_eq(vim.fn.readfile(source), { 'committed version' },
+      'undo reverses the put-back without losing either version')
+    local after_undo = trash.entries()
+    local worktree_in_trash = false
+    for _, entry in ipairs(after_undo) do
+      if entry.original == source and vim.fn.readfile(entry.path)[1] == 'worktree changes' then
+        worktree_in_trash = true
+      end
+    end
+    H.assert_true(worktree_in_trash, 'the worktree version is retained in trash after undo')
+  end)
 end)

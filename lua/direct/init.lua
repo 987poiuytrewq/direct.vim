@@ -70,7 +70,7 @@ local function worktree_backups(changes)
         path = backup_path,
         original = path,
       }
-      local metadata, metadata_err = action.write_trash_metadata(backup_path, path)
+      local metadata, metadata_err = action.write_trash_metadata(backup_path, path, 'git-restore-backup')
       if not metadata then
         return nil, 'backup exists at ' .. backup_path .. ' but metadata failed: ' .. tostring(metadata_err), backups
       end
