@@ -1,6 +1,6 @@
 # Spec: direct.vim improvements, second review
 
-**Status:** A1–A24 are complete; no proposed tasks remain.
+**Status:** A1–A24 are complete; A25 is proposed.
 This replaces the first gap review, whose tasks (S1–S6, R1–R3, F1–F6, M1–M6)
 have all landed on `master`.
 
@@ -10,9 +10,9 @@ been reproduced in a running Neovim. Each task's first step is to write a
 failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
-**Last checked:** `origin/master` at `b35cc6b` (12 November 2026). The hourly
-review read #131 (removal of the positional sync classifier) in the code and
-confirmed A15. It found no new tasks. All tasks in this review are complete.
+**Last checked:** `origin/master` at `e4f5ff4` (12 November 2026). That check
+read #95 (folder-chain collapsing on by default, with a `gC` toggle). The code
+is sound, but the README and changelog weren't updated, so it added A25.
 
 ## Conventions
 
@@ -77,6 +77,7 @@ Checked by reading the code at `d72b7ea`:
 | A22 | P4 | Complete | Move unreleased trash changes out of the 0.2.1 changelog section |
 | A23 | P3 | Complete | Make trash completion cheap, and date recovered entries sensibly |
 | A24 | P3 | Complete | Let a Git-restore backup be put back safely from the trash view |
+| A25 | P4 | Proposed | Document collapsing being on by default, and the `gC` toggle |
 
 ## Safety
 
@@ -789,6 +790,36 @@ and the restored version is in the trash.
 
 ## Project maturity
 
+### A25 — Collapsing is on by default, but the README and changelog don't say so (P4)
+
+**Problem.** #95 changed `collapse_single_entry_directories` to default to
+`true` (`lua/direct/config.lua`), so every listing now shows single-child
+folder chains as one row such as `src/main/java/`. It also added
+`:DirectToggleDirectoryCollapse`, mapped to `gC`, which switches it for the
+current listing. `doc/direct.txt` describes all of this, but:
+
+- `CHANGELOG.md` has no entry for it. Existing users upgrading will see their
+  listings change shape with nothing in the release notes.
+- `README.md` doesn't mention the option in its "These are the defaults"
+  block, and `gC` isn't in its key table.
+
+The code itself looks right: the toggle refuses with unsaved edits, keeps the
+setting per listing (`view_collapse_single_entry_directories` in
+`lua/direct/buffer/list.lua`), and `render_chain` in
+`lua/direct/buffer/collapse.lua` now stops at a folder it has already
+visited, so a symlink loop can't make it recurse forever.
+
+**Change.**
+
+- Add an Unreleased changelog entry under "Changed" for the new default, and
+  under "Added" for `:DirectToggleDirectoryCollapse` and `gC`, saying how to
+  turn collapsing off (`collapse_single_entry_directories = false`).
+- Add the option to the README's defaults block and `gC` to its key table.
+
+**Tests.** None needed beyond the existing ones; check the README block
+against `defaults` in `lua/direct/config.lua`.
+
+
 ### A4 — The tagged release lags the README (P2)
 
 **Status: COMPLETE.** Prepared `v0.2.0` release notes covering 0.11.7 support,
@@ -902,4 +933,6 @@ filesystem or history changes.
 A1–A4 and A16 were released in `v0.2.0`; A5–A6 and A17–A21 were released in
 `v0.2.1`.
 
-A7–A15 and A22–A24 are complete but not released. No proposed tasks remain.
+A7–A15 and A22–A24 are complete but not released.
+
+1. A25, before the next release, so its notes mention the new default.
