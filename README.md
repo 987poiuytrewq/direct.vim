@@ -187,10 +187,24 @@ Mappings are buffer-local to direct listings, except the global `-`.
 | `]c` `[c`        | Next or previous changed entry                      |
 | `ga` `<leader>gu` `<leader>gr` | Stage, unstage, or confirm restore of the entry |
 
+These defaults are buffer-local, but inside a Direct listing they replace any
+existing mappings for the same keys. In particular, `gd` is commonly used for
+LSP go-to-definition, `<leader>gr` for references, and `<leader>gu` for a
+gitsigns reset. Move only the conflicting actions with `mappings`:
+
+```lua
+require('direct').setup({ mappings = {
+  git_diff = '<leader>gD',
+  git_restore = '<leader>gR',
+  git_unstage = '<leader>gU',
+} })
+```
+
+Set `map_default_keys = false` to disable all defaults while keeping explicit
+`mappings` and `<Plug>` mappings active.
+
 With mouse support on (`:set mouse=a`), double-click an entry to open it, and
-click a folder icon to expand or collapse that folder. Set `map_default_keys =
-false` to disable default key bindings; explicit entries in `mappings` remain
-active.
+click a folder icon to expand or collapse that folder.
 
 ## Configuration
 

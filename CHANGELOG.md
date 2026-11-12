@@ -7,6 +7,9 @@ Notable changes to direct.vim are documented here. Versions follow
 
 ### Changed
 
+- Document that the default `gd`, `<leader>gr`, and `<leader>gu` mappings can
+  shadow LSP or Git plugin keys inside Direct listings, with per-action examples
+  for remapping them.
 - Mark `:DirectGitRestore` backups in the trash view and offer a confirmed
   put-back that preserves the current file in trash as an undoable step.
 - Make trash restore completion list IDs without sizing entries or recovering

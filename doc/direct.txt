@@ -689,8 +689,9 @@ mappings                table (default: `{}`)
 <
     Action names include `open`, `open_horizontal`, `open_vertical`, `open_tab`,
     `undo`, `redo`, `yank`, `paste`, `toggle_hidden`, `toggle_gitignore`,
-    `git_add`, `git_diff`, `next_change`, `expand`, `collapse`, `toggle`, and
-    the recursive folder actions. Each action has a `<Plug>(direct-...)` mapping.
+    `git_add`, `git_unstage`, `git_restore`, `git_diff`, `next_change`, `expand`,
+    `collapse`, `toggle`, and the recursive folder actions. Each action has a
+    `<Plug>(direct-...)` mapping.
     `map_default_keys = false` suppresses defaults but not explicit overrides
     or `<Plug>` mappings.
 
@@ -1095,6 +1096,20 @@ In a listing (buffer-local):
     n       <leader>gr      |:DirectGitRestore| (confirm worktree restore)
 
 In a listing, the buffer-local `-` takes priority over the global one.
+
+These defaults replace existing mappings for the same keys while a Direct
+listing is active. `gd` is commonly used for LSP go-to-definition,
+`<leader>gr` for references, and `<leader>gu` for a gitsigns reset. Move only
+the conflicting actions with `mappings`, for example:
+>
+    require('direct').setup({ mappings = {
+      git_diff = '<leader>gD',
+      git_restore = '<leader>gR',
+      git_unstage = '<leader>gU',
+    } })
+<
+Set `map_default_keys = false` to disable all physical defaults while keeping
+explicit `mappings` and `<Plug>` mappings active.
 
 Use `mappings` to override one action, or map a `<Plug>` entry point yourself:
 >lua
