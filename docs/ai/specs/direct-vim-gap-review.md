@@ -1,6 +1,6 @@
 # Spec: direct.vim improvements, second review
 
-**Status:** A1–A11, A16–A24 are complete; A12–A15 remain proposed.
+**Status:** A1–A12, A16–A24 are complete; A13–A15 remain proposed.
 This replaces the first gap review, whose tasks (S1–S6, R1–R3, F1–F6, M1–M6)
 have all landed on `master`.
 
@@ -12,7 +12,8 @@ reproduced and drop the task.
 
 **Last checked:** `origin/master` at `72784b4` (12 November 2026). That check
 read #122 (sync cancellation and operation lifecycle events) and found no new
-task IDs. A11 is complete; A12–A15 remain proposed.
+task IDs. A11 is complete in #122; A12 is addressed in this PR. A13–A15 remain
+proposed.
 
 ## Conventions
 
@@ -64,7 +65,7 @@ Checked by reading the code at `d72b7ea`:
 | A9 | P3 | Complete | Make `:DirectTrash` easier to use |
 | A10 | P3 | Complete | Preserve worktree contents before Git restore |
 | A11 | P3 | Complete | Let `DirectSyncPre` cancel a save, and add the missing events |
-| A12 | P3 | Proposed | Review default keys that shadow common user mappings |
+| A12 | P3 | Complete | Document default keys that shadow common user mappings |
 | A13 | P4 | Proposed | Widen lint, formatting and type-check coverage |
 | A14 | P4 | Proposed | Fix stale docs and remove stray files |
 | A15 | P4 | Proposed | Retire the positional root classifier |
@@ -465,6 +466,12 @@ the listing still modified. Each new event fires once with the documented
 data.
 
 ### A12 — Some default keys shadow common user mappings (P3)
+
+**Status: COMPLETE.** Kept the key defaults and documented that `gd`,
+`<leader>gr`, and `<leader>gu` override existing mappings inside Direct
+listings. Added a per-action `mappings` example to move them and clarified that
+`map_default_keys = false` disables defaults while retaining explicit and
+`<Plug>` mappings. No runtime behavior changed.
 
 **Problem.** The buffer-local defaults `<leader>gr`, `<leader>gu` and `gd`
 (`BUFFER_MAPS` in `lua/direct/config.lua`) override mappings many users
