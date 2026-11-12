@@ -49,9 +49,7 @@ return function(M)
     for index = 1, staging_count do
       local step = steps[index]
       local ok, err = M.fs.rename(step.src, step.dst)
-      if not ok then
-        return nil, err, temps, overrides, identities
-      end
+      if not ok then return nil, err, temps, overrides, identities end
       overrides[step.src] = step.dst
       identities[step.src] = step.identity
       temps[#temps + 1] = step.dst
@@ -64,9 +62,7 @@ return function(M)
   -- a group, so restart recovery never has to guess staging names.
   function M.plan_move_steps(actions)
     actions = actions or {}
-    local move_key = function(path)
-      return type(path) == 'string' and M.paths.strip_trailing_separator(path) or path
-    end
+    local move_key = function(path) return type(path) == 'string' and M.paths.strip_trailing_separator(path) or path end
     local destinations, destinations_by_inode = {}, {}
     for _, act in ipairs(actions) do
       if act.name == 'mv' and act.dst ~= nil then
@@ -102,8 +98,7 @@ return function(M)
     local overrides, staged_identities, reserved = {}, {}, {}
     local stages = {}
     for _, act in ipairs(actions) do
-      if act.name == 'mv' and act.src ~= nil and stage_sources[move_key(act.src)]
-        and overrides[act.src] == nil then
+      if act.name == 'mv' and act.src ~= nil and stage_sources[move_key(act.src)] and overrides[act.src] == nil then
         local parent = parent_dir(act.src)
         local tmp = M.first_free_temp(parent)
         while reserved[tmp] do
@@ -118,27 +113,29 @@ return function(M)
         overrides[act.src] = tmp
         staged_identities[act.src] = identity
         stages[#stages + 1] = {
-          src = act.src, dst = tmp,
+          src = act.src,
+          dst = tmp,
           identity = { path = M.paths.canonical(act.src), inode = identity.inode },
         }
       end
     end
 
     local steps = {}
-    for _, stage in ipairs(stages) do steps[#steps + 1] = stage end
+    for _, stage in ipairs(stages) do
+      steps[#steps + 1] = stage
+    end
     for _, act in ipairs(actions) do
-      if act.name ~= 'mv' or type(act.src) ~= 'string'
-        or type(act.dst) ~= 'string' then
+      if act.name ~= 'mv' or type(act.src) ~= 'string' or type(act.dst) ~= 'string' then
         return nil, 'grouped move plan contains a non-move action'
       end
       local src = overrides[act.src] or act.src
-      local identity = staged_identities[act.src]
-        or M.fs.entry_identity(act.src)
+      local identity = staged_identities[act.src] or M.fs.entry_identity(act.src)
       if not identity or not identity.inode then
         return nil, 'cannot identify grouped move source: ' .. tostring(act.src)
       end
       steps[#steps + 1] = {
-        src = src, dst = act.dst,
+        src = src,
+        dst = act.dst,
         identity = { path = M.paths.canonical(src), inode = identity.inode },
       }
     end
@@ -165,9 +162,7 @@ return function(M)
   -- every action index exactly once, a group of one being an independent action.
   function M.move_groups(actions)
     actions = actions or {}
-    local function move_key(path)
-      return type(path) == 'string' and M.paths.strip_trailing_separator(path) or path
-    end
+    local function move_key(path) return type(path) == 'string' and M.paths.strip_trailing_separator(path) or path end
     local parent = {}
     for i = 1, #actions do
       parent[i] = i
@@ -182,12 +177,8 @@ return function(M)
     local at_path, at_inode = {}, {}
     for i, act in ipairs(actions) do
       local paths = {}
-      if type(act.src) == 'string' then
-        paths[#paths + 1] = act.src
-      end
-      if type(act.dst) == 'string' then
-        paths[#paths + 1] = act.dst
-      end
+      if type(act.src) == 'string' then paths[#paths + 1] = act.src end
+      if type(act.dst) == 'string' then paths[#paths + 1] = act.dst end
       if act.name == 'mv' then
         for _, path in ipairs(paths) do
           path = move_key(path)
@@ -248,16 +239,14 @@ return function(M)
     local function report_temps(staging)
       for _, tmp in ipairs(staging ~= nil and staging.temps or {}) do
         if M.fs.taken(tmp) then
-          M.ui.notify('direct: a failed move left the staged entry ' .. tmp,
-            vim.log.levels.ERROR)
+          M.ui.notify('direct: a failed move left the staged entry ' .. tmp, vim.log.levels.ERROR)
         end
       end
     end
     self._execute = function()
       local members = self.actions or {}
       self._completed_actions = {}
-      local staging, stage_err, stage_temps, stage_overrides, stage_identities =
-        M.stage_moves(members)
+      local staging, stage_err, stage_temps, stage_overrides, stage_identities = M.stage_moves(members)
       if staging == nil and stage_err ~= nil then
         -- Restore only to an unoccupied original path with atomic no-replace
         -- rename. If that fails, leave and report the temp entry; retry only after
@@ -274,25 +263,29 @@ return function(M)
               reported[tmp] = true
               local occupied = M.fs.taken(act.src)
               local cause = occupied and 'destination is occupied' or tostring(rerr)
-              M.ui.notify('direct: could not restore staged entry ' .. tmp
-                .. ' to ' .. tostring(act.src) .. ' (' .. cause
-                .. '); temp preserved; manual recovery required before retry',
-                vim.log.levels.ERROR)
+              M.ui.notify(
+                'direct: could not restore staged entry '
+                  .. tmp
+                  .. ' to '
+                  .. tostring(act.src)
+                  .. ' ('
+                  .. cause
+                  .. '); temp preserved; manual recovery required before retry',
+                vim.log.levels.ERROR
+              )
             end
           end
         end
         for _, tmp in ipairs(stage_temps or {}) do
           if M.fs.taken(tmp) and not reported[tmp] then
-            M.ui.notify('direct: a failed rename left the staged entry ' .. tmp,
-              vim.log.levels.ERROR)
+            M.ui.notify('direct: a failed rename left the staged entry ' .. tmp, vim.log.levels.ERROR)
           end
         end
         return nil, 'could not stage renames: ' .. tostring(stage_err)
       end
       for _, act in ipairs(members) do
         local exec = act
-        if staging ~= nil and act.name == 'mv'
-          and staging.overrides[act.src] ~= nil then
+        if staging ~= nil and act.name == 'mv' and staging.overrides[act.src] ~= nil then
           exec = M.Move(staging.overrides[act.src], act.dst)
         end
         local ok, res, err = pcall(M.execute, exec)

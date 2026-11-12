@@ -8,8 +8,8 @@ local function get_ffi()
   if not loaded then return nil end
   ffi = module
   local source = debug.getinfo(1, 'S').source
-  local declared, declaration_err = require('direct.platform.ffi_declarations')
-    .load(ffi, source, 'unix.h', 'direct_unix_ffi_declarations')
+  local declared, declaration_err =
+    require('direct.platform.ffi_declarations').load(ffi, source, 'unix.h', 'direct_unix_ffi_declarations')
   if not declared then
     ffi = nil
     return nil, declaration_err
@@ -17,17 +17,11 @@ local function get_ffi()
   return ffi
 end
 
-function M.canonical_path(path)
-  return vim.fs.normalize(tostring(path))
-end
+function M.canonical_path(path) return vim.fs.normalize(tostring(path)) end
 
-function M.identity_path(path)
-  return M.canonical_path(path)
-end
+function M.identity_path(path) return M.canonical_path(path) end
 
-function M.validation_path(path)
-  return path
-end
+function M.validation_path(path) return path end
 
 function M.strip_trailing_separator(path)
   if type(path) ~= 'string' then return path end
@@ -40,30 +34,20 @@ function M.path_component(component, display_separator)
   return component
 end
 
-function M.home_directory(home)
-  return home
-end
+function M.home_directory(home) return home end
 
 function M.component_path_reason(component, path_style)
-  if path_style == 'win32' then
-    return require('direct.platform.windows_path').component_reason(component)
-  end
+  if path_style == 'win32' then return require('direct.platform.windows_path').component_reason(component) end
   return nil
 end
 
-function M.file_identity(_path, _nofollow)
-  return nil
-end
+function M.file_identity(_path, _nofollow) return nil end
 
-function M.create_symlink(target, link, _source_link)
-  return vim.uv.fs_symlink(target, link)
-end
+function M.create_symlink(target, link, _source_link) return vim.uv.fs_symlink(target, link) end
 
 function M.rename_noreplace(src, dst, sysname)
-  local ffi_lib, ffi_err = get_ffi()
-  if not ffi_lib then
-    return nil, 'atomic no-replace rename is unavailable (LuaJIT FFI unavailable)'
-  end
+  local ffi_lib = get_ffi()
+  if not ffi_lib then return nil, 'atomic no-replace rename is unavailable (LuaJIT FFI unavailable)' end
 
   sysname = sysname or vim.uv.os_uname().sysname
   local ok, result = pcall(function()
@@ -77,9 +61,7 @@ function M.rename_noreplace(src, dst, sysname)
   if not ok then return nil, tostring(result) end
   if result == 0 then return true end
   local code = ffi_lib.errno()
-  local err_ok, err = pcall(function()
-    return ffi_lib.string(ffi_lib.C.strerror(code))
-  end)
+  local err_ok, err = pcall(function() return ffi_lib.string(ffi_lib.C.strerror(code)) end)
   local message = err_ok and err or ('errno ' .. tostring(code))
   if code == 17 then
     return nil, 'destination exists: ' .. dst, 'EEXIST'
@@ -89,9 +71,7 @@ function M.rename_noreplace(src, dst, sysname)
   return nil, tostring(message), code
 end
 
-function M.shellescape_path(path, _shell)
-  return vim.fn.shellescape(path)
-end
+function M.shellescape_path(path, _shell) return vim.fn.shellescape(path) end
 
 function M.command_argv(shell, shellcmdflag, command)
   local argv = { shell }
@@ -121,8 +101,7 @@ function M.release_file_lock(token)
   local lib = get_ffi()
   if not lib then return nil, 'same-host history locking requires LuaJIT FFI' end
   local unlocked = lib.C.flock(token.fd, 8) == 0
-  local unlock_err = not unlocked and ('flock unlock failed (errno '
-    .. tostring(lib.errno()) .. ')') or nil
+  local unlock_err = not unlocked and ('flock unlock failed (errno ' .. tostring(lib.errno()) .. ')') or nil
   local closed, close_err = vim.uv.fs_close(token.fd)
   if not unlocked then return nil, unlock_err end
   if not closed then return nil, tostring(close_err or 'could not close history lock') end

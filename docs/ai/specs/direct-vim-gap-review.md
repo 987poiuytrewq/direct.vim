@@ -1,6 +1,6 @@
 # Spec: direct.vim improvements, second review
 
-**Status:** A1–A12, A16–A24 are complete; A13–A15 remain proposed.
+**Status:** A1–A13, A16–A24 are complete; A14–A15 remain proposed.
 This replaces the first gap review, whose tasks (S1–S6, R1–R3, F1–F6, M1–M6)
 have all landed on `master`.
 
@@ -10,9 +10,9 @@ been reproduced in a running Neovim. Each task's first step is to write a
 failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
-**Last checked:** `origin/master` at `aa39535` (12 November 2026). That hourly
-review checked #122 and #124, confirmed A11 and A12, and found no new task IDs.
-A13–A15 remain proposed.
+**Last checked:** `origin/master` at `284a93e` (12 November 2026). That review
+recorded A12's completion and found no new task IDs. A13 is addressed in this
+PR; A14–A15 remain proposed.
 
 ## Conventions
 
@@ -65,7 +65,7 @@ Checked by reading the code at `d72b7ea`:
 | A10 | P3 | Complete | Preserve worktree contents before Git restore |
 | A11 | P3 | Complete | Let `DirectSyncPre` cancel a save, and add the missing events |
 | A12 | P3 | Complete | Document default keys that shadow common user mappings |
-| A13 | P4 | Proposed | Widen lint, formatting and type-check coverage |
+| A13 | P4 | Complete | Widen lint, formatting and type-check coverage |
 | A14 | P4 | Proposed | Fix stale docs and remove stray files |
 | A15 | P4 | Proposed | Retire the positional root classifier |
 | A16 | P2 | Complete | Let a listing made during a Git timeout be saved once Git recovers |
@@ -820,6 +820,13 @@ under Unreleased.
 
 ### A13 — Lint and type checks cover only part of the code (P4)
 
+**Status: COMPLETE.** `make lint` now requires zero Luacheck warnings and runs
+StyLua across all of `lua/direct`. LuaLS checks the entire module tree for
+errors, keeps the public `init.lua` and `config.lua` checks at warning level,
+and adds warning-level checks for fully annotated modules. Removed the global
+`undefined-field` suppression and annotated the folder-record shape where
+needed. Formatting is a separate first commit in this PR.
+
 **Problem.** `make lint` lets luacheck pass with up to 48 warnings
 (`LUACHECK_MAX_WARNINGS`). StyLua and LuaLS only check `init.lua` and
 `config.lua`, and `.luarc.json` turns off `undefined-field` everywhere.
@@ -864,5 +871,5 @@ A1–A4 and A16 were released in `v0.2.0`; A5–A6 and A17–A21 were released i
 
 A7–A12, A23 and A24 are complete but not released.
 
-1. A13–A15, in any order. A13's formatting-only commit is easiest
+1. A14–A15, in any order.
    when nothing else is changing `lua/`.

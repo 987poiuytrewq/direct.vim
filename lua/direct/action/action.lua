@@ -16,9 +16,7 @@ local function lstat(path)
   return ok and stat or nil
 end
 
-function M.trash_metadata_path(trash_path)
-  return trash_path .. TRASH_METADATA_SUFFIX
-end
+function M.trash_metadata_path(trash_path) return trash_path .. TRASH_METADATA_SUFFIX end
 
 local function trash_metadata(original_path, reserved, purpose)
   local stat = lstat(original_path)
@@ -45,9 +43,14 @@ function M.write_trash_metadata(trash_path, original_path, purpose)
   if read_err then return nil, read_err end
   if exists then
     local ok, old = pcall(vim.json.decode, existing)
-    if not ok or type(old) ~= 'table' or old.format ~= 'direct-trash'
-      or old.version ~= 1 or old.reserved ~= true
-      or old.original ~= M.paths.canonical(M.paths.root(original_path)) then
+    if
+      not ok
+      or type(old) ~= 'table'
+      or old.format ~= 'direct-trash'
+      or old.version ~= 1
+      or old.reserved ~= true
+      or old.original ~= M.paths.canonical(M.paths.root(original_path))
+    then
       return nil, 'trash slot metadata already exists'
     end
     return M.log.write_raw_atomic(metadata_path, bytes)
@@ -60,12 +63,8 @@ function M.recover_trash_metadata(trash_path, original_path, kind, deleted_at_ep
   local original = M.paths.canonical(M.paths.root(original_path))
   local valid, valid_err = M.paths.validate_canonical_path(original)
   if not valid then return nil, 'invalid recovered trash path: ' .. tostring(valid_err) end
-  if type(deleted_at_epoch) ~= 'number' or deleted_at_epoch <= 0 then
-    deleted_at_epoch = os.time()
-  end
-  if kind ~= 'file' and kind ~= 'directory' and kind ~= 'link' and kind ~= 'unknown' then
-    kind = 'unknown'
-  end
+  if type(deleted_at_epoch) ~= 'number' or deleted_at_epoch <= 0 then deleted_at_epoch = os.time() end
+  if kind ~= 'file' and kind ~= 'directory' and kind ~= 'link' and kind ~= 'unknown' then kind = 'unknown' end
   local value = {
     format = 'direct-trash',
     version = 1,
@@ -76,8 +75,7 @@ function M.recover_trash_metadata(trash_path, original_path, kind, deleted_at_ep
     kind = kind,
     reserved = false,
   }
-  return M.log.write_raw_exclusive(M.trash_metadata_path(trash_path),
-    vim.json.encode(value) .. '\n')
+  return M.log.write_raw_exclusive(M.trash_metadata_path(trash_path), vim.json.encode(value) .. '\n')
 end
 
 function M.write_trash_reservation(trash_path, original_path)
@@ -89,9 +87,13 @@ function M.write_trash_reservation(trash_path, original_path)
   if read_err then return nil, read_err end
   if exists then
     local ok, old = pcall(vim.json.decode, existing)
-    if not ok or type(old) ~= 'table' or old.format ~= 'direct-trash'
+    if
+      not ok
+      or type(old) ~= 'table'
+      or old.format ~= 'direct-trash'
       or old.version ~= 1
-      or old.original ~= M.paths.canonical(M.paths.root(original_path)) then
+      or old.original ~= M.paths.canonical(M.paths.root(original_path))
+    then
       return nil, 'trash slot metadata is damaged'
     end
     return M.log.write_raw_atomic(metadata_path, bytes)
@@ -121,17 +123,11 @@ M.PASTE_CLASH_ATTEMPTS = 10
 -- does, so it is stripped: a directory description is 'Removed tree', never
 -- 'Removed tree/' (Paste's describe adds its own separator).
 function M.rel(path)
-  if type(path) ~= 'string' then
-    return tostring(path)
-  end
+  if type(path) ~= 'string' then return tostring(path) end
   local rel = vim.fn.fnamemodify(path, ':p:.')
-  if rel == '' then
-    return '.'
-  end
+  if rel == '' then return '.' end
   rel = M.paths.strip_trailing_separator(rel)
-  if rel == '' then
-    return M.paths.separator
-  end
+  if rel == '' then return M.paths.separator end
   return rel
 end
 
@@ -142,21 +138,15 @@ end
 -- Pure defence and parity: nothing here may raise, so every buffer API call is
 -- pcall-guarded.
 function M.close_src_buffer(src)
-  if type(src) ~= 'string' then
-    return true
-  end
+  if type(src) ~= 'string' then return true end
   local target = M.fs.realpath(src)
   local ok = pcall(function()
     for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
       local name = vim.api.nvim_buf_get_name(bufnr)
-      if name ~= '' and M.fs.realpath(name) == target then
-        pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
-      end
+      if name ~= '' and M.fs.realpath(name) == target then pcall(vim.api.nvim_buf_delete, bufnr, { force = true }) end
     end
   end)
-  if not ok then
-    return nil, 'failed to close source buffers'
-  end
+  if not ok then return nil, 'failed to close source buffers' end
   return true
 end
 
@@ -167,12 +157,9 @@ end
 function M.first_free_trash(trash_dir, src)
   local base = M.paths.digest(src)
   local dst = M.fs.join(trash_dir, base)
-  if not M.fs.taken(dst) and not M.fs.taken(M.trash_metadata_path(dst)) then
-    return dst
-  end
+  if not M.fs.taken(dst) and not M.fs.taken(M.trash_metadata_path(dst)) then return dst end
   local n = 1
-  while M.fs.taken(dst .. '-' .. n)
-    or M.fs.taken(M.trash_metadata_path(dst .. '-' .. n)) do
+  while M.fs.taken(dst .. '-' .. n) or M.fs.taken(M.trash_metadata_path(dst .. '-' .. n)) do
     n = n + 1
   end
   return dst .. '-' .. n
@@ -182,29 +169,17 @@ end
 -- Empty fields deserialize to an empty list (Python `''.split(' ')` yields
 -- ['']); an empty name can never be a real entry, so it is dropped here.
 function M.split_names(str)
-  if type(str) ~= 'string' then
-    return {}
-  end
+  if type(str) ~= 'string' then return {} end
   return vim.split(str, ' ', { plain = true, trimempty = true })
 end
 
 -- entry_name_reason(name) -> nil when `name` is one valid basename component.
 function M.entry_name_reason(name)
-  if type(name) ~= 'string' or name == '' then
-    return 'empty'
-  end
-  if not M.paths.valid_utf8(name) then
-    return 'invalid UTF-8'
-  end
-  if name == '.' or name == '..' or name:find('/', 1, true) ~= nil then
-    return 'not a basename component'
-  end
-  if name:find('\t', 1, true) ~= nil then
-    return 'contains a tab'
-  end
-  if name:find('%c') ~= nil then
-    return 'contains a control character'
-  end
+  if type(name) ~= 'string' or name == '' then return 'empty' end
+  if not M.paths.valid_utf8(name) then return 'invalid UTF-8' end
+  if name == '.' or name == '..' or name:find('/', 1, true) ~= nil then return 'not a basename component' end
+  if name:find('\t', 1, true) ~= nil then return 'contains a tab' end
+  if name:find('%c') ~= nil then return 'contains a control character' end
   return nil
 end
 
@@ -212,21 +187,11 @@ end
 -- Tab keeps a specific diagnostic; all controls, including NUL and newlines,
 -- are rejected before a JSONL record is built.
 function M.path_reason(path)
-  if type(path) ~= 'string' then
-    return 'invalid path'
-  end
-  if path == '' then
-    return 'invalid path'
-  end
-  if not M.paths.valid_utf8(path) then
-    return 'invalid UTF-8'
-  end
-  if path:find('\t', 1, true) ~= nil then
-    return 'contains a tab'
-  end
-  if path:find('%c') ~= nil then
-    return 'contains a control character'
-  end
+  if type(path) ~= 'string' then return 'invalid path' end
+  if path == '' then return 'invalid path' end
+  if not M.paths.valid_utf8(path) then return 'invalid UTF-8' end
+  if path:find('\t', 1, true) ~= nil then return 'contains a tab' end
+  if path:find('%c') ~= nil then return 'contains a control character' end
   return nil
 end
 
@@ -237,15 +202,12 @@ local function zipped(src_names, dst_names)
   local n = math.min(#(src_names or {}), #(dst_names or {}))
   for i = 1, n do
     local ps, pd = src_names[i], dst_names[i]
-    if type(ps) == 'string' and type(pd) == 'string'
-      and ps ~= '' and pd ~= '' then
+    if type(ps) == 'string' and type(pd) == 'string' and ps ~= '' and pd ~= '' then
       pairs_list[#pairs_list + 1] = { src = ps, dst = pd }
     end
   end
   table.sort(pairs_list, function(a, b)
-    if a.src == b.src then
-      return false
-    end
+    if a.src == b.src then return false end
     return a.src < b.src
   end)
   return pairs_list
@@ -270,13 +232,13 @@ local function move_progress(src, dst)
   local function report(stage, total)
     if stage == 'copying' and not announced then
       announced = true
-      M.ui.notify('direct: copying ' .. M.rel(src) .. ' to ' .. M.rel(dst)
-        .. ' across filesystems', vim.log.levels.INFO)
-    elseif type(stage) == 'number'
-      and (stage == total or stage == 1 or stage % 25 == 0) then
+      M.ui.notify(
+        'direct: copying ' .. M.rel(src) .. ' to ' .. M.rel(dst) .. ' across filesystems',
+        vim.log.levels.INFO
+      )
+    elseif type(stage) == 'number' and (stage == total or stage == 1 or stage % 25 == 0) then
       echo_shown = true
-      M.ui.notify(string.format('direct: copying %d/%d files', stage, total),
-        vim.log.levels.INFO, { ephemeral = true })
+      M.ui.notify(string.format('direct: copying %d/%d files', stage, total), vim.log.levels.INFO, { ephemeral = true })
     end
   end
   local function clear()
@@ -291,10 +253,8 @@ function M.Move(src, dst)
     if M.fs.taken(self.dst) and not M.fs.same_entry(self.src, self.dst) then
       return nil, 'destination exists: ' .. tostring(self.dst)
     end
-    local ok, err = M.close_src_buffer(self.src)
-    if not ok then
-      return nil, err
-    end
+    local ok, close_err = M.close_src_buffer(self.src)
+    if not ok then return nil, close_err end
     return M.fs.rename(self.src, self.dst)
   end
   self._execute_async = function(callback)
@@ -303,7 +263,10 @@ function M.Move(src, dst)
       return
     end
     local ok, err = M.close_src_buffer(self.src)
-    if not ok then callback(false, nil, err); return end
+    if not ok then
+      callback(false, nil, err)
+      return
+    end
     local progress, clear_progress = move_progress(self.src, self.dst)
     M.fs.rename_async(self.src, self.dst, function(moved, result, move_err)
       clear_progress()
@@ -311,9 +274,7 @@ function M.Move(src, dst)
     end, progress)
   end
   self['do'] = function() return M.execute(self) end
-  function self.describe()
-    return 'Moved ' .. M.rel(self.src) .. ' to ' .. M.rel(self.dst)
-  end
+  function self.describe() return 'Moved ' .. M.rel(self.src) .. ' to ' .. M.rel(self.dst) end
   return self
 end
 
@@ -329,57 +290,58 @@ function M.Remove(src, dst)
     self.dst = dst
   else
     local trash = M.paths.data_dir_path('trash')
-    if trash then
-      self.dst = M.first_free_trash(trash, src)
-    end
+    if trash then self.dst = M.first_free_trash(trash, src) end
   end
   self._execute = function()
     if not self.dst then
       local trash, err = M.paths.ensure_data_dir('trash')
-      if not trash then
-        return nil, err
-      end
+      if not trash then return nil, err end
       self.dst = M.first_free_trash(trash, self.src)
     end
     local trash, err = M.paths.ensure_data_dir('trash')
     if not trash then return nil, err end
-    local ok, err = M.close_src_buffer(self.src)
-    if not ok then
-      return nil, err
-    end
-    if M.fs.taken(self.dst) then
-      return nil, 'destination exists: ' .. tostring(self.dst)
-    end
+    local ok, close_err = M.close_src_buffer(self.src)
+    if not ok then return nil, close_err end
+    if M.fs.taken(self.dst) then return nil, 'destination exists: ' .. tostring(self.dst) end
     local recorded, record_err = M.write_trash_metadata(self.dst, self.src)
-    if not recorded then
-      return nil, 'could not record trash metadata: ' .. tostring(record_err)
-    end
+    if not recorded then return nil, 'could not record trash metadata: ' .. tostring(record_err) end
     local moved, move_err = M.fs.rename(self.src, self.dst)
     if not moved then
       local cleared, clear_err = M.clear_trash_metadata(self.dst)
       if not cleared then
-        M.ui.notify('direct: could not remove unused trash metadata '
-          .. M.trash_metadata_path(self.dst) .. ': ' .. tostring(clear_err),
-          vim.log.levels.WARN)
+        M.ui.notify(
+          'direct: could not remove unused trash metadata '
+            .. M.trash_metadata_path(self.dst)
+            .. ': '
+            .. tostring(clear_err),
+          vim.log.levels.WARN
+        )
       end
       return nil, move_err
     end
     return moved
   end
   self['do'] = function() return M.execute(self) end
-  function self.describe()
-    return 'Removed ' .. M.rel(self.src)
-  end
+  function self.describe() return 'Removed ' .. M.rel(self.src) end
   self._execute_async = function(callback)
     if not self.dst then
       local trash, err = M.paths.ensure_data_dir('trash')
-      if not trash then callback(false, nil, err); return end
+      if not trash then
+        callback(false, nil, err)
+        return
+      end
       self.dst = M.first_free_trash(trash, self.src)
     end
     local trash, err = M.paths.ensure_data_dir('trash')
-    if not trash then callback(false, nil, err); return end
+    if not trash then
+      callback(false, nil, err)
+      return
+    end
     local ok, close_err = M.close_src_buffer(self.src)
-    if not ok then callback(false, nil, close_err); return end
+    if not ok then
+      callback(false, nil, close_err)
+      return
+    end
     if M.fs.taken(self.dst) then
       callback(false, nil, 'destination exists: ' .. tostring(self.dst))
       return
@@ -395,9 +357,13 @@ function M.Remove(src, dst)
       if not moved then
         local cleared, clear_err = M.clear_trash_metadata(self.dst)
         if not cleared then
-          M.ui.notify('direct: could not remove unused trash metadata '
-            .. M.trash_metadata_path(self.dst) .. ': ' .. tostring(clear_err),
-            vim.log.levels.WARN)
+          M.ui.notify(
+            'direct: could not remove unused trash metadata '
+              .. M.trash_metadata_path(self.dst)
+              .. ': '
+              .. tostring(clear_err),
+            vim.log.levels.WARN
+          )
         end
       end
       callback(moved, result, move_err)
@@ -408,12 +374,18 @@ end
 
 local function warn_cross_device_trash(src, trash)
   local source_stat, trash_stat = lstat(src), M.fs.stat(trash)
-  if source_stat and source_stat.type == 'directory' and trash_stat
-    and source_stat.dev ~= nil and trash_stat.dev ~= nil
-    and source_stat.dev ~= trash_stat.dev then
-    M.ui.notify('direct: deleting ' .. M.rel(src)
-      .. ' copies its directory tree across filesystems to trash; this may take time',
-      vim.log.levels.WARN)
+  if
+    source_stat
+    and source_stat.type == 'directory'
+    and trash_stat
+    and source_stat.dev ~= nil
+    and trash_stat.dev ~= nil
+    and source_stat.dev ~= trash_stat.dev
+  then
+    M.ui.notify(
+      'direct: deleting ' .. M.rel(src) .. ' copies its directory tree across filesystems to trash; this may take time',
+      vim.log.levels.WARN
+    )
   end
 end
 
@@ -423,58 +395,59 @@ function M.RemoveDirectory(src, dst)
     self.dst = dst
   else
     local trash = M.paths.data_dir_path('trash')
-    if trash then
-      self.dst = M.first_free_trash(trash, src)
-    end
+    if trash then self.dst = M.first_free_trash(trash, src) end
   end
   self._execute = function()
     if not self.dst then
       local trash, err = M.paths.ensure_data_dir('trash')
-      if not trash then
-        return nil, err
-      end
+      if not trash then return nil, err end
       self.dst = M.first_free_trash(trash, self.src)
     end
     local trash, err = M.paths.ensure_data_dir('trash')
     if not trash then return nil, err end
-    local ok, err = M.close_src_buffer(self.src)
-    if not ok then
-      return nil, err
-    end
+    local ok, close_err = M.close_src_buffer(self.src)
+    if not ok then return nil, close_err end
     warn_cross_device_trash(self.src, trash)
-    if M.fs.taken(self.dst) then
-      return nil, 'destination exists: ' .. tostring(self.dst)
-    end
+    if M.fs.taken(self.dst) then return nil, 'destination exists: ' .. tostring(self.dst) end
     local recorded, record_err = M.write_trash_metadata(self.dst, self.src)
-    if not recorded then
-      return nil, 'could not record trash metadata: ' .. tostring(record_err)
-    end
+    if not recorded then return nil, 'could not record trash metadata: ' .. tostring(record_err) end
     local moved, move_err = M.fs.rename(self.src, self.dst)
     if not moved then
       local cleared, clear_err = M.clear_trash_metadata(self.dst)
       if not cleared then
-        M.ui.notify('direct: could not remove unused trash metadata '
-          .. M.trash_metadata_path(self.dst) .. ': ' .. tostring(clear_err),
-          vim.log.levels.WARN)
+        M.ui.notify(
+          'direct: could not remove unused trash metadata '
+            .. M.trash_metadata_path(self.dst)
+            .. ': '
+            .. tostring(clear_err),
+          vim.log.levels.WARN
+        )
       end
       return nil, move_err
     end
     return moved
   end
   self['do'] = function() return M.execute(self) end
-  function self.describe()
-    return 'Removed ' .. M.rel(self.src)
-  end
+  function self.describe() return 'Removed ' .. M.rel(self.src) end
   self._execute_async = function(callback)
     if not self.dst then
       local trash, err = M.paths.ensure_data_dir('trash')
-      if not trash then callback(false, nil, err); return end
+      if not trash then
+        callback(false, nil, err)
+        return
+      end
       self.dst = M.first_free_trash(trash, self.src)
     end
     local trash, err = M.paths.ensure_data_dir('trash')
-    if not trash then callback(false, nil, err); return end
+    if not trash then
+      callback(false, nil, err)
+      return
+    end
     local ok, close_err = M.close_src_buffer(self.src)
-    if not ok then callback(false, nil, close_err); return end
+    if not ok then
+      callback(false, nil, close_err)
+      return
+    end
     warn_cross_device_trash(self.src, trash)
     if M.fs.taken(self.dst) then
       callback(false, nil, 'destination exists: ' .. tostring(self.dst))
@@ -491,9 +464,13 @@ function M.RemoveDirectory(src, dst)
       if not moved then
         local cleared, clear_err = M.clear_trash_metadata(self.dst)
         if not cleared then
-          M.ui.notify('direct: could not remove unused trash metadata '
-            .. M.trash_metadata_path(self.dst) .. ': ' .. tostring(clear_err),
-            vim.log.levels.WARN)
+          M.ui.notify(
+            'direct: could not remove unused trash metadata '
+              .. M.trash_metadata_path(self.dst)
+              .. ': '
+              .. tostring(clear_err),
+            vim.log.levels.WARN
+          )
         end
       end
       callback(moved, result, move_err)
@@ -506,15 +483,19 @@ function M.Restore(src, dst)
   local self = { name = 'rs', _kind = 'rs', src = src, dst = dst }
   self._execute = function()
     local ok, err = M.close_src_buffer(self.src)
-    if not ok then
-      return nil, err
-    end
+    if not ok then return nil, err end
     local res, rerr = M.fs.rename(self.src, self.dst)
     if res then
       local reserved, reserve_err = M.write_trash_reservation(self.src, self.dst)
       if not reserved then
-        M.ui.notify('direct: restored entry but could not reserve its trash slot '
-          .. self.src .. ' (' .. tostring(reserve_err) .. ')', vim.log.levels.WARN)
+        M.ui.notify(
+          'direct: restored entry but could not reserve its trash slot '
+            .. self.src
+            .. ' ('
+            .. tostring(reserve_err)
+            .. ')',
+          vim.log.levels.WARN
+        )
       end
       -- the trash slot must stay occupied so a later Remove picks a
       -- fresh `-<n>` sibling instead of reusing the exact slot. Leave an
@@ -527,15 +508,24 @@ function M.Restore(src, dst)
   end
   self._execute_async = function(callback)
     local ok, err = M.close_src_buffer(self.src)
-    if not ok then callback(false, nil, err); return end
+    if not ok then
+      callback(false, nil, err)
+      return
+    end
     local progress, clear_progress = move_progress(self.src, self.dst)
     M.fs.rename_async(self.src, self.dst, function(restored, result, restore_err)
       clear_progress()
       if restored then
         local reserved, reserve_err = M.write_trash_reservation(self.src, self.dst)
         if not reserved then
-          M.ui.notify('direct: restored entry but could not reserve its trash slot '
-            .. self.src .. ' (' .. tostring(reserve_err) .. ')', vim.log.levels.WARN)
+          M.ui.notify(
+            'direct: restored entry but could not reserve its trash slot '
+              .. self.src
+              .. ' ('
+              .. tostring(reserve_err)
+              .. ')',
+            vim.log.levels.WARN
+          )
         end
         M.fs.touch(self.src)
       end
@@ -543,9 +533,7 @@ function M.Restore(src, dst)
     end, progress)
   end
   self['do'] = function() return M.execute(self) end
-  function self.describe()
-    return 'Restored ' .. M.rel(self.dst)
-  end
+  function self.describe() return 'Restored ' .. M.rel(self.dst) end
   return self
 end
 
@@ -553,81 +541,91 @@ function M.RestoreDirectory(src, dst)
   local self = { name = 'rsdir', _kind = 'rsdir', src = src, dst = dst }
   self._execute = function()
     local ok, err = M.close_src_buffer(self.src)
-    if not ok then
-      return nil, err
-    end
+    if not ok then return nil, err end
     local res, rerr = M.fs.rename(self.src, self.dst)
     if res then
       local reserved, reserve_err = M.write_trash_reservation(self.src, self.dst)
       if not reserved then
-        M.ui.notify('direct: restored directory but could not reserve its trash slot '
-          .. self.src .. ' (' .. tostring(reserve_err) .. ')', vim.log.levels.WARN)
+        M.ui.notify(
+          'direct: restored directory but could not reserve its trash slot '
+            .. self.src
+            .. ' ('
+            .. tostring(reserve_err)
+            .. ')',
+          vim.log.levels.WARN
+        )
       end
       -- directory variant: the marker is an empty directory (the POSIX
       -- rename below replaces an empty dir just as easily as a file).
       local mok, merr = M.fs.mkdir_exclusive(self.src)
       if not mok then
-        M.ui.notify('direct: restored directory, but could not reserve its trash slot '
-          .. self.src .. ': ' .. tostring(merr), vim.log.levels.WARN)
+        M.ui.notify(
+          'direct: restored directory, but could not reserve its trash slot ' .. self.src .. ': ' .. tostring(merr),
+          vim.log.levels.WARN
+        )
       end
     end
     return res, rerr
   end
   self._execute_async = function(callback)
     local ok, err = M.close_src_buffer(self.src)
-    if not ok then callback(false, nil, err); return end
+    if not ok then
+      callback(false, nil, err)
+      return
+    end
     local progress, clear_progress = move_progress(self.src, self.dst)
     M.fs.rename_async(self.src, self.dst, function(restored, result, restore_err)
       clear_progress()
       if restored then
         local reserved, reserve_err = M.write_trash_reservation(self.src, self.dst)
         if not reserved then
-          M.ui.notify('direct: restored directory but could not reserve its trash slot '
-            .. self.src .. ' (' .. tostring(reserve_err) .. ')', vim.log.levels.WARN)
+          M.ui.notify(
+            'direct: restored directory but could not reserve its trash slot '
+              .. self.src
+              .. ' ('
+              .. tostring(reserve_err)
+              .. ')',
+            vim.log.levels.WARN
+          )
         end
         local made, make_err = M.fs.mkdir_exclusive(self.src)
         if not made then
-          M.ui.notify('direct: restored directory, but could not reserve its trash slot '
-            .. self.src .. ': ' .. tostring(make_err), vim.log.levels.WARN)
+          M.ui.notify(
+            'direct: restored directory, but could not reserve its trash slot '
+              .. self.src
+              .. ': '
+              .. tostring(make_err),
+            vim.log.levels.WARN
+          )
         end
       end
       callback(restored, result, restore_err)
     end, progress)
   end
   self['do'] = function() return M.execute(self) end
-  function self.describe()
-    return 'Restored ' .. M.rel(self.dst)
-  end
+  function self.describe() return 'Restored ' .. M.rel(self.dst) end
   return self
 end
 
 function M.Touch(dst)
   local self = { name = 'touch', _kind = 'touch', dst = dst }
   self._execute = function()
-    if M.fs.taken(self.dst) then
-      return nil, 'destination exists: ' .. tostring(self.dst)
-    end
+    if M.fs.taken(self.dst) then return nil, 'destination exists: ' .. tostring(self.dst) end
     return M.fs.touch(self.dst)
   end
   self['do'] = function() return M.execute(self) end
-  function self.describe()
-    return 'Created ' .. M.rel(self.dst)
-  end
+  function self.describe() return 'Created ' .. M.rel(self.dst) end
   return self
 end
 
 function M.MakeDirectory(dst)
   local self = { name = 'mkdir', _kind = 'mkdir', dst = dst }
   self._execute = function()
-    if M.fs.taken(self.dst) then
-      return nil, 'destination exists: ' .. tostring(self.dst)
-    end
+    if M.fs.taken(self.dst) then return nil, 'destination exists: ' .. tostring(self.dst) end
     return M.fs.mkdir_exclusive(self.dst)
   end
   self['do'] = function() return M.execute(self) end
-  function self.describe()
-    return 'Created ' .. M.rel(self.dst)
-  end
+  function self.describe() return 'Created ' .. M.rel(self.dst) end
   return self
 end
 
@@ -653,8 +651,7 @@ function M.Paste(src, dst, src_names, dst_names)
       local st = M.fs.stat(full_src)
       if st then
         if M.fs.taken(full_dst) then
-          return nil, 'paste requires async execution for a destination clash: '
-            .. tostring(full_dst)
+          return nil, 'paste requires async execution for a destination clash: ' .. tostring(full_dst)
         end
         if st.type == 'file' then
           local ok, err = M.fs.copy_file_exclusive(full_src, full_dst)
@@ -663,9 +660,15 @@ function M.Paste(src, dst, src_names, dst_names)
           local ok, skipped = M.fs.copy_tree_exclusive(full_src, full_dst)
           if not ok then return nil, skipped end
           if skipped ~= nil and #skipped > 0 then
-            M.ui.notify('Skipped ' .. #skipped .. ' '
-              .. (#skipped == 1 and 'entry' or 'entries')
-              .. ' that cannot be copied: ' .. full_src, vim.log.levels.WARN)
+            M.ui.notify(
+              'Skipped '
+                .. #skipped
+                .. ' '
+                .. (#skipped == 1 and 'entry' or 'entries')
+                .. ' that cannot be copied: '
+                .. full_src,
+              vim.log.levels.WARN
+            )
           end
         end
         copied[#copied + 1] = { src = pair.src, dst = pair.dst }
@@ -684,9 +687,7 @@ function M.Paste(src, dst, src_names, dst_names)
       self.renames = copied
       callback(ok, result, err)
     end
-    local function fail(err)
-      finish(false, nil, tostring(err or 'paste failed'))
-    end
+    local function fail(err) finish(false, nil, tostring(err or 'paste failed')) end
     local process_next
     local function skip(pair)
       M.ui.notify('Skipped ' .. pair.src, vim.log.levels.WARN)
@@ -725,9 +726,15 @@ function M.Paste(src, dst, src_names, dst_names)
         return
       end
       if st.type == 'directory' and type(extra) == 'table' and #extra > 0 then
-        M.ui.notify('Skipped ' .. #extra .. ' '
-          .. (#extra == 1 and 'entry' or 'entries')
-          .. ' that cannot be copied: ' .. full_src, vim.log.levels.WARN)
+        M.ui.notify(
+          'Skipped '
+            .. #extra
+            .. ' '
+            .. (#extra == 1 and 'entry' or 'entries')
+            .. ' that cannot be copied: '
+            .. full_src,
+          vim.log.levels.WARN
+        )
       end
       last = full_dst
       copied[#copied + 1] = { src = pair.src, dst = pair.dst }
@@ -748,8 +755,11 @@ function M.Paste(src, dst, src_names, dst_names)
       end
       local current = M.fs.join(self.dst, pair.dst)
       local entry_type = M.fs.is_file(current) and 'File' or 'Directory'
-      local called, started, start_err = pcall(M.ui.input,
-        entry_type .. ' already exists. Paste as: ', pair.src, 'file',
+      local called, started, start_err = pcall(
+        M.ui.input,
+        entry_type .. ' already exists. Paste as: ',
+        pair.src,
+        'file',
         function(answer)
           if answer == nil or M.entry_name_reason(answer) ~= nil then
             skip(pair)
@@ -763,9 +773,8 @@ function M.Paste(src, dst, src_names, dst_names)
             copy_pair(pair, full_src, chosen, st)
           end
         end,
-        function(input_err)
-          fail(input_err)
-        end)
+        function(input_err) fail(input_err) end
+      )
       if not called then
         fail(started)
       elseif started ~= true then
@@ -785,8 +794,7 @@ function M.Paste(src, dst, src_names, dst_names)
         index = index + 1
         process_next()
       elseif st.type ~= 'file' and st.type ~= 'directory' then
-        M.ui.notify('Skipped unsupported register entry: ' .. full_src,
-          vim.log.levels.WARN)
+        M.ui.notify('Skipped unsupported register entry: ' .. full_src, vim.log.levels.WARN)
         index = index + 1
         process_next()
       elseif M.fs.taken(full_dst) then
@@ -798,9 +806,7 @@ function M.Paste(src, dst, src_names, dst_names)
     process_next()
   end
   self['do'] = function() return M.execute(self) end
-  function self.describe()
-    return 'Pasted into ' .. M.rel(self.dst) .. M.paths.separator
-  end
+  function self.describe() return 'Pasted into ' .. M.rel(self.dst) .. M.paths.separator end
   return self
 end
 
@@ -820,14 +826,22 @@ local function restore_unpaste_captures(captured)
   for i = #captured, 1, -1 do
     local item = captured[i]
     if M.fs.taken(item.quarantine) then
-      local called, restored, err = pcall(M.fs.rename_noreplace,
-        item.quarantine, item.path, item.identity)
-      if not called then err, restored = tostring(restored), nil end
+      local called, restored, err = pcall(M.fs.rename_noreplace, item.quarantine, item.path, item.identity)
+      if not called then
+        err, restored = tostring(restored), nil
+      end
       if not restored then
         failures[#failures + 1] = item.quarantine
-        M.ui.notify('direct: could not restore Unpaste quarantine '
-          .. item.quarantine .. ' to ' .. item.path .. ' (' .. tostring(err)
-          .. '); quarantine preserved', vim.log.levels.ERROR)
+        M.ui.notify(
+          'direct: could not restore Unpaste quarantine '
+            .. item.quarantine
+            .. ' to '
+            .. item.path
+            .. ' ('
+            .. tostring(err)
+            .. '); quarantine preserved',
+          vim.log.levels.ERROR
+        )
       end
     end
   end
@@ -836,13 +850,13 @@ end
 
 local function capture_unpaste_item(item)
   if item.quarantine then
-    local called, moved, err = pcall(M.fs.rename_noreplace,
-      item.path, item.quarantine, item.identity)
-    if not called then err, moved = tostring(moved), nil end
+    local called, moved, err = pcall(M.fs.rename_noreplace, item.path, item.quarantine, item.identity)
+    if not called then
+      err, moved = tostring(moved), nil
+    end
     if not moved then return nil, err end
     local identity, stat = M.fs.entry_identity(item.quarantine)
-    if identity == nil or identity.inode == nil
-      or item.identity == nil or identity.inode ~= item.identity.inode then
+    if identity == nil or identity.inode == nil or item.identity == nil or identity.inode ~= item.identity.inode then
       return nil, 'captured entry identity differs from the inspected source'
     end
     item.identity = identity
@@ -851,18 +865,15 @@ local function capture_unpaste_item(item)
   end
   for _ = 1, 100 do
     local quarantine = M.fs.unique_temp_path(M.fs.dirname(item.path), 'unpaste')
-    if type(quarantine) ~= 'string' then
-      return nil, 'could not allocate a unique Unpaste quarantine'
+    if type(quarantine) ~= 'string' then return nil, 'could not allocate a unique Unpaste quarantine' end
+    local called, moved, err, code = pcall(M.fs.rename_noreplace, item.path, quarantine, item.identity)
+    if not called then
+      err, moved = tostring(moved), nil
     end
-    local called, moved, err, code = pcall(M.fs.rename_noreplace,
-      item.path, quarantine, item.identity)
-    if not called then err, moved = tostring(moved), nil end
     if moved then
       item.quarantine = quarantine
       local identity, stat = M.fs.entry_identity(quarantine)
-      if identity == nil or identity.inode == nil then
-        return nil, 'could not verify captured entry identity'
-      end
+      if identity == nil or identity.inode == nil then return nil, 'could not verify captured entry identity' end
       if item.identity == nil or item.identity.inode ~= identity.inode then
         return nil, 'captured entry identity differs from the inspected source'
       end
@@ -870,9 +881,7 @@ local function capture_unpaste_item(item)
       item.kind = stat and stat.type or nil
       return true
     end
-    if code ~= 'EEXIST' and not tostring(err):find('destination exists', 1, true) then
-      return nil, err
-    end
+    if code ~= 'EEXIST' and not tostring(err):find('destination exists', 1, true) then return nil, err end
   end
   return nil, 'could not allocate a unique Unpaste quarantine'
 end
@@ -911,14 +920,16 @@ function M.Unpaste(src, dst, src_names, dst_names)
       if identity == nil or identity.inode == nil then
         return unpaste_refusal('cannot inspect pasted entry: ' .. path)
       end
-      if not stat or (stat.type ~= 'file' and stat.type ~= 'directory'
-          and stat.type ~= 'link') then
+      if not stat or (stat.type ~= 'file' and stat.type ~= 'directory' and stat.type ~= 'link') then
         return unpaste_refusal('unsupported pasted entry type: ' .. path)
       end
       local matches, compare_err = compare_unpaste_contents(path, reference)
       if matches ~= true then
-        return unpaste_refusal('pasted entry does not match register content: '
-          .. path .. (compare_err and (' (' .. tostring(compare_err) .. ')') or ''))
+        return unpaste_refusal(
+          'pasted entry does not match register content: '
+            .. path
+            .. (compare_err and (' (' .. tostring(compare_err) .. ')') or '')
+        )
       end
       local item = {
         path = path,
@@ -929,8 +940,7 @@ function M.Unpaste(src, dst, src_names, dst_names)
       }
       local planned = self._journal_items and self._journal_items[#items + 1]
       if planned then
-        if planned.src ~= pair.src or planned.dst ~= pair.dst
-          or planned.identity.inode ~= identity.inode then
+        if planned.src ~= pair.src or planned.dst ~= pair.dst or planned.identity.inode ~= identity.inode then
           return unpaste_refusal('journaled Unpaste plan no longer matches: ' .. path)
         end
         item.quarantine = planned.quarantine
@@ -940,10 +950,7 @@ function M.Unpaste(src, dst, src_names, dst_names)
 
     if type(self._on_unpaste_begin) == 'function' then
       local ready, ready_err = self._on_unpaste_begin(items)
-      if not ready then
-        return unpaste_refusal('could not prepare Unpaste recovery: '
-          .. tostring(ready_err))
-      end
+      if not ready then return unpaste_refusal('could not prepare Unpaste recovery: ' .. tostring(ready_err)) end
       self._journal_active = true
     end
 
@@ -955,15 +962,13 @@ function M.Unpaste(src, dst, src_names, dst_names)
       captured[#captured + 1] = item
       local ok, err = capture_unpaste_item(item)
       if not ok then
-        local reason = 'could not capture pasted entry: ' .. item.path
-          .. ' (' .. tostring(err) .. ')'
+        local reason = 'could not capture pasted entry: ' .. item.path .. ' (' .. tostring(err) .. ')'
         if not self._journal_active then
           restore_unpaste_captures(captured)
         else
           for _, captured_item in ipairs(captured) do
             if M.fs.taken(captured_item.quarantine) then
-              M.ui.notify('direct: Unpaste quarantine preserved at '
-                .. captured_item.quarantine, vim.log.levels.ERROR)
+              M.ui.notify('direct: Unpaste quarantine preserved at ' .. captured_item.quarantine, vim.log.levels.ERROR)
             end
           end
         end
@@ -972,19 +977,18 @@ function M.Unpaste(src, dst, src_names, dst_names)
       if type(self._after_unpaste_capture) == 'function' then
         local recorded, record_err = self._after_unpaste_capture(#captured, item)
         if not recorded then
-          return unpaste_refusal('could not record captured Unpaste entry: '
-            .. tostring(record_err))
+          return unpaste_refusal('could not record captured Unpaste entry: ' .. tostring(record_err))
         end
       end
       local matches, compare_err = compare_unpaste_contents(item.quarantine, item.reference)
       if matches ~= true then
         local reason = 'captured entry no longer matches register content: '
-          .. item.path .. (compare_err and (' (' .. tostring(compare_err) .. ')') or '')
+          .. item.path
+          .. (compare_err and (' (' .. tostring(compare_err) .. ')') or '')
         if not self._journal_active then
           restore_unpaste_captures(captured)
         else
-          M.ui.notify('direct: Unpaste quarantine preserved at '
-            .. item.quarantine, vim.log.levels.ERROR)
+          M.ui.notify('direct: Unpaste quarantine preserved at ' .. item.quarantine, vim.log.levels.ERROR)
         end
         return unpaste_refusal(reason)
       end
@@ -992,10 +996,7 @@ function M.Unpaste(src, dst, src_names, dst_names)
 
     if type(self._before_unpaste_delete) == 'function' then
       local ready, ready_err = self._before_unpaste_delete(captured)
-      if not ready then
-        return unpaste_refusal('could not prepare Unpaste deletion: '
-          .. tostring(ready_err))
-      end
+      if not ready then return unpaste_refusal('could not prepare Unpaste deletion: ' .. tostring(ready_err)) end
     end
 
     -- Phase C: delete only the captured Q paths, never the original P paths.
@@ -1004,29 +1005,23 @@ function M.Unpaste(src, dst, src_names, dst_names)
     for i, item in ipairs(captured) do
       local current = M.fs.entry_identity(item.quarantine)
       if current == nil or current.inode == nil or current.inode ~= item.identity.inode then
-        M.ui.notify('direct: Unpaste quarantine changed; preserved at '
-          .. item.quarantine, vim.log.levels.ERROR)
+        M.ui.notify('direct: Unpaste quarantine changed; preserved at ' .. item.quarantine, vim.log.levels.ERROR)
         for j = i + 1, #captured do
           if M.fs.taken(captured[j].quarantine) then
-            M.ui.notify('direct: Unpaste entry preserved at '
-              .. captured[j].quarantine, vim.log.levels.ERROR)
+            M.ui.notify('direct: Unpaste entry preserved at ' .. captured[j].quarantine, vim.log.levels.ERROR)
           end
         end
-        return unpaste_refusal('captured entry changed before deletion: '
-          .. item.quarantine)
+        return unpaste_refusal('captured entry changed before deletion: ' .. item.quarantine)
       end
       local matches, compare_err = compare_unpaste_contents(item.quarantine, item.reference)
       if matches ~= true then
-        M.ui.notify('direct: Unpaste entry preserved at ' .. item.quarantine,
-          vim.log.levels.ERROR)
+        M.ui.notify('direct: Unpaste entry preserved at ' .. item.quarantine, vim.log.levels.ERROR)
         for j = i + 1, #captured do
           if M.fs.taken(captured[j].quarantine) then
-            M.ui.notify('direct: Unpaste entry preserved at '
-              .. captured[j].quarantine, vim.log.levels.ERROR)
+            M.ui.notify('direct: Unpaste entry preserved at ' .. captured[j].quarantine, vim.log.levels.ERROR)
           end
         end
-        return unpaste_refusal('captured entry changed before deletion: '
-          .. tostring(compare_err or item.quarantine))
+        return unpaste_refusal('captured entry changed before deletion: ' .. tostring(compare_err or item.quarantine))
       end
       local deleted, delete_err
       local called
@@ -1035,34 +1030,32 @@ function M.Unpaste(src, dst, src_names, dst_names)
       else
         called, deleted, delete_err = pcall(M.fs.rm_file, item.quarantine)
       end
-      if not called then delete_err, deleted = tostring(deleted), nil end
+      if not called then
+        delete_err, deleted = tostring(deleted), nil
+      end
       if not deleted or M.fs.taken(item.quarantine) then
         for j = i, #captured do
           if M.fs.taken(captured[j].quarantine) then
-            M.ui.notify('direct: Unpaste entry preserved at '
-              .. captured[j].quarantine, vim.log.levels.ERROR)
+            M.ui.notify('direct: Unpaste entry preserved at ' .. captured[j].quarantine, vim.log.levels.ERROR)
           end
         end
-        return unpaste_refusal('could not delete captured entry '
-          .. item.quarantine .. ': ' .. tostring(delete_err))
+        return unpaste_refusal('could not delete captured entry ' .. item.quarantine .. ': ' .. tostring(delete_err))
       end
       self._completed_renames[#self._completed_renames + 1] = {
-        src = item.pair.src, dst = item.pair.dst,
+        src = item.pair.src,
+        dst = item.pair.dst,
       }
       if type(self._after_unpaste_delete) == 'function' then
         local recorded, record_err = self._after_unpaste_delete(i, item)
         if not recorded then
-          return unpaste_refusal('could not record deleted Unpaste entry: '
-            .. tostring(record_err))
+          return unpaste_refusal('could not record deleted Unpaste entry: ' .. tostring(record_err))
         end
       end
     end
     return true
   end
   self['do'] = function() return M.execute(self) end
-  function self.describe()
-    return 'Reversed paste into ' .. M.rel(self.src) .. M.paths.separator
-  end
+  function self.describe() return 'Reversed paste into ' .. M.rel(self.src) .. M.paths.separator end
   return self
 end
 
@@ -1071,9 +1064,7 @@ end
 
 -- describe_action(action) -> a human-readable description, never serialized text.
 function M.describe_action(action)
-  if type(action) == 'table' and type(action.describe) == 'function' then
-    return action.describe()
-  end
+  if type(action) == 'table' and type(action.describe) == 'function' then return action.describe() end
   return tostring(action)
 end
 
@@ -1085,9 +1076,7 @@ function M.summarize(actions)
     parts[#parts + 1] = M.describe_action(action)
   end
   local summary = table.concat(parts, ', ')
-  if #summary > 0 then
-    summary = summary:sub(1, 1):upper() .. summary:sub(2)
-  end
+  if #summary > 0 then summary = summary:sub(1, 1):upper() .. summary:sub(2) end
   return summary
 end
 

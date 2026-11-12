@@ -46,7 +46,9 @@ local function action_paths(item)
   local function visit(current)
     if type(current) ~= 'table' then return end
     if current.name == 'g' or current.name == 'batch' then
-      for _, member in ipairs(current.actions or {}) do visit(member) end
+      for _, member in ipairs(current.actions or {}) do
+        visit(member)
+      end
       return
     end
     if current.name == 'p' then
@@ -68,8 +70,7 @@ local function action_paths(item)
 end
 
 local function append_stack(lines, label, stack)
-  local count = (stack.state == 'current' or stack.state == 'fresh')
-    and #stack.actions or nil
+  local count = (stack.state == 'current' or stack.state == 'fresh') and #stack.actions or nil
   lines[#lines + 1] = label .. ' stack' .. (count and (' (' .. count .. ')') or '')
   if stack.state == 'fresh' then
     lines[#lines + 1] = '  (empty)'
@@ -83,13 +84,18 @@ local function append_stack(lines, label, stack)
     for index = #stack.actions, 1, -1 do
       local item = stack.actions[index]
       local ok, summary = pcall(action.summarize, { item })
-      lines[#lines + 1] = string.format('  %d. %s', #stack.actions - index + 1,
-        ok and summary or ('Unknown action: ' .. tostring(item.name)))
+      lines[#lines + 1] = string.format(
+        '  %d. %s',
+        #stack.actions - index + 1,
+        ok and summary or ('Unknown action: ' .. tostring(item.name))
+      )
       local affected = action_paths(item)
       if #affected == 0 then
         lines[#lines + 1] = '     (no paths)'
       else
-        for _, path in ipairs(affected) do lines[#lines + 1] = '     ' .. path end
+        for _, path in ipairs(affected) do
+          lines[#lines + 1] = '     ' .. path
+        end
       end
     end
   end
@@ -107,8 +113,7 @@ function M.lines()
   append_stack(lines, 'Undo', undo)
   append_stack(lines, 'Redo', redo)
 
-  local journal, journal_err, journal_exists = log.read_raw(
-    paths.join(history_dir, 'transaction.json'))
+  local journal, journal_err, journal_exists = log.read_raw(paths.join(history_dir, 'transaction.json'))
   if journal_err then
     lines[#lines + 1] = 'Recovery journal unavailable: ' .. tostring(journal_err)
   elseif journal_exists and journal ~= '' then

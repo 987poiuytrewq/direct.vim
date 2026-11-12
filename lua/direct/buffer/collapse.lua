@@ -31,14 +31,13 @@ return function(deps)
         else
           -- A newly appeared directory has no saved filter context. Inspect it
           -- only so sync can reject the external change safely.
-          children, snapshot, err = list_with_snapshot(directory, options.show_hidden, options.respect_gitignore)
+          local listed, _, list_err = list_with_snapshot(directory, options.show_hidden, options.respect_gitignore)
+          children, err = listed, list_err
           if not children then return nil, err end
         end
       end
       if options.status_only then children = filter_git_status_lines(directory, children, options.git_status) end
-      if options.git_diff_only then
-        children = filter_git_diff_lines(directory, children, options.git_diff)
-      end
+      if options.git_diff_only then children = filter_git_diff_lines(directory, children, options.git_diff) end
       return children
     end
 

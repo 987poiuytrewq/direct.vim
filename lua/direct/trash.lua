@@ -11,18 +11,14 @@ local log = require('direct.log')
 local metadata_suffix = '.direct-trash.json'
 local retention_checked = {}
 
-local function step_word(count)
-  return count == 1 and 'step' or 'steps'
-end
+local function step_word(count) return count == 1 and 'step' or 'steps' end
 
 local function lstat(path)
   local ok, stat = pcall(vim.uv.fs_lstat, path)
   return ok and stat or nil
 end
 
-local function trash_dir()
-  return paths.data_dir_path('trash')
-end
+local function trash_dir() return paths.data_dir_path('trash') end
 
 local function format_size(bytes)
   if bytes < 1024 then return string.format('%d B', bytes) end
@@ -61,16 +57,19 @@ local function decode_metadata(path)
   if err then return nil, err end
   if not exists then return nil, 'metadata is unavailable' end
   local ok, value = pcall(vim.json.decode, raw)
-  if not ok or type(value) ~= 'table'
-    or value.format ~= 'direct-trash' or value.version ~= 1
+  if
+    not ok
+    or type(value) ~= 'table'
+    or value.format ~= 'direct-trash'
+    or value.version ~= 1
     or type(value.original) ~= 'string'
     or type(value.deleted_at) ~= 'string'
     or type(value.deleted_at_epoch) ~= 'number'
     or (value.deleted_at_estimated ~= nil and type(value.deleted_at_estimated) ~= 'boolean')
     or (value.purpose ~= nil and value.purpose ~= 'git-restore-backup')
     or type(value.reserved) ~= 'boolean'
-    or (value.kind ~= 'file' and value.kind ~= 'directory'
-      and value.kind ~= 'link' and value.kind ~= 'unknown') then
+    or (value.kind ~= 'file' and value.kind ~= 'directory' and value.kind ~= 'link' and value.kind ~= 'unknown')
+  then
     return nil, 'metadata is damaged'
   end
   local valid, valid_err = paths.validate_canonical_path(value.original)
@@ -115,8 +114,7 @@ function M.entries(options)
           }
           if metadata_err == 'metadata is unavailable' then
             missing_metadata = true
-            recovery_times[paths.canonical(path)] = stat_time_epoch(stat, 'ctime')
-              or stat_time_epoch(stat, 'mtime')
+            recovery_times[paths.canonical(path)] = stat_time_epoch(stat, 'ctime') or stat_time_epoch(stat, 'mtime')
           end
         end
       end
@@ -135,7 +133,9 @@ function M.entries(options)
             by_trash_path[paths.canonical(current.dst)] = current.src
           end
         end
-        for _, member in ipairs(current.actions or {}) do visit(member) end
+        for _, member in ipairs(current.actions or {}) do
+          visit(member)
+        end
       end
       for _, lines in ipairs({ state.undo_lines, state.redo_lines }) do
         for index = 2, #lines do
@@ -149,8 +149,11 @@ function M.entries(options)
           local original = by_trash_path[paths.canonical(entry.path)]
           if original then
             local _, record_err = action.recover_trash_metadata(
-              entry.path, original, entry.kind,
-              recovery_times[paths.canonical(entry.path)])
+              entry.path,
+              original,
+              entry.kind,
+              recovery_times[paths.canonical(entry.path)]
+            )
             local metadata, metadata_err = decode_metadata(entry.path)
             if metadata then
               entry.original = metadata.original
@@ -175,9 +178,7 @@ function M.entries(options)
     if options.history_state then
       recovered, recovery_err = recover(options.history_state)
     else
-      recovered, recovery_err = history.with_trash_references(function(_, state)
-        return recover(state)
-      end)
+      recovered, recovery_err = history.with_trash_references(function(_, state) return recover(state) end)
     end
     if not recovered then
       for _, entry in ipairs(entries) do
@@ -200,15 +201,16 @@ function M.size_bytes()
   local entries, err = M.entries({ include_reserved = true })
   if not entries then return nil, err end
   local total = 0
-  for _, entry in ipairs(entries) do total = total + entry.storage_size end
+  for _, entry in ipairs(entries) do
+    total = total + entry.storage_size
+  end
   return total
 end
 
 function M.show()
   local retained, retention_err = M.apply_retention({ force = true })
   if not retained and retention_err then
-    ui.notify('direct: trash retention was skipped: ' .. tostring(retention_err),
-      vim.log.levels.WARN)
+    ui.notify('direct: trash retention was skipped: ' .. tostring(retention_err), vim.log.levels.WARN)
   end
   local entries, err = M.entries()
   if not entries then
@@ -221,18 +223,14 @@ function M.show()
   for index, header in ipairs(headers) do
     widths[index] = vim.fn.strdisplaywidth(header)
   end
-  local function cell(value)
-    return tostring(value):gsub('[\t\r\n]', ' ')
-  end
+  local function cell(value) return tostring(value):gsub('[\t\r\n]', ' ') end
   for _, entry in ipairs(entries) do
     local row = {
       cell(entry.id),
-      cell((entry.deleted_at or 'unknown')
-        .. (entry.deleted_at_estimated and ' (estimated)' or '')),
+      cell((entry.deleted_at or 'unknown') .. (entry.deleted_at_estimated and ' (estimated)' or '')),
       cell(format_size(entry.size)),
       cell(entry.original or ('(unknown: ' .. tostring(entry.metadata_error) .. ')')),
-      entry.purpose == 'git-restore-backup' and 'Git backup'
-        or entry.reserved and 'reserved' or 'deleted',
+      entry.purpose == 'git-restore-backup' and 'Git backup' or entry.reserved and 'reserved' or 'deleted',
     }
     rows[#rows + 1] = row
     for index, value in ipairs(row) do
@@ -251,7 +249,9 @@ function M.show()
   if #entries == 0 then
     lines[#lines + 1] = '(empty)'
   else
-    for _, row in ipairs(rows) do lines[#lines + 1] = render(row) end
+    for _, row in ipairs(rows) do
+      lines[#lines + 1] = render(row)
+    end
   end
 
   local bufnr = vim.api.nvim_create_buf(false, true)
@@ -269,7 +269,10 @@ function M.show()
     if not id then return end
     local entry
     for _, candidate in ipairs(entries) do
-      if candidate.id == id then entry = candidate; break end
+      if candidate.id == id then
+        entry = candidate
+        break
+      end
     end
     if not entry then return end
     local destination = entry.original
@@ -286,20 +289,20 @@ function M.show()
       restored, restore_err = require('direct').trash_restore(id, destination, true)
     end
     if restored then M.show() end
-    if not restored and restore_err then
-      ui.notify('direct: ' .. tostring(restore_err), vim.log.levels.ERROR)
-    end
+    if not restored and restore_err then ui.notify('direct: ' .. tostring(restore_err), vim.log.levels.ERROR) end
   end
   vim.keymap.set('n', 'r', restore_under_cursor, {
-    buffer = bufnr, silent = true, desc = 'direct: restore this trash entry',
+    buffer = bufnr,
+    silent = true,
+    desc = 'direct: restore this trash entry',
   })
   vim.keymap.set('n', '<CR>', restore_under_cursor, {
-    buffer = bufnr, silent = true, desc = 'direct: restore this trash entry',
+    buffer = bufnr,
+    silent = true,
+    desc = 'direct: restore this trash entry',
   })
   vim.keymap.set('n', 'q', function()
-    if vim.api.nvim_buf_is_valid(bufnr) then
-      pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
-    end
+    if vim.api.nvim_buf_is_valid(bufnr) then pcall(vim.api.nvim_buf_delete, bufnr, { force = true }) end
   end, { buffer = bufnr, silent = true, desc = 'direct: close the trash view' })
   vim.api.nvim_set_current_buf(bufnr)
   return bufnr
@@ -308,9 +311,7 @@ end
 function M.complete(arg_lead, cmdline, cursor_pos)
   arg_lead, cmdline = tostring(arg_lead or ''), tostring(cmdline or '')
   local before = cmdline:sub(1, cursor_pos or #cmdline)
-  if arg_lead ~= '' and before:sub(-#arg_lead) == arg_lead then
-    before = before:sub(1, #before - #arg_lead)
-  end
+  if arg_lead ~= '' and before:sub(-#arg_lead) == arg_lead then before = before:sub(1, #before - #arg_lead) end
   local previous = before:match('(%S+)%s*$')
   previous = previous and previous:gsub('^:', '') or nil
   local candidates = {}
@@ -319,24 +320,18 @@ function M.complete(arg_lead, cmdline, cursor_pos)
     local ok, iter = pcall(vim.fs.dir, directory)
     if ok and iter then
       for name in iter do
-        if not name:match('%.direct%-trash%.json$') then
-          candidates[#candidates + 1] = name
-        end
+        if not name:match('%.direct%-trash%.json$') then candidates[#candidates + 1] = name end
       end
     end
     table.sort(candidates)
   elseif previous == 'DirectTrash' or previous == nil then
     candidates = { 'empty', 'restore' }
   end
-  return vim.tbl_filter(function(candidate)
-    return candidate:sub(1, #arg_lead) == arg_lead
-  end, candidates)
+  return vim.tbl_filter(function(candidate) return candidate:sub(1, #arg_lead) == arg_lead end, candidates)
 end
 
 local function lookup(id)
-  if type(id) ~= 'string' or id == '' or id:find('[/\\]') then
-    return nil, 'a trash entry ID is required'
-  end
+  if type(id) ~= 'string' or id == '' or id:find('[/\\]') then return nil, 'a trash entry ID is required' end
   local directory, dir_err = trash_dir()
   if not directory then return nil, dir_err end
   local path = fs.join(directory, id)
@@ -356,8 +351,7 @@ function M.put_back_git_backup(id)
   local stat = lstat(destination)
   local actions
   if stat then
-    local prompt = string.format(
-      'Put back Git-restore backup %s and move the current file to trash?', id)
+    local prompt = string.format('Put back Git-restore backup %s and move the current file to trash?', id)
     if vim.fn.confirm(prompt, '&Put back\n&Cancel', 2) ~= 1 then
       return nil, 'backup put-back cancelled; both files were preserved'
     end
@@ -367,41 +361,41 @@ function M.put_back_git_backup(id)
     }
   else
     local restore_action = action.Restore(path, destination)
-    local restored, restore_err = history.apply(restore_action, function()
-      return restore_action['do']()
-    end)
-    if restored then
-      ui.notify('direct: Git-restore backup restored at ' .. destination, vim.log.levels.INFO)
-    end
+    local restored, restore_err = history.apply(restore_action, function() return restore_action['do']() end)
+    if restored then ui.notify('direct: Git-restore backup restored at ' .. destination, vim.log.levels.INFO) end
     return restored, restore_err
   end
   local batch = action.Batch(actions)
-  local restored, restore_err = history.apply(batch, function()
-    return action.execute(batch)
-  end)
+  local restored, restore_err = history.apply(batch, function() return action.execute(batch) end)
   if restored then
-    ui.notify('direct: Git-restore backup put back at ' .. destination
-      .. '; the displaced file is in trash and this step can be undone', vim.log.levels.INFO)
+    ui.notify(
+      'direct: Git-restore backup put back at '
+        .. destination
+        .. '; the displaced file is in trash and this step can be undone',
+      vim.log.levels.INFO
+    )
   end
   return restored, restore_err
 end
 
 local function referenced_message(path)
-  return 'trash entry is still referenced by undo/redo history: ' .. path
-    .. '; use :DirectTrash! restore to force it'
+  return 'trash entry is still referenced by undo/redo history: ' .. path .. '; use :DirectTrash! restore to force it'
 end
 
 function M.restore(id, destination, force)
   local path, lookup_err = lookup(id)
   if not path then return nil, lookup_err end
   local metadata = decode_metadata(path)
-  if metadata and metadata.reserved then
-    return nil, 'trash entry is a history reservation, not a deleted item'
-  end
-  if metadata and metadata.purpose == 'git-restore-backup'
-    and (destination == nil or destination == ''
-      or (type(destination) == 'string'
-        and paths.canonical(paths.root(destination)) == metadata.original)) then
+  if metadata and metadata.reserved then return nil, 'trash entry is a history reservation, not a deleted item' end
+  if
+    metadata
+    and metadata.purpose == 'git-restore-backup'
+    and (
+      destination == nil
+      or destination == ''
+      or (type(destination) == 'string' and paths.canonical(paths.root(destination)) == metadata.original)
+    )
+  then
     return M.put_back_git_backup(id)
   end
   destination = destination or (metadata and metadata.original)
@@ -411,45 +405,52 @@ function M.restore(id, destination, force)
   destination = paths.root(destination)
   local valid, valid_err = paths.validate_canonical_path(destination)
   if not valid then return nil, 'invalid restore path: ' .. tostring(valid_err) end
-  if fs.taken(destination) then
-    return nil, 'restore destination already exists: ' .. destination
-  end
+  if fs.taken(destination) then return nil, 'restore destination already exists: ' .. destination end
   local restore_action = action.Restore(path, destination)
   local dropped = { undo_dropped = 0, redo_dropped = 0 }
-  local restored, restore_err = history.apply(restore_action, function()
-    return restore_action['do']()
-  end, function(state, references)
-    if not references[paths.canonical(path)] then return true end
-    if not force then
-      return nil, referenced_message(path)
-    end
-    local stat = lstat(path)
-    local is_directory = metadata and metadata.kind == 'directory'
-      or (stat and stat.type == 'directory') or false
-    local plan, plan_err = history.plan_trash_history(state, {
-      { path = path, directory = is_directory },
-    })
-    if not plan then return nil, plan_err end
-    local step_count = plan.undo_dropped + plan.redo_dropped
-    if step_count > 0 then
-      local prompt = string.format(
-        'Restore this trash entry and discard %d undo %s and %d redo %s?',
-        plan.undo_dropped, step_word(plan.undo_dropped),
-        plan.redo_dropped, step_word(plan.redo_dropped))
-      if vim.fn.confirm(prompt, '&Restore and drop history\n&Cancel', 2) ~= 1 then
-        return nil, 'restore cancelled; history and trash entry were preserved'
+  local restored, restore_err = history.apply(
+    restore_action,
+    function() return restore_action['do']() end,
+    function(state, references)
+      if not references[paths.canonical(path)] then return true end
+      if not force then return nil, referenced_message(path) end
+      local stat = lstat(path)
+      local is_directory = metadata and metadata.kind == 'directory' or (stat and stat.type == 'directory') or false
+      local plan, plan_err = history.plan_trash_history(state, {
+        { path = path, directory = is_directory },
+      })
+      if not plan then return nil, plan_err end
+      local step_count = plan.undo_dropped + plan.redo_dropped
+      if step_count > 0 then
+        local prompt = string.format(
+          'Restore this trash entry and discard %d undo %s and %d redo %s?',
+          plan.undo_dropped,
+          step_word(plan.undo_dropped),
+          plan.redo_dropped,
+          step_word(plan.redo_dropped)
+        )
+        if vim.fn.confirm(prompt, '&Restore and drop history\n&Cancel', 2) ~= 1 then
+          return nil, 'restore cancelled; history and trash entry were preserved'
+        end
+        local counts, prune_err = history.apply_trash_history_plan(state, plan, false)
+        if not counts then return nil, prune_err end
+        dropped = counts
       end
-      local counts, prune_err = history.apply_trash_history_plan(state, plan, false)
-      if not counts then return nil, prune_err end
-      dropped = counts
+      return true
     end
-    return true
-  end)
+  )
   local dropped_count = dropped.undo_dropped + dropped.redo_dropped
   if restored and dropped_count > 0 then
-    ui.notify(string.format('direct: discarded %d undo %s and %d redo %s '
-      .. 'while restoring trash', dropped.undo_dropped, step_word(dropped.undo_dropped),
-      dropped.redo_dropped, step_word(dropped.redo_dropped)), vim.log.levels.WARN)
+    ui.notify(
+      string.format(
+        'direct: discarded %d undo %s and %d redo %s ' .. 'while restoring trash',
+        dropped.undo_dropped,
+        step_word(dropped.undo_dropped),
+        dropped.redo_dropped,
+        step_word(dropped.redo_dropped)
+      ),
+      vim.log.levels.WARN
+    )
   end
   if restored then ui.notify(action.summarize({ restore_action }), vim.log.levels.INFO) end
   return restored, restore_err
@@ -467,8 +468,10 @@ local function remove_entry(path)
   if not removed then return nil, err end
   local metadata_removed, metadata_err = action.clear_trash_metadata(path)
   if not metadata_removed then
-    ui.notify('direct: removed trash entry but could not remove its metadata: '
-      .. tostring(metadata_err), vim.log.levels.WARN)
+    ui.notify(
+      'direct: removed trash entry but could not remove its metadata: ' .. tostring(metadata_err),
+      vim.log.levels.WARN
+    )
   end
   return true
 end
@@ -489,11 +492,8 @@ local function empty_locked(force, references, state)
       end
     end
   end
-  if #failed > 0 then
-    return nil, 'could not empty all trash entries: ' .. table.concat(failed, '; ')
-  end
-  ui.notify(string.format('direct: trash emptied (%d removed, %d protected)',
-    removed, protected), vim.log.levels.INFO)
+  if #failed > 0 then return nil, 'could not empty all trash entries: ' .. table.concat(failed, '; ') end
+  ui.notify(string.format('direct: trash emptied (%d removed, %d protected)', removed, protected), vim.log.levels.INFO)
   return true, { removed = removed, protected = protected }
 end
 
@@ -503,9 +503,7 @@ function M.apply_retention(options)
   if retention == false then return true end
   local directory = trash_dir()
   local cache_key = paths.canonical(directory)
-  if not options.force and retention_checked[cache_key] then
-    return true, { skipped = true }
-  end
+  if not options.force and retention_checked[cache_key] then return true, { skipped = true } end
   -- Automatic retention is expensive because it measures the whole trash and
   -- reads history references. Limit saves to one pass per data directory in
   -- this Neovim session. DirectTrash passes force to provide an explicit scan.
@@ -557,13 +555,19 @@ function M.apply_retention(options)
     end
 
     if removed > 0 then
-      ui.notify(string.format('direct: trash retention removed %d unreferenced entr%s',
-        removed, removed == 1 and 'y' or 'ies'), vim.log.levels.INFO)
+      ui.notify(
+        string.format('direct: trash retention removed %d unreferenced entr%s', removed, removed == 1 and 'y' or 'ies'),
+        vim.log.levels.INFO
+      )
     end
     if max_size and total > max_size then
-      ui.notify(string.format('direct: trash exceeds its %d-byte retention limit; '
-        .. 'history-referenced or unindexed entries were kept', max_size),
-        vim.log.levels.WARN)
+      ui.notify(
+        string.format(
+          'direct: trash exceeds its %d-byte retention limit; ' .. 'history-referenced or unindexed entries were kept',
+          max_size
+        ),
+        vim.log.levels.WARN
+      )
     end
     return true, { removed = removed, size_bytes = total }
   end)
@@ -578,7 +582,8 @@ function M.empty(force)
       local paths_to_remove = {}
       for _, entry in ipairs(entries) do
         paths_to_remove[#paths_to_remove + 1] = {
-          path = entry.path, directory = entry.kind == 'directory',
+          path = entry.path,
+          directory = entry.kind == 'directory',
         }
       end
       local plan, plan_err = history.plan_trash_history(state, paths_to_remove)
@@ -587,8 +592,13 @@ function M.empty(force)
       if step_count > 0 then
         local prompt = string.format(
           'Empty %d trash entr%s and discard %d undo %s and %d redo %s?',
-          #entries, #entries == 1 and 'y' or 'ies', plan.undo_dropped,
-          step_word(plan.undo_dropped), plan.redo_dropped, step_word(plan.redo_dropped))
+          #entries,
+          #entries == 1 and 'y' or 'ies',
+          plan.undo_dropped,
+          step_word(plan.undo_dropped),
+          plan.redo_dropped,
+          step_word(plan.redo_dropped)
+        )
         if vim.fn.confirm(prompt, '&Empty and drop history\n&Cancel', 2) ~= 1 then
           return nil, 'empty cancelled; history and trash entries were preserved'
         end
@@ -601,9 +611,16 @@ function M.empty(force)
     local emptied, result = empty_locked(force == true, references, state)
     local dropped_count = dropped.undo_dropped + dropped.redo_dropped
     if emptied and dropped_count > 0 then
-      ui.notify(string.format('direct: discarded %d undo %s and %d redo %s '
-        .. 'to empty trash', dropped.undo_dropped, step_word(dropped.undo_dropped),
-        dropped.redo_dropped, step_word(dropped.redo_dropped)), vim.log.levels.WARN)
+      ui.notify(
+        string.format(
+          'direct: discarded %d undo %s and %d redo %s ' .. 'to empty trash',
+          dropped.undo_dropped,
+          step_word(dropped.undo_dropped),
+          dropped.redo_dropped,
+          step_word(dropped.redo_dropped)
+        ),
+        vim.log.levels.WARN
+      )
     end
     return emptied, result
   end)

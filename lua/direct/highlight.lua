@@ -46,22 +46,16 @@ local function define_highlight_defaults()
   end
 end
 
-function M.git_status_highlight(status)
-  return change_highlights[status]
-end
+function M.git_status_highlight(status) return change_highlights[status] end
 
 local function status_chunks(status, symbols, conflicted)
   local function slot(key, highlight)
     local symbol = symbols[key]
-    if type(symbol) ~= 'string' or symbol == '' then
-      return { ' ', 'Normal' }
-    end
+    if type(symbol) ~= 'string' or symbol == '' then return { ' ', 'Normal' } end
     return { symbol, highlight }
   end
 
-  if status == '!!' then
-    return { slot('ignored', 'DirectGitIgnored'), { ' ', 'Normal' }, { ' ', 'Normal' } }
-  end
+  if status == '!!' then return { slot('ignored', 'DirectGitIgnored'), { ' ', 'Normal' }, { ' ', 'Normal' } } end
 
   local index, worktree = status:sub(1, 1), status:sub(2, 2)
   local conflict = conflicted
@@ -100,8 +94,7 @@ local function status_chunks(status, symbols, conflicted)
   return {
     slot(first_change, change_highlights[first_change]),
     { ' ', 'Normal' },
-    second_change
-      and slot(second_change, change_highlights[second_change])
+    second_change and slot(second_change, change_highlights[second_change])
       or (second_symbol and slot(second_symbol, second_highlight) or { ' ', 'Normal' }),
   }
 end
@@ -129,29 +122,26 @@ function M.render(bufnr, rows, options)
   local indent_size = options.indent_size or 2
 
   for _, item in ipairs(rows or {}) do
-    local deleted_group = item.deleted_kind == 'directory'
-      and 'DirectGitDeletedDirectory'
+    local deleted_group = item.deleted_kind == 'directory' and 'DirectGitDeletedDirectory'
       or (item.deleted_kind == 'file' and 'DirectGitDeletedFile' or nil)
     if deleted_group and not (git_options.enabled ~= false and item.first_status) then
       local line = vim.api.nvim_buf_get_lines(bufnr, item.row, item.row + 1, false)[1] or ''
-      vim.api.nvim_buf_set_extmark(bufnr, namespace, item.row,
-        (item.depth or 0) * indent_size, {
-          end_row = item.row,
-          end_col = #line,
-          hl_group = deleted_group,
-          priority = 150,
-        })
+      vim.api.nvim_buf_set_extmark(bufnr, namespace, item.row, (item.depth or 0) * indent_size, {
+        end_row = item.row,
+        end_col = #line,
+        hl_group = deleted_group,
+        priority = 150,
+      })
     end
 
     if git_options.enabled ~= false and item.first_status then
       local line = vim.api.nvim_buf_get_lines(bufnr, item.row, item.row + 1, false)[1] or ''
-      vim.api.nvim_buf_set_extmark(bufnr, namespace, item.row,
-        (item.depth or 0) * indent_size, {
-          end_row = item.row,
-          end_col = #line,
-          hl_group = change_highlights[item.first_status],
-          priority = 160,
-        })
+      vim.api.nvim_buf_set_extmark(bufnr, namespace, item.row, (item.depth or 0) * indent_size, {
+        end_row = item.row,
+        end_col = #line,
+        hl_group = change_highlights[item.first_status],
+        priority = 160,
+      })
     end
 
     if git_options.enabled ~= false and git_options.show_symbols ~= false and item.status then

@@ -20,8 +20,7 @@ local backup_sequence = 0
 
 local function identity_paths_equal(a, b)
   if type(a) ~= 'string' or type(b) ~= 'string' then return false end
-  return platform.identity_path(M.paths.canonical(a))
-    == platform.identity_path(M.paths.canonical(b))
+  return platform.identity_path(M.paths.canonical(a)) == platform.identity_path(M.paths.canonical(b))
 end
 
 local function rename_files(action, files, paths)
@@ -43,13 +42,11 @@ M.HEADER = format.HEADER
 
 local function log_paths()
   local dir = M.paths.data_dir_path('history')
-  return M.paths.join(dir, 'undo.log'), M.paths.join(dir, 'redo.log'),
-    M.paths.join(dir, 'transaction.json')
+  return M.paths.join(dir, 'undo.log'), M.paths.join(dir, 'redo.log'), M.paths.join(dir, 'transaction.json')
 end
 
 local function notify_unavailable(err)
-  M.ui.notify('direct: history unavailable: ' .. tostring(err),
-    vim.log.levels.ERROR)
+  M.ui.notify('direct: history unavailable: ' .. tostring(err), vim.log.levels.ERROR)
 end
 
 function M.with_lock(callback)
@@ -69,8 +66,7 @@ function M.with_lock(callback)
 end
 
 local function notify_preserved(path, reason)
-  local message = 'direct: refusing operation; history was preserved at '
-    .. path .. ' (' .. tostring(reason) .. ')'
+  local message = 'direct: refusing operation; history was preserved at ' .. path .. ' (' .. tostring(reason) .. ')'
   M.ui.notify(message, vim.log.levels.ERROR)
   return nil, message
 end
@@ -85,17 +81,13 @@ end
 
 local function classify_path(path)
   local bytes, err, exists = log_mod.read_raw(path)
-  if err then
-    return { state = 'preserve', reason = err, read_error = true }
-  end
+  if err then return { state = 'preserve', reason = err, read_error = true } end
   local state = format.classify(bytes, exists)
   state.bytes, state.exists = bytes, exists
   return state
 end
 
-local function write_stack(path, lines)
-  return log_mod.write(path, lines)
-end
+local function write_stack(path, lines) return log_mod.write(path, lines) end
 
 local commit_stacks
 
@@ -104,8 +96,7 @@ local function backup_history(path, bytes)
   local pid = tostring(log_mod.uv.os_getpid())
   for _ = 1, 100 do
     backup_sequence = backup_sequence + 1
-    local backup_path = string.format('%s.backup-%s-%s-%d', path, stamp, pid,
-      backup_sequence)
+    local backup_path = string.format('%s.backup-%s-%s-%d', path, stamp, pid, backup_sequence)
     local ok, err, code = log_mod.write_raw_exclusive(backup_path, bytes)
     if ok then return backup_path end
     if code ~= 'EEXIST' then return nil, err end
@@ -126,17 +117,16 @@ local function backup_history_files(entries)
 end
 
 local function reset_stacks(undo_path, redo_path, transaction_path)
-  return commit_stacks(undo_path, redo_path, transaction_path,
-    { M.HEADER }, { M.HEADER })
+  return commit_stacks(undo_path, redo_path, transaction_path, { M.HEADER }, { M.HEADER })
 end
 
 local copy_lines
 local parse_transaction = transaction_codec.parse
 
 local function write_operation_transaction(path, transaction)
-  local called, ok, err = pcall(function()
-    return log_mod.write_raw_atomic(path, vim.json.encode(transaction) .. '\n')
-  end)
+  local called, ok, err = pcall(
+    function() return log_mod.write_raw_atomic(path, vim.json.encode(transaction) .. '\n') end
+  )
   if not called then return nil, tostring(ok) end
   if not ok then return nil, err end
   return true
@@ -148,9 +138,12 @@ local function attach_unpaste_journal(action, transaction, transaction_path)
     if #items ~= #transaction.items then return nil, 'Unpaste plan length changed' end
     for index, item in ipairs(items) do
       local expected = transaction.items[index]
-      if item.path ~= expected.path or item.reference ~= expected.reference
+      if
+        item.path ~= expected.path
+        or item.reference ~= expected.reference
         or item.quarantine ~= expected.quarantine
-        or item.identity.inode ~= expected.identity.inode then
+        or item.identity.inode ~= expected.identity.inode
+      then
         return nil, 'Unpaste plan changed at ' .. item.path
       end
     end
@@ -174,13 +167,23 @@ end
 local clear_transaction
 
 local recoverable_rename_kinds = {
-  mv = true, rm = true, rmdir = true, rs = true, rsdir = true,
-  g = true, up = true,
+  mv = true,
+  rm = true,
+  rmdir = true,
+  rs = true,
+  rsdir = true,
+  g = true,
+  up = true,
 }
 
 local recoverable_apply_kinds = {
-  mv = true, rm = true, rmdir = true, rs = true, rsdir = true,
-  touch = true, mkdir = true,
+  mv = true,
+  rm = true,
+  rmdir = true,
+  rs = true,
+  rsdir = true,
+  touch = true,
+  mkdir = true,
 }
 
 local function reverse_intent(state, which, reversal, inverse)
@@ -194,19 +197,23 @@ local function reverse_intent(state, which, reversal, inverse)
       local path = M.action.fs.join(reversal.src, pair.src)
       local reference = M.action.fs.join(reversal.dst, pair.dst)
       local identity, stat = M.action.fs.entry_identity(path)
-      if not stat or not identity or not identity.inode
-        or (stat.type ~= 'file' and stat.type ~= 'directory' and stat.type ~= 'link') then
+      if
+        not stat
+        or not identity
+        or not identity.inode
+        or (stat.type ~= 'file' and stat.type ~= 'directory' and stat.type ~= 'link')
+      then
         return false, 'cannot identify Unpaste entry: ' .. path
       end
-      local quarantine = M.action.fs.unique_temp_path(
-        M.action.fs.dirname(path), 'unpaste')
+      local quarantine = M.action.fs.unique_temp_path(M.action.fs.dirname(path), 'unpaste')
       while quarantine and (reserved[quarantine] or M.action.fs.taken(quarantine)) do
         quarantine = M.action.fs.unique_temp_path(M.action.fs.dirname(path), 'unpaste')
       end
       if not quarantine then return false, 'could not allocate Unpaste quarantine' end
       reserved[quarantine] = true
       items[#items + 1] = {
-        src = pair.src, dst = pair.dst,
+        src = pair.src,
+        dst = pair.dst,
         path = M.paths.canonical(path),
         reference = M.paths.canonical(reference),
         quarantine = M.paths.canonical(quarantine),
@@ -235,9 +242,7 @@ local function reverse_intent(state, which, reversal, inverse)
   end
   if reversal.name == 'g' then
     local steps, staging_count = M.action.plan_move_steps(reversal.actions)
-    if not steps then
-      return false, staging_count
-    end
+    if not steps then return false, staging_count end
     local next_src = copy_lines(which == 'undo' and state.undo_lines or state.redo_lines)
     local next_dst = copy_lines(which == 'undo' and state.redo_lines or state.undo_lines)
     table.remove(next_src)
@@ -257,16 +262,23 @@ local function reverse_intent(state, which, reversal, inverse)
       next_step = 1,
     }
   end
-  if not recoverable_rename_kinds[reversal.name]
-    or type(reversal.src) ~= 'string' or type(reversal.dst) ~= 'string' then
+  if
+    not recoverable_rename_kinds[reversal.name]
+    or type(reversal.src) ~= 'string'
+    or type(reversal.dst) ~= 'string'
+  then
     return nil
   end
   local source_identity, source_stat = M.action.fs.entry_identity(reversal.src)
   local destination_identity, destination_stat = M.action.fs.entry_identity(reversal.dst)
   if not destination_stat then destination_identity = nil end
-  if not source_stat or not source_identity or not source_identity.inode
+  if
+    not source_stat
+    or not source_identity
+    or not source_identity.inode
     or (destination_stat and (not destination_identity or not destination_identity.inode))
-    or (destination_identity and destination_identity.inode == source_identity.inode) then
+    or (destination_identity and destination_identity.inode == source_identity.inode)
+  then
     return nil
   end
 
@@ -295,8 +307,7 @@ local function write_reverse_intent(state, which, reversal, inverse)
   local transaction, plan_err = reverse_intent(state, which, reversal, inverse)
   if transaction == false then return false, plan_err end
   if not transaction then return nil end
-  local ok, err = log_mod.write_raw_atomic(state.transaction_path,
-    vim.json.encode(transaction) .. '\n')
+  local ok, err = log_mod.write_raw_atomic(state.transaction_path, vim.json.encode(transaction) .. '\n')
   if not ok then return false, err end
   return transaction
 end
@@ -321,8 +332,7 @@ local function write_paste_reverse_intent(state, which, reversal, inverse, sourc
     completed = {},
     pending = vim.NIL,
   }
-  local ok, err = log_mod.write_raw_atomic(state.transaction_path,
-    vim.json.encode(transaction) .. '\n')
+  local ok, err = log_mod.write_raw_atomic(state.transaction_path, vim.json.encode(transaction) .. '\n')
   if not ok then return false, err end
   return transaction
 end
@@ -330,8 +340,7 @@ end
 local function start_paste_reverse(state, which, reversal, source_record)
   local inverse, serialize_err = M.action.serialize(reversal)
   if not inverse then return false, serialize_err end
-  local transaction, transaction_err = write_paste_reverse_intent(
-    state, which, reversal, inverse, source_record)
+  local transaction, transaction_err = write_paste_reverse_intent(state, which, reversal, inverse, source_record)
   if transaction == false then return false, transaction_err end
   if not transaction then return nil end
   return {
@@ -344,9 +353,7 @@ end
 local function write_apply_intent(state, action, record)
   if action.name == 'g' then
     local steps, staging_count = M.action.plan_move_steps(action.actions)
-    if not steps then
-      return false, staging_count
-    end
+    if not steps then return false, staging_count end
     local next_undo = copy_lines(state.undo_lines)
     next_undo[#next_undo + 1] = record
     local transaction = {
@@ -361,8 +368,7 @@ local function write_apply_intent(state, action, record)
       staging_count = staging_count,
       next_step = 1,
     }
-    local ok, err = log_mod.write_raw_atomic(state.transaction_path,
-      vim.json.encode(transaction) .. '\n')
+    local ok, err = log_mod.write_raw_atomic(state.transaction_path, vim.json.encode(transaction) .. '\n')
     if not ok then return false, err end
     return transaction
   end
@@ -377,11 +383,8 @@ local function write_apply_intent(state, action, record)
   end
   local destination_identity, destination_stat = M.action.fs.entry_identity(destination)
   if not destination_stat then destination_identity = nil end
-  if destination_stat and (not destination_identity or not destination_identity.inode) then
-    return nil
-  end
-  if source_identity and destination_identity
-    and source_identity.inode == destination_identity.inode then
+  if destination_stat and (not destination_identity or not destination_identity.inode) then return nil end
+  if source_identity and destination_identity and source_identity.inode == destination_identity.inode then
     return nil
   end
   local next_undo = copy_lines(state.undo_lines)
@@ -400,8 +403,7 @@ local function write_apply_intent(state, action, record)
     source_identity = source_identity or vim.NIL,
     destination_identity = destination_identity or vim.NIL,
   }
-  local ok, err = log_mod.write_raw_atomic(state.transaction_path,
-    vim.json.encode(transaction) .. '\n')
+  local ok, err = log_mod.write_raw_atomic(state.transaction_path, vim.json.encode(transaction) .. '\n')
   if not ok then return false, err end
   return transaction
 end
@@ -409,30 +411,30 @@ end
 local function settle_failed_reverse(state, transaction)
   if not transaction then return true end
   if transaction.kind == 'unpaste' then
-    if transaction.phase == 'preflight' then
-      return clear_transaction(state.transaction_path)
-    end
+    if transaction.phase == 'preflight' then return clear_transaction(state.transaction_path) end
     local message = 'Unpaste is incomplete; recovery journal preserved at '
-      .. state.transaction_path .. '; inspect the affected paths before retrying'
+      .. state.transaction_path
+      .. '; inspect the affected paths before retrying'
     M.ui.notify('direct: ' .. message, vim.log.levels.ERROR)
     return nil, message
   end
   if transaction.steps then
-    if transaction.next_step == 1
-      and recovery.move_step_status(transaction.steps[1]) == 'not-started' then
+    if transaction.next_step == 1 and recovery.move_step_status(transaction.steps[1]) == 'not-started' then
       return clear_transaction(state.transaction_path)
     end
     local message = 'grouped filesystem action is incomplete; recovery journal preserved at '
-      .. state.transaction_path .. '; inspect the affected paths before retrying'
+      .. state.transaction_path
+      .. '; inspect the affected paths before retrying'
     M.ui.notify('direct: ' .. message, vim.log.levels.ERROR)
     return nil, message
   end
   local outcome = recovery.reverse_operation_status(transaction)
-  if outcome == 'not-started' then
-    return clear_transaction(state.transaction_path)
-  end
-  local message = 'failed ' .. transaction.direction .. ' left an ambiguous filesystem state; '
-    .. 'recovery journal preserved at ' .. state.transaction_path
+  if outcome == 'not-started' then return clear_transaction(state.transaction_path) end
+  local message = 'failed '
+    .. transaction.direction
+    .. ' left an ambiguous filesystem state; '
+    .. 'recovery journal preserved at '
+    .. state.transaction_path
     .. '; inspect the affected paths before retrying'
   M.ui.notify('direct: ' .. message, vim.log.levels.ERROR)
   return nil, message
@@ -454,24 +456,25 @@ local function recover_transaction(undo_path, redo_path, transaction_path)
   local transaction = parse_transaction(bytes)
   if not transaction then
     local message = 'history recovery journal is malformed; preserved at '
-      .. transaction_path .. ' for manual inspection'
+      .. transaction_path
+      .. ' for manual inspection'
     M.ui.notify('direct: ' .. message, vim.log.levels.ERROR)
     return nil, message
   end
   if transaction.kind == 'paste' then
-    return recovery.recover_paste_transaction(transaction, undo_path, redo_path,
-      transaction_path)
+    return recovery.recover_paste_transaction(transaction, undo_path, redo_path, transaction_path)
   end
   if transaction.kind == 'unpaste' then
-    if transaction.phase == 'preflight' then
-      return clear_transaction(transaction_path)
-    end
-    local finished, finish_err = recovery.finish_unpaste_transaction(transaction,
-      undo_path, redo_path, transaction_path)
+    if transaction.phase == 'preflight' then return clear_transaction(transaction_path) end
+    local finished, finish_err =
+      recovery.finish_unpaste_transaction(transaction, undo_path, redo_path, transaction_path)
     if not finished then
       local message = 'interrupted Unpaste is ambiguous or incomplete; '
-        .. 'recovery journal preserved at ' .. transaction_path .. ' ('
-        .. tostring(finish_err) .. ')'
+        .. 'recovery journal preserved at '
+        .. transaction_path
+        .. ' ('
+        .. tostring(finish_err)
+        .. ')'
       M.ui.notify('direct: ' .. message, vim.log.levels.ERROR)
       return nil, message
     end
@@ -482,46 +485,51 @@ local function recover_transaction(undo_path, redo_path, transaction_path)
       local completed, step_err = recovery.complete_move_steps(transaction, transaction_path)
       if not completed then
         local message = 'interrupted grouped move is ambiguous or incomplete; '
-          .. 'recovery journal preserved at ' .. transaction_path .. ' ('
-          .. tostring(step_err) .. ')'
+          .. 'recovery journal preserved at '
+          .. transaction_path
+          .. ' ('
+          .. tostring(step_err)
+          .. ')'
         M.ui.notify('direct: ' .. message, vim.log.levels.ERROR)
         return nil, message
       end
-      local committed, commit_err = commit_stacks(undo_path, redo_path,
-        transaction_path, transaction.undo, transaction.redo)
+      local committed, commit_err =
+        commit_stacks(undo_path, redo_path, transaction_path, transaction.undo, transaction.redo)
       if not committed then return nil, commit_err end
       return true
     end
     local status = recovery.reverse_operation_status(transaction)
     if status == 'ambiguous' then
-      local operation = transaction.kind == 'apply' and 'filesystem action'
-        or transaction.direction
-      local message = 'interrupted ' .. operation
-        .. ' is ambiguous; recovery journal preserved at ' .. transaction_path
+      local operation = transaction.kind == 'apply' and 'filesystem action' or transaction.direction
+      local message = 'interrupted '
+        .. operation
+        .. ' is ambiguous; recovery journal preserved at '
+        .. transaction_path
         .. '; inspect the affected paths before retrying'
       M.ui.notify('direct: ' .. message, vim.log.levels.ERROR)
       return nil, message
     end
     if status == 'not-started' then
       local action, action_err = M.action.deserialize(transaction.action)
-      if not action then
-        return nil, 'recovery journal action is invalid: ' .. tostring(action_err)
-      end
+      if not action then return nil, 'recovery journal action is invalid: ' .. tostring(action_err) end
       local called, result, execute_err = pcall(M.action.execute, action)
       if not called or result == nil then
         status = recovery.reverse_operation_status(transaction)
         if status == 'not-started' then return clear_transaction(transaction_path) end
-        local operation = transaction.kind == 'apply' and 'filesystem action'
-          or transaction.direction
-        local message = 'automatic ' .. operation .. ' recovery failed; journal '
-          .. 'preserved at ' .. transaction_path .. ' ('
-          .. tostring(called and execute_err or result) .. ')'
+        local operation = transaction.kind == 'apply' and 'filesystem action' or transaction.direction
+        local message = 'automatic '
+          .. operation
+          .. ' recovery failed; journal '
+          .. 'preserved at '
+          .. transaction_path
+          .. ' ('
+          .. tostring(called and execute_err or result)
+          .. ')'
         M.ui.notify('direct: ' .. message, vim.log.levels.ERROR)
         return nil, message
       end
     end
-    local ok, err = commit_stacks(undo_path, redo_path, transaction_path,
-      transaction.undo, transaction.redo)
+    local ok, err = commit_stacks(undo_path, redo_path, transaction_path, transaction.undo, transaction.redo)
     if not ok then return nil, err end
     return true
   end
@@ -533,8 +541,7 @@ local function recover_transaction(undo_path, redo_path, transaction_path)
 end
 
 commit_stacks = function(undo_path, redo_path, transaction_path, undo_lines, redo_lines)
-  local ok, err = log_mod.write_raw_atomic(transaction_path,
-    transaction_codec.stack_bytes(undo_lines, redo_lines))
+  local ok, err = log_mod.write_raw_atomic(transaction_path, transaction_codec.stack_bytes(undo_lines, redo_lines))
   if not ok then return nil, err end
   ok, err = write_stack(undo_path, undo_lines)
   if not ok then return nil, err end
@@ -555,7 +562,9 @@ recovery = require('direct.history.recovery').new({
 
 copy_lines = function(lines)
   local result = {}
-  for i, line in ipairs(lines) do result[i] = line end
+  for i, line in ipairs(lines) do
+    result[i] = line
+  end
   return result
 end
 
@@ -565,8 +574,7 @@ end
 local function preflight_locked(user_paths)
   local valid, validation_err = validate_user_paths(user_paths)
   if not valid then
-    M.ui.notify('direct: refusing operation: ' .. tostring(validation_err),
-      vim.log.levels.ERROR)
+    M.ui.notify('direct: refusing operation: ' .. tostring(validation_err), vim.log.levels.ERROR)
     return nil, validation_err
   end
 
@@ -582,9 +590,7 @@ local function preflight_locked(user_paths)
     { path = undo_path, state = undo_state },
     { path = redo_path, state = redo_state },
   }) do
-    if entry.state.state == 'preserve' then
-      return notify_preserved(entry.path, entry.state.reason)
-    end
+    if entry.state.state == 'preserve' then return notify_preserved(entry.path, entry.state.reason) end
   end
 
   local entries = {
@@ -603,7 +609,8 @@ local function preflight_locked(user_paths)
     local backup_entries = {}
     for _, entry in ipairs(entries) do
       backup_entries[#backup_entries + 1] = {
-        path = entry.path, bytes = entry.state.bytes,
+        path = entry.path,
+        bytes = entry.state.bytes,
       }
     end
     local backups, backup_err = backup_history_files(backup_entries)
@@ -617,14 +624,15 @@ local function preflight_locked(user_paths)
       return nil, err
     end
     undo_state.lines, redo_state.lines = { M.HEADER }, { M.HEADER }
-    local warning = #backups > 0
-      and ('; backup: ' .. table.concat(backups, ', ')) or ''
-    M.ui.notify('direct: recognized legacy history was backed up and reset' .. warning,
-      vim.log.levels.WARN)
+    local warning = #backups > 0 and ('; backup: ' .. table.concat(backups, ', ')) or ''
+    M.ui.notify('direct: recognized legacy history was backed up and reset' .. warning, vim.log.levels.WARN)
   else
     local initialized = false
     for _, entry in ipairs(entries) do
-      if entry.state.state == 'fresh' then initialized = true; break end
+      if entry.state.state == 'fresh' then
+        initialized = true
+        break
+      end
     end
     if initialized then
       local dir, dir_err = M.paths.ensure_data_dir('history')
@@ -659,13 +667,10 @@ function M.preflight(user_paths)
   -- no-side-effect contract for invalid caller paths.
   local valid, validation_err = validate_user_paths(user_paths)
   if not valid then
-    M.ui.notify('direct: refusing operation: ' .. tostring(validation_err),
-      vim.log.levels.ERROR)
+    M.ui.notify('direct: refusing operation: ' .. tostring(validation_err), vim.log.levels.ERROR)
     return nil, validation_err
   end
-  return M.with_lock(function()
-    return preflight_locked(user_paths)
-  end)
+  return M.with_lock(function() return preflight_locked(user_paths) end)
 end
 
 -- reset_history() intentionally replaces the undo and redo stacks, but first
@@ -683,9 +688,7 @@ local function reset_history_locked()
     { path = redo_path, state = classify_path(redo_path) },
   }
   for _, entry in ipairs(entries) do
-    if entry.state.read_error then
-      return notify_preserved(entry.path, entry.state.reason)
-    end
+    if entry.state.read_error then return notify_preserved(entry.path, entry.state.reason) end
   end
 
   local dir, dir_err = M.paths.ensure_data_dir('history')
@@ -696,7 +699,8 @@ local function reset_history_locked()
   local backup_entries = {}
   for _, entry in ipairs(entries) do
     backup_entries[#backup_entries + 1] = {
-      path = entry.path, bytes = entry.state.bytes,
+      path = entry.path,
+      bytes = entry.state.bytes,
     }
   end
   local backups, backup_err = backup_history_files(backup_entries)
@@ -711,18 +715,14 @@ local function reset_history_locked()
     return nil, reset_err
   end
   if #backups > 0 then
-    M.ui.notify('direct: history reset; backups: ' .. table.concat(backups, ', '),
-      vim.log.levels.INFO)
+    M.ui.notify('direct: history reset; backups: ' .. table.concat(backups, ', '), vim.log.levels.INFO)
   else
-    M.ui.notify('direct: history reset; no history files needed backup',
-      vim.log.levels.INFO)
+    M.ui.notify('direct: history reset; no history files needed backup', vim.log.levels.INFO)
   end
   return true, backups
 end
 
-function M.reset_history()
-  return M.with_lock(reset_history_locked)
-end
+function M.reset_history() return M.with_lock(reset_history_locked) end
 
 local function action_paths(action)
   local result = {}
@@ -730,25 +730,25 @@ local function action_paths(action)
     if type(current) ~= 'table' then return end
     if type(current.src) == 'string' then result[#result + 1] = current.src end
     if type(current.dst) == 'string' then result[#result + 1] = current.dst end
-    for _, member in ipairs(current.actions or {}) do visit(member) end
+    for _, member in ipairs(current.actions or {}) do
+      visit(member)
+    end
   end
-  if type(action) == 'table' then
-    visit(action)
-  end
+  if type(action) == 'table' then visit(action) end
   return result
 end
 
 local function trash_references(state)
   local references = {}
   local function add(path)
-    if type(path) == 'string' and path ~= '' then
-      references[M.paths.canonical(path)] = true
-    end
+    if type(path) == 'string' and path ~= '' then references[M.paths.canonical(path)] = true end
   end
   local function visit(action)
     if type(action) ~= 'table' then return end
     if action.name == 'g' or action.name == 'batch' then
-      for _, member in ipairs(action.actions or {}) do visit(member) end
+      for _, member in ipairs(action.actions or {}) do
+        visit(member)
+      end
     elseif action.name == 'rm' or action.name == 'rmdir' then
       add(action.dst)
     elseif action.name == 'rs' or action.name == 'rsdir' then
@@ -783,9 +783,7 @@ local function path_within(directory, candidate)
 end
 
 local function paths_overlap(a, b)
-  return a.key == b.key
-    or (a.directory and path_within(a, b))
-    or (b.directory and path_within(b, a))
+  return a.key == b.key or (a.directory and path_within(a, b)) or (b.directory and path_within(b, a))
 end
 
 local function add_affected(affected, entry)
@@ -802,8 +800,7 @@ local function action_path_entries(action)
   local result = {}
   local function visit(current)
     if type(current) ~= 'table' then return end
-    local directory = current.name == 'rmdir' or current.name == 'rsdir'
-      or current.name == 'mkdir'
+    local directory = current.name == 'rmdir' or current.name == 'rsdir' or current.name == 'mkdir'
     for _, field in ipairs({ 'src', 'dst' }) do
       local entry = history_path_entry(current[field], directory)
       if entry then result[#result + 1] = entry end
@@ -825,7 +822,9 @@ local function action_path_entries(action)
         if entry then result[#result + 1] = entry end
       end
     end
-    for _, member in ipairs(current.actions or {}) do visit(member) end
+    for _, member in ipairs(current.actions or {}) do
+      visit(member)
+    end
   end
   visit(action)
   return result
@@ -833,7 +832,9 @@ end
 
 local function filter_trash_records(lines, trash_paths)
   local records, affected, dropped = {}, {}, 0
-  for _, target in ipairs(trash_paths) do add_affected(affected, target) end
+  for _, target in ipairs(trash_paths) do
+    add_affected(affected, target)
+  end
   for index = 2, #(lines or {}) do
     local record = lines[index]
     records[#records + 1] = {
@@ -853,7 +854,10 @@ local function filter_trash_records(lines, trash_paths)
         local dependent = false
         for _, path in ipairs(record.paths) do
           for _, affected_path in ipairs(affected) do
-            if paths_overlap(path, affected_path) then dependent = true; break end
+            if paths_overlap(path, affected_path) then
+              dependent = true
+              break
+            end
           end
           if dependent then break end
         end
@@ -861,7 +865,9 @@ local function filter_trash_records(lines, trash_paths)
           record.dropped = true
           dropped = dropped + 1
           changed = true
-          for _, path in ipairs(record.paths) do add_affected(affected, path) end
+          for _, path in ipairs(record.paths) do
+            add_affected(affected, path)
+          end
         end
       end
     end
@@ -910,8 +916,8 @@ function M.apply_trash_history_plan(state, plan, persist)
     return nil, 'history.apply_trash_history_plan: state and plan are required'
   end
   if plan.changed and persist then
-    local committed, err = commit_stacks(state.undo_path, state.redo_path,
-      state.transaction_path, plan.undo_lines, plan.redo_lines)
+    local committed, err =
+      commit_stacks(state.undo_path, state.redo_path, state.transaction_path, plan.undo_lines, plan.redo_lines)
     if not committed then return nil, err end
   end
   state.undo_lines = plan.undo_lines
@@ -923,25 +929,21 @@ function M.apply_trash_history_plan(state, plan, persist)
 end
 
 function M.drop_top(which)
-  if which ~= 'undo' and which ~= 'redo' then
-    return nil, 'history.drop_top: expected "undo" or "redo"'
-  end
+  if which ~= 'undo' and which ~= 'redo' then return nil, 'history.drop_top: expected "undo" or "redo"' end
   return M.with_lock(function()
     local state, preflight_err = preflight_locked()
     if not state then return nil, preflight_err end
-    local lines = which == 'undo' and copy_lines(state.undo_lines)
-      or copy_lines(state.redo_lines)
+    local lines = which == 'undo' and copy_lines(state.undo_lines) or copy_lines(state.redo_lines)
     if #lines <= 1 then return nil, which .. ' history is empty' end
     local record = table.remove(lines)
     local undo_lines = which == 'undo' and lines or copy_lines(state.undo_lines)
     local redo_lines = which == 'redo' and lines or copy_lines(state.redo_lines)
-    local committed, commit_err = commit_stacks(state.undo_path, state.redo_path,
-      state.transaction_path, undo_lines, redo_lines)
+    local committed, commit_err =
+      commit_stacks(state.undo_path, state.redo_path, state.transaction_path, undo_lines, redo_lines)
     if not committed then return nil, commit_err end
     local dropped = M.action.deserialize(record)
     local summary = dropped and M.action.summarize({ dropped }) or 'unknown action'
-    M.ui.notify('direct: dropped the top ' .. which .. ' step: ' .. summary,
-      vim.log.levels.WARN)
+    M.ui.notify('direct: dropped the top ' .. which .. ' step: ' .. summary, vim.log.levels.WARN)
     return true, { which = which, record = record }
   end)
 end
@@ -949,23 +951,16 @@ end
 function M.complete_history(arg_lead, cmdline, cursor_pos)
   arg_lead, cmdline = tostring(arg_lead or ''), tostring(cmdline or '')
   local before = cmdline:sub(1, cursor_pos or #cmdline)
-  if arg_lead ~= '' and before:sub(-#arg_lead) == arg_lead then
-    before = before:sub(1, #before - #arg_lead)
-  end
+  if arg_lead ~= '' and before:sub(-#arg_lead) == arg_lead then before = before:sub(1, #before - #arg_lead) end
   local previous = before:match('(%S+)%s*$')
-  local candidates = previous == 'drop' and { 'undo', 'redo' }
-    or previous == 'DirectHistory' and { 'drop' } or {}
-  return vim.tbl_filter(function(candidate)
-    return candidate:sub(1, #arg_lead) == arg_lead
-  end, candidates)
+  local candidates = previous == 'drop' and { 'undo', 'redo' } or previous == 'DirectHistory' and { 'drop' } or {}
+  return vim.tbl_filter(function(candidate) return candidate:sub(1, #arg_lead) == arg_lead end, candidates)
 end
 
 -- Run a trash operation while holding the history lock and with a verified
 -- snapshot of every undo/redo reference to trash paths.
 function M.with_trash_references(callback)
-  if type(callback) ~= 'function' then
-    return nil, 'history.with_trash_references: callback is required'
-  end
+  if type(callback) ~= 'function' then return nil, 'history.with_trash_references: callback is required' end
   return M.with_lock(function()
     local state, err = preflight_locked()
     if not state then return nil, err end
@@ -1021,9 +1016,7 @@ end
 -- returned record can be passed back to _reverse_async as expected_record so a
 -- confirmation can never approve one action and execute a different one.
 function M.preview_reverse(which)
-  if which ~= 'undo' and which ~= 'redo' then
-    return nil, 'history.preview_reverse: expected undo or redo'
-  end
+  if which ~= 'undo' and which ~= 'redo' then return nil, 'history.preview_reverse: expected undo or redo' end
   local state, preflight_err = M.preflight()
   if not state then return nil, preflight_err end
   local lines = which == 'undo' and state.undo_lines or state.redo_lines
@@ -1044,12 +1037,8 @@ end
 -- durable intent journal supports restart recovery; keeping
 -- the lock across execute prevents it from replaying that intent concurrently.
 function M.apply(action, execute, preflight_guard)
-  if type(action) ~= 'table' then
-    return nil, 'history.apply: an action is required'
-  end
-  if type(execute) ~= 'function' then
-    return nil, 'history.apply: an executor is required'
-  end
+  if type(action) ~= 'table' then return nil, 'history.apply: an action is required' end
+  if type(execute) ~= 'function' then return nil, 'history.apply: an executor is required' end
   local record, serialize_err = M.action.serialize(action)
   if not record then return nil, serialize_err end
 
@@ -1075,29 +1064,29 @@ function M.apply(action, execute, preflight_guard)
       called, result, execute_err = pcall(execute)
     end
     if not called or result == nil then
-      local why = not called and tostring(result)
-        or tostring(execute_err or 'action failed')
+      local why = not called and tostring(result) or tostring(execute_err or 'action failed')
       if transaction then
         if transaction.steps then
-          if transaction.next_step == 1
-            and recovery.move_step_status(transaction.steps[1]) == 'not-started' then
+          if transaction.next_step == 1 and recovery.move_step_status(transaction.steps[1]) == 'not-started' then
             clear_transaction(state.transaction_path)
           else
-            why = why .. '; grouped move recovery journal preserved at '
-              .. state.transaction_path
+            why = why .. '; grouped move recovery journal preserved at ' .. state.transaction_path
           end
         else
           local status = recovery.reverse_operation_status(transaction)
           if status == 'not-started' then
             clear_transaction(state.transaction_path)
           elseif status == 'completed' then
-            local committed, commit_err = commit_stacks(state.undo_path,
-              state.redo_path, state.transaction_path,
-              transaction.undo, transaction.redo)
+            local committed, commit_err = commit_stacks(
+              state.undo_path,
+              state.redo_path,
+              state.transaction_path,
+              transaction.undo,
+              transaction.redo
+            )
             if not committed then why = why .. '; ' .. tostring(commit_err) end
           else
-            why = why .. '; filesystem outcome is ambiguous; recovery journal preserved at '
-              .. state.transaction_path
+            why = why .. '; filesystem outcome is ambiguous; recovery journal preserved at ' .. state.transaction_path
           end
         end
       end
@@ -1112,11 +1101,10 @@ function M.apply(action, execute, preflight_guard)
       undo_lines[#undo_lines + 1] = record
       redo_lines = { M.HEADER }
     end
-    local committed, commit_err = commit_stacks(state.undo_path, state.redo_path,
-      state.transaction_path, undo_lines, redo_lines)
+    local committed, commit_err =
+      commit_stacks(state.undo_path, state.redo_path, state.transaction_path, undo_lines, redo_lines)
     if not committed then
-      return nil, 'action completed but history commit is pending recovery: '
-        .. tostring(commit_err)
+      return nil, 'action completed but history commit is pending recovery: ' .. tostring(commit_err)
     end
     return result
   end)
@@ -1126,12 +1114,8 @@ end
 -- asynchronous filesystem executor. The callback receives result, err.
 function M.apply_async(action, execute_async, callback, preflight_guard)
   if type(action) ~= 'table' then return nil, 'history.apply_async: an action is required' end
-  if type(execute_async) ~= 'function' then
-    return nil, 'history.apply_async: an executor is required'
-  end
-  if type(callback) ~= 'function' then
-    return nil, 'history.apply_async: a completion callback is required'
-  end
+  if type(execute_async) ~= 'function' then return nil, 'history.apply_async: an executor is required' end
+  if type(callback) ~= 'function' then return nil, 'history.apply_async: a completion callback is required' end
   local record, serialize_err = M.action.serialize(action)
   if not record then return nil, serialize_err end
 
@@ -1140,9 +1124,10 @@ function M.apply_async(action, execute_async, callback, preflight_guard)
     notify_unavailable(acquire_err)
     return nil, acquire_err
   end
-  local called, state, preflight_err = xpcall(function()
-    return preflight_locked(action_paths(action))
-  end, debug.traceback)
+  local called, state, preflight_err = xpcall(
+    function() return preflight_locked(action_paths(action)) end,
+    debug.traceback
+  )
   if not called or not state then
     M.lock.release()
     return nil, called and preflight_err or state
@@ -1172,25 +1157,26 @@ function M.apply_async(action, execute_async, callback, preflight_guard)
       local why = tostring(execute_err or 'action failed')
       if transaction then
         if transaction.steps then
-          if transaction.next_step == 1
-            and recovery.move_step_status(transaction.steps[1]) == 'not-started' then
+          if transaction.next_step == 1 and recovery.move_step_status(transaction.steps[1]) == 'not-started' then
             clear_transaction(state.transaction_path)
           else
-            why = why .. '; grouped move recovery journal preserved at '
-              .. state.transaction_path
+            why = why .. '; grouped move recovery journal preserved at ' .. state.transaction_path
           end
         else
           local status = recovery.reverse_operation_status(transaction)
           if status == 'not-started' then
             clear_transaction(state.transaction_path)
           elseif status == 'completed' then
-            local committed, commit_err = commit_stacks(state.undo_path,
-              state.redo_path, state.transaction_path,
-              transaction.undo, transaction.redo)
+            local committed, commit_err = commit_stacks(
+              state.undo_path,
+              state.redo_path,
+              state.transaction_path,
+              transaction.undo,
+              transaction.redo
+            )
             if not committed then why = why .. '; ' .. tostring(commit_err) end
           else
-            why = why .. '; filesystem outcome is ambiguous; recovery journal preserved at '
-              .. state.transaction_path
+            why = why .. '; filesystem outcome is ambiguous; recovery journal preserved at ' .. state.transaction_path
           end
         end
       end
@@ -1204,12 +1190,11 @@ function M.apply_async(action, execute_async, callback, preflight_guard)
         undo_lines[#undo_lines + 1] = record
         redo_lines = { M.HEADER }
       end
-      local committed, commit_err = commit_stacks(state.undo_path, state.redo_path,
-        state.transaction_path, undo_lines, redo_lines)
+      local committed, commit_err =
+        commit_stacks(state.undo_path, state.redo_path, state.transaction_path, undo_lines, redo_lines)
       if not committed then
         final_result = nil
-        final_err = 'action completed but history commit is pending recovery: '
-          .. tostring(commit_err)
+        final_err = 'action completed but history commit is pending recovery: ' .. tostring(commit_err)
       end
     end
 
@@ -1218,25 +1203,28 @@ function M.apply_async(action, execute_async, callback, preflight_guard)
       notify_unavailable('could not release history lock: ' .. tostring(release_err))
       if final_result ~= nil then
         final_result = nil
-        final_err = 'action completed but the history lock could not be released: '
-          .. tostring(release_err)
+        final_err = 'action completed but the history lock could not be released: ' .. tostring(release_err)
       end
     end
     local callback_ok, callback_err = pcall(callback, final_result, final_err)
-    if not callback_ok then
-      M.ui.report_error('finish asynchronous history action', callback_err)
-    end
+    if not callback_ok then M.ui.report_error('finish asynchronous history action', callback_err) end
   end
 
   if transaction and transaction.steps then
-    recovery.complete_move_steps_async(transaction, state.transaction_path,
-      function(result, execute_err) finish(result, execute_err) end)
+    recovery.complete_move_steps_async(
+      transaction,
+      state.transaction_path,
+      function(result, execute_err) finish(result, execute_err) end
+    )
     return true
   end
 
   local started, start_err = pcall(execute_async, function(ok, result, execute_err)
-    if ok and result ~= nil then finish(result, nil)
-    else finish(nil, execute_err or result or 'action failed') end
+    if ok and result ~= nil then
+      finish(result, nil)
+    else
+      finish(nil, execute_err or result or 'action failed')
+    end
   end)
   if not started then finish(nil, start_err) end
   return true
@@ -1260,35 +1248,26 @@ local write_paste_journal = paste_helpers.write_paste_journal
 -- log(action) appends one action and clears redo through a recoverable paired
 -- stack transaction.
 local function log_locked(action)
-  if type(action) ~= 'table' then
-    return nil, 'history.log: an action is required'
-  end
+  if type(action) ~= 'table' then return nil, 'history.log: an action is required' end
   local record, serialize_err = M.action.serialize(action)
   if not record then
-    M.ui.notify('direct: cannot write history: ' .. tostring(serialize_err),
-      vim.log.levels.ERROR)
+    M.ui.notify('direct: cannot write history: ' .. tostring(serialize_err), vim.log.levels.ERROR)
     return nil, serialize_err
   end
   local state, preflight_err = M.preflight(action_paths(action))
-  if not state then
-    return nil, preflight_err
-  end
+  if not state then return nil, preflight_err end
   local undo_lines = copy_lines(state.undo_lines)
   undo_lines[#undo_lines + 1] = record
-  local ok, err = commit_stacks(state.undo_path, state.redo_path,
-    state.transaction_path, undo_lines, { M.HEADER })
+  local ok, err = commit_stacks(state.undo_path, state.redo_path, state.transaction_path, undo_lines, { M.HEADER })
   if not ok then
-    M.ui.notify('direct: cannot write history: ' .. tostring(err),
-      vim.log.levels.ERROR)
+    M.ui.notify('direct: cannot write history: ' .. tostring(err), vim.log.levels.ERROR)
     return nil, err
   end
   return true
 end
 
 function M.log(action)
-  return M.with_lock(function()
-    return log_locked(action)
-  end)
+  return M.with_lock(function() return log_locked(action) end)
 end
 
 -- Replace the most recently logged independent actions with one durable batch
@@ -1312,9 +1291,7 @@ function M.combine_recent(actions, stack_name)
     local source = stack_name == 'undo' and state.undo_lines or state.redo_lines
     local next_source = copy_lines(source)
     local first = #next_source - #actions + 1
-    if first <= 1 then
-      return nil, 'the recent history entries changed before they could be grouped'
-    end
+    if first <= 1 then return nil, 'the recent history entries changed before they could be grouped' end
     local records = {}
     for index, action in ipairs(actions) do
       local record, err = M.action.serialize(action)
@@ -1324,12 +1301,14 @@ function M.combine_recent(actions, stack_name)
         return nil, 'the recent history entries changed before they could be grouped'
       end
     end
-    for _ = 1, #records do table.remove(next_source) end
+    for _ = 1, #records do
+      table.remove(next_source)
+    end
     next_source[#next_source + 1] = batch_record
     local next_undo = stack_name == 'undo' and next_source or copy_lines(state.undo_lines)
     local next_redo = stack_name == 'redo' and next_source or copy_lines(state.redo_lines)
-    local committed, commit_err = commit_stacks(state.undo_path, state.redo_path,
-      state.transaction_path, next_undo, next_redo)
+    local committed, commit_err =
+      commit_stacks(state.undo_path, state.redo_path, state.transaction_path, next_undo, next_redo)
     if not committed then return nil, commit_err end
     return true
   end)

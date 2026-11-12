@@ -34,16 +34,14 @@ local function workspace_roots(client)
   end
   -- Workspace folders are the authoritative coverage when present. root_dir is
   -- only the compatibility fallback for clients that do not expose folders.
-  if #roots == 0 and type(client.root_dir) == 'string' then
-    roots[#roots + 1] = client.root_dir
-  end
+  if #roots == 0 and type(client.root_dir) == 'string' then roots[#roots + 1] = client.root_dir end
   return roots
 end
 
-local function workspace_paths(client, paths)
+local function workspace_paths(client, candidate_paths)
   local roots = workspace_roots(client)
   local result = {}
-  for _, path in ipairs(paths) do
+  for _, path in ipairs(candidate_paths) do
     for _, root in ipairs(roots) do
       if under(path, root) then
         result[#result + 1] = path
@@ -54,23 +52,18 @@ local function workspace_paths(client, paths)
   return result
 end
 
-local function operation_field(method)
-  return (method:match('([^/]+)$') or ''):gsub('Files$', '')
-end
+local function operation_field(method) return (method:match('([^/]+)$') or ''):gsub('Files$', '') end
 
 local function supports(client, method)
   local field = operation_field(method)
-  local workspace = client.server_capabilities
-    and client.server_capabilities.workspace
+  local workspace = client.server_capabilities and client.server_capabilities.workspace
   local operations = workspace and workspace.fileOperations
   local static = operations and operations[field]
   if static ~= nil and static ~= false then return true end
   local dynamic = client.dynamic_capabilities
   if dynamic and type(dynamic.get) == 'function' then
     local ok, registrations = pcall(dynamic.get, dynamic, method)
-    if ok and type(registrations) == 'table' and next(registrations) ~= nil then
-      return true
-    end
+    if ok and type(registrations) == 'table' and next(registrations) ~= nil then return true end
   end
   return false
 end
@@ -85,9 +78,7 @@ end
 local function glob_match(glob, path, root)
   if type(glob) ~= 'string' or glob == '' then return true end
   local relative = path
-  if root and under(path, root) then
-    relative = path:sub(#canonical(root):gsub('/+$', '') + 2)
-  end
+  if root and under(path, root) then relative = path:sub(#canonical(root):gsub('/+$', '') + 2) end
   local ok, matcher = pcall(vim.glob.to_lpeg, glob)
   if not ok or not matcher then return false end
   return matcher:match(relative) ~= nil or matcher:match(path) ~= nil
@@ -114,9 +105,7 @@ local function filters_for(client, method)
     and client.server_capabilities.workspace
     and client.server_capabilities.workspace.fileOperations
   local capability = operations and operations[field]
-  if type(capability) == 'table' and type(capability.filters) == 'table' then
-    return capability.filters
-  end
+  if type(capability) == 'table' and type(capability.filters) == 'table' then return capability.filters end
   -- Dynamic file-operation registrations are available through
   -- dynamic_capabilities:get on current Neovim; older clients may expose the
   -- registration table directly.
@@ -131,9 +120,12 @@ local function filters_for(client, method)
     local result, has_filters = {}, false
     for _, registration in pairs(registrations) do
       local options = type(registration) == 'table' and registration.registerOptions
-      if type(registration) == 'table' and registration.method == method
+      if
+        type(registration) == 'table'
+        and registration.method == method
         and type(options) == 'table'
-        and type(options.filters) == 'table' then
+        and type(options.filters) == 'table'
+      then
         -- An explicitly empty array denies every path; only missing filter
         -- information falls through to the protocol's unrestricted behavior.
         has_filters = true
@@ -147,14 +139,17 @@ local function filters_for(client, method)
   return nil
 end
 
-local function filter_paths(client, method, paths, kinds)
+local function filter_paths(client, method, candidate_paths, kinds)
   local roots = workspace_roots(client)
   local filters = filters_for(client, method)
   local result = {}
-  for _, path in ipairs(paths) do
+  for _, path in ipairs(candidate_paths) do
     local matches = filters == nil
     for _, filter in ipairs(filters or {}) do
-      if filter_matches(filter, path, roots, kinds) then matches = true; break end
+      if filter_matches(filter, path, roots, kinds) then
+        matches = true
+        break
+      end
     end
     if matches then result[#result + 1] = canonical(path) end
   end
@@ -169,9 +164,9 @@ local function client_list()
   return {}
 end
 
-function M.clients(method, paths, kinds)
+function M.clients(method, candidate_paths, kinds)
   local full_paths = {}
-  for _, path in ipairs(paths or {}) do
+  for _, path in ipairs(candidate_paths or {}) do
     local full = canonical(path)
     if full then full_paths[#full_paths + 1] = full end
   end
@@ -183,7 +178,9 @@ function M.clients(method, paths, kinds)
         local filtered = filter_paths(client, method, scoped, kinds)
         if #filtered > 0 then
           selected[#selected + 1] = {
-            client = client, paths = filtered, workspace_paths = scoped,
+            client = client,
+            paths = filtered,
+            workspace_paths = scoped,
           }
         end
       end
@@ -193,13 +190,17 @@ function M.clients(method, paths, kinds)
   return selected
 end
 
-function M.notify(kind, paths, pairs, kinds)
+function M.notify(kind, candidate_paths, pairs, kinds)
   local method = methods[kind]
   if not method then return end
   local entries = {}
-  for _, path in ipairs(paths or {}) do entries[#entries + 1] = canonical(path) end
+  for _, path in ipairs(candidate_paths or {}) do
+    entries[#entries + 1] = canonical(path)
+  end
   local involved = {}
-  for _, path in ipairs(paths or {}) do involved[#involved + 1] = path end
+  for _, path in ipairs(candidate_paths or {}) do
+    involved[#involved + 1] = path
+  end
   for _, pair in ipairs(pairs or {}) do
     involved[#involved + 1] = pair.src
     involved[#involved + 1] = pair.dst
@@ -207,23 +208,26 @@ function M.notify(kind, paths, pairs, kinds)
   for _, selected in ipairs(M.clients(method, involved, kinds)) do
     local allowed = {}
     local filterset = {}
-    for _, path in ipairs(selected.paths) do filterset[path] = true end
+    for _, path in ipairs(selected.paths) do
+      filterset[path] = true
+    end
     local workspace_set = {}
-    for _, path in ipairs(selected.workspace_paths) do workspace_set[path] = true end
+    for _, path in ipairs(selected.workspace_paths) do
+      workspace_set[path] = true
+    end
     if kind == 'didRenameFiles' then
       for _, pair in ipairs(pairs or {}) do
         local src, dst = canonical(pair.src), canonical(pair.dst)
-        if workspace_set[src] and workspace_set[dst]
-          and (filterset[src] or filterset[dst]) then
-          allowed[#allowed + 1] = { oldUri = vim.uri_from_fname(canonical(pair.src)),
-            newUri = vim.uri_from_fname(canonical(pair.dst)) }
+        if workspace_set[src] and workspace_set[dst] and (filterset[src] or filterset[dst]) then
+          allowed[#allowed + 1] = {
+            oldUri = vim.uri_from_fname(canonical(pair.src)),
+            newUri = vim.uri_from_fname(canonical(pair.dst)),
+          }
         end
       end
     else
       for _, path in ipairs(entries) do
-        if filterset[canonical(path)] then
-          allowed[#allowed + 1] = { uri = vim.uri_from_fname(canonical(path)) }
-        end
+        if filterset[canonical(path)] then allowed[#allowed + 1] = { uri = vim.uri_from_fname(canonical(path)) } end
       end
     end
     if #allowed > 0 and type(selected.client.notify) == 'function' then
@@ -231,8 +235,10 @@ function M.notify(kind, paths, pairs, kinds)
       local ok, err = pcall(selected.client.notify, selected.client, method, params)
       if not ok then
         require('direct.ui').report_error(
-          'notify the language server about ' .. operation_field(method), err,
-          vim.log.levels.WARN)
+          'notify the language server about ' .. operation_field(method),
+          err,
+          vim.log.levels.WARN
+        )
       end
     end
   end
@@ -286,28 +292,24 @@ local function resource_expectations(edit)
       if change.kind == 'rename' then
         local old_ok, old_path = pcall(vim.uri_to_fname, change.oldUri)
         local new_ok, new_path = pcall(vim.uri_to_fname, change.newUri)
-        if not old_ok or not new_ok then
-          return nil, ('documentChanges[%d] has an invalid rename URI'):format(index)
-        end
+        if not old_ok or not new_ok then return nil, ('documentChanges[%d] has an invalid rename URI'):format(index) end
         old_path, new_path = canonical(old_path), canonical(new_path)
         local options = change.options or {}
         if old_path ~= new_path then
           local old_type, new_type = state(old_path), state(new_path)
           if old_type == false then
-            return nil, ('documentChanges[%d] rename source is missing: %s')
-              :format(index, old_path)
+            return nil, ('documentChanges[%d] rename source is missing: %s'):format(index, old_path)
           end
           if new_type ~= false then
             -- util.rename skips occupied targets unless overwrite is set. Even
             -- when ignoreIfExists was requested, an unapplied edit must not be
             -- mistaken for approval to continue with Direct's own rename.
             if options.overwrite and options.ignoreIfExists then
-              return nil, ('documentChanges[%d] rename has conflicting overwrite and ignoreIfExists options')
-                :format(index)
+              return nil,
+                ('documentChanges[%d] rename has conflicting overwrite and ignoreIfExists options'):format(index)
             end
             if not options.overwrite or options.ignoreIfExists then
-              return nil, ('documentChanges[%d] rename destination is occupied: %s')
-                :format(index, new_path)
+              return nil, ('documentChanges[%d] rename destination is occupied: %s'):format(index, new_path)
             end
           end
           local old_size, old_verify_size = sizes[old_path], verify_sizes[old_path]
@@ -319,9 +321,7 @@ local function resource_expectations(edit)
         end
       elseif change.kind == 'create' or change.kind == 'delete' then
         local ok, path = pcall(vim.uri_to_fname, change.uri)
-        if not ok then
-          return nil, ('documentChanges[%d] has an invalid resource URI'):format(index)
-        end
+        if not ok then return nil, ('documentChanges[%d] has an invalid resource URI'):format(index) end
         path = canonical(path)
         if change.kind == 'create' then
           local options = change.options or {}
@@ -331,12 +331,14 @@ local function resource_expectations(edit)
             -- are present; ignoreIfExists applies only without overwrite.
             if options.overwrite then
               if current ~= 'file' then
-                return nil, ('documentChanges[%d] CreateFile overwrite target is not a file: %s')
-                  :format(index, path)
+                return nil, ('documentChanges[%d] CreateFile overwrite target is not a file: %s'):format(index, path)
               end
               if sizes[path] == 0 then
-                return nil, ('documentChanges[%d] CreateFile overwrite of an already-empty file cannot be verified with Neovim apply_workspace_edit: %s')
-                  :format(index, path)
+                return nil,
+                  (
+                    'documentChanges[%d] CreateFile overwrite of an already-empty file '
+                    .. 'cannot be verified with Neovim apply_workspace_edit: %s'
+                  ):format(index, path)
               end
               states[path] = 'file'
               sizes[path], verify_sizes[path] = 0, true
@@ -346,8 +348,7 @@ local function resource_expectations(edit)
               -- type and verify that it remains unchanged after application.
               remember(path)
             else
-              return nil, ('documentChanges[%d] CreateFile target already exists: %s')
-                :format(index, path)
+              return nil, ('documentChanges[%d] CreateFile target already exists: %s'):format(index, path)
             end
           else
             states[path] = 'file'
@@ -358,8 +359,7 @@ local function resource_expectations(edit)
           local options = change.options or {}
           local current = state(path)
           if current == false and options.ignoreIfNotExists ~= true then
-            return nil, ('documentChanges[%d] DeleteFile target does not exist: %s')
-              :format(index, path)
+            return nil, ('documentChanges[%d] DeleteFile target does not exist: %s'):format(index, path)
           end
           if current ~= false then
             states[path], sizes[path], verify_sizes[path] = false, false, nil
@@ -376,12 +376,20 @@ local function resource_expectations(edit)
       local stat = vim.uv.fs_lstat(path)
       local actual_type = stat and stat.type or false
       if actual_type ~= expectation.type then
-        return nil, ('resource operation postcondition failed for %s (expected %s, got %s)')
-          :format(path, tostring(expectation.type), tostring(actual_type))
+        return nil,
+          ('resource operation postcondition failed for %s (expected %s, got %s)'):format(
+            path,
+            tostring(expectation.type),
+            tostring(actual_type)
+          )
       end
       if expectation.size ~= nil and (not stat or stat.size ~= expectation.size) then
-        return nil, ('resource operation postcondition failed for %s (expected file size %d, got %s)')
-          :format(path, expectation.size, tostring(stat and stat.size or 'missing'))
+        return nil,
+          ('resource operation postcondition failed for %s (expected file size %d, got %s)'):format(
+            path,
+            expectation.size,
+            tostring(stat and stat.size or 'missing')
+          )
       end
     end
     return true
@@ -392,13 +400,15 @@ local function stale_document_edit(edit)
   for index, change in ipairs(edit and edit.documentChanges or {}) do
     local document = type(change) == 'table' and change.textDocument
     local version = document and document.version
-    if document and version ~= nil and version ~= vim.NIL and version > 0
-      and not (index and index > 1) then
+    if document and version ~= nil and version ~= vim.NIL and version > 0 and not (index and index > 1) then
       local ok, bufnr = pcall(vim.uri_to_bufnr, document.uri)
       local current = ok and vim.lsp.util.buf_versions[bufnr] or nil
       if type(current) == 'number' and current > version then
-        return ('documentChanges[%d] is stale (buffer version %d exceeds edit version %d)')
-          :format(index, current, version)
+        return ('documentChanges[%d] is stale (buffer version %d exceeds edit version %d)'):format(
+          index,
+          current,
+          version
+        )
       end
     end
   end
@@ -413,9 +423,7 @@ local function confirm_workspace_edit(edit)
   local groups = {}
   if edit.documentChanges then
     for _, change in ipairs(edit.documentChanges) do
-      if type(change) == 'table' and not change.kind then
-        groups[#groups + 1] = change.edits or {}
-      end
+      if type(change) == 'table' and not change.kind then groups[#groups + 1] = change.edits or {} end
     end
   else
     for _, edits in pairs(edit.changes or {}) do
@@ -434,9 +442,7 @@ local function confirm_workspace_edit(edit)
         if type(annotation) ~= 'table' then
           return nil, 'annotated WorkspaceEdit is missing change annotation: ' .. tostring(id)
         end
-        if annotation.needsConfirmation then
-          confirmations[id] = (confirmations[id] or 0) + 1
-        end
+        if annotation.needsConfirmation then confirmations[id] = (confirmations[id] or 0) + 1 end
       end
     end
 
@@ -451,7 +457,9 @@ local function confirm_workspace_edit(edit)
       if vim.fn.confirm(table.concat(message, '\n'), '&Yes\n&No', 1, 'Question') ~= 1 then
         return false, 'WorkspaceEdit changes were not confirmed'
       end
-      for id in pairs(confirmations) do approved[id] = true end
+      for id in pairs(confirmations) do
+        approved[id] = true
+      end
     end
   end
 
@@ -464,16 +472,18 @@ local function confirm_workspace_edit(edit)
 end
 
 function M.will_rename(files, callback, warn, is_active)
-  local paths = {}
+  local rename_paths = {}
   for _, file in ipairs(files or {}) do
-    paths[#paths + 1] = vim.uri_to_fname(file.oldUri)
-    paths[#paths + 1] = vim.uri_to_fname(file.newUri)
+    rename_paths[#rename_paths + 1] = vim.uri_to_fname(file.oldUri)
+    rename_paths[#rename_paths + 1] = vim.uri_to_fname(file.newUri)
   end
-  local selected_clients = M.clients(methods.willRenameFiles, paths)
+  local selected_clients = M.clients(methods.willRenameFiles, rename_paths)
   local clients = {}
   for _, selected in ipairs(selected_clients) do
     local filterset, workspace_set, client_files = {}, {}, {}
-    for _, path in ipairs(selected.paths) do filterset[canonical(path)] = true end
+    for _, path in ipairs(selected.paths) do
+      filterset[canonical(path)] = true
+    end
     for _, path in ipairs(selected.workspace_paths) do
       workspace_set[canonical(path)] = true
     end
@@ -481,16 +491,22 @@ function M.will_rename(files, callback, warn, is_active)
       local ok_src, src = pcall(vim.uri_to_fname, file.oldUri)
       local ok_dst, dst = pcall(vim.uri_to_fname, file.newUri)
       local src_path, dst_path = ok_src and canonical(src), ok_dst and canonical(dst)
-      if src_path and dst_path and workspace_set[src_path] and workspace_set[dst_path]
-        and (filterset[src_path] or filterset[dst_path]) then
+      if
+        src_path
+        and dst_path
+        and workspace_set[src_path]
+        and workspace_set[dst_path]
+        and (filterset[src_path] or filterset[dst_path])
+      then
         client_files[#client_files + 1] = file
       end
     end
-    if #client_files > 0 then
-      clients[#clients + 1] = { client = selected.client, files = client_files }
-    end
+    if #client_files > 0 then clients[#clients + 1] = { client = selected.client, files = client_files } end
   end
-  if #clients == 0 then callback(true, {}); return false end
+  if #clients == 0 then
+    callback(true, {})
+    return false
+  end
   local pending, responses = #clients, {}
   local settled = false
   local cancelled = false
@@ -509,9 +525,7 @@ function M.will_rename(files, callback, warn, is_active)
     cancel_requests()
     return true
   end
-  local function active()
-    return not cancelled and (not is_active or is_active())
-  end
+  local function active() return not cancelled and (not is_active or is_active()) end
   local function deliver(ok, value)
     if settled or not active() then
       if not settled then cancel() end
@@ -525,7 +539,9 @@ function M.will_rename(files, callback, warn, is_active)
   local function warning(client, reason)
     local client_id = tostring(client and client.id or 'unknown')
     local message = require('direct.ui').error_message(
-      'check with the language server before renaming (client ' .. client_id .. ')', reason)
+      'check with the language server before renaming (client ' .. client_id .. ')',
+      reason
+    )
     if warn then
       pcall(warn, message)
     else
@@ -534,14 +550,20 @@ function M.will_rename(files, callback, warn, is_active)
   end
   local function finish()
     if settled or pending > 0 then return end
-    if not active() then cancel(); return end
+    if not active() then
+      cancel()
+      return
+    end
     local processing_client
     local ok, outcome, value = xpcall(function()
       table.sort(responses, function(a, b) return (a.client.id or 0) < (b.client.id or 0) end)
       local suppressed = {}
       for _, response in ipairs(responses) do
         processing_client = response.client
-        if not active() then cancel(); return nil end
+        if not active() then
+          cancel()
+          return nil
+        end
         if response.edit ~= nil then
           local verify, preflight_err = resource_expectations(response.edit)
           if not verify then return false, tostring(preflight_err) end
@@ -555,15 +577,16 @@ function M.will_rename(files, callback, warn, is_active)
               cancel()
               return nil
             end
-            return vim.lsp.util.apply_workspace_edit(edit,
-              response.client.offset_encoding or 'utf-16')
+            return vim.lsp.util.apply_workspace_edit(edit, response.client.offset_encoding or 'utf-16')
           end)
           if settled then return nil end
           if not applied then return false, tostring(result) end
           if result == false then return false, 'workspace edit application failed' end
           local verified, verify_err = verify()
           if not verified then return false, tostring(verify_err) end
-          for path in pairs(resource_paths(response.edit)) do suppressed[path] = true end
+          for path in pairs(resource_paths(response.edit)) do
+            suppressed[path] = true
+          end
         end
       end
       return true, suppressed
@@ -594,8 +617,13 @@ function M.will_rename(files, callback, warn, is_active)
     if type(client.request) ~= 'function' then
       complete(index, 'client has no request method')
     else
-      local ok, started, request_id = pcall(client.request, client, methods.willRenameFiles,
-        { files = vim.deepcopy(selected.files) }, function(err, edit) complete(index, err, edit) end)
+      local ok, started, request_id = pcall(
+        client.request,
+        client,
+        methods.willRenameFiles,
+        { files = vim.deepcopy(selected.files) },
+        function(err, edit) complete(index, err, edit) end
+      )
       if ok and started ~= false and started ~= nil then
         local request = requests[index]
         if request and not response.done and not settled then request.id = request_id end
@@ -620,9 +648,12 @@ end
 local function notify_safely(...)
   local ok, err = pcall(M.notify, ...)
   if not ok then
-    pcall(require('direct.ui').report_error,
-      'send file-operation notifications to language servers', err,
-      vim.log.levels.WARN)
+    pcall(
+      require('direct.ui').report_error,
+      'send file-operation notifications to language servers',
+      err,
+      vim.log.levels.WARN
+    )
   end
 end
 
@@ -635,7 +666,9 @@ function M.emit_actions(actions, applied, suppressed)
   local function add(action)
     if action.name == 'g' then
       local completed = action._completed_actions or action.actions or {}
-      for _, member in ipairs(completed) do add(member) end
+      for _, member in ipairs(completed) do
+        add(member)
+      end
     elseif action.name == 'touch' or action.name == 'mkdir' then
       creates[#creates + 1] = action.dst
       mark(action.dst, action.name == 'mkdir' and 'folder' or 'file')
@@ -674,19 +707,18 @@ function M.emit_actions(actions, applied, suppressed)
       or action._completed_renames and #action._completed_renames > 0
     if applied == nil or applied[index] or partial then add(action) end
   end
-  local function keep(path)
-    return not (suppressed and suppressed[canonical(path)])
-  end
+  local function keep(path) return not (suppressed and suppressed[canonical(path)]) end
   local function filter(list)
     local result = {}
-    for _, path in ipairs(list) do if keep(path) then result[#result + 1] = path end end
+    for _, path in ipairs(list) do
+      if keep(path) then result[#result + 1] = path end
+    end
     return result
   end
   creates, deletes = filter(creates), filter(deletes)
   local filtered_renames = {}
   for _, pair in ipairs(renames) do
-    if not (suppressed and suppressed[canonical(pair.src)]
-        and suppressed[canonical(pair.dst)]) then
+    if not (suppressed and suppressed[canonical(pair.src)] and suppressed[canonical(pair.dst)]) then
       filtered_renames[#filtered_renames + 1] = pair
     end
   end

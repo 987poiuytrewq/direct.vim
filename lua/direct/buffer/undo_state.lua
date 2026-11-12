@@ -16,9 +16,7 @@ return function(deps)
   local read_with_snapshot = deps.read_with_snapshot
   local entry_path = deps.entry_path
   local highlight = deps.highlight
-  local refresh_highlights = deps.refresh_highlights or function(bufnr)
-    highlight.render(bufnr)
-  end
+  local refresh_highlights = deps.refresh_highlights or function(bufnr) highlight.render(bufnr) end
   local refresh_icons = deps.refresh_icons
   local remove_expanded_subtree = deps.remove_expanded_subtree
   local indent_size = deps.indent_size
@@ -34,9 +32,11 @@ return function(deps)
       end
     end
     if parent_row == nil or lines[parent_row + 1] ~= parent.text then return false end
-    if type(parent.path) ~= 'string'
+    if
+      type(parent.path) ~= 'string'
       or vim.fs.normalize(parent.path) ~= vim.fs.normalize(materialization.parent_path)
-      or not fs.path_identities_match(path_identity(parent.path), materialization.parent_identity) then
+      or not fs.path_identities_match(path_identity(parent.path), materialization.parent_identity)
+    then
       return false
     end
 
@@ -55,9 +55,7 @@ return function(deps)
       local ignored = ignore_set(parent.path, materialization.wildignore)
       listed = read(parent.path, ignored)
     end
-    if not listed or not same_lines(listed, materialization.listing_lines or {}) then
-      return false
-    end
+    if not listed or not same_lines(listed, materialization.listing_lines or {}) then return false end
 
     local children = vim.deepcopy(materialization.children_snapshot or {})
     local child_ids, expected_rows = {}, {}
@@ -65,15 +63,19 @@ return function(deps)
     for offset, child in ipairs(children) do
       local expected_path = entry_path(parent.path, child.name)
       local expected_row = parent_row + offset
-      if child.kind ~= 'child' or child.parent ~= parent.id
-        or type(child.order) ~= 'number' or child.order <= previous_order
+      if
+        child.kind ~= 'child'
+        or child.parent ~= parent.id
+        or type(child.order) ~= 'number'
+        or child.order <= previous_order
         or child.depth ~= (parent.depth or 0) + 1
         or child.path ~= expected_path
         or child.text ~= string.rep(' ', indent_size() * child.depth) .. child.name
         or lines[expected_row + 1] ~= child.text
         or not child.identity
         or not fs.path_identities_match(path_identity(child.path), child.identity)
-        or child_ids[child.id] then
+        or child_ids[child.id]
+      then
         return false
       end
       previous_order = child.order
@@ -85,8 +87,7 @@ return function(deps)
     -- reconciliation. Any surviving marks must still be unique and in the exact
     -- rows implied by this materialization; no row is adopted by spelling alone.
     local seen_ids, seen_rows = {}, {}
-    for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1,
-        { details = true })) do
+    for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1, { details = true })) do
       local id, row, details = mark[1], mark[2], mark[4] or {}
       if seen_ids[id] then return false end
       seen_ids[id] = true
@@ -94,8 +95,7 @@ return function(deps)
         if seen_rows[row] then return false end
         seen_rows[row] = id
         if child_ids[id] and row ~= expected_rows[id] then return false end
-        if row >= parent_row + 1 and row <= parent_row + #children
-          and not child_ids[id] then return false end
+        if row >= parent_row + 1 and row <= parent_row + #children and not child_ids[id] then return false end
       end
     end
 
@@ -114,7 +114,9 @@ return function(deps)
       local ok = pcall(set_row_mark, bufnr, expected_rows[child.id], child.id)
       if not ok then
         state.expanded[parent.id] = nil
-        for _, restored in ipairs(children) do state.rows[restored.id] = nil end
+        for _, restored in ipairs(children) do
+          state.rows[restored.id] = nil
+        end
         return false
       end
     end
@@ -140,18 +142,21 @@ return function(deps)
     for index, item in ipairs(display.rows or {}) do
       local row = index - 1
       local rec = item.record
-      if item.row ~= row or item.id == nil or records[item.id]
+      if
+        item.row ~= row
+        or item.id == nil
+        or records[item.id]
         or item.text ~= lines[index]
-        or not rec or rec.id ~= item.id or type(rec.path) ~= 'string'
+        or not rec
+        or rec.id ~= item.id
+        or type(rec.path) ~= 'string'
         or not item.identity
-        or not fs.path_identities_match(path_identity(rec.path), item.identity) then
+        or not fs.path_identities_match(path_identity(rec.path), item.identity)
+      then
         return false
       end
       if rec.kind == 'child' then
-        if not rec.identity
-          or not fs.path_identities_match(path_identity(rec.path), rec.identity) then
-          return false
-        end
+        if not rec.identity or not fs.path_identities_match(path_identity(rec.path), rec.identity) then return false end
       elseif rec.kind ~= 'root' then
         return false
       end
@@ -162,9 +167,12 @@ return function(deps)
     if #expected_order ~= #lines then return false end
 
     local parent_row = expected_rows[parent.id]
-    if parent_row == nil or lines[parent_row + 1] ~= snapshot.parent_text
+    if
+      parent_row == nil
+      or lines[parent_row + 1] ~= snapshot.parent_text
       or vim.fs.normalize(parent.path) ~= vim.fs.normalize(snapshot.parent_path)
-      or not fs.path_identities_match(path_identity(parent.path), snapshot.parent_identity) then
+      or not fs.path_identities_match(path_identity(parent.path), snapshot.parent_identity)
+    then
       return false
     end
 
@@ -180,12 +188,18 @@ return function(deps)
       local previous_order = 0
       for _, child in ipairs(expansion.children or {}) do
         local rec = records[child.id]
-        if not rec or rec.kind ~= 'child' or rec.parent ~= parent_id
-          or type(rec.order) ~= 'number' or rec.order <= previous_order
+        if
+          not rec
+          or rec.kind ~= 'child'
+          or rec.parent ~= parent_id
+          or type(rec.order) ~= 'number'
+          or rec.order <= previous_order
           or rec.depth ~= (parent_record.depth or 0) + 1
           or rec.path ~= entry_path(parent_record.path, rec.name)
-          or rec.text ~= recorded_row_text(rec) or child.id == parent_id
-          or visited[child.id] then
+          or rec.text ~= recorded_row_text(rec)
+          or child.id == parent_id
+          or visited[child.id]
+        then
           return false
         end
         previous_order = rec.order
@@ -219,8 +233,7 @@ return function(deps)
       if expected.filter_snapshot and read_with_snapshot then
         current = read_with_snapshot(rec.path, expected.filter_snapshot)
       else
-        current = fs.read_dir_lines(rec.path,
-          ignore_set(rec.path, expected.wildignore or ''))
+        current = fs.read_dir_lines(rec.path, ignore_set(rec.path, expected.wildignore or ''))
       end
       if not current or not same_lines(current, expected.listing_lines or {}) then return false end
     end
@@ -228,13 +241,9 @@ return function(deps)
     -- The collapsed subtree snapshot must agree with the full display snapshot.
     for offset, item in ipairs(snapshot.rows or {}) do
       local row = parent_row + offset
-      if item.row ~= row or expected_rows[item.id] ~= row
-        or item.text ~= lines[row + 1] then
-        return false
-      end
+      if item.row ~= row or expected_rows[item.id] ~= row or item.text ~= lines[row + 1] then return false end
     end
-    for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1,
-        { details = true })) do
+    for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1, { details = true })) do
       local id, row, details = mark[1], mark[2], mark[4] or {}
       if not details.invalid then
         if expected_rows[id] ~= row then return false end
@@ -307,7 +316,9 @@ return function(deps)
     local active, alternate = {}, {}
     local function collect_alternates(entries)
       local pending = {}
-      for _, entry in ipairs(entries or {}) do pending[#pending + 1] = entry end
+      for _, entry in ipairs(entries or {}) do
+        pending[#pending + 1] = entry
+      end
       while #pending > 0 do
         local entry = table.remove(pending)
         alternate[entry.seq] = true
@@ -330,13 +341,10 @@ return function(deps)
     -- Collapse snapshots include full child records. Keep them only while both
     -- the collapse node and its base remain reachable for undo/redo; discarded
     -- Neovim branches can no longer replay the corresponding view transition.
-    local function undo_node_reachable(seq)
-      return seq == 0 or active[seq] or alternate[seq]
-    end
+    local function undo_node_reachable(seq) return seq == 0 or active[seq] or alternate[seq] end
     local retained_collapses = {}
     for _, collapse in ipairs(state.collapse_undos or {}) do
-      if collapse.seq and undo_node_reachable(collapse.seq)
-        and undo_node_reachable(collapse.base_seq) then
+      if collapse.seq and undo_node_reachable(collapse.seq) and undo_node_reachable(collapse.base_seq) then
         retained_collapses[#retained_collapses + 1] = collapse
       end
     end
@@ -373,9 +381,7 @@ return function(deps)
     if recovery_count > 0 then
       if recovery_count ~= 1 then return false end
       local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-      if not restore_redone_materialization(bufnr, state, recovery, lines) then
-        return false
-      end
+      if not restore_redone_materialization(bufnr, state, recovery, lines) then return false end
       table.remove(state.materialization_recoveries, recovery_index)
       state.materialization_undos[#state.materialization_undos + 1] = recovery
       state.materialization_seq = seq_cur
@@ -384,8 +390,7 @@ return function(deps)
 
     for index, materialization in ipairs(undos) do
       local returned_to_base = materialization.base_seq == seq_cur
-      local branched_from_base = (materialization.base_seq == 0
-          or active[materialization.base_seq])
+      local branched_from_base = (materialization.base_seq == 0 or active[materialization.base_seq])
         and not active[materialization.seq]
         and alternate[materialization.seq]
       if returned_to_base or branched_from_base then
@@ -421,8 +426,7 @@ return function(deps)
       if rec.kind == 'child' then expected_children[id] = rec end
     end
     local marks, seen_ids, seen_rows = {}, {}, {}
-    for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1,
-        { details = true })) do
+    for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, namespace, 0, -1, { details = true })) do
       local id, row, details = mark[1], mark[2], mark[4] or {}
       local rec = state.rows[id]
       if not rec or seen_ids[id] then return false end
@@ -447,7 +451,9 @@ return function(deps)
       if found_children[id] == nil then return false end
     end
     local child_rows = {}
-    for id, row in pairs(found_children) do child_rows[row] = id end
+    for id, row in pairs(found_children) do
+      child_rows[row] = id
+    end
     for row, line in ipairs(lines) do
       if not child_rows[row - 1] and line:match('^%s') then return false end
     end
@@ -465,8 +471,7 @@ return function(deps)
       local materialization = undos[index]
       forget_subtree(undos[index].parent_id)
       state.materialization_recoveries = state.materialization_recoveries or {}
-      state.materialization_recoveries[#state.materialization_recoveries + 1] =
-        vim.deepcopy(materialization)
+      state.materialization_recoveries[#state.materialization_recoveries + 1] = vim.deepcopy(materialization)
       undos[index] = nil
     end
 
@@ -474,8 +479,12 @@ return function(deps)
     -- from the verified surviving row identities so no stale child identity can
     -- poison a later root-only sync.
     vim.api.nvim_buf_clear_namespace(bufnr, namespace, 0, -1)
-    for _, mark in ipairs(marks) do set_row_mark(bufnr, mark.row, mark.id) end
-    for id, row in pairs(found_children) do set_row_mark(bufnr, row, id) end
+    for _, mark in ipairs(marks) do
+      set_row_mark(bufnr, mark.row, mark.id)
+    end
+    for id, row in pairs(found_children) do
+      set_row_mark(bufnr, row, id)
+    end
     state.display_ids = expected_ids
     state.materialization_seq = seq_cur
     return true

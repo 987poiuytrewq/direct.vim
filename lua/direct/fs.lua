@@ -9,22 +9,20 @@ local temp_sequence = 0
 
 local function temp_candidate(parent, tag)
   temp_sequence = temp_sequence + 1
-  return M.join(parent, string.format('.direct-%s-%d-%d', tag,
-    M.uv.os_getpid(), temp_sequence))
+  return M.join(parent, string.format('.direct-%s-%d-%d', tag, M.uv.os_getpid(), temp_sequence))
 end
 
 function M.unique_temp_path(parent, tag)
   if type(parent) ~= 'string' or parent == '' then return nil, 'invalid parent path' end
   temp_sequence = temp_sequence + 1
   local nonce = tostring(M.uv.hrtime()) .. '-' .. tostring(temp_sequence)
-  return M.join(parent, string.format('.direct-%s-%d-%s', tag or 'temp',
-    M.uv.os_getpid(), nonce))
+  return M.join(parent, string.format('.direct-%s-%d-%s', tag or 'temp', M.uv.os_getpid(), nonce))
 end
 
 local function is_eexist(err, code)
-  return code == 'EEXIST' or code == 17
-    or (type(err) == 'string' and (err:find('EEXIST', 1, true) ~= nil
-      or err:find('exists', 1, true) ~= nil))
+  return code == 'EEXIST'
+    or code == 17
+    or (type(err) == 'string' and (err:find('EEXIST', 1, true) ~= nil or err:find('exists', 1, true) ~= nil))
 end
 
 local function identity_key(stat, path)
@@ -39,9 +37,7 @@ end
 -- are interpreted relative to the link's parent, not the process cwd.
 local function remove_file_if_same(path, identity)
   local now = M.uv.fs_lstat(path)
-  if identity ~= nil and identity_key(now, path) == identity then
-    return M.rm_file(path)
-  end
+  if identity ~= nil and identity_key(now, path) == identity then return M.rm_file(path) end
   return nil, 'temporary path changed; preserved at ' .. tostring(path)
 end
 
@@ -62,10 +58,9 @@ require('direct.fs.path_ops')({ M = M, platform = platform, identity_key = ident
 -- ---------------------------------------------------------------------------
 
 local function is_exdev(err, code)
-  return code == 'EXDEV' or code == 18
-    or (type(err) == 'string'
-      and (err:find('EXDEV', 1, true) ~= nil
-        or err:find('Cross-device link', 1, true) ~= nil))
+  return code == 'EXDEV'
+    or code == 18
+    or (type(err) == 'string' and (err:find('EXDEV', 1, true) ~= nil or err:find('Cross-device link', 1, true) ~= nil))
 end
 
 local function rename_case_only(src, dst)
@@ -85,9 +80,15 @@ local function rename_case_only(src, dst)
 
   local restored, restore_err = M.rename_noreplace(temp, src)
   if not restored then
-    local message = 'case-only rename failed (' .. tostring(err)
-      .. '); source preserved at ' .. temp .. '; restore to ' .. src
-      .. ' failed (' .. tostring(restore_err) .. ')'
+    local message = 'case-only rename failed ('
+      .. tostring(err)
+      .. '); source preserved at '
+      .. temp
+      .. '; restore to '
+      .. src
+      .. ' failed ('
+      .. tostring(restore_err)
+      .. ')'
     require('direct.ui').notify('direct: ' .. message, vim.log.levels.ERROR)
     return nil, message, code
   end
@@ -97,9 +98,7 @@ end
 -- rename(src, dst) -> true | nil, err, code. Placement is always atomic
 -- no-replace. EXDEV is handled by an exclusive-temp copy path below.
 function M.rename(src, dst)
-  if type(src) ~= 'string' or src == '' or type(dst) ~= 'string' or dst == '' then
-    return nil, 'invalid path'
-  end
+  if type(src) ~= 'string' or src == '' or type(dst) ~= 'string' or dst == '' then return nil, 'invalid path' end
   local src_spelling = require('direct.paths').strip_trailing_separator(src)
   local dst_spelling = require('direct.paths').strip_trailing_separator(dst)
   local src_norm = require('direct.paths').canonical(src_spelling)
@@ -108,16 +107,10 @@ function M.rename(src, dst)
     if M.taken(src) then return true end
     return nil, 'source does not exist: ' .. tostring(src), 'ENOENT'
   end
-  if M.same_entry(src, dst) then
-    return rename_case_only(src, dst)
-  end
+  if M.same_entry(src, dst) then return rename_case_only(src, dst) end
   local ok, err, code = M.rename_noreplace(src, dst)
-  if ok then
-    return true
-  end
-  if not is_exdev(err, code) then
-    return nil, err, code
-  end
+  if ok then return true end
+  if not is_exdev(err, code) then return nil, err, code end
   return M.move_exdev(src, dst)
 end
 
@@ -126,18 +119,13 @@ end
 -- Use the native atomic exclusive-rename operation on each supported platform;
 -- if unavailable, fail closed rather than placing onto a user path.
 function M.rename_noreplace(src, dst, expected_source_identity)
-  if type(src) ~= 'string' or src == '' or type(dst) ~= 'string' or dst == '' then
-    return nil, 'invalid path'
-  end
-  if src:find('\0', 1, true) or dst:find('\0', 1, true) then
-    return nil, 'invalid path: contains NUL'
-  end
+  if type(src) ~= 'string' or src == '' or type(dst) ~= 'string' or dst == '' then return nil, 'invalid path' end
+  if src:find('\0', 1, true) or dst:find('\0', 1, true) then return nil, 'invalid path: contains NUL' end
   src = require('direct.paths').strip_trailing_separator(src)
   dst = require('direct.paths').strip_trailing_separator(dst)
   if expected_source_identity ~= nil then
     local actual = identity_key(M.uv.fs_lstat(src), src)
-    if expected_source_identity.inode == nil
-      or actual ~= expected_source_identity.inode then
+    if expected_source_identity.inode == nil or actual ~= expected_source_identity.inode then
       return nil, 'source identity changed: ' .. src, 'ESTALE'
     end
   end
@@ -147,13 +135,9 @@ end
 -- copy_file(src, dst) -> true | nil, err, code (vim.uv.fs_copyfile preserves
 -- mode by default).
 function M.copy_file(src, dst)
-  if type(src) ~= 'string' or type(dst) ~= 'string' then
-    return nil, 'invalid path'
-  end
+  if type(src) ~= 'string' or type(dst) ~= 'string' then return nil, 'invalid path' end
   local ok, err, code = vim.uv.fs_copyfile(src, dst)
-  if ok then
-    return true
-  end
+  if ok then return true end
   return nil, err, code
 end
 
@@ -161,9 +145,7 @@ end
 -- copy_file, it is suitable for user paths where an occupant must never be
 -- overwritten.
 function M.copy_file_exclusive(src, dst)
-  if type(src) ~= 'string' or src == '' or type(dst) ~= 'string' or dst == '' then
-    return nil, 'invalid path'
-  end
+  if type(src) ~= 'string' or src == '' or type(dst) ~= 'string' or dst == '' then return nil, 'invalid path' end
   local ok, err, code = M.uv.fs_copyfile(src, dst, { excl = true })
   if ok then return true end
   if code == 'EEXIST' or (type(err) == 'string' and err:find('EEXIST', 1, true)) then
@@ -192,24 +174,17 @@ end
 -- that failure, so the probe lives here, once, for both callers.
 local function classify(path, opts)
   local ok, lst = pcall(vim.uv.fs_lstat, path)
-  if not ok or lst == nil then
-    return 'unreadable entry', nil
-  end
+  if not ok or lst == nil then return 'unreadable entry', nil end
   if lst.type == 'directory' then
     local scan, scan_err = vim.uv.fs_scandir(path)
-    if scan == nil then
-      return 'unreadable directory (' .. tostring(scan_err) .. ')', 'directory'
-    end
+    if scan == nil then return 'unreadable directory (' .. tostring(scan_err) .. ')', 'directory' end
     -- Drain the handle: luv closes it at the end of iteration.
-    while vim.uv.fs_scandir_next(scan) ~= nil do end
+    while vim.uv.fs_scandir_next(scan) ~= nil do
+    end
     return nil, 'directory'
   end
-  if lst.type == 'file' then
-    return nil, 'file'
-  end
-  if lst.type == 'link' and opts ~= nil and opts.recreate_symlinks then
-    return nil, 'link'
-  end
+  if lst.type == 'file' then return nil, 'file' end
+  if lst.type == 'link' and opts ~= nil and opts.recreate_symlinks then return nil, 'link' end
   -- 'link' is the luv name for a symlink; keep reporting it as 'symlink'
   -- which is the vocabulary the skipped-entry records already use.
   return (lst.type == 'link' and 'symlink' or tostring(lst.type)), lst.type
@@ -221,9 +196,7 @@ end
 -- source where it is. Otherwise the entry is SKIPPED and recorded in ctx.skipped
 -- for the caller to report: it is never dropped silently.
 local function uncopyable(ctx, path, kind)
-  if ctx.require_complete then
-    return 'cannot copy ' .. kind .. ': ' .. path
-  end
+  if ctx.require_complete then return 'cannot copy ' .. kind .. ': ' .. path end
   ctx.skipped[#ctx.skipped + 1] = { path = path, kind = kind }
   return nil
 end
@@ -265,59 +238,46 @@ local function copy_dir(from, to, ctx)
   local kind = classify(from, ctx)
   if kind ~= nil then
     local uerr = uncopyable(ctx, from, kind)
-    if uerr ~= nil then
-      return nil, uerr
-    end
+    if uerr ~= nil then return nil, uerr end
     return true
   end
 
   local existed = M.taken(to)
-  if existed and ctx.require_complete then
-    return nil, 'destination exists: ' .. tostring(to)
-  end
+  if existed and ctx.require_complete then return nil, 'destination exists: ' .. tostring(to) end
   local mok, merr
   if ctx.require_complete or ctx.exclusive then
     mok, merr = M.mkdir_exclusive(to)
   else
     mok, merr = M.mkdirp(to)
   end
-  if not mok then
-    return nil, merr
-  end
+  if not mok then return nil, merr end
   if not existed then
     ctx.created[#ctx.created + 1] = {
-      path = to, dir = true, identity = identity_key(M.uv.fs_lstat(to), to),
+      path = to,
+      dir = true,
+      identity = identity_key(M.uv.fs_lstat(to), to),
     }
   end
   local names = M.list_dir(from)
-  if not names then
-    return nil, 'cannot list: ' .. tostring(from)
-  end
+  if not names then return nil, 'cannot list: ' .. tostring(from) end
   for _, name in ipairs(names) do
     local child_from = M.join(from, name)
     local child_to = M.join(to, name)
     local child_kind, itype = classify(child_from, ctx)
     if child_kind ~= nil then
       local uerr = uncopyable(ctx, child_from, child_kind)
-      if uerr ~= nil then
-        return nil, uerr
-      end
+      if uerr ~= nil then return nil, uerr end
     elseif itype == 'directory' then
       local cok, cerr = copy_dir(child_from, child_to, ctx)
-      if not cok then
-        return nil, cerr
-      end
+      if not cok then return nil, cerr end
     elseif itype == 'link' and ctx.recreate_symlinks then
       local target, read_err = M.uv.fs_readlink(child_from)
-      if not target then
-        return nil, 'cannot read symlink: ' .. tostring(read_err)
-      end
+      if not target then return nil, 'cannot read symlink: ' .. tostring(read_err) end
       local linked, link_err, link_code = platform.create_symlink(target, child_to, child_from)
-      if not linked then
-        return nil, tostring(link_err or link_code or 'cannot recreate symlink')
-      end
+      if not linked then return nil, tostring(link_err or link_code or 'cannot recreate symlink') end
       ctx.created[#ctx.created + 1] = {
-        path = child_to, dir = false,
+        path = child_to,
+        dir = false,
         identity = identity_key(M.uv.fs_lstat(child_to), child_to),
       }
     else
@@ -327,12 +287,8 @@ local function copy_dir(from, to, ctx)
       -- there (EISDIR when the source entry clashes with an existing
       -- destination directory, say) must not delete it.
       local child_taken = M.taken(child_to)
-      if child_taken and ctx.require_complete then
-        return nil, 'destination exists: ' .. tostring(child_to)
-      end
-      if not child_taken then
-        ctx.created[#ctx.created + 1] = { path = child_to, dir = false }
-      end
+      if child_taken and ctx.require_complete then return nil, 'destination exists: ' .. tostring(child_to) end
+      if not child_taken then ctx.created[#ctx.created + 1] = { path = child_to, dir = false } end
       local cok, cerr, ccode
       if ctx.require_complete or ctx.exclusive then
         cok, cerr, ccode = M.copy_file_exclusive(child_from, child_to)
@@ -340,8 +296,7 @@ local function copy_dir(from, to, ctx)
         cok, cerr, ccode = M.copy_file(child_from, child_to)
       end
       if not cok then
-        if not child_taken and (ccode == 'EEXIST'
-          or (type(cerr) == 'string' and cerr:find('EEXIST', 1, true))) then
+        if not child_taken and (ccode == 'EEXIST' or (type(cerr) == 'string' and cerr:find('EEXIST', 1, true))) then
           -- An exclusive copy lost a race; the occupant belongs to someone else.
           table.remove(ctx.created)
         elseif not child_taken then
@@ -352,9 +307,7 @@ local function copy_dir(from, to, ctx)
         end
         return nil, cerr
       end
-      if not child_taken then
-        ctx.created[#ctx.created].identity = identity_key(M.uv.fs_lstat(child_to), child_to)
-      end
+      if not child_taken then ctx.created[#ctx.created].identity = identity_key(M.uv.fs_lstat(child_to), child_to) end
     end
   end
   return true
@@ -365,9 +318,7 @@ end
 -- destination; the live copy walk still catches entries that appear later.
 local function prescan(path, offender, ctx)
   local names = M.list_dir(path)
-  if not names then
-    return nil, 'cannot list: ' .. tostring(path)
-  end
+  if not names then return nil, 'cannot list: ' .. tostring(path) end
   for _, name in ipairs(names) do
     local child = M.join(path, name)
     local kind, itype = classify(child, ctx)
@@ -378,12 +329,8 @@ local function prescan(path, offender, ctx)
     end
     if itype == 'directory' then
       local nested, err = prescan(child, offender, ctx)
-      if err ~= nil then
-        return nil, err
-      end
-      if nested ~= nil then
-        return nested
-      end
+      if err ~= nil then return nil, err end
+      if nested ~= nil then return nested end
     end
   end
   return nil
@@ -403,9 +350,7 @@ end
 -- existing register entries may be refreshed. User paste uses the exclusive
 -- temp-and-commit path below.
 function M.copy_tree(src, dst, opts)
-  if not M.is_dir(src) then
-    return nil, 'not a directory: ' .. tostring(src)
-  end
+  if not M.is_dir(src) then return nil, 'not a directory: ' .. tostring(src) end
   local ctx = {
     require_complete = opts ~= nil and opts.require_complete == true,
     recreate_symlinks = opts ~= nil and opts.recreate_symlinks == true,
@@ -415,24 +360,16 @@ function M.copy_tree(src, dst, opts)
   }
   if ctx.require_complete then
     local offender, perr = prescan(src, {}, ctx)
-    if perr ~= nil then
-      return nil, perr
-    end
-    if offender ~= nil then
-      return nil, 'cannot copy ' .. offender.kind .. ': ' .. offender.path
-    end
-    if M.taken(dst) then
-      return nil, 'destination exists: ' .. tostring(dst)
-    end
+    if perr ~= nil then return nil, perr end
+    if offender ~= nil then return nil, 'cannot copy ' .. offender.kind .. ': ' .. offender.path end
+    if M.taken(dst) then return nil, 'destination exists: ' .. tostring(dst) end
   end
   local cok, cerr = copy_dir(src, dst, ctx)
   if not cok then
     discard(ctx.created)
     return nil, cerr
   end
-  if #ctx.skipped > 0 then
-    return true, ctx.skipped, ctx.created
-  end
+  if #ctx.skipped > 0 then return true, ctx.skipped, ctx.created end
   return true, nil, ctx.created
 end
 
@@ -446,9 +383,7 @@ local function allocate_private_dir(dst, tag)
   for _ = 1, 100 do
     local candidate = temp_candidate(parent, tag)
     local ok, err, code = M.mkdir_exclusive(candidate, 448) -- private mode 0700
-    if ok then
-      return candidate, identity_key(M.uv.fs_lstat(candidate), candidate)
-    end
+    if ok then return candidate, identity_key(M.uv.fs_lstat(candidate), candidate) end
     if not is_eexist(err, code) then return nil, err, code end
   end
   return nil, 'could not allocate a unique private temp directory'
@@ -459,7 +394,8 @@ local function cleanup_private_dir(path, identity)
   if not ok then
     require('direct.ui').notify(
       'direct: temporary directory preserved at ' .. path .. ': ' .. tostring(err),
-      vim.log.levels.ERROR)
+      vim.log.levels.ERROR
+    )
   end
 end
 
@@ -494,12 +430,10 @@ function M.copy_tree_exclusive(src, dst, opts)
     if not matches then
       discard(created or {})
       cleanup_private_dir(temp_dir, temp_identity)
-      return nil, 'source or private copy changed before placement: '
-        .. tostring(compare_err or 'content mismatch')
+      return nil, 'source or private copy changed before placement: ' .. tostring(compare_err or 'content mismatch')
     end
   end
-  local placed, place_err, place_code = M.rename_noreplace(payload, dst,
-    { inode = payload_identity })
+  local placed, place_err, place_code = M.rename_noreplace(payload, dst, { inode = payload_identity })
   if not placed then
     discard(created or {})
     cleanup_private_dir(temp_dir, temp_identity)
@@ -510,9 +444,16 @@ function M.copy_tree_exclusive(src, dst, opts)
 end
 
 local function report_partial_move(src, dst, err)
-  require('direct.ui').notify('direct: destination committed at ' .. dst
-    .. ' but source could not be removed at ' .. src .. ': ' .. tostring(err)
-    .. '; both copies may remain', vim.log.levels.ERROR)
+  require('direct.ui').notify(
+    'direct: destination committed at '
+      .. dst
+      .. ' but source could not be removed at '
+      .. src
+      .. ': '
+      .. tostring(err)
+      .. '; both copies may remain',
+    vim.log.levels.ERROR
+  )
 end
 
 local function read_file_equal(a, b)
@@ -584,18 +525,14 @@ same_tree = function(src, dst)
   if a.type == 'link' then
     local target_a, err_a = M.uv.fs_readlink(src)
     local target_b, err_b = M.uv.fs_readlink(dst)
-    if not target_a or not target_b then
-      return nil, tostring(err_a or err_b or 'readlink failed')
-    end
+    if not target_a or not target_b then return nil, tostring(err_a or err_b or 'readlink failed') end
     return target_a == target_b
   end
   if a.type ~= 'directory' then return false end
   local initial_src, initial_dst = a, b
   local names_a, err_a = M.list_dir(src)
   local names_b, err_b = M.list_dir(dst)
-  if not names_a or not names_b then
-    return nil, tostring(err_a or err_b or 'cannot list directory')
-  end
+  if not names_a or not names_b then return nil, tostring(err_a or err_b or 'cannot list directory') end
   if not vim.deep_equal(names_a, names_b) then return false end
   for _, name in ipairs(names_a) do
     local equal, err = same_tree(M.join(src, name), M.join(dst, name))
@@ -603,8 +540,7 @@ same_tree = function(src, dst)
   end
   local final_src, final_dst = M.uv.fs_lstat(src), M.uv.fs_lstat(dst)
   local function directory_stable(before, after)
-    if not after or before.dev ~= after.dev or before.ino ~= after.ino
-      or before.size ~= after.size then
+    if not after or before.dev ~= after.dev or before.ino ~= after.ino or before.size ~= after.size then
       return false
     end
     for _, field in ipairs({ 'mtime', 'ctime' }) do
@@ -613,8 +549,7 @@ same_tree = function(src, dst)
     end
     return true
   end
-  if not directory_stable(initial_src, final_src)
-    or not directory_stable(initial_dst, final_dst) then
+  if not directory_stable(initial_src, final_src) or not directory_stable(initial_dst, final_dst) then
     return false, 'directory changed while being verified'
   end
   return true
@@ -622,18 +557,27 @@ end
 
 M.same_contents = same_tree
 
-local function restore_quarantined_source(quarantine_dir, dir_identity,
-    quarantine, src, dst, reason)
+local function restore_quarantined_source(quarantine_dir, dir_identity, quarantine, src, dst, reason)
   local restored, restore_err = M.rename_noreplace(quarantine, src)
   if restored then
     cleanup_private_dir(quarantine_dir, dir_identity)
     report_partial_move(src, dst, reason)
     return true
   end
-  require('direct.ui').notify('direct: destination committed at ' .. dst
-    .. '; source could not be restored to ' .. src .. ' (' .. tostring(restore_err)
-    .. '); original source preserved at ' .. quarantine .. ' (' .. tostring(reason) .. ')',
-    vim.log.levels.ERROR)
+  require('direct.ui').notify(
+    'direct: destination committed at '
+      .. dst
+      .. '; source could not be restored to '
+      .. src
+      .. ' ('
+      .. tostring(restore_err)
+      .. '); original source preserved at '
+      .. quarantine
+      .. ' ('
+      .. tostring(reason)
+      .. ')',
+    vim.log.levels.ERROR
+  )
   return true
 end
 
@@ -643,29 +587,38 @@ local function remove_source_after_copy(src, dst, kind, original_identity)
   -- from being removed by a later pathname-based unlink/rm_tree.
   local quarantine_dir, dir_identity, dir_err = allocate_private_dir(src, 'exdev-source')
   if not quarantine_dir then
-    report_partial_move(src, dst, 'could not allocate source quarantine: '
-      .. tostring(dir_identity or dir_err))
+    report_partial_move(src, dst, 'could not allocate source quarantine: ' .. tostring(dir_identity or dir_err))
     return true
   end
   local quarantine = M.join(quarantine_dir, 'source')
   local captured, capture_err = M.rename_noreplace(src, quarantine)
   if not captured then
     cleanup_private_dir(quarantine_dir, dir_identity)
-    report_partial_move(src, dst, 'could not capture source for safe removal: '
-      .. tostring(capture_err))
+    report_partial_move(src, dst, 'could not capture source for safe removal: ' .. tostring(capture_err))
     return true
   end
 
   local captured_identity = identity_key(M.uv.fs_lstat(quarantine), quarantine)
   if original_identity == nil or captured_identity ~= original_identity then
-    return restore_quarantined_source(quarantine_dir, dir_identity, quarantine,
-      src, dst, 'source identity changed before removal')
+    return restore_quarantined_source(
+      quarantine_dir,
+      dir_identity,
+      quarantine,
+      src,
+      dst,
+      'source identity changed before removal'
+    )
   end
   local equal, compare_err = same_tree(quarantine, dst)
   if not equal then
-    return restore_quarantined_source(quarantine_dir, dir_identity, quarantine,
-      src, dst, 'source changed or could not be verified after copy: '
-        .. tostring(compare_err or 'content mismatch'))
+    return restore_quarantined_source(
+      quarantine_dir,
+      dir_identity,
+      quarantine,
+      src,
+      dst,
+      'source changed or could not be verified after copy: ' .. tostring(compare_err or 'content mismatch')
+    )
   end
 
   local removed, remove_err
@@ -675,8 +628,14 @@ local function remove_source_after_copy(src, dst, kind, original_identity)
     removed, remove_err = M.rm_file(quarantine)
   end
   if not removed or M.taken(quarantine) then
-    return restore_quarantined_source(quarantine_dir, dir_identity, quarantine,
-      src, dst, 'source removal failed: ' .. tostring(remove_err or 'source remains'))
+    return restore_quarantined_source(
+      quarantine_dir,
+      dir_identity,
+      quarantine,
+      src,
+      dst,
+      'source removal failed: ' .. tostring(remove_err or 'source remains')
+    )
   end
   cleanup_private_dir(quarantine_dir, dir_identity)
   return true
@@ -696,8 +655,10 @@ local function move_exdev_file(src, dst, source_identity)
       if partial_identity ~= nil then
         local cleanup_ok, cleanup_err = remove_file_if_same(temp, partial_identity)
         if not cleanup_ok then
-          require('direct.ui').notify('direct: failed copy temp preserved at ' .. temp
-            .. ': ' .. tostring(cleanup_err), vim.log.levels.ERROR)
+          require('direct.ui').notify(
+            'direct: failed copy temp preserved at ' .. temp .. ': ' .. tostring(cleanup_err),
+            vim.log.levels.ERROR
+          )
         end
       end
       cleanup_private_dir(temp_dir, temp_dir_identity)
@@ -718,19 +679,22 @@ local function move_exdev_file(src, dst, source_identity)
   if not matches then
     local cleanup_ok, cleanup_err = remove_file_if_same(temp, temp_identity.inode)
     if not cleanup_ok then
-      require('direct.ui').notify('direct: copy temp preserved at ' .. temp
-        .. ': ' .. tostring(cleanup_err), vim.log.levels.ERROR)
+      require('direct.ui').notify(
+        'direct: copy temp preserved at ' .. temp .. ': ' .. tostring(cleanup_err),
+        vim.log.levels.ERROR
+      )
     end
     cleanup_private_dir(temp_dir, temp_dir_identity)
-    return nil, 'source or private copy changed before placement: '
-      .. tostring(compare_err or 'content mismatch')
+    return nil, 'source or private copy changed before placement: ' .. tostring(compare_err or 'content mismatch')
   end
   local placed, place_err, place_code = M.rename_noreplace(temp, dst, temp_identity)
   if not placed then
     local cleanup_ok, cleanup_err = remove_file_if_same(temp, temp_identity.inode)
     if not cleanup_ok then
-      require('direct.ui').notify('direct: copy temp preserved at ' .. temp
-        .. ': ' .. tostring(cleanup_err), vim.log.levels.ERROR)
+      require('direct.ui').notify(
+        'direct: copy temp preserved at ' .. temp .. ': ' .. tostring(cleanup_err),
+        vim.log.levels.ERROR
+      )
     end
     cleanup_private_dir(temp_dir, temp_dir_identity)
     return nil, place_err, place_code
@@ -773,8 +737,10 @@ local function move_exdev_link(src, dst, source_identity)
   if not placed then
     local cleanup_ok, cleanup_err = remove_file_if_same(temp, temp_identity.inode)
     if not cleanup_ok then
-      require('direct.ui').notify('direct: symlink temp preserved at ' .. temp
-        .. ': ' .. tostring(cleanup_err), vim.log.levels.ERROR)
+      require('direct.ui').notify(
+        'direct: symlink temp preserved at ' .. temp .. ': ' .. tostring(cleanup_err),
+        vim.log.levels.ERROR
+      )
     end
     cleanup_private_dir(temp_dir, temp_dir_identity)
     return nil, place_err, place_code
@@ -822,31 +788,37 @@ local function same_tree_async_file(src, dst, callback)
     uv.fs_open(dst, 'r', 0, function(open_dst_err, dst_fd)
       if open_dst_err or not dst_fd then
         uv.fs_close(src_fd)
-        return async_callback(callback, nil,
-          'cannot read destination: ' .. tostring(open_dst_err))
+        return async_callback(callback, nil, 'cannot read destination: ' .. tostring(open_dst_err))
       end
       uv.fs_fstat(src_fd, function(stat_src_err, stat_src)
         uv.fs_fstat(dst_fd, function(stat_dst_err, stat_dst)
           if stat_src_err or stat_dst_err or not stat_src or not stat_dst then
-            uv.fs_close(src_fd); uv.fs_close(dst_fd)
-            return async_callback(callback, nil,
-              tostring(stat_src_err or stat_dst_err or 'fstat failed'))
+            uv.fs_close(src_fd)
+            uv.fs_close(dst_fd)
+            return async_callback(callback, nil, tostring(stat_src_err or stat_dst_err or 'fstat failed'))
           end
           if stat_src.size ~= stat_dst.size then
-            uv.fs_close(src_fd); uv.fs_close(dst_fd)
+            uv.fs_close(src_fd)
+            uv.fs_close(dst_fd)
             return async_callback(callback, false)
           end
           local offset = 0
           local function finish(equal, reason)
             uv.fs_fstat(src_fd, function(after_src_err, after_src)
               uv.fs_fstat(dst_fd, function(after_dst_err, after_dst)
-                local stable = after_src and after_dst
-                  and stat_src.size == after_src.size and stat_dst.size == after_dst.size
+                local stable = after_src
+                  and after_dst
+                  and stat_src.size == after_src.size
+                  and stat_dst.size == after_dst.size
                 for _, field in ipairs({ 'mtime', 'ctime' }) do
                   local before_a, after_a = stat_src[field] or {}, after_src and after_src[field] or {}
                   local before_b, after_b = stat_dst[field] or {}, after_dst and after_dst[field] or {}
-                  if before_a.sec ~= after_a.sec or before_a.nsec ~= after_a.nsec
-                    or before_b.sec ~= after_b.sec or before_b.nsec ~= after_b.nsec then
+                  if
+                    before_a.sec ~= after_a.sec
+                    or before_a.nsec ~= after_a.nsec
+                    or before_b.sec ~= after_b.sec
+                    or before_b.nsec ~= after_b.nsec
+                  then
                     stable = false
                   end
                 end
@@ -856,8 +828,11 @@ local function same_tree_async_file(src, dst, callback)
                       return async_callback(callback, false, 'file changed while being verified')
                     end
                     if equal and (after_src_err or after_dst_err or close_src_err or close_dst_err) then
-                      return async_callback(callback, nil, tostring(after_src_err
-                        or after_dst_err or close_src_err or close_dst_err))
+                      return async_callback(
+                        callback,
+                        nil,
+                        tostring(after_src_err or after_dst_err or close_src_err or close_dst_err)
+                      )
                     end
                     async_callback(callback, equal, reason)
                   end)
@@ -916,16 +891,20 @@ local function same_tree_async(src, dst, callback)
     if index > #names_a then
       local final_a, final_b = M.uv.fs_lstat(src), M.uv.fs_lstat(dst)
       local function stable(before, after)
-        if not after or before.dev ~= after.dev or before.ino ~= after.ino
-          or before.size ~= after.size then return false end
+        if not after or before.dev ~= after.dev or before.ino ~= after.ino or before.size ~= after.size then
+          return false
+        end
         for _, field in ipairs({ 'mtime', 'ctime' }) do
           local left, right = before[field] or {}, after[field] or {}
           if left.sec ~= right.sec or left.nsec ~= right.nsec then return false end
         end
         return true
       end
-      return async_callback(callback, stable(a, final_a) and stable(b, final_b),
-        'directory changed while being verified')
+      return async_callback(
+        callback,
+        stable(a, final_a) and stable(b, final_b),
+        'directory changed while being verified'
+      )
     end
     local name = names_a[index]
     index = index + 1
@@ -941,18 +920,14 @@ local function remove_tree_async(path, callback)
   local stat = M.uv.fs_lstat(path)
   if not stat then return async_callback(callback, nil, 'entry disappeared: ' .. path) end
   if stat.type ~= 'directory' then
-    return M.uv.fs_unlink(path, function(err)
-      async_callback(callback, err == nil, err and tostring(err) or nil)
-    end)
+    return M.uv.fs_unlink(path, function(err) async_callback(callback, err == nil, err and tostring(err) or nil) end)
   end
   local names, list_err = M.list_dir(path)
   if not names then return async_callback(callback, nil, tostring(list_err or 'cannot list directory')) end
   local index = 1
   local function remove_next()
     if index > #names then
-      return M.uv.fs_rmdir(path, function(err)
-        async_callback(callback, err == nil, err and tostring(err) or nil)
-      end)
+      return M.uv.fs_rmdir(path, function(err) async_callback(callback, err == nil, err and tostring(err) or nil) end)
     end
     local child = M.join(path, names[index])
     index = index + 1
@@ -964,51 +939,77 @@ local function remove_tree_async(path, callback)
   remove_next()
 end
 
-local function restore_after_async_move(quarantine_dir, dir_identity, quarantine,
-    src, dst, reason, callback)
+local function restore_after_async_move(quarantine_dir, dir_identity, quarantine, src, dst, reason, callback)
   local restored, restore_err = M.rename_noreplace(quarantine, src)
   if restored then
     cleanup_private_dir(quarantine_dir, dir_identity)
     report_partial_move(src, dst, reason)
     return async_callback(callback, true, true)
   end
-  require('direct.ui').notify('direct: destination committed at ' .. dst
-    .. '; source could not be restored to ' .. src .. ' (' .. tostring(restore_err)
-    .. '); original source preserved at ' .. quarantine .. ' (' .. tostring(reason) .. ')',
-    vim.log.levels.ERROR)
+  require('direct.ui').notify(
+    'direct: destination committed at '
+      .. dst
+      .. '; source could not be restored to '
+      .. src
+      .. ' ('
+      .. tostring(restore_err)
+      .. '); original source preserved at '
+      .. quarantine
+      .. ' ('
+      .. tostring(reason)
+      .. ')',
+    vim.log.levels.ERROR
+  )
   async_callback(callback, true, true)
 end
 
-local function remove_async_move_source(src, dst, kind, original_identity, callback)
+local function remove_async_move_source(src, dst, original_identity, callback)
   local quarantine_dir, dir_identity, dir_err = allocate_private_dir(src, 'exdev-source')
   if not quarantine_dir then
-    report_partial_move(src, dst, 'could not allocate source quarantine: '
-      .. tostring(dir_identity or dir_err))
+    report_partial_move(src, dst, 'could not allocate source quarantine: ' .. tostring(dir_identity or dir_err))
     return async_callback(callback, true, true)
   end
   local quarantine = M.join(quarantine_dir, 'source')
   local captured, capture_err = M.rename_noreplace(src, quarantine)
   if not captured then
     cleanup_private_dir(quarantine_dir, dir_identity)
-    report_partial_move(src, dst, 'could not capture source for safe removal: '
-      .. tostring(capture_err))
+    report_partial_move(src, dst, 'could not capture source for safe removal: ' .. tostring(capture_err))
     return async_callback(callback, true, true)
   end
-  if original_identity == nil or identity_key(M.uv.fs_lstat(quarantine), quarantine)
-    ~= original_identity then
-    return restore_after_async_move(quarantine_dir, dir_identity, quarantine, src, dst,
-      'source identity changed before removal', callback)
+  if original_identity == nil or identity_key(M.uv.fs_lstat(quarantine), quarantine) ~= original_identity then
+    return restore_after_async_move(
+      quarantine_dir,
+      dir_identity,
+      quarantine,
+      src,
+      dst,
+      'source identity changed before removal',
+      callback
+    )
   end
   same_tree_async(quarantine, dst, function(equal, compare_err)
     if not equal then
-      return restore_after_async_move(quarantine_dir, dir_identity, quarantine, src, dst,
-        'source changed or could not be verified after copy: '
-          .. tostring(compare_err or 'content mismatch'), callback)
+      return restore_after_async_move(
+        quarantine_dir,
+        dir_identity,
+        quarantine,
+        src,
+        dst,
+        'source changed or could not be verified after copy: ' .. tostring(compare_err or 'content mismatch'),
+        callback
+      )
     end
     remove_tree_async(quarantine, function(removed, remove_err)
       if not removed or M.taken(quarantine) then
-        return restore_after_async_move(quarantine_dir, dir_identity, quarantine, src, dst,
-          'source removal failed: ' .. tostring(remove_err or 'source remains'), callback)
+        return restore_after_async_move(
+          quarantine_dir,
+          dir_identity,
+          quarantine,
+          src,
+          dst,
+          'source removal failed: ' .. tostring(remove_err or 'source remains'),
+          callback
+        )
       end
       cleanup_private_dir(quarantine_dir, dir_identity)
       async_callback(callback, true, false)
@@ -1025,12 +1026,9 @@ local function async_copy_tree_exclusive(src, dst, callback, progress)
   local offender, prescan_err = prescan(src, {}, ctx)
   if prescan_err then return async_callback(callback, false, nil, prescan_err) end
   if offender then
-    return async_callback(callback, false, nil,
-      'cannot copy ' .. offender.kind .. ': ' .. offender.path)
+    return async_callback(callback, false, nil, 'cannot copy ' .. offender.kind .. ': ' .. offender.path)
   end
-  if M.taken(dst) then
-    return async_callback(callback, false, nil, 'destination exists: ' .. tostring(dst))
-  end
+  if M.taken(dst) then return async_callback(callback, false, nil, 'destination exists: ' .. tostring(dst)) end
   local temp_dir, temp_identity, alloc_err = allocate_private_dir(dst, 'move-tree')
   if not temp_dir then return async_callback(callback, false, nil, tostring(temp_identity or alloc_err)) end
   local payload = M.join(temp_dir, 'payload')
@@ -1044,8 +1042,7 @@ local function async_copy_tree_exclusive(src, dst, callback, progress)
   local function add_directory(from, to)
     local made, mkdir_err = M.mkdir_exclusive(to)
     if not made then return nil, mkdir_err end
-    created[#created + 1] = { path = to, dir = true,
-      identity = identity_key(M.uv.fs_lstat(to), to) }
+    created[#created + 1] = { path = to, dir = true, identity = identity_key(M.uv.fs_lstat(to), to) }
     local names, list_err = M.list_dir(from)
     if not names then return nil, 'cannot list: ' .. tostring(list_err or from) end
     for _, name in ipairs(names) do
@@ -1059,8 +1056,8 @@ local function async_copy_tree_exclusive(src, dst, callback, progress)
         if not target then return nil, 'cannot read symlink: ' .. tostring(read_err) end
         local linked, link_err = platform.create_symlink(target, child_dst, child_src)
         if not linked then return nil, tostring(link_err or 'cannot recreate symlink') end
-        created[#created + 1] = { path = child_dst, dir = false,
-          identity = identity_key(M.uv.fs_lstat(child_dst), child_dst) }
+        created[#created + 1] =
+          { path = child_dst, dir = false, identity = identity_key(M.uv.fs_lstat(child_dst), child_dst) }
       else
         files[#files + 1] = { src = child_src, dst = child_dst }
       end
@@ -1083,17 +1080,19 @@ local function async_copy_tree_exclusive(src, dst, callback, progress)
         if not payload_identity then return fail('could not verify private copy tree identity') end
         return same_tree_async(src, payload, function(equal, verify_err)
           if not equal then
-            return fail('source or private copy changed before placement: '
-              .. tostring(verify_err or 'content mismatch'))
+            return fail(
+              'source or private copy changed before placement: ' .. tostring(verify_err or 'content mismatch')
+            )
           end
-          local placed, place_err = M.rename_noreplace(payload, dst,
-            { inode = payload_identity })
+          local placed, place_err = M.rename_noreplace(payload, dst, { inode = payload_identity })
           if not placed then return fail(place_err) end
           cleanup_private_dir(temp_dir, temp_identity)
-          return remove_async_move_source(src, dst, 'directory', original_identity,
-            function(ok, partial, err)
-              callback(ok, partial, err)
-            end)
+          return remove_async_move_source(
+            src,
+            dst,
+            original_identity,
+            function(ok, partial, err) callback(ok, partial, err) end
+          )
         end)
       end
       local file = files[file_index]
@@ -1130,8 +1129,12 @@ function M.rename_async(src, dst, callback, progress)
   local src_norm = paths.canonical(paths.strip_trailing_separator(src))
   local dst_norm = paths.canonical(paths.strip_trailing_separator(dst))
   if src_norm == dst_norm then
-    async_callback(callback, M.taken(src), M.taken(src),
-      M.taken(src) and nil or ('source does not exist: ' .. tostring(src)))
+    async_callback(
+      callback,
+      M.taken(src),
+      M.taken(src),
+      M.taken(src) and nil or ('source does not exist: ' .. tostring(src))
+    )
     return true
   end
   if M.same_entry(src, dst) then
@@ -1158,9 +1161,12 @@ function M.rename_async(src, dst, callback, progress)
   end
   if progress then progress('copying', src, dst) end
   if source.type == 'directory' then
-    async_copy_tree_exclusive(src, dst, function(ok, _, copy_err)
-      async_callback(callback, ok, ok and true or nil, copy_err)
-    end, progress)
+    async_copy_tree_exclusive(
+      src,
+      dst,
+      function(ok, _, copy_err) async_callback(callback, ok, ok and true or nil, copy_err) end,
+      progress
+    )
     return true
   end
   if source.type == 'link' then
@@ -1169,8 +1175,7 @@ function M.rename_async(src, dst, callback, progress)
     return true
   end
   if source.type ~= 'file' then
-    async_callback(callback, false, nil,
-      'cannot move unsupported source type ' .. tostring(source.type))
+    async_callback(callback, false, nil, 'cannot move unsupported source type ' .. tostring(source.type))
     return true
   end
 
@@ -1192,9 +1197,12 @@ function M.rename_async(src, dst, callback, progress)
           local temp_identity = M.entry_identity(temp)
           if temp_identity then remove_file_if_same(temp, temp_identity.inode) end
           cleanup_private_dir(temp_dir, dir_identity)
-          return async_callback(callback, false, nil,
-            'source or private copy changed before placement: '
-              .. tostring(verify_err or 'content mismatch'))
+          return async_callback(
+            callback,
+            false,
+            nil,
+            'source or private copy changed before placement: ' .. tostring(verify_err or 'content mismatch')
+          )
         end
         local temp_identity = M.entry_identity(temp)
         local placed, place_err = M.rename_noreplace(temp, dst, temp_identity)
@@ -1204,9 +1212,12 @@ function M.rename_async(src, dst, callback, progress)
           return async_callback(callback, false, nil, place_err)
         end
         cleanup_private_dir(temp_dir, dir_identity)
-        remove_async_move_source(src, dst, 'file', source_identity, function(ok, _, err2)
-          async_callback(callback, ok, ok and true or nil, err2)
-        end)
+        remove_async_move_source(
+          src,
+          dst,
+          source_identity,
+          function(ok, _, err2) async_callback(callback, ok, ok and true or nil, err2) end
+        )
       end)
     end)
   end)
@@ -1215,13 +1226,9 @@ end
 
 -- rm_file(path) -> true | nil, err, code.
 function M.rm_file(path)
-  if type(path) ~= 'string' then
-    return nil, 'invalid path'
-  end
+  if type(path) ~= 'string' then return nil, 'invalid path' end
   local ok, err, code = vim.uv.fs_unlink(path)
-  if ok then
-    return true
-  end
+  if ok then return true end
   return nil, err, code
 end
 
@@ -1229,9 +1236,7 @@ end
 -- success is "did not raise".
 function M.rm_tree(path)
   local ok, err = pcall(vim.fs.rm, path, { recursive = true, force = true })
-  if not ok then
-    return nil, tostring(err)
-  end
+  if not ok then return nil, tostring(err) end
   return true
 end
 
@@ -1241,16 +1246,10 @@ end
 -- number to a directory name in the cwd and create a literal `v:null`
 -- directory for a nil argument.
 function M.mkdirp(path)
-  if type(path) ~= 'string' then
-    return nil, 'invalid path'
-  end
+  if type(path) ~= 'string' then return nil, 'invalid path' end
   local ok, res = pcall(vim.fn.mkdir, path, 'p')
-  if not ok then
-    return nil, tostring(res)
-  end
-  if res == 0 then
-    return nil, 'mkdir failed: ' .. tostring(path)
-  end
+  if not ok then return nil, tostring(res) end
+  if res == 0 then return nil, 'mkdir failed: ' .. tostring(path) end
   return true
 end
 
@@ -1260,23 +1259,17 @@ function M.mkdir_exclusive(path, mode)
   if type(path) ~= 'string' or path == '' then return nil, 'invalid path' end
   local ok, err, code = M.uv.fs_mkdir(path, mode or 493) -- default 0755, subject to umask
   if ok then return true end
-  if is_eexist(err, code) then
-    return nil, 'destination exists: ' .. tostring(path), 'EEXIST'
-  end
+  if is_eexist(err, code) then return nil, 'destination exists: ' .. tostring(path), 'EEXIST' end
   return nil, err, code
 end
 
 -- touch uses exclusive create (`wx`): a file appearing after a caller's
 -- occupancy check is still never truncated.
 function M.touch(path)
-  if type(path) ~= 'string' or path == '' then
-    return nil, 'invalid path'
-  end
+  if type(path) ~= 'string' or path == '' then return nil, 'invalid path' end
   local fd, err, code = M.uv.fs_open(path, 'wx', 420) -- 0644, subject to umask
   if not fd then
-    if is_eexist(err, code) then
-      return nil, 'destination exists: ' .. tostring(path), 'EEXIST'
-    end
+    if is_eexist(err, code) then return nil, 'destination exists: ' .. tostring(path), 'EEXIST' end
     return nil, err, code
   end
   local stat = M.uv.fs_fstat(fd)
@@ -1289,10 +1282,12 @@ function M.touch(path)
   end
   local closed, close_err = M.uv.fs_close(fd)
   if closed == nil or closed == false then
-    local err = tostring(close_err or 'close failed')
-    require('direct.ui').notify('direct: created file preserved at ' .. path
-      .. ' but close failed: ' .. err, vim.log.levels.ERROR)
-    return nil, 'close failed; created file preserved at ' .. path .. ': ' .. err
+    local close_err_text = tostring(close_err or 'close failed')
+    require('direct.ui').notify(
+      'direct: created file preserved at ' .. path .. ' but close failed: ' .. close_err_text,
+      vim.log.levels.ERROR
+    )
+    return nil, 'close failed; created file preserved at ' .. path .. ': ' .. close_err_text
   end
   return true
 end

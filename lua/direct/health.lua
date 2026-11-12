@@ -16,8 +16,7 @@ local function check_git()
     pcall(process.kill, process, 15)
     vim.health.warn('Git version check timed out')
   elseif result.code ~= 0 then
-    vim.health.warn('Git version check failed: '
-      .. tostring((result.stderr or ''):gsub('%s+$', '')))
+    vim.health.warn('Git version check failed: ' .. tostring((result.stderr or ''):gsub('%s+$', '')))
   else
     local version = (result.stdout or ''):gsub('[\r\n]+$', '')
     vim.health.ok('Git: ' .. (version ~= '' and version or 'available'))
@@ -37,8 +36,8 @@ local function check_data_directory()
     return directory, false
   end
 
-  local probe = paths.join(directory, '.health-write-' .. tostring(vim.uv.os_getpid())
-    .. '-' .. tostring(vim.uv.hrtime()))
+  local probe =
+    paths.join(directory, '.health-write-' .. tostring(vim.uv.os_getpid()) .. '-' .. tostring(vim.uv.hrtime()))
   local fd, open_err = vim.uv.fs_open(probe, 'wx', 384)
   if not fd then
     vim.health.error('data directory is not writable: ' .. tostring(open_err))
@@ -47,8 +46,7 @@ local function check_data_directory()
   local closed, close_err = vim.uv.fs_close(fd)
   local removed, remove_err = vim.uv.fs_unlink(probe)
   if not closed or not removed then
-    vim.health.error('data directory write probe could not be cleaned up: '
-      .. tostring(close_err or remove_err))
+    vim.health.error('data directory write probe could not be cleaned up: ' .. tostring(close_err or remove_err))
     return directory, false
   end
   vim.health.ok('data directory is writable: ' .. directory)
@@ -64,8 +62,7 @@ local function inspect_history(directory)
   local history_dir = paths.join(directory, 'history')
   local acquired, lock_err = lock.acquire()
   if not acquired then
-    vim.health.warn('history could not be inspected because its lock is unavailable: '
-      .. tostring(lock_err))
+    vim.health.warn('history could not be inspected because its lock is unavailable: ' .. tostring(lock_err))
     return
   end
 
@@ -86,8 +83,7 @@ local function inspect_history(directory)
     elseif state.state == 'legacy' then
       vim.health.warn(name .. ': recognized legacy history; it will be backed up on use')
     else
-      vim.health.warn(name .. ': preserved because damaged or unrecognized ('
-        .. tostring(state.reason) .. ')')
+      vim.health.warn(name .. ': preserved because damaged or unrecognized (' .. tostring(state.reason) .. ')')
     end
   end
 
@@ -108,10 +104,7 @@ local function inspect_history(directory)
     end
   end, debug.traceback)
   local released, release_err = lock.release()
-  if not released then
-    vim.health.warn('history inspection lock could not be released: '
-      .. tostring(release_err))
-  end
+  if not released then vim.health.warn('history inspection lock could not be released: ' .. tostring(release_err)) end
   if not ok then vim.health.warn('history inspection failed: ' .. tostring(inspect_err)) end
 end
 
@@ -119,9 +112,14 @@ local function inspect_icons()
   local options = require('direct.config').options
   local installed = pcall(require, 'nvim-web-devicons')
   vim.health.ok('nvim-web-devicons: ' .. (installed and 'installed' or 'not installed'))
-  vim.health.info(string.format('icons enabled: folders=%s files=%s filetypes=%s',
-    tostring(options.show_folder_icons), tostring(options.show_file_icons),
-    tostring(options.show_filetype_icons)))
+  vim.health.info(
+    string.format(
+      'icons enabled: folders=%s files=%s filetypes=%s',
+      tostring(options.show_folder_icons),
+      tostring(options.show_file_icons),
+      tostring(options.show_filetype_icons)
+    )
+  )
   for name, glyph in pairs(options.icons or {}) do
     vim.health.info('icon ' .. tostring(name) .. ': ' .. tostring(glyph))
   end
@@ -131,8 +129,7 @@ function M.check()
   vim.health.start('direct')
 
   local version = vim.version()
-  local pretty = string.format('%d.%d.%d', version.major, version.minor,
-    version.patch)
+  local pretty = string.format('%d.%d.%d', version.major, version.minor, version.patch)
   if vim.fn.has('nvim-0.11.7') == 1 then
     vim.health.ok('Neovim ' .. pretty .. ' (>= 0.11.7 required)')
   else

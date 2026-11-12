@@ -9,8 +9,7 @@ local ui = require('direct.ui')
 
 local function report_result(result, quiet_success)
   if quiet_success and result.code == 0 then return end
-  local message = result.code == 0
-    and 'direct: command completed successfully (exit status 0)'
+  local message = result.code == 0 and 'direct: command completed successfully (exit status 0)'
     or string.format('direct: command failed with exit status %d', result.code)
   local stdout = (result.stdout or ''):gsub('%s+$', '')
   local stderr = (result.stderr or ''):gsub('%s+$', '')
@@ -53,8 +52,7 @@ function M.current_entry(command, on_complete, opts)
 
   local escaped_path = platform.shellescape_path(path, vim.o.shell)
   local expanded = command:gsub('%{%}', function() return escaped_path end)
-  local argv, command_file, command_err = platform.command_argv(
-    vim.o.shell, vim.o.shellcmdflag, expanded)
+  local argv, command_file, command_err = platform.command_argv(vim.o.shell, vim.o.shellcmdflag, expanded)
   if not argv then
     local err = 'could not prepare shell command: ' .. tostring(command_err)
     ui.notify('direct: ' .. err, vim.log.levels.ERROR)
@@ -68,14 +66,10 @@ function M.current_entry(command, on_complete, opts)
     vim.schedule(function()
       platform.cleanup_command(command_file)
       local reported, report_err = pcall(report_result, result, opts.quiet_success)
-      if not reported then
-        ui.report_error('report the command result', report_err)
-      end
+      if not reported then ui.report_error('report the command result', report_err) end
       if on_complete then
         local completed, err = pcall(on_complete, result, bufnr, listing.root)
-        if not completed then
-          ui.report_error('refresh after the command', err, vim.log.levels.WARN)
-        end
+        if not completed then ui.report_error('refresh after the command', err, vim.log.levels.WARN) end
       end
     end)
   end)

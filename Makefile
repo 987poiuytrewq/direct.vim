@@ -3,7 +3,7 @@ COVERAGE_PLATFORM ?= local
 DEMO_FONT ?= JetBrainsMono Nerd Font
 DEMO_GIF ?= demo/tour.gif
 LUACHECK ?= luacheck
-LUACHECK_MAX_WARNINGS ?= 48
+LUACHECK_MAX_WARNINGS ?= 0
 LUALS ?= lua-language-server
 LUALS_LOGPATH ?= $(CURDIR)/.cache/luals
 
@@ -25,10 +25,13 @@ lint:
 	  if [ "$$result" -gt 1 ] || [ -z "$$warnings" ] || [ "$$warnings" -gt '$(LUACHECK_MAX_WARNINGS)' ]; then \
 	    echo "luacheck failed (exit $$result, warnings=$${warnings:-unknown}, maximum=$(LUACHECK_MAX_WARNINGS))" >&2; exit 1; \
 	  fi
-	stylua --check lua/direct/init.lua lua/direct/config.lua
+	stylua --check lua/direct
 	@mkdir -p '$(LUALS_LOGPATH)'
 	$(LUALS) --check=lua/direct/init.lua --configpath='$(CURDIR)/.luarc.json' --checklevel=Warning --logpath='$(LUALS_LOGPATH)'
 	$(LUALS) --check=lua/direct/config.lua --configpath='$(CURDIR)/.luarc.json' --checklevel=Warning --logpath='$(LUALS_LOGPATH)'
+	$(LUALS) --check=lua/direct/folding.lua --configpath='$(CURDIR)/.luarc.json' --checklevel=Warning --logpath='$(LUALS_LOGPATH)'
+	$(LUALS) --check=lua/direct/events.lua --configpath='$(CURDIR)/.luarc.json' --checklevel=Warning --logpath='$(LUALS_LOGPATH)'
+	$(LUALS) --check=lua/direct --configpath='$(CURDIR)/.luarc.json' --checklevel=Error --logpath='$(LUALS_LOGPATH)'
 
 coverage-deps:
 	bash tests/install_coverage_deps.sh
