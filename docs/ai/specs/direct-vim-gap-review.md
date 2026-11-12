@@ -10,9 +10,9 @@ been reproduced in a running Neovim. Each task's first step is to write a
 failing test that reproduces the problem, or to record that it can't be
 reproduced and drop the task.
 
-**Last checked:** `origin/master` at `79631d8` (12 November 2026). That check
-read #127 (lint and type checks for all modules) and confirmed A13. It found
-no new tasks. A14–A15 are unchanged.
+**Last checked:** `origin/master` at `52458ec` (12 November 2026). That hourly
+review read #127, confirmed A13, and found no new task IDs. A14–A15 remain
+proposed.
 
 ## Conventions
 
@@ -820,7 +820,7 @@ under Unreleased.
 
 ### A13 — Lint and type checks cover only part of the code (P4)
 
-**Status: COMPLETE.** `make lint` now requires zero Luacheck warnings and runs
+**Status: COMPLETE in #127.** `make lint` now requires zero Luacheck warnings and runs
 StyLua across all of `lua/direct`. LuaLS checks the entire module tree for
 errors, keeps the public `init.lua` and `config.lua` checks at warning level,
 and adds warning-level checks for fully annotated modules. Removed the global
