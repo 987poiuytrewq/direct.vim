@@ -201,8 +201,8 @@ H.describe('Git worktree restore confirmation', function()
 
     vim.cmd('DirectGitRestore')
     local git_restored = vim.wait(5000, function()
-      local contents = vim.fn.readfile(source)
-      return contents[1] == 'committed version'
+      local ok, contents = pcall(vim.fn.readfile, source)
+      return ok and contents[1] == 'committed version'
     end)
     local backups = trash.entries()
     local backup = backups[1]
@@ -223,8 +223,8 @@ H.describe('Git worktree restore confirmation', function()
 
     vim.api.nvim_feedkeys('r', 'x', false)
     local put_back = vim.wait(5000, function()
-      local contents = vim.fn.readfile(source)
-      return contents[1] == 'worktree changes'
+      local ok, contents = pcall(vim.fn.readfile, source)
+      return ok and contents[1] == 'worktree changes'
     end)
     local after_put_back = trash.entries()
     local committed_in_trash = false
